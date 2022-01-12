@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package file;
+package org.apache.flink.table.store.file;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
@@ -28,8 +28,6 @@ import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.FileFormat;
-import org.apache.flink.table.store.file.FileFormatImpl;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 
