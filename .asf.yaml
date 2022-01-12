@@ -1,0 +1,5 @@
+notifications:
+  commits:      commits@flink.apache.org
+  issues:       issues@flink.apache.org
+  pullrequests: issues@flink.apache.org
+  jira_options: link label
