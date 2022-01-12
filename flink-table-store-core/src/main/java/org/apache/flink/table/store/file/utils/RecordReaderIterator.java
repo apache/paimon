@@ -21,7 +21,6 @@ package org.apache.flink.table.store.file.utils;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.util.CloseableIterator;
 
-
 import java.io.IOException;
 
 /** Wrap a {@link RecordReader} as an {@link CloseableIterator}. */

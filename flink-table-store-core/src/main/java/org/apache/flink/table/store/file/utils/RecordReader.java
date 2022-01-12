@@ -20,7 +20,6 @@ package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.table.store.file.KeyValue;
 
-
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
