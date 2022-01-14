@@ -31,6 +31,8 @@ import java.io.Serializable;
 /** A serializable literal class. */
 public class Literal implements Serializable {
 
+    private static final long serialVersionUID = 1L;
+
     private final LogicalType type;
 
     private transient Object value;
