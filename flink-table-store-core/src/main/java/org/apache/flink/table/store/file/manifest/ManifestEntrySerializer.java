@@ -29,6 +29,8 @@ import org.apache.flink.table.types.logical.RowType;
 /** Serializer for {@link ManifestEntry}. */
 public class ManifestEntrySerializer extends ObjectSerializer<ManifestEntry> {
 
+    private static final long serialVersionUID = 1L;
+
     private final RowDataSerializer partitionSerializer;
     private final SstFileMetaSerializer sstFileMetaSerializer;
 

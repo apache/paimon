@@ -32,6 +32,8 @@ import org.apache.flink.table.types.logical.RowType;
  */
 public class KeyValueSerializer extends ObjectSerializer<KeyValue> {
 
+    private static final long serialVersionUID = 1L;
+
     private final int keyArity;
 
     private final GenericRowData reusedMeta;
