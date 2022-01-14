@@ -29,6 +29,8 @@ import org.apache.flink.table.types.logical.RowType;
 /** Serializer for {@link SstFileMeta}. */
 public class SstFileMetaSerializer extends ObjectSerializer<SstFileMeta> {
 
+    private static final long serialVersionUID = 1L;
+
     private final RowDataSerializer keySerializer;
     private final FieldStatsArraySerializer statsArraySerializer;
 

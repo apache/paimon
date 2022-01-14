@@ -34,6 +34,8 @@ import java.util.stream.IntStream;
 /** Serializer for array of {@link FieldStats}. */
 public class FieldStatsArraySerializer extends ObjectSerializer<FieldStats[]> {
 
+    private static final long serialVersionUID = 1L;
+
     private final RowData.FieldGetter[] fieldGetters;
 
     public FieldStatsArraySerializer(RowType rowType) {
