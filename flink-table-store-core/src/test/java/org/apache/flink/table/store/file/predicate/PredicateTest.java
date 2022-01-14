@@ -26,13 +26,14 @@ import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
 import org.apache.flink.table.functions.FunctionDefinition;
 import org.apache.flink.table.store.file.stats.FieldStats;
 import org.apache.flink.table.types.DataType;
+import org.apache.flink.types.Row;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 
 import static org.apache.flink.table.planner.expressions.ExpressionBuilder.literal;
-import static org.apache.flink.table.store.file.predicate.ExpressionConverter.CONVERTER;
+import static org.apache.flink.table.store.file.predicate.PredicateConverter.CONVERTER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -295,7 +296,7 @@ public class PredicateTest {
     }
 
     @Test
-    public void testUnsupported() {
+    public void testUnsupportedExpression() {
         CallExpression expression =
                 call(
                         BuiltInFunctionDefinitions.AND,
@@ -308,7 +309,19 @@ public class PredicateTest {
                                 field(1, DataTypes.INT()),
                                 literal(5)));
         assertThatThrownBy(() -> expression.accept(CONVERTER))
-                .isInstanceOf(ExpressionConverter.UnsupportedExpression.class);
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+    }
+
+    @Test
+    public void testUnsupportedType() {
+        DataType structType = DataTypes.ROW(DataTypes.INT()).bridgedTo(Row.class);
+        CallExpression expression =
+                call(
+                        BuiltInFunctionDefinitions.EQUALS,
+                        field(0, structType),
+                        literal(Row.of(1), structType));
+        assertThatThrownBy(() -> expression.accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
     }
 
     private FieldReferenceExpression field(int i, DataType type) {

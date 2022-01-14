@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.predicate;
 
+import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArrayComparator;
 import org.apache.flink.core.memory.DataInputViewStreamWrapper;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.table.runtime.typeutils.InternalSerializers;
@@ -32,6 +33,9 @@ import java.io.Serializable;
 public class Literal implements Serializable {
 
     private static final long serialVersionUID = 1L;
+
+    private static final BytePrimitiveArrayComparator BINARY_COMPARATOR =
+            new BytePrimitiveArrayComparator(true);
 
     private final LogicalType type;
 
@@ -53,6 +57,8 @@ public class Literal implements Serializable {
     public int compareValueTo(Object o) {
         if (value instanceof Comparable) {
             return ((Comparable<Object>) value).compareTo(o);
+        } else if (value instanceof byte[]) {
+            return BINARY_COMPARATOR.compare((byte[]) value, (byte[]) o);
         } else {
             throw new RuntimeException("Unsupported type: " + type);
         }

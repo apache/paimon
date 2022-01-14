@@ -27,6 +27,7 @@ import org.apache.flink.table.expressions.ValueLiteralExpression;
 import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
 import org.apache.flink.table.functions.FunctionDefinition;
 import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.logical.LogicalType;
 
 import java.util.List;
 import java.util.Optional;
@@ -35,9 +36,9 @@ import java.util.function.BiFunction;
 import static org.apache.flink.table.data.conversion.DataStructureConverters.getConverter;
 
 /** Convert {@link Expression} to {@link Predicate}. */
-public class ExpressionConverter implements ExpressionVisitor<Predicate> {
+public class PredicateConverter implements ExpressionVisitor<Predicate> {
 
-    public static final ExpressionConverter CONVERTER = new ExpressionConverter();
+    public static final PredicateConverter CONVERTER = new PredicateConverter();
 
     @Override
     public Predicate visit(CallExpression call) {
@@ -111,16 +112,45 @@ public class ExpressionConverter implements ExpressionVisitor<Predicate> {
         if (expression instanceof ValueLiteralExpression) {
             ValueLiteralExpression valueExpression = (ValueLiteralExpression) expression;
             DataType type = valueExpression.getOutputDataType();
-            return Optional.of(
-                    new Literal(
-                            type.getLogicalType(),
-                            getConverter(type)
-                                    .toInternalOrNull(
-                                            valueExpression
-                                                    .getValueAs(type.getConversionClass())
-                                                    .get())));
+            return supportsPredicate(type.getLogicalType())
+                    ? Optional.of(
+                            new Literal(
+                                    type.getLogicalType(),
+                                    getConverter(type)
+                                            .toInternalOrNull(
+                                                    valueExpression
+                                                            .getValueAs(type.getConversionClass())
+                                                            .get())))
+                    : Optional.empty();
         }
         return Optional.empty();
+    }
+
+    private boolean supportsPredicate(LogicalType type) {
+        switch (type.getTypeRoot()) {
+            case CHAR:
+            case VARCHAR:
+            case BOOLEAN:
+            case BINARY:
+            case VARBINARY:
+            case DECIMAL:
+            case TINYINT:
+            case SMALLINT:
+            case INTEGER:
+            case BIGINT:
+            case FLOAT:
+            case DOUBLE:
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+            case INTERVAL_YEAR_MONTH:
+            case INTERVAL_DAY_TIME:
+                return true;
+            default:
+                return false;
+        }
     }
 
     @Override
