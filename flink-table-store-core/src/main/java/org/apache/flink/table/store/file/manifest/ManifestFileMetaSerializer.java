@@ -28,6 +28,8 @@ import org.apache.flink.table.types.logical.RowType;
 /** Serializer for {@link ManifestFileMeta}. */
 public class ManifestFileMetaSerializer extends ObjectSerializer<ManifestFileMeta> {
 
+    private static final long serialVersionUID = 1L;
+
     private final FieldStatsArraySerializer statsArraySerializer;
 
     public ManifestFileMetaSerializer(RowType partitionType) {
