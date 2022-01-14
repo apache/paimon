@@ -53,6 +53,7 @@ under the License.
 
     <modules>
         <module>flink-table-store-core</module>
+        <module>flink-table-store-connector</module>
     </modules>
 
     <properties>
