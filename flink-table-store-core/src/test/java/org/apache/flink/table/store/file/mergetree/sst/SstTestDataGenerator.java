@@ -49,7 +49,7 @@ public class SstTestDataGenerator {
         this.gen = new TestKeyValueGenerator();
     }
 
-    public SstFile next() {
+    public Data next() {
         while (true) {
             KeyValue kv = gen.next();
             BinaryRowData key = (BinaryRowData) kv.key();
@@ -60,7 +60,7 @@ public class SstTestDataGenerator {
             memTable.add(kv);
 
             if (memTable.size() >= memTableCapacity) {
-                List<SstFile> result = createSstFiles(memTable, 0, partition, bucket);
+                List<Data> result = createSstFiles(memTable, 0, partition, bucket);
                 memTable.clear();
                 assert result.size() == 1;
                 return result.get(0);
@@ -68,7 +68,7 @@ public class SstTestDataGenerator {
         }
     }
 
-    public List<SstFile> createSstFiles(
+    public List<Data> createSstFiles(
             List<KeyValue> kvs, int level, BinaryRowData partition, int bucket) {
         gen.sort(kvs);
         List<KeyValue> combined = new ArrayList<>();
@@ -85,7 +85,7 @@ public class SstTestDataGenerator {
         for (int i = 0; i < level; i++) {
             capacity *= memTableCapacity;
         }
-        List<SstFile> result = new ArrayList<>();
+        List<Data> result = new ArrayList<>();
         for (int i = 0; i < combined.size(); i += capacity) {
             result.add(
                     createSstFile(
@@ -97,8 +97,7 @@ public class SstTestDataGenerator {
         return result;
     }
 
-    private SstFile createSstFile(
-            List<KeyValue> kvs, int level, BinaryRowData partition, int bucket) {
+    private Data createSstFile(List<KeyValue> kvs, int level, BinaryRowData partition, int bucket) {
         FieldStatsCollector collector = new FieldStatsCollector(TestKeyValueGenerator.ROW_TYPE);
         long totalSize = 0;
         BinaryRowData minKey = null;
@@ -120,7 +119,7 @@ public class SstTestDataGenerator {
             maxSequenceNumber = Math.max(maxSequenceNumber, kv.sequenceNumber());
         }
 
-        return new SstFile(
+        return new Data(
                 partition,
                 bucket,
                 new SstFileMeta(
@@ -137,13 +136,13 @@ public class SstTestDataGenerator {
     }
 
     /** An in-memory SST file. */
-    public static class SstFile {
+    public static class Data {
         public final BinaryRowData partition;
         public final int bucket;
         public final SstFileMeta meta;
         public final List<KeyValue> content;
 
-        private SstFile(
+        private Data(
                 BinaryRowData partition, int bucket, SstFileMeta meta, List<KeyValue> content) {
             this.partition = partition;
             this.bucket = bucket;

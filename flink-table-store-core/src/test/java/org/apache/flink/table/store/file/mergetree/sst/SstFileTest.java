@@ -59,7 +59,7 @@ public class SstFileTest {
 
     @RepeatedTest(10)
     public void testWriteAndReadSstFile() throws Exception {
-        SstTestDataGenerator.SstFile data = gen.next();
+        SstTestDataGenerator.Data data = gen.next();
         SstFile sstFile = createSstFile(tempDir.toString());
         SstFileMetaSerializer serializer =
                 new SstFileMetaSerializer(
@@ -98,7 +98,7 @@ public class SstFileTest {
     public void testCleanUpForException() throws IOException {
         FailingAtomicRenameFileSystem.resetFailCounter(1);
         FailingAtomicRenameFileSystem.setFailPossibility(10);
-        SstTestDataGenerator.SstFile data = gen.next();
+        SstTestDataGenerator.Data data = gen.next();
         SstFile sstFile =
                 createSstFile(FailingAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString());
 
