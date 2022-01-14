@@ -30,8 +30,6 @@ import org.apache.flink.table.types.utils.LogicalTypeDataTypeConverter;
 import org.apache.flink.table.utils.PartitionPathUtils;
 import org.apache.flink.util.Preconditions;
 
-import javax.annotation.Nullable;
-
 import java.util.UUID;
 
 /** Factory which produces {@link Path}s for each type of files. */
@@ -39,33 +37,29 @@ public class FileStorePathFactory {
 
     private final Path root;
     private final String uuid;
-    @Nullable private final RowDataPartitionComputer partitionComputer;
+    private final RowDataPartitionComputer partitionComputer;
 
     private int manifestFileCount;
     private int manifestListCount;
 
     public FileStorePathFactory(Path root) {
-        this(root, null, FileSystemConnectorOptions.PARTITION_DEFAULT_NAME.defaultValue());
+        this(root, RowType.of(), FileSystemConnectorOptions.PARTITION_DEFAULT_NAME.defaultValue());
     }
 
-    public FileStorePathFactory(
-            Path root, @Nullable RowType partitionType, String defaultPartValue) {
+    // for tables without partition, partitionType should be a row type with 0 columns (not null)
+    public FileStorePathFactory(Path root, RowType partitionType, String defaultPartValue) {
         this.root = root;
         this.uuid = UUID.randomUUID().toString();
 
-        if (partitionType == null) {
-            this.partitionComputer = null;
-        } else {
-            String[] partitionColumns = partitionType.getFieldNames().toArray(new String[0]);
-            this.partitionComputer =
-                    new RowDataPartitionComputer(
-                            defaultPartValue,
-                            partitionColumns,
-                            partitionType.getFields().stream()
-                                    .map(f -> LogicalTypeDataTypeConverter.toDataType(f.getType()))
-                                    .toArray(DataType[]::new),
-                            partitionColumns);
-        }
+        String[] partitionColumns = partitionType.getFieldNames().toArray(new String[0]);
+        this.partitionComputer =
+                new RowDataPartitionComputer(
+                        defaultPartValue,
+                        partitionColumns,
+                        partitionType.getFields().stream()
+                                .map(f -> LogicalTypeDataTypeConverter.toDataType(f.getType()))
+                                .toArray(DataType[]::new),
+                        partitionColumns);
 
         this.manifestFileCount = 0;
         this.manifestListCount = 0;
@@ -91,14 +85,11 @@ public class FileStorePathFactory {
         return new Path(root + "/snapshot/snapshot-" + id);
     }
 
-    public SstPathFactory createSstPathFactory(@Nullable BinaryRowData partition, int bucket) {
+    public SstPathFactory createSstPathFactory(BinaryRowData partition, int bucket) {
         return new SstPathFactory(root, getPartitionString(partition), bucket);
     }
 
-    public @Nullable String getPartitionString(@Nullable BinaryRowData partition) {
-        if (partitionComputer == null) {
-            return null;
-        }
+    public String getPartitionString(BinaryRowData partition) {
         return PartitionPathUtils.generatePartitionPath(
                 partitionComputer.generatePartValues(
                         Preconditions.checkNotNull(

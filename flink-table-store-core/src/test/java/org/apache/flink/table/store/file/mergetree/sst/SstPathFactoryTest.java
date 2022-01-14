@@ -32,7 +32,7 @@ public class SstPathFactoryTest {
 
     @Test
     public void testNoPartition() {
-        SstPathFactory pathFactory = new SstPathFactory(new Path(tempDir.toString()), null, 123);
+        SstPathFactory pathFactory = new SstPathFactory(new Path(tempDir.toString()), "", 123);
         String uuid = pathFactory.uuid();
 
         for (int i = 0; i < 20; i++) {

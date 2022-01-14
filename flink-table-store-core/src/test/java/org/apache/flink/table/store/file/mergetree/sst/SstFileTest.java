@@ -26,6 +26,7 @@ import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.KeyValue;
@@ -118,7 +119,8 @@ public class SstFileTest {
 
     private SstFile createSstFile(String path) {
         FileStorePathFactory fileStorePathFactory = new FileStorePathFactory(new Path(path));
-        SstPathFactory sstPathFactory = fileStorePathFactory.createSstPathFactory(null, 0);
+        SstPathFactory sstPathFactory =
+                fileStorePathFactory.createSstPathFactory(BinaryRowDataUtil.EMPTY_ROW, 0);
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         return new SstFile(
                 TestKeyValueGenerator.KEY_TYPE,
