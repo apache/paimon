@@ -21,8 +21,6 @@ package org.apache.flink.table.store.file.mergetree.sst;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.fs.Path;
 
-import javax.annotation.Nullable;
-
 import java.util.UUID;
 
 /** Factory which produces new {@link Path}s for sst files. */
@@ -33,12 +31,8 @@ public class SstPathFactory {
 
     private int pathCount;
 
-    public SstPathFactory(Path root, @Nullable String partition, int bucket) {
-        if (partition == null) {
-            this.bucketDir = new Path(root + "/bucket-" + bucket);
-        } else {
-            this.bucketDir = new Path(root + "/" + partition + "/bucket-" + bucket);
-        }
+    public SstPathFactory(Path root, String partition, int bucket) {
+        this.bucketDir = new Path(root + "/" + partition + "/bucket-" + bucket);
         this.uuid = UUID.randomUUID().toString();
 
         this.pathCount = 0;
