@@ -20,8 +20,6 @@ package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.file.stats.FieldStats;
 
-import javax.annotation.Nullable;
-
 /** A {@link Predicate} to eval or. */
 public class Or implements Predicate {
 
@@ -33,15 +31,9 @@ public class Or implements Predicate {
         this.predicate2 = predicate2;
     }
 
-    @Nullable
     @Override
-    public Boolean test(Object[] values) {
-        Boolean v1 = predicate1.test(values);
-        Boolean v2 = predicate2.test(values);
-        if (v1 == null || v2 == null) {
-            return null;
-        }
-        return v1 || v2;
+    public boolean test(Object[] values) {
+        return predicate1.test(values) || predicate2.test(values);
     }
 
     @Override

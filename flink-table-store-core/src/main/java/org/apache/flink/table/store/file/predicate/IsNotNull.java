@@ -20,8 +20,6 @@ package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.file.stats.FieldStats;
 
-import javax.annotation.Nullable;
-
 /** A {@link Predicate} to eval is not null. */
 public class IsNotNull implements Predicate {
 
@@ -31,9 +29,8 @@ public class IsNotNull implements Predicate {
         this.index = index;
     }
 
-    @Nullable
     @Override
-    public Boolean test(Object[] values) {
+    public boolean test(Object[] values) {
         return values[index] != null;
     }
 

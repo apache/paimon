@@ -20,8 +20,6 @@ package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.file.stats.FieldStats;
 
-import javax.annotation.Nullable;
-
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /** A {@link Predicate} to eval greater or equal. */
@@ -36,11 +34,10 @@ public class GreaterOrEqual implements Predicate {
         this.literal = checkNotNull(literal);
     }
 
-    @Nullable
     @Override
-    public Boolean test(Object[] values) {
+    public boolean test(Object[] values) {
         Object field = values[index];
-        return field == null ? null : literal.compareValueTo(field) <= 0;
+        return field != null && literal.compareValueTo(field) <= 0;
     }
 
     @Override

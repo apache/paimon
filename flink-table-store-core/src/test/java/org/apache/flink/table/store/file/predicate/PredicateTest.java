@@ -47,7 +47,7 @@ public class PredicateTest {
 
         assertThat(predicate.test(new Object[] {4})).isEqualTo(false);
         assertThat(predicate.test(new Object[] {5})).isEqualTo(true);
-        assertThat(predicate.test(new Object[] {null})).isNull();
+        assertThat(predicate.test(new Object[] {null})).isEqualTo(false);
 
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 5, 0)})).isEqualTo(true);
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 6, 0)})).isEqualTo(true);
@@ -64,7 +64,7 @@ public class PredicateTest {
 
         assertThat(predicate.test(new Object[] {4})).isEqualTo(true);
         assertThat(predicate.test(new Object[] {5})).isEqualTo(false);
-        assertThat(predicate.test(new Object[] {null})).isNull();
+        assertThat(predicate.test(new Object[] {null})).isEqualTo(false);
 
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 5, 0)})).isEqualTo(true);
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 6, 0)})).isEqualTo(true);
@@ -84,7 +84,7 @@ public class PredicateTest {
         assertThat(predicate.test(new Object[] {4})).isEqualTo(false);
         assertThat(predicate.test(new Object[] {5})).isEqualTo(false);
         assertThat(predicate.test(new Object[] {6})).isEqualTo(true);
-        assertThat(predicate.test(new Object[] {null})).isNull();
+        assertThat(predicate.test(new Object[] {null})).isEqualTo(false);
 
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 4, 0)})).isEqualTo(false);
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 5, 0)})).isEqualTo(false);
@@ -103,7 +103,7 @@ public class PredicateTest {
         assertThat(predicate.test(new Object[] {4})).isEqualTo(false);
         assertThat(predicate.test(new Object[] {5})).isEqualTo(false);
         assertThat(predicate.test(new Object[] {6})).isEqualTo(true);
-        assertThat(predicate.test(new Object[] {null})).isNull();
+        assertThat(predicate.test(new Object[] {null})).isEqualTo(false);
 
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 4, 0)})).isEqualTo(false);
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 5, 0)})).isEqualTo(false);
@@ -125,7 +125,7 @@ public class PredicateTest {
         assertThat(predicate.test(new Object[] {4})).isEqualTo(false);
         assertThat(predicate.test(new Object[] {5})).isEqualTo(true);
         assertThat(predicate.test(new Object[] {6})).isEqualTo(true);
-        assertThat(predicate.test(new Object[] {null})).isNull();
+        assertThat(predicate.test(new Object[] {null})).isEqualTo(false);
 
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 4, 0)})).isEqualTo(false);
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 5, 0)})).isEqualTo(true);
@@ -144,7 +144,7 @@ public class PredicateTest {
         assertThat(predicate.test(new Object[] {4})).isEqualTo(true);
         assertThat(predicate.test(new Object[] {5})).isEqualTo(false);
         assertThat(predicate.test(new Object[] {6})).isEqualTo(false);
-        assertThat(predicate.test(new Object[] {null})).isNull();
+        assertThat(predicate.test(new Object[] {null})).isEqualTo(false);
 
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(6, 7, 0)})).isEqualTo(false);
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(5, 7, 0)})).isEqualTo(false);
@@ -165,7 +165,7 @@ public class PredicateTest {
         assertThat(predicate.test(new Object[] {4})).isEqualTo(true);
         assertThat(predicate.test(new Object[] {5})).isEqualTo(true);
         assertThat(predicate.test(new Object[] {6})).isEqualTo(false);
-        assertThat(predicate.test(new Object[] {null})).isNull();
+        assertThat(predicate.test(new Object[] {null})).isEqualTo(false);
 
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(6, 7, 0)})).isEqualTo(false);
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(5, 7, 0)})).isEqualTo(true);
@@ -226,7 +226,7 @@ public class PredicateTest {
         assertThat(predicate.test(new Object[] {4, 5})).isEqualTo(false);
         assertThat(predicate.test(new Object[] {3, 6})).isEqualTo(false);
         assertThat(predicate.test(new Object[] {3, 5})).isEqualTo(true);
-        assertThat(predicate.test(new Object[] {null, 5})).isNull();
+        assertThat(predicate.test(new Object[] {null, 5})).isEqualTo(false);
 
         assertThat(
                         predicate.test(
@@ -269,7 +269,7 @@ public class PredicateTest {
         assertThat(predicate.test(new Object[] {4, 6})).isEqualTo(false);
         assertThat(predicate.test(new Object[] {3, 6})).isEqualTo(true);
         assertThat(predicate.test(new Object[] {3, 5})).isEqualTo(true);
-        assertThat(predicate.test(new Object[] {null, 5})).isNull();
+        assertThat(predicate.test(new Object[] {null, 5})).isEqualTo(true);
 
         assertThat(
                         predicate.test(

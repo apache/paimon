@@ -20,22 +20,21 @@ package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.file.stats.FieldStats;
 
-import javax.annotation.Nullable;
-
 /** Predicate which returns Boolean and provides testing by stats. */
 public interface Predicate {
 
     /**
-     * @param values input column values.
-     * @return return nullable value.
+     * Test based on the specific input column values.
+     *
+     * @return return true when hit, false when not hit.
      */
-    @Nullable
-    Boolean test(Object[] values);
+    boolean test(Object[] values);
 
     /**
-     * Based on the statistical information to determine whether a hit is possible, return true is
-     * likely to hit (there may also be false positives), return false is absolutely not possible to
-     * hit.
+     * Test based on the statistical information to determine whether a hit is possible.
+     *
+     * @return return true is likely to hit (there may also be false positives), return false is
+     *     absolutely not possible to hit.
      */
     boolean test(long rowCount, FieldStats[] fieldStats);
 }
