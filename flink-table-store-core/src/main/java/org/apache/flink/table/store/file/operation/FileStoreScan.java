@@ -31,7 +31,9 @@ public interface FileStoreScan {
 
     FileStoreScan withPartitionFilter(Predicate predicate);
 
-    FileStoreScan withColumnFilter(Predicate predicate);
+    FileStoreScan withKeyFilter(Predicate predicate);
+
+    FileStoreScan withValueFilter(Predicate predicate);
 
     FileStoreScan withBucket(int bucket);
 
