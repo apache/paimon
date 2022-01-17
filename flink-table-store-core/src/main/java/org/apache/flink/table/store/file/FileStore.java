@@ -20,10 +20,8 @@ package org.apache.flink.table.store.file;
 
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.FileStoreExpire;
+import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
-import org.apache.flink.table.store.file.operation.Lock;
-
-import javax.annotation.Nullable;
 
 import java.io.Serializable;
 
@@ -32,7 +30,9 @@ public interface FileStore extends Serializable {
 
     FileStoreWrite newWrite();
 
-    FileStoreCommit newCommit(@Nullable Lock lock);
+    FileStoreCommit newCommit();
 
     FileStoreExpire newExpire();
+
+    FileStoreScan newScan();
 }
