@@ -74,6 +74,13 @@ public class CompactManager {
                             if (unit.files().size() < 2) {
                                 return;
                             }
+                            /*
+                             * As long as there is no older data, We can drop the deletion.
+                             * If the output level is 0, there may be older data not involved in compaction.
+                             * If the output level is bigger than 0, as long as there is no older data in
+                             * the current levels, the output is the oldest, so we can drop the deletion.
+                             * See CompactStrategy.pick.
+                             */
                             boolean dropDelete =
                                     unit.outputLevel() != 0
                                             && unit.outputLevel() >= levels.nonEmptyHighestLevel();

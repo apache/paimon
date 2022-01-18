@@ -26,5 +26,14 @@ import java.util.Optional;
 /** Compact strategy to decide which files to select for compaction. */
 public interface CompactStrategy {
 
+    /**
+     * Pick compaction unit from runs.
+     *
+     * <ul>
+     *   <li>compaction is runs-based, not file-based.
+     *   <li>level 0 is special, one run per file; all other levels are one run per level.
+     *   <li>compaction is sequential from small level to large level.
+     * </ul>
+     */
     Optional<CompactUnit> pick(int numLevels, List<LevelSortedRun> runs);
 }
