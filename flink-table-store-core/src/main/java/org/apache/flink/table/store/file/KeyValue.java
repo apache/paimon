@@ -18,13 +18,17 @@
 
 package org.apache.flink.table.store.file;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.TinyIntType;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * A key value, including user key, sequence number, value kind and value. This object can be
@@ -72,5 +76,40 @@ public class KeyValue {
         fields.add(new RowType.RowField("_VALUE_KIND", new TinyIntType(false)));
         fields.addAll(valueType.getFields());
         return new RowType(fields);
+    }
+
+    @VisibleForTesting
+    public KeyValue copy(RowDataSerializer keySerializer, RowDataSerializer valueSerializer) {
+        return new KeyValue()
+                .replace(
+                        keySerializer.copy(key),
+                        sequenceNumber,
+                        valueKind,
+                        valueSerializer.copy(value));
+    }
+
+    @VisibleForTesting
+    public String toString(RowType keyType, RowType valueType) {
+        String keyString = rowDataToString(key, keyType);
+        String valueString = rowDataToString(value, valueType);
+        return "{kind: "
+                + valueKind.name()
+                + ", seq: "
+                + sequenceNumber
+                + ", key: ("
+                + keyString
+                + "), value: ("
+                + valueString
+                + ")}";
+    }
+
+    public static String rowDataToString(RowData row, RowType type) {
+        return IntStream.range(0, type.getFieldCount())
+                .mapToObj(
+                        i ->
+                                String.valueOf(
+                                        RowData.createFieldGetter(type.getTypeAt(i), i)
+                                                .getFieldOrNull(row)))
+                .collect(Collectors.joining(", "));
     }
 }

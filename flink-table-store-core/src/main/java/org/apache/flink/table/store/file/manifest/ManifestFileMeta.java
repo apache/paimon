@@ -23,10 +23,13 @@ import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /** Metadata of a manifest file. */
@@ -117,5 +120,95 @@ public class ManifestFileMeta {
                 numAddedFiles,
                 numDeletedFiles,
                 Arrays.toString(partitionStats));
+    }
+
+    /**
+     * Merge several {@link ManifestFileMeta}s. {@link ManifestEntry}s representing first adding and
+     * then deleting the same sst file will cancel each other.
+     *
+     * <p>NOTE: This method is atomic.
+     */
+    public static List<ManifestFileMeta> merge(
+            List<ManifestFileMeta> metas, ManifestFile manifestFile, long suggestedMetaSize) {
+        List<ManifestFileMeta> result = new ArrayList<>();
+        // these are the newly created manifest files, clean them up if exception occurs
+        List<ManifestFileMeta> newMetas = new ArrayList<>();
+        List<ManifestFileMeta> candidate = new ArrayList<>();
+        long totalSize = 0;
+
+        try {
+            for (ManifestFileMeta manifest : metas) {
+                totalSize += manifest.fileSize;
+                candidate.add(manifest);
+                if (totalSize >= suggestedMetaSize) {
+                    // reach suggested file size, perform merging and produce new file
+                    merge(candidate, manifestFile, result, newMetas);
+                    candidate.clear();
+                    totalSize = 0;
+                }
+            }
+            if (!candidate.isEmpty()) {
+                // merge the last bit of metas
+                merge(candidate, manifestFile, result, newMetas);
+            }
+        } catch (Throwable e) {
+            // exception occurs, clean up and rethrow
+            for (ManifestFileMeta manifest : newMetas) {
+                manifestFile.delete(manifest.fileName);
+            }
+            throw e;
+        }
+
+        return result;
+    }
+
+    private static void merge(
+            List<ManifestFileMeta> metas,
+            ManifestFile manifestFile,
+            List<ManifestFileMeta> result,
+            List<ManifestFileMeta> newMetas) {
+        if (metas.size() > 1) {
+            ManifestFileMeta newMeta = merge(metas, manifestFile);
+            result.add(newMeta);
+            newMetas.add(newMeta);
+        } else {
+            result.addAll(metas);
+        }
+    }
+
+    private static ManifestFileMeta merge(List<ManifestFileMeta> metas, ManifestFile manifestFile) {
+        Preconditions.checkArgument(
+                metas.size() > 1, "Number of ManifestFileMeta <= 1. This is a bug.");
+
+        Map<ManifestEntry.Identifier, ManifestEntry> map = new LinkedHashMap<>();
+        for (ManifestFileMeta manifest : metas) {
+            for (ManifestEntry entry : manifestFile.read(manifest.fileName)) {
+                switch (entry.kind()) {
+                    case ADD:
+                        Preconditions.checkState(
+                                !map.containsKey(entry.identifier()),
+                                "Trying to add file %s which is already added. Manifest might be corrupted.",
+                                entry.identifier());
+                        map.put(entry.identifier(), entry);
+                        break;
+                    case DELETE:
+                        // each sst file will only be added once and deleted once,
+                        // if we know that it is added before then both add and delete entry can be
+                        // removed because there won't be further operations on this file,
+                        // otherwise we have to keep the delete entry because the add entry must be
+                        // in the previous manifest files
+                        if (map.containsKey(entry.identifier())) {
+                            map.remove(entry.identifier());
+                        } else {
+                            map.put(entry.identifier(), entry);
+                        }
+                        break;
+                    default:
+                        throw new UnsupportedOperationException(
+                                "Unknown value kind " + entry.kind().name());
+                }
+            }
+        }
+        return manifestFile.write(new ArrayList<>(map.values()));
     }
 }

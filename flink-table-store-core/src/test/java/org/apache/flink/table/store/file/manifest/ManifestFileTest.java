@@ -46,7 +46,7 @@ public class ManifestFileTest {
     @TempDir java.nio.file.Path tempDir;
 
     @RepeatedTest(10)
-    public void testWriteAndReadManifestFile() throws IOException {
+    public void testWriteAndReadManifestFile() {
         List<ManifestEntry> entries = generateData();
         ManifestFileMeta meta = gen.createManifestFileMeta(entries);
         ManifestFile manifestFile = createManifestFile(tempDir.toString());
@@ -71,7 +71,8 @@ public class ManifestFileTest {
             manifestFile.write(entries);
         } catch (Throwable e) {
             assertThat(e)
-                    .isExactlyInstanceOf(FailingAtomicRenameFileSystem.ArtificialException.class);
+                    .hasRootCauseExactlyInstanceOf(
+                            FailingAtomicRenameFileSystem.ArtificialException.class);
             Path manifestDir = new Path(tempDir.toString() + "/manifest");
             FileSystem fs = manifestDir.getFileSystem();
             assertThat(fs.listStatus(manifestDir)).isEmpty();

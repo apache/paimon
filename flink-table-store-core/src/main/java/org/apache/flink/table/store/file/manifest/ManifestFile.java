@@ -32,9 +32,6 @@ import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.util.List;
 
@@ -43,8 +40,6 @@ import java.util.List;
  * snapshot.
  */
 public class ManifestFile {
-
-    private static final Logger LOG = LoggerFactory.getLogger(ManifestFile.class);
 
     private final RowType partitionType;
     private final ManifestEntrySerializer serializer;
@@ -66,9 +61,13 @@ public class ManifestFile {
         this.pathFactory = pathFactory;
     }
 
-    public List<ManifestEntry> read(String fileName) throws IOException {
-        return FileUtils.readListFromFile(
-                pathFactory.toManifestFilePath(fileName), serializer, readerFactory);
+    public List<ManifestEntry> read(String fileName) {
+        try {
+            return FileUtils.readListFromFile(
+                    pathFactory.toManifestFilePath(fileName), serializer, readerFactory);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read manifest file " + fileName, e);
+        }
     }
 
     /**
@@ -76,7 +75,7 @@ public class ManifestFile {
      *
      * <p>NOTE: This method is atomic.
      */
-    public ManifestFileMeta write(List<ManifestEntry> entries) throws IOException {
+    public ManifestFileMeta write(List<ManifestEntry> entries) {
         Preconditions.checkArgument(
                 entries.size() > 0, "Manifest entries to write must not be empty.");
 
@@ -84,9 +83,9 @@ public class ManifestFile {
         try {
             return write(entries, path);
         } catch (Throwable e) {
-            LOG.warn("Exception occurs when writing manifest file " + path + ". Cleaning up.", e);
             FileUtils.deleteOrWarn(path);
-            throw e;
+            throw new RuntimeException(
+                    "Exception occurs when writing manifest file " + path + ". Clean up.", e);
         }
     }
 

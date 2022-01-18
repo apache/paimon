@@ -23,6 +23,8 @@ import org.apache.flink.connector.base.source.reader.SourceReaderOptions;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.util.Utils;
+import org.apache.flink.core.fs.FSDataInputStream;
+import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
@@ -30,7 +32,11 @@ import org.apache.flink.table.data.RowData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -61,6 +67,28 @@ public class FileUtils {
 
     public static long getFileSize(Path path) throws IOException {
         return path.getFileSystem().getFileStatus(path).getLen();
+    }
+
+    public static String readFileUtf8(Path file) throws IOException {
+        try (FSDataInputStream in = file.getFileSystem().open(file)) {
+            BufferedReader reader =
+                    new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                builder.append(line);
+            }
+            return builder.toString();
+        }
+    }
+
+    public static void writeFileUtf8(Path file, String content) throws IOException {
+        try (FSDataOutputStream out =
+                file.getFileSystem().create(file, FileSystem.WriteMode.NO_OVERWRITE)) {
+            OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
+            writer.write(content);
+            writer.close();
+        }
     }
 
     public static void deleteOrWarn(Path file) {

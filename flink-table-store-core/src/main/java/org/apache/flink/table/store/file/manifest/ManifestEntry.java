@@ -114,9 +114,9 @@ public class ManifestEntry {
      * file.
      */
     public static class Identifier {
-        private final BinaryRowData partition;
-        private final int bucket;
-        private final String fileName;
+        public final BinaryRowData partition;
+        public final int bucket;
+        public final String fileName;
 
         private Identifier(BinaryRowData partition, int bucket, String fileName) {
             this.partition = partition;

@@ -109,10 +109,10 @@ public class SstTestDataGenerator {
             BinaryRowData value = (BinaryRowData) kv.value();
             totalSize += key.getSizeInBytes() + value.getSizeInBytes();
             collector.collect(value);
-            if (minKey == null || gen.compareKeys(key, minKey) < 0) {
+            if (minKey == null || TestKeyValueGenerator.KEY_COMPARATOR.compare(key, minKey) < 0) {
                 minKey = key;
             }
-            if (maxKey == null || gen.compareKeys(key, maxKey) > 0) {
+            if (maxKey == null || TestKeyValueGenerator.KEY_COMPARATOR.compare(key, maxKey) > 0) {
                 maxKey = key;
             }
             minSequenceNumber = Math.min(minSequenceNumber, kv.sequenceNumber());
