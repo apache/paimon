@@ -89,7 +89,6 @@ public class StoreSinkTest {
                 GenericRowData.ofKind(RowKind.UPDATE_BEFORE, 0, 2, 3),
                 GenericRowData.ofKind(RowKind.UPDATE_AFTER, 0, 4, 5),
                 GenericRowData.ofKind(RowKind.DELETE, 1, 0, 1));
-        System.out.println(fileStore.committedFiles);
         assertThat(fileStore.committedFiles.get(row(1)).get(0))
                 .isEqualTo(Collections.singletonList("ADD-key-1/0/1-value--1"));
         assertThat(fileStore.committedFiles.get(row(0)).get(0))
