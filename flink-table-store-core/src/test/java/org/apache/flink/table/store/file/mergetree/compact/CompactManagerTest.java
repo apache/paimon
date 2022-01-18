@@ -21,7 +21,6 @@ package org.apache.flink.table.store.file.mergetree.compact;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
-import org.apache.flink.table.store.file.mergetree.LevelSortedRun;
 import org.apache.flink.table.store.file.mergetree.Levels;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
@@ -63,6 +62,18 @@ public class CompactManagerTest {
     }
 
     @Test
+    public void testOutputToZeroLevel() throws ExecutionException, InterruptedException {
+        innerTest(
+                Arrays.asList(
+                        new LevelMinMax(0, 1, 3),
+                        new LevelMinMax(0, 1, 5),
+                        new LevelMinMax(0, 1, 8)),
+                Arrays.asList(new LevelMinMax(0, 1, 8), new LevelMinMax(0, 1, 3)),
+                (numLevels, runs) -> Optional.of(CompactUnit.fromLevelRuns(0, runs.subList(0, 2))),
+                false);
+    }
+
+    @Test
     public void testCompactToPenultimateLayer() throws ExecutionException, InterruptedException {
         innerTest(
                 Arrays.asList(
@@ -70,12 +81,7 @@ public class CompactManagerTest {
                         new LevelMinMax(0, 1, 5),
                         new LevelMinMax(2, 1, 7)),
                 Arrays.asList(new LevelMinMax(1, 1, 5), new LevelMinMax(2, 1, 7)),
-                new CompactStrategy() {
-                    @Override
-                    public Optional<CompactUnit> pick(int numLevels, List<LevelSortedRun> runs) {
-                        return Optional.of(CompactUnit.fromLevelRuns(1, runs.subList(0, 2)));
-                    }
-                },
+                (numLevels, runs) -> Optional.of(CompactUnit.fromLevelRuns(1, runs.subList(0, 2))),
                 false);
     }
 

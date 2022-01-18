@@ -75,7 +75,8 @@ public class CompactManager {
                                 return;
                             }
                             boolean dropDelete =
-                                    unit.outputLevel() >= levels.nonEmptyHighestLevel();
+                                    unit.outputLevel() != 0
+                                            && unit.outputLevel() >= levels.nonEmptyHighestLevel();
                             CompactTask task = new CompactTask(unit, dropDelete);
                             taskFuture = executor.submit(task);
                         });
