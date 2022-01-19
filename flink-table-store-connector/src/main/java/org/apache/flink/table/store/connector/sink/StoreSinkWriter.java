@@ -127,6 +127,8 @@ public class StoreSinkWriter implements SinkWriter<RowData, LocalCommittable, Vo
                 committables.add(committable);
 
                 // clear if no update
+                // we need a mechanism to clear writers, otherwise there will be more and more
+                // such as yesterday's partition that no longer needs to be written.
                 if (committable.increment().newFiles().isEmpty()) {
                     closeWriter(writer);
                     buckets.remove(bucket);
