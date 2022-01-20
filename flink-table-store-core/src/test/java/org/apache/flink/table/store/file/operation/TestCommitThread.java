@@ -104,7 +104,7 @@ public class TestCommitThread extends Thread {
         Configuration fileStoreConf = new Configuration();
         fileStoreConf.set(FileStoreOptions.BUCKET, 1);
         fileStoreConf.set(
-                FileStoreOptions.MANIFEST_SUGGESTED_SIZE,
+                FileStoreOptions.MANIFEST_TARGET_FILE_SIZE,
                 MemorySize.parse((ThreadLocalRandom.current().nextInt(16) + 1) + "kb"));
         FileStoreOptions fileStoreOptions = new FileStoreOptions(fileStoreConf);
         FileStoreScanImpl testScan =
@@ -169,6 +169,11 @@ public class TestCommitThread extends Thread {
         }
 
         for (MergeTreeWriter writer : writers.values()) {
+            try {
+                writer.sync();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
             writer.close();
         }
     }

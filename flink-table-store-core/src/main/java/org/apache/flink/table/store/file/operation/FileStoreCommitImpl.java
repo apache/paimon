@@ -49,7 +49,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -72,7 +71,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreCommitImpl.class);
 
-    private final String committer;
+    private final String commitUser;
     private final ManifestCommittableSerializer committableSerializer;
 
     private final FileStorePathFactory pathFactory;
@@ -84,14 +83,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Nullable private Lock lock;
 
     public FileStoreCommitImpl(
-            String committer,
+            String commitUser,
             ManifestCommittableSerializer committableSerializer,
             FileStorePathFactory pathFactory,
             ManifestFile manifestFile,
             ManifestList manifestList,
             FileStoreOptions fileStoreOptions,
             FileStoreScan scan) {
-        this.committer = committer;
+        this.commitUser = commitUser;
         this.committableSerializer = committableSerializer;
 
         this.pathFactory = pathFactory;
@@ -123,26 +122,26 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         // check if a committable is already committed by its hash
-        Map<String, ManifestCommittable> hashes = new LinkedHashMap<>();
+        Map<String, ManifestCommittable> digests = new LinkedHashMap<>();
         for (ManifestCommittable committable : committableList) {
-            hashes.put(digestManifestCommittable(committable), committable);
+            digests.put(digestManifestCommittable(committable), committable);
         }
 
         for (long id = latestSnapshotId; id >= Snapshot.FIRST_SNAPSHOT_ID; id--) {
             Path snapshotPath = pathFactory.toSnapshotPath(id);
             Snapshot snapshot = Snapshot.fromPath(snapshotPath);
-            if (committer.equals(snapshot.committer())) {
-                if (hashes.containsKey(snapshot.hash())) {
-                    hashes.remove(snapshot.hash());
+            if (commitUser.equals(snapshot.commitUser())) {
+                if (digests.containsKey(snapshot.digest())) {
+                    digests.remove(snapshot.digest());
                 } else {
                     // early exit, because committableList must be the latest commits by this
-                    // committer
+                    // commit user
                     break;
                 }
             }
         }
 
-        return new ArrayList<>(hashes.values());
+        return new ArrayList<>(digests.values());
     }
 
     @Override
@@ -218,16 +217,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long newSnapshotId =
                     latestSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshotId + 1;
             Path newSnapshotPath = pathFactory.toSnapshotPath(newSnapshotId);
-            Path tmpSnapshotPath =
-                    new Path(
-                            newSnapshotPath.getParent()
-                                    + "/."
-                                    + newSnapshotPath.getName()
-                                    + UUID.randomUUID());
+            Path tmpSnapshotPath = pathFactory.toTmpSnapshotPath(newSnapshotId);
 
             Snapshot latestSnapshot = null;
             if (latestSnapshotId != null) {
-                detectConflicts(latestSnapshotId, changes);
+                noConflictsOrFail(latestSnapshotId, changes);
                 latestSnapshot = Snapshot.fromPath(pathFactory.toSnapshotPath(latestSnapshotId));
             }
 
@@ -250,18 +244,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 newMetas.add(manifestFile.write(changes));
                 // prepare snapshot file
                 manifestListName = manifestList.write(newMetas);
-                newSnapshot = new Snapshot(newSnapshotId, manifestListName, committer, hash, type);
+                newSnapshot = new Snapshot(newSnapshotId, manifestListName, commitUser, hash, type);
                 FileUtils.writeFileUtf8(tmpSnapshotPath, newSnapshot.toJson());
             } catch (Throwable e) {
                 // fails when preparing for commit, we should clean up
-                cleanUpManifests(tmpSnapshotPath, manifestListName, oldMetas, newMetas);
+                cleanUpTmpSnapshot(tmpSnapshotPath, manifestListName, oldMetas, newMetas);
                 throw new RuntimeException(
                         String.format(
-                                "Exception occurs when preparing snapshot #%d (path %s) by committer %s "
+                                "Exception occurs when preparing snapshot #%d (path %s) by user %s "
                                         + "with hash %s and type %s. Clean up.",
                                 newSnapshotId,
                                 newSnapshotPath.toString(),
-                                committer,
+                                commitUser,
                                 hash,
                                 type.name()),
                         e);
@@ -290,12 +284,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 // we cannot clean up because we can't determine the success
                 throw new RuntimeException(
                         String.format(
-                                "Exception occurs when committing snapshot #%d (path %s) by committer %s "
+                                "Exception occurs when committing snapshot #%d (path %s) by user %s "
                                         + "with hash %s and type %s. "
                                         + "Cannot clean up because we can't determine the success.",
                                 newSnapshotId,
                                 newSnapshotPath.toString(),
-                                committer,
+                                commitUser,
                                 hash,
                                 type.name()),
                         e);
@@ -308,19 +302,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             // atomic rename fails, clean up and try again
             LOG.warn(
                     String.format(
-                            "Atomic rename failed for snapshot #%d (path %s) by committer %s "
+                            "Atomic rename failed for snapshot #%d (path %s) by user %s "
                                     + "with hash %s and type %s. "
                                     + "Clean up and try again.",
                             newSnapshotId,
                             newSnapshotPath.toString(),
-                            committer,
+                            commitUser,
                             hash,
                             type.name()));
-            cleanUpManifests(tmpSnapshotPath, manifestListName, oldMetas, newMetas);
+            cleanUpTmpSnapshot(tmpSnapshotPath, manifestListName, oldMetas, newMetas);
         }
     }
 
-    private void detectConflicts(long snapshotId, List<ManifestEntry> changes) {
+    private void noConflictsOrFail(long snapshotId, List<ManifestEntry> changes) {
         Set<ManifestEntry.Identifier> removedFiles =
                 changes.stream()
                         .filter(e -> e.kind().equals(ValueKind.DELETE))
@@ -332,6 +326,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         try {
+            // TODO use partition filter of scan when implemented
             for (ManifestEntry entry : scan.withSnapshot(snapshotId).plan().files()) {
                 removedFiles.remove(entry.identifier());
             }
@@ -348,13 +343,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                     pathFactory.getPartitionString(i.partition)
                                                             + ", bucket "
                                                             + i.bucket
+                                                            + ", level "
+                                                            + i.level
                                                             + ", file "
                                                             + i.fileName)
                                     .collect(Collectors.joining("\n")));
         }
     }
 
-    private void cleanUpManifests(
+    private void cleanUpTmpSnapshot(
             Path tmpSnapshotPath,
             String manifestListName,
             List<ManifestFileMeta> oldMetas,

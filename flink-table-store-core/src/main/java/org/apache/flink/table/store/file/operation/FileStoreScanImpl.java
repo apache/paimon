@@ -111,6 +111,7 @@ public class FileStoreScanImpl implements FileStoreScan {
     private List<ManifestEntry> scan() {
         Map<ManifestEntry.Identifier, ManifestEntry> map = new LinkedHashMap<>();
         for (ManifestFileMeta manifest : manifests) {
+            // TODO read each manifest file concurrently
             for (ManifestEntry entry : manifestFile.read(manifest.fileName())) {
                 switch (entry.kind()) {
                     case ADD:

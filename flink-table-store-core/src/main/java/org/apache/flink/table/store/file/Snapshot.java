@@ -36,8 +36,8 @@ public class Snapshot {
 
     private static final String FIELD_ID = "id";
     private static final String FIELD_MANIFEST_LIST = "manifestList";
-    private static final String FIELD_COMMITTER = "committer";
-    private static final String FIELD_HASH = "hash";
+    private static final String FIELD_COMMIT_USER = "commitUser";
+    private static final String FIELD_DIGEST = "digest";
     private static final String FIELD_TYPE = "type";
 
     @JsonProperty(FIELD_ID)
@@ -46,12 +46,12 @@ public class Snapshot {
     @JsonProperty(FIELD_MANIFEST_LIST)
     private final String manifestList;
 
-    @JsonProperty(FIELD_COMMITTER)
-    private final String committer;
+    @JsonProperty(FIELD_COMMIT_USER)
+    private final String commitUser;
 
     // for deduplication
-    @JsonProperty(FIELD_HASH)
-    private final String hash;
+    @JsonProperty(FIELD_DIGEST)
+    private final String digest;
 
     @JsonProperty(FIELD_TYPE)
     private final Type type;
@@ -60,13 +60,13 @@ public class Snapshot {
     public Snapshot(
             @JsonProperty(FIELD_ID) long id,
             @JsonProperty(FIELD_MANIFEST_LIST) String manifestList,
-            @JsonProperty(FIELD_COMMITTER) String committer,
-            @JsonProperty(FIELD_HASH) String hash,
+            @JsonProperty(FIELD_COMMIT_USER) String commitUser,
+            @JsonProperty(FIELD_DIGEST) String digest,
             @JsonProperty(FIELD_TYPE) Type type) {
         this.id = id;
         this.manifestList = manifestList;
-        this.committer = committer;
-        this.hash = hash;
+        this.commitUser = commitUser;
+        this.digest = digest;
         this.type = type;
     }
 
@@ -80,14 +80,14 @@ public class Snapshot {
         return manifestList;
     }
 
-    @JsonGetter(FIELD_COMMITTER)
-    public String committer() {
-        return committer;
+    @JsonGetter(FIELD_COMMIT_USER)
+    public String commitUser() {
+        return commitUser;
     }
 
-    @JsonGetter(FIELD_HASH)
-    public String hash() {
-        return hash;
+    @JsonGetter(FIELD_DIGEST)
+    public String digest() {
+        return digest;
     }
 
     @JsonGetter(FIELD_TYPE)

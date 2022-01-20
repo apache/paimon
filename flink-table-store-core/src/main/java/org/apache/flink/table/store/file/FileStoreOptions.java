@@ -30,11 +30,10 @@ public class FileStoreOptions {
             ConfigOptions.key("bucket")
                     .intType()
                     .defaultValue(1)
-                    .withDescription(
-                            "Bucket number for file store and partition number for Kafka.");
+                    .withDescription("Bucket number for file store.");
 
-    public static final ConfigOption<MemorySize> MANIFEST_SUGGESTED_SIZE =
-            ConfigOptions.key("manifest.suggested-size")
+    public static final ConfigOption<MemorySize> MANIFEST_TARGET_FILE_SIZE =
+            ConfigOptions.key("manifest.target-file-size")
                     .memoryType()
                     .defaultValue(MemorySize.ofMebiBytes(8))
                     .withDescription("Suggested file size of a manifest file.");
@@ -48,6 +47,6 @@ public class FileStoreOptions {
     }
 
     public FileStoreOptions(ReadableConfig config) {
-        this(config.get(BUCKET), config.get(MANIFEST_SUGGESTED_SIZE));
+        this(config.get(BUCKET), config.get(MANIFEST_TARGET_FILE_SIZE));
     }
 }

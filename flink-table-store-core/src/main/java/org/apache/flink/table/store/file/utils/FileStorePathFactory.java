@@ -97,6 +97,10 @@ public class FileStorePathFactory {
         return new Path(root + "/snapshot/" + SNAPSHOT_PREFIX + id);
     }
 
+    public Path toTmpSnapshotPath(long id) {
+        return new Path(root + "/snapshot/." + SNAPSHOT_PREFIX + id + "-" + UUID.randomUUID());
+    }
+
     public SstPathFactory createSstPathFactory(BinaryRowData partition, int bucket) {
         return new SstPathFactory(root, getPartitionString(partition), bucket);
     }
@@ -110,6 +114,7 @@ public class FileStorePathFactory {
 
     @Nullable
     public Long latestSnapshotId() {
+        // TODO add a `bestEffort` argument and read from a best-effort CURRENT file if true
         try {
             Path snapshotDir = new Path(root + "/snapshot");
             FileSystem fs = snapshotDir.getFileSystem();

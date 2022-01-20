@@ -74,12 +74,12 @@ public abstract class FileStoreCommitTestBase {
     protected abstract String getSchema();
 
     @RepeatedTest(10)
-    public void testSingleCommitter() throws Exception {
+    public void testSingleCommitUser() throws Exception {
         testRandomConcurrentNoConflict(1);
     }
 
     @RepeatedTest(10)
-    public void testManyCommittersNoConflict() throws Exception {
+    public void testManyCommitUsersNoConflict() throws Exception {
         testRandomConcurrentNoConflict(ThreadLocalRandom.current().nextInt(3) + 2);
     }
 

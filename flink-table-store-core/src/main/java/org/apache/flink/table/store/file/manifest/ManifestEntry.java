@@ -38,6 +38,7 @@ public class ManifestEntry {
     private final int bucket;
     private final int totalBuckets;
     private final SstFileMeta file;
+    private final Identifier identifier;
 
     public ManifestEntry(
             ValueKind kind,
@@ -50,6 +51,7 @@ public class ManifestEntry {
         this.bucket = bucket;
         this.totalBuckets = totalBuckets;
         this.file = file;
+        this.identifier = new Identifier(partition, bucket, file.level(), file.fileName());
     }
 
     public ValueKind kind() {
@@ -73,7 +75,7 @@ public class ManifestEntry {
     }
 
     public Identifier identifier() {
-        return new Identifier(partition, bucket, file.fileName());
+        return identifier;
     }
 
     public static RowType schema(RowType partitionType, RowType keyType, RowType rowType) {
@@ -116,11 +118,13 @@ public class ManifestEntry {
     public static class Identifier {
         public final BinaryRowData partition;
         public final int bucket;
+        public final int level;
         public final String fileName;
 
-        private Identifier(BinaryRowData partition, int bucket, String fileName) {
+        private Identifier(BinaryRowData partition, int bucket, int level, String fileName) {
             this.partition = partition;
             this.bucket = bucket;
+            this.level = level;
             this.fileName = fileName;
         }
 
@@ -132,17 +136,18 @@ public class ManifestEntry {
             Identifier that = (Identifier) o;
             return Objects.equals(partition, that.partition)
                     && bucket == that.bucket
+                    && level == that.level
                     && Objects.equals(fileName, that.fileName);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(partition, bucket, fileName);
+            return Objects.hash(partition, bucket, level, fileName);
         }
 
         @Override
         public String toString() {
-            return String.format("{%s, %d, %s}", partition, bucket, fileName);
+            return String.format("{%s, %d, %d, %s}", partition, bucket, level, fileName);
         }
     }
 }
