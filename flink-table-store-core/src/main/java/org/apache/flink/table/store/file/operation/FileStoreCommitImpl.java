@@ -57,8 +57,8 @@ import java.util.stream.Collectors;
  * <p>This class provides an atomic commit method to the user.
  *
  * <ol>
- *   <li>Before calling {@link FileStoreCommitImpl#commit}, user should first call {@link
- *       FileStoreCommitImpl#filterCommitted} to make sure this commit is not done before.
+ *   <li>Before calling {@link FileStoreCommitImpl#commit}, if user cannot determine if this commit
+ *       is done before, user should first call {@link FileStoreCommitImpl#filterCommitted}.
  *   <li>Before committing, it will first check for conflicts by checking if all files to be removed
  *       currently exists.
  *   <li>After that it use the external {@link FileStoreCommitImpl#lock} (if provided) or the atomic
@@ -131,8 +131,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Path snapshotPath = pathFactory.toSnapshotPath(id);
             Snapshot snapshot = Snapshot.fromPath(snapshotPath);
             if (commitUser.equals(snapshot.commitUser())) {
-                if (digests.containsKey(snapshot.digest())) {
-                    digests.remove(snapshot.digest());
+                if (digests.containsKey(snapshot.commitDigest())) {
+                    digests.remove(snapshot.commitDigest());
                 } else {
                     // early exit, because committableList must be the latest commits by this
                     // commit user
@@ -154,14 +154,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         List<ManifestEntry> appendChanges = collectChanges(committable.newFiles(), ValueKind.ADD);
         if (!appendChanges.isEmpty()) {
-            tryCommit(appendChanges, hash, Snapshot.Type.APPEND);
+            tryCommit(appendChanges, hash, Snapshot.CommitKind.APPEND);
         }
 
         List<ManifestEntry> compactChanges = new ArrayList<>();
         compactChanges.addAll(collectChanges(committable.compactBefore(), ValueKind.DELETE));
         compactChanges.addAll(collectChanges(committable.compactAfter(), ValueKind.ADD));
         if (!compactChanges.isEmpty()) {
-            tryCommit(compactChanges, hash, Snapshot.Type.COMPACT);
+            tryCommit(compactChanges, hash, Snapshot.CommitKind.COMPACT);
         }
     }
 
@@ -211,7 +211,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return changes;
     }
 
-    private void tryCommit(List<ManifestEntry> changes, String hash, Snapshot.Type type) {
+    private void tryCommit(
+            List<ManifestEntry> changes, String hash, Snapshot.CommitKind commitKind) {
         while (true) {
             Long latestSnapshotId = pathFactory.latestSnapshotId();
             long newSnapshotId =
@@ -244,7 +245,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 newMetas.add(manifestFile.write(changes));
                 // prepare snapshot file
                 manifestListName = manifestList.write(newMetas);
-                newSnapshot = new Snapshot(newSnapshotId, manifestListName, commitUser, hash, type);
+                newSnapshot =
+                        new Snapshot(newSnapshotId, manifestListName, commitUser, hash, commitKind);
                 FileUtils.writeFileUtf8(tmpSnapshotPath, newSnapshot.toJson());
             } catch (Throwable e) {
                 // fails when preparing for commit, we should clean up
@@ -252,12 +254,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 throw new RuntimeException(
                         String.format(
                                 "Exception occurs when preparing snapshot #%d (path %s) by user %s "
-                                        + "with hash %s and type %s. Clean up.",
+                                        + "with hash %s and kind %s. Clean up.",
                                 newSnapshotId,
                                 newSnapshotPath.toString(),
                                 commitUser,
                                 hash,
-                                type.name()),
+                                commitKind.name()),
                         e);
             }
 
@@ -285,13 +287,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 throw new RuntimeException(
                         String.format(
                                 "Exception occurs when committing snapshot #%d (path %s) by user %s "
-                                        + "with hash %s and type %s. "
+                                        + "with hash %s and kind %s. "
                                         + "Cannot clean up because we can't determine the success.",
                                 newSnapshotId,
                                 newSnapshotPath.toString(),
                                 commitUser,
                                 hash,
-                                type.name()),
+                                commitKind.name()),
                         e);
             }
 
@@ -303,13 +305,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             LOG.warn(
                     String.format(
                             "Atomic rename failed for snapshot #%d (path %s) by user %s "
-                                    + "with hash %s and type %s. "
+                                    + "with hash %s and kind %s. "
                                     + "Clean up and try again.",
                             newSnapshotId,
                             newSnapshotPath.toString(),
                             commitUser,
                             hash,
-                            type.name()));
+                            commitKind.name()));
             cleanUpTmpSnapshot(tmpSnapshotPath, manifestListName, oldMetas, newMetas);
         }
     }

@@ -113,22 +113,23 @@ public class FileStoreScanImpl implements FileStoreScan {
         for (ManifestFileMeta manifest : manifests) {
             // TODO read each manifest file concurrently
             for (ManifestEntry entry : manifestFile.read(manifest.fileName())) {
+                ManifestEntry.Identifier identifier = entry.identifier();
                 switch (entry.kind()) {
                     case ADD:
                         Preconditions.checkState(
-                                !map.containsKey(entry.identifier()),
+                                !map.containsKey(identifier),
                                 "Trying to add file %s which is already added. "
                                         + "Manifest might be corrupted.",
-                                entry.identifier());
-                        map.put(entry.identifier(), entry);
+                                identifier);
+                        map.put(identifier, entry);
                         break;
                     case DELETE:
                         Preconditions.checkState(
-                                map.containsKey(entry.identifier()),
+                                map.containsKey(identifier),
                                 "Trying to delete file %s which is not previously added. "
                                         + "Manifest might be corrupted.",
-                                entry.identifier());
-                        map.remove(entry.identifier());
+                                identifier);
+                        map.remove(identifier);
                         break;
                     default:
                         throw new UnsupportedOperationException(

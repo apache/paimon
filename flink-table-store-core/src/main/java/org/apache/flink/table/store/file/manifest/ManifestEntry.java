@@ -38,7 +38,6 @@ public class ManifestEntry {
     private final int bucket;
     private final int totalBuckets;
     private final SstFileMeta file;
-    private final Identifier identifier;
 
     public ManifestEntry(
             ValueKind kind,
@@ -51,7 +50,6 @@ public class ManifestEntry {
         this.bucket = bucket;
         this.totalBuckets = totalBuckets;
         this.file = file;
-        this.identifier = new Identifier(partition, bucket, file.level(), file.fileName());
     }
 
     public ValueKind kind() {
@@ -75,7 +73,7 @@ public class ManifestEntry {
     }
 
     public Identifier identifier() {
-        return identifier;
+        return new Identifier(partition, bucket, file.level(), file.fileName());
     }
 
     public static RowType schema(RowType partitionType, RowType keyType, RowType rowType) {

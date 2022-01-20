@@ -37,8 +37,8 @@ public class Snapshot {
     private static final String FIELD_ID = "id";
     private static final String FIELD_MANIFEST_LIST = "manifestList";
     private static final String FIELD_COMMIT_USER = "commitUser";
-    private static final String FIELD_DIGEST = "digest";
-    private static final String FIELD_TYPE = "type";
+    private static final String FIELD_COMMIT_DIGEST = "commitDigest";
+    private static final String FIELD_COMMIT_KIND = "commitKind";
 
     @JsonProperty(FIELD_ID)
     private final long id;
@@ -50,24 +50,24 @@ public class Snapshot {
     private final String commitUser;
 
     // for deduplication
-    @JsonProperty(FIELD_DIGEST)
-    private final String digest;
+    @JsonProperty(FIELD_COMMIT_DIGEST)
+    private final String commitDigest;
 
-    @JsonProperty(FIELD_TYPE)
-    private final Type type;
+    @JsonProperty(FIELD_COMMIT_KIND)
+    private final CommitKind commitKind;
 
     @JsonCreator
     public Snapshot(
             @JsonProperty(FIELD_ID) long id,
             @JsonProperty(FIELD_MANIFEST_LIST) String manifestList,
             @JsonProperty(FIELD_COMMIT_USER) String commitUser,
-            @JsonProperty(FIELD_DIGEST) String digest,
-            @JsonProperty(FIELD_TYPE) Type type) {
+            @JsonProperty(FIELD_COMMIT_DIGEST) String commitDigest,
+            @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind) {
         this.id = id;
         this.manifestList = manifestList;
         this.commitUser = commitUser;
-        this.digest = digest;
-        this.type = type;
+        this.commitDigest = commitDigest;
+        this.commitKind = commitKind;
     }
 
     @JsonGetter(FIELD_ID)
@@ -85,14 +85,14 @@ public class Snapshot {
         return commitUser;
     }
 
-    @JsonGetter(FIELD_DIGEST)
-    public String digest() {
-        return digest;
+    @JsonGetter(FIELD_COMMIT_DIGEST)
+    public String commitDigest() {
+        return commitDigest;
     }
 
-    @JsonGetter(FIELD_TYPE)
-    public Type type() {
-        return type;
+    @JsonGetter(FIELD_COMMIT_KIND)
+    public CommitKind commitKind() {
+        return commitKind;
     }
 
     public String toJson() {
@@ -121,7 +121,7 @@ public class Snapshot {
     }
 
     /** Type of changes in this snapshot. */
-    public enum Type {
+    public enum CommitKind {
 
         /** Changes flushed from the mem table. */
         APPEND,

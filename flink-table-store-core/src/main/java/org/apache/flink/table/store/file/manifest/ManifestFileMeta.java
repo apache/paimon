@@ -183,13 +183,14 @@ public class ManifestFileMeta {
         Map<ManifestEntry.Identifier, ManifestEntry> map = new LinkedHashMap<>();
         for (ManifestFileMeta manifest : metas) {
             for (ManifestEntry entry : manifestFile.read(manifest.fileName)) {
+                ManifestEntry.Identifier identifier = entry.identifier();
                 switch (entry.kind()) {
                     case ADD:
                         Preconditions.checkState(
-                                !map.containsKey(entry.identifier()),
+                                !map.containsKey(identifier),
                                 "Trying to add file %s which is already added. Manifest might be corrupted.",
-                                entry.identifier());
-                        map.put(entry.identifier(), entry);
+                                identifier);
+                        map.put(identifier, entry);
                         break;
                     case DELETE:
                         // each sst file will only be added once and deleted once,
@@ -197,10 +198,10 @@ public class ManifestFileMeta {
                         // removed because there won't be further operations on this file,
                         // otherwise we have to keep the delete entry because the add entry must be
                         // in the previous manifest files
-                        if (map.containsKey(entry.identifier())) {
-                            map.remove(entry.identifier());
+                        if (map.containsKey(identifier)) {
+                            map.remove(identifier);
                         } else {
-                            map.put(entry.identifier(), entry);
+                            map.put(identifier, entry);
                         }
                         break;
                     default:
