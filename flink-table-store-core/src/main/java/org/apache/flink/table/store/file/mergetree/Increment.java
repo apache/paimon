@@ -22,6 +22,7 @@ import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Incremental files for merge tree. It consists of two parts:
@@ -59,5 +60,24 @@ public class Increment {
 
     public List<SstFileMeta> compactAfter() {
         return compactAfter;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        Increment increment = (Increment) o;
+        return Objects.equals(newFiles, increment.newFiles)
+                && Objects.equals(compactBefore, increment.compactBefore)
+                && Objects.equals(compactAfter, increment.compactAfter);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(newFiles, compactBefore, compactAfter);
     }
 }
