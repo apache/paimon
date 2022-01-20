@@ -35,7 +35,6 @@ import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
 import org.apache.flink.table.store.file.mergetree.sst.SstFile;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 
 import org.slf4j.Logger;
@@ -97,8 +96,8 @@ public class TestCommitThread extends Thread {
         ManifestCommittableSerializer serializer =
                 new ManifestCommittableSerializer(
                         TestKeyValueGenerator.PARTITION_TYPE,
-                        new SstFileMetaSerializer(
-                                TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.ROW_TYPE));
+                        TestKeyValueGenerator.KEY_TYPE,
+                        TestKeyValueGenerator.ROW_TYPE);
         ManifestFile testManifestFile = createManifestFile(testPathFactory);
         ManifestList testManifestList = createManifestList(testPathFactory);
         Configuration fileStoreConf = new Configuration();
