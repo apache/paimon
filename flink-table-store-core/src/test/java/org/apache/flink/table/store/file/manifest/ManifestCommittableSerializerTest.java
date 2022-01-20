@@ -21,7 +21,6 @@ package org.apache.flink.table.store.file.manifest;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMetaSerializer;
 import org.apache.flink.table.store.file.stats.FieldStats;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -38,14 +37,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link ManifestCommittableSerializer}. */
 public class ManifestCommittableSerializerTest {
 
-    private final AtomicInteger id = new AtomicInteger();
+    private static final AtomicInteger ID = new AtomicInteger();
 
     @Test
     public void testCommittableSerDe() throws IOException {
-        SstFileMetaSerializer sstSerializer =
-                new SstFileMetaSerializer(RowType.of(new IntType()), RowType.of(new IntType()));
         ManifestCommittableSerializer serializer =
-                new ManifestCommittableSerializer(RowType.of(new IntType()), sstSerializer);
+                new ManifestCommittableSerializer(
+                        RowType.of(new IntType()),
+                        RowType.of(new IntType()),
+                        RowType.of(new IntType()));
         ManifestCommittable committable = new ManifestCommittable();
         addAndAssert(committable, row(0), 0);
         addAndAssert(committable, row(0), 1);
@@ -57,7 +57,7 @@ public class ManifestCommittableSerializerTest {
 
     private void addAndAssert(
             ManifestCommittable committable, BinaryRowData partition, int bucket) {
-        Increment increment = newIncrement();
+        Increment increment = randomIncrement();
         committable.add(partition, bucket, increment);
         assertThat(committable.newFiles().get(partition).get(bucket))
                 .isEqualTo(increment.newFiles());
@@ -67,11 +67,11 @@ public class ManifestCommittableSerializerTest {
                 .isEqualTo(increment.compactAfter());
     }
 
-    private Increment newIncrement() {
+    public static Increment randomIncrement() {
         return new Increment(
-                Arrays.asList(newFile(id.incrementAndGet(), 0), newFile(id.incrementAndGet(), 0)),
-                Arrays.asList(newFile(id.incrementAndGet(), 0), newFile(id.incrementAndGet(), 0)),
-                Arrays.asList(newFile(id.incrementAndGet(), 0), newFile(id.incrementAndGet(), 0)));
+                Arrays.asList(newFile(ID.incrementAndGet(), 0), newFile(ID.incrementAndGet(), 0)),
+                Arrays.asList(newFile(ID.incrementAndGet(), 0), newFile(ID.incrementAndGet(), 0)),
+                Arrays.asList(newFile(ID.incrementAndGet(), 0), newFile(ID.incrementAndGet(), 0)));
     }
 
     public static SstFileMeta newFile(int name, int level) {
