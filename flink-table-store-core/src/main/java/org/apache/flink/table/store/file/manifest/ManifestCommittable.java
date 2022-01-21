@@ -98,4 +98,34 @@ public class ManifestCommittable {
     public int hashCode() {
         return Objects.hash(newFiles, compactBefore, compactAfter);
     }
+
+    @Override
+    public String toString() {
+        return "new files:\n"
+                + filesToString(newFiles)
+                + "compact before:\n"
+                + filesToString(compactBefore)
+                + "compact after:\n"
+                + filesToString(compactAfter);
+    }
+
+    private static String filesToString(Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> files) {
+        StringBuilder builder = new StringBuilder();
+        for (Map.Entry<BinaryRowData, Map<Integer, List<SstFileMeta>>> entryWithPartition :
+                files.entrySet()) {
+            for (Map.Entry<Integer, List<SstFileMeta>> entryWithBucket :
+                    entryWithPartition.getValue().entrySet()) {
+                for (SstFileMeta sst : entryWithBucket.getValue()) {
+                    builder.append("  * partition: ")
+                            .append(entryWithPartition.getKey())
+                            .append(", bucket: ")
+                            .append(entryWithBucket.getKey())
+                            .append(", file: ")
+                            .append(sst.fileName())
+                            .append("\n");
+                }
+            }
+        }
+        return builder.toString();
+    }
 }
