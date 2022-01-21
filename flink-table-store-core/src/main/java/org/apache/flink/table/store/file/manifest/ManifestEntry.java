@@ -73,7 +73,7 @@ public class ManifestEntry {
     }
 
     public Identifier identifier() {
-        return new Identifier(partition, bucket, file.fileName());
+        return new Identifier(partition, bucket, file.level(), file.fileName());
     }
 
     public static RowType schema(RowType partitionType, RowType keyType, RowType rowType) {
@@ -114,13 +114,15 @@ public class ManifestEntry {
      * file.
      */
     public static class Identifier {
-        private final BinaryRowData partition;
-        private final int bucket;
-        private final String fileName;
+        public final BinaryRowData partition;
+        public final int bucket;
+        public final int level;
+        public final String fileName;
 
-        private Identifier(BinaryRowData partition, int bucket, String fileName) {
+        private Identifier(BinaryRowData partition, int bucket, int level, String fileName) {
             this.partition = partition;
             this.bucket = bucket;
+            this.level = level;
             this.fileName = fileName;
         }
 
@@ -132,17 +134,18 @@ public class ManifestEntry {
             Identifier that = (Identifier) o;
             return Objects.equals(partition, that.partition)
                     && bucket == that.bucket
+                    && level == that.level
                     && Objects.equals(fileName, that.fileName);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(partition, bucket, fileName);
+            return Objects.hash(partition, bucket, level, fileName);
         }
 
         @Override
         public String toString() {
-            return String.format("{%s, %d, %s}", partition, bucket, fileName);
+            return String.format("{%s, %d, %d, %s}", partition, bucket, level, fileName);
         }
     }
 }

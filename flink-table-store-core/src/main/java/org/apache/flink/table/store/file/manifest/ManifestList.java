@@ -31,9 +31,6 @@ import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.util.List;
 
@@ -42,8 +39,6 @@ import java.util.List;
  * the corresponding snapshot.
  */
 public class ManifestList {
-
-    private static final Logger LOG = LoggerFactory.getLogger(ManifestList.class);
 
     private final ManifestFileMetaSerializer serializer;
     private final BulkFormat<RowData, FileSourceSplit> readerFactory;
@@ -59,9 +54,13 @@ public class ManifestList {
         this.pathFactory = pathFactory;
     }
 
-    public List<ManifestFileMeta> read(String fileName) throws IOException {
-        return FileUtils.readListFromFile(
-                pathFactory.toManifestListPath(fileName), serializer, readerFactory);
+    public List<ManifestFileMeta> read(String fileName) {
+        try {
+            return FileUtils.readListFromFile(
+                    pathFactory.toManifestListPath(fileName), serializer, readerFactory);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read manifest list " + fileName, e);
+        }
     }
 
     /**
@@ -69,7 +68,7 @@ public class ManifestList {
      *
      * <p>NOTE: This method is atomic.
      */
-    public String write(List<ManifestFileMeta> metas) throws IOException {
+    public String write(List<ManifestFileMeta> metas) {
         Preconditions.checkArgument(
                 metas.size() > 0, "Manifest file metas to write must not be empty.");
 
@@ -77,9 +76,9 @@ public class ManifestList {
         try {
             return write(metas, path);
         } catch (Throwable e) {
-            LOG.warn("Exception occurs when writing manifest list " + path + ". Cleaning up.", e);
             FileUtils.deleteOrWarn(path);
-            throw e;
+            throw new RuntimeException(
+                    "Exception occurs when writing manifest list " + path + ". Clean up.", e);
         }
     }
 

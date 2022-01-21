@@ -222,11 +222,22 @@ public class SstFile {
             this.maxKey = null;
             this.minSequenceNumber = Long.MAX_VALUE;
             this.maxSequenceNumber = Long.MIN_VALUE;
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Creating new sst file " + path);
+            }
         }
 
         private void write(KeyValue kv) throws IOException {
-            writer.addElement(serializer.toRow(kv));
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Writing key-value to sst file "
+                                + path
+                                + ", kv: "
+                                + kv.toString(keyType, valueType));
+            }
 
+            writer.addElement(serializer.toRow(kv));
             rowCount++;
             if (minKey == null) {
                 minKey = keySerializer.toBinaryRow(kv.key()).copy();

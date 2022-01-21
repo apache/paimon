@@ -78,7 +78,7 @@ public class TestKeyValueGenerator {
     private static final RowDataSerializer PARTITION_SERIALIZER =
             new RowDataSerializer(PARTITION_TYPE);
     public static final RowDataSerializer KEY_SERIALIZER = new RowDataSerializer(KEY_TYPE);
-    private static final RecordComparator KEY_COMPARATOR =
+    public static final RecordComparator KEY_COMPARATOR =
             (a, b) -> {
                 int firstResult = a.getInt(0) - b.getInt(0);
                 if (firstResult != 0) {
@@ -167,10 +167,6 @@ public class TestKeyValueGenerator {
                             ? keyCompareResult
                             : Long.compare(a.sequenceNumber(), b.sequenceNumber());
                 });
-    }
-
-    public int compareKeys(BinaryRowData a, BinaryRowData b) {
-        return KEY_COMPARATOR.compare(a, b);
     }
 
     private Order pick(List<Order> list) {
