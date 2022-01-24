@@ -115,10 +115,8 @@ public class MergeTreeWriter implements RecordWriter {
             Iterator<KeyValue> iterator = memTable.iterator(keyComparator, accumulator);
             List<SstFileMeta> files =
                     sstFile.write(CloseableIterator.adapterForIterator(iterator), 0);
-            for (SstFileMeta file : files) {
-                newFiles.add(file);
-                levels.addLevel0File(file);
-            }
+            newFiles.addAll(files);
+            files.forEach(levels::addLevel0File);
             memTable.clear();
             submitCompaction();
         }
@@ -139,7 +137,6 @@ public class MergeTreeWriter implements RecordWriter {
     }
 
     private Increment drainIncrement() {
-        // drain files to create Increment
         Increment increment =
                 new Increment(
                         new ArrayList<>(newFiles),
@@ -148,8 +145,6 @@ public class MergeTreeWriter implements RecordWriter {
         newFiles.clear();
         compactBefore.clear();
         compactAfter.clear();
-
-        // return increment
         return increment;
     }
 

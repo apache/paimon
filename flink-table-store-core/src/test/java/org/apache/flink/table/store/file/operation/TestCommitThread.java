@@ -169,11 +169,6 @@ public class TestCommitThread extends Thread {
 
         for (MergeTreeWriter writer : writers.values()) {
             try {
-                writer.sync();
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-            try {
                 writer.close();
             } catch (Exception e) {
                 throw new RuntimeException(e);

@@ -43,6 +43,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -61,12 +63,7 @@ import java.util.stream.Collectors;
 import static java.util.Collections.singletonList;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * Test for {@link MergeTree}.
- *
- * <p>Manual test: please adjust TARGET_FILE_SIZE to 1, so that a large number of upgrade files will
- * be generated.
- */
+/** Test for {@link MergeTree}. */
 public class MergeTreeTest {
 
     @TempDir java.nio.file.Path tempDir;
@@ -90,10 +87,14 @@ public class MergeTreeTest {
         bucketDir.getFileSystem().mkdirs(bucketDir);
 
         comparator = Comparator.comparingInt(o -> o.getInt(0));
+        recreateWriter(1024 * 1024);
+    }
+
+    private void recreateWriter(long targetFileSize) {
         Configuration configuration = new Configuration();
         configuration.set(MergeTreeOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
         configuration.set(MergeTreeOptions.PAGE_SIZE, new MemorySize(4096));
-        configuration.set(MergeTreeOptions.TARGET_FILE_SIZE, new MemorySize(1024 * 1024));
+        configuration.set(MergeTreeOptions.TARGET_FILE_SIZE, new MemorySize(targetFileSize));
         MergeTreeOptions options = new MergeTreeOptions(configuration);
         sstFile =
                 new SstFile(
@@ -164,8 +165,12 @@ public class MergeTreeTest {
         }
     }
 
-    @Test
-    public void testCloseUpgrade() throws Exception {
+    @ParameterizedTest
+    @ValueSource(longs = {1, 1024 * 1024})
+    public void testCloseUpgrade(long targetFileSize) throws Exception {
+        // To generate a large number of upgrade files
+        recreateWriter(targetFileSize);
+
         List<TestRecord> expected = new ArrayList<>();
         Random random = new Random();
         int perBatch = 1_000;
