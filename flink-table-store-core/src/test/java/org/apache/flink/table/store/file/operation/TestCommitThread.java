@@ -173,7 +173,11 @@ public class TestCommitThread extends Thread {
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
-            writer.close();
+            try {
+                writer.close();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 

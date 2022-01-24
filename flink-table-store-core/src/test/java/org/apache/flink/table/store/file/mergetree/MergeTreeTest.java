@@ -61,7 +61,12 @@ import java.util.stream.Collectors;
 import static java.util.Collections.singletonList;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link MergeTree}. */
+/**
+ * Test for {@link MergeTree}.
+ *
+ * <p>Manual test: please adjust TARGET_FILE_SIZE to 1, so that a large number of upgrade files will
+ * be generated.
+ */
 public class MergeTreeTest {
 
     @TempDir java.nio.file.Path tempDir;
@@ -88,6 +93,7 @@ public class MergeTreeTest {
         Configuration configuration = new Configuration();
         configuration.set(MergeTreeOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
         configuration.set(MergeTreeOptions.PAGE_SIZE, new MemorySize(4096));
+        configuration.set(MergeTreeOptions.TARGET_FILE_SIZE, new MemorySize(1024 * 1024));
         MergeTreeOptions options = new MergeTreeOptions(configuration);
         sstFile =
                 new SstFile(
@@ -159,6 +165,32 @@ public class MergeTreeTest {
     }
 
     @Test
+    public void testCloseUpgrade() throws Exception {
+        List<TestRecord> expected = new ArrayList<>();
+        Random random = new Random();
+        int perBatch = 1_000;
+        Set<String> newFileNames = new HashSet<>();
+        List<SstFileMeta> compactedFiles = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            List<TestRecord> records = new ArrayList<>(perBatch);
+            for (int j = 0; j < perBatch; j++) {
+                records.add(
+                        new TestRecord(
+                                random.nextBoolean() ? ValueKind.ADD : ValueKind.DELETE,
+                                random.nextInt(perBatch / 2) - i * (perBatch / 2),
+                                random.nextInt()));
+            }
+            writeAll(records);
+            expected.addAll(records);
+            Increment increment = writer.prepareCommit();
+            mergeCompacted(newFileNames, compactedFiles, increment);
+        }
+        writer.close();
+
+        assertRecords(expected, compactedFiles, true);
+    }
+
+    @Test
     public void testWriteMany() throws Exception {
         doTestWriteRead(3, 20_000);
     }
@@ -183,18 +215,7 @@ public class MergeTreeTest {
 
             Increment increment = writer.prepareCommit();
             newFiles.addAll(increment.newFiles());
-            increment.newFiles().stream().map(SstFileMeta::fileName).forEach(newFileNames::add);
-
-            // merge compacted
-            compactedFiles.addAll(increment.newFiles());
-            for (SstFileMeta file : increment.compactBefore()) {
-                boolean remove = compactedFiles.remove(file);
-                assertThat(remove).isTrue();
-                if (!newFileNames.contains(file.fileName())) {
-                    sstFile.delete(file);
-                }
-            }
-            compactedFiles.addAll(increment.compactAfter());
+            mergeCompacted(newFileNames, compactedFiles, increment);
         }
 
         // assert records from writer
@@ -216,6 +237,25 @@ public class MergeTreeTest {
         newFiles.stream().map(SstFileMeta::fileName).forEach(files::remove);
         compactedFiles.stream().map(SstFileMeta::fileName).forEach(files::remove);
         assertThat(files).isEqualTo(Collections.emptySet());
+    }
+
+    private void mergeCompacted(
+            Set<String> newFileNames, List<SstFileMeta> compactedFiles, Increment increment) {
+        increment.newFiles().stream().map(SstFileMeta::fileName).forEach(newFileNames::add);
+        compactedFiles.addAll(increment.newFiles());
+        Set<String> afterFiles =
+                increment.compactAfter().stream()
+                        .map(SstFileMeta::fileName)
+                        .collect(Collectors.toSet());
+        for (SstFileMeta file : increment.compactBefore()) {
+            boolean remove = compactedFiles.remove(file);
+            assertThat(remove).isTrue();
+            // See MergeTreeWriter.updateCompactResult
+            if (!newFileNames.contains(file.fileName()) && !afterFiles.contains(file.fileName())) {
+                sstFile.delete(file);
+            }
+        }
+        compactedFiles.addAll(increment.compactAfter());
     }
 
     private List<TestRecord> writeBatch() throws Exception {
