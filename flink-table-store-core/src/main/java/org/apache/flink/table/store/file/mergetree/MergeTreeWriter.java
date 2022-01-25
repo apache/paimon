@@ -32,10 +32,13 @@ import org.apache.flink.util.CloseableIterator;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
+import java.util.stream.Collectors;
 
 /** A {@link RecordWriter} to write records and generate {@link Increment}. */
 public class MergeTreeWriter implements RecordWriter {
@@ -56,7 +59,7 @@ public class MergeTreeWriter implements RecordWriter {
 
     private final LinkedHashSet<SstFileMeta> newFiles;
 
-    private final LinkedHashSet<SstFileMeta> compactBefore;
+    private final LinkedHashMap<String, SstFileMeta> compactBefore;
 
     private final LinkedHashSet<SstFileMeta> compactAfter;
 
@@ -80,7 +83,7 @@ public class MergeTreeWriter implements RecordWriter {
         this.sstFile = sstFile;
         this.commitForceCompact = commitForceCompact;
         this.newFiles = new LinkedHashSet<>();
-        this.compactBefore = new LinkedHashSet<>();
+        this.compactBefore = new LinkedHashMap<>();
         this.compactAfter = new LinkedHashSet<>();
     }
 
@@ -137,7 +140,7 @@ public class MergeTreeWriter implements RecordWriter {
         Increment increment =
                 new Increment(
                         new ArrayList<>(newFiles),
-                        new ArrayList<>(compactBefore),
+                        new ArrayList<>(compactBefore.values()),
                         new ArrayList<>(compactAfter));
         newFiles.clear();
         compactBefore.clear();
@@ -146,14 +149,21 @@ public class MergeTreeWriter implements RecordWriter {
     }
 
     private void updateCompactResult(CompactManager.CompactResult result) {
+        Set<String> afterFiles =
+                result.after().stream().map(SstFileMeta::fileName).collect(Collectors.toSet());
         for (SstFileMeta file : result.before()) {
-            boolean removed = compactAfter.remove(file);
-            if (removed) {
+            if (compactAfter.remove(file)) {
                 // This is an intermediate file (not a new data file), which is no longer needed
-                // after compaction and can be deleted directly
-                sstFile.delete(file);
+                // after compaction and can be deleted directly, but upgrade file is required by
+                // previous snapshot and following snapshot, so we should ensure:
+                // 1. This file is not the output of upgraded.
+                // 2. This file is not the input of upgraded.
+                if (!compactBefore.containsKey(file.fileName())
+                        && !afterFiles.contains(file.fileName())) {
+                    sstFile.delete(file);
+                }
             } else {
-                compactBefore.add(file);
+                compactBefore.put(file.fileName(), file);
             }
         }
         compactAfter.addAll(result.after());
@@ -165,16 +175,21 @@ public class MergeTreeWriter implements RecordWriter {
 
     private void finishCompaction() throws ExecutionException, InterruptedException {
         Optional<CompactManager.CompactResult> result = compactManager.finishCompaction(levels);
-        if (result.isPresent()) {
-            updateCompactResult(result.get());
-        }
+        result.ifPresent(this::updateCompactResult);
     }
 
     @Override
-    public List<SstFileMeta> close() {
+    public List<SstFileMeta> close() throws Exception {
+        sync();
         // delete temporary files
         List<SstFileMeta> delete = new ArrayList<>(newFiles);
-        delete.addAll(compactAfter);
+        for (SstFileMeta file : compactAfter) {
+            // upgrade file is required by previous snapshot, so we should ensure that this file is
+            // not the output of upgraded.
+            if (!compactBefore.containsKey(file.fileName())) {
+                delete.add(file);
+            }
+        }
         for (SstFileMeta file : delete) {
             sstFile.delete(file);
         }
