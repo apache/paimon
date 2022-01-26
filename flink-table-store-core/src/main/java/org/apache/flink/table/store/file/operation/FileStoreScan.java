@@ -19,13 +19,20 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
+import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.predicate.Predicate;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+
+import static org.apache.flink.util.Preconditions.checkArgument;
 
 /** Scan operation which produces a plan. */
 public interface FileStoreScan {
@@ -56,5 +63,18 @@ public interface FileStoreScan {
 
         /** Result {@link ManifestEntry} files. */
         List<ManifestEntry> files();
+
+        /** Return a map group by partition and bucket. */
+        default Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> groupByPartFiles() {
+            List<ManifestEntry> files = files();
+            Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> groupBy = new HashMap<>();
+            for (ManifestEntry entry : files) {
+                checkArgument(entry.kind() == ValueKind.ADD);
+                groupBy.computeIfAbsent(entry.partition(), k -> new HashMap<>())
+                        .computeIfAbsent(entry.bucket(), k -> new ArrayList<>())
+                        .add(entry.file());
+            }
+            return groupBy;
+        }
     }
 }
