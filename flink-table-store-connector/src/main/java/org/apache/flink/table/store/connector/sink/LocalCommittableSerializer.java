@@ -23,14 +23,11 @@ import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.store.file.mergetree.Increment;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMetaSerializer;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 
 /** {@link SimpleVersionedSerializer} for {@link LocalCommittable}. */
 public class LocalCommittableSerializer implements SimpleVersionedSerializer<LocalCommittable> {
@@ -54,27 +51,10 @@ public class LocalCommittableSerializer implements SimpleVersionedSerializer<Loc
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
         partSerializer.serialize(obj.partition(), view);
         view.writeInt(obj.bucket());
-        serializeFiles(view, obj.increment().newFiles());
-        serializeFiles(view, obj.increment().compactBefore());
-        serializeFiles(view, obj.increment().compactAfter());
+        sstSerializer.serializeList(obj.increment().newFiles(), view);
+        sstSerializer.serializeList(obj.increment().compactBefore(), view);
+        sstSerializer.serializeList(obj.increment().compactAfter(), view);
         return out.toByteArray();
-    }
-
-    private void serializeFiles(DataOutputViewStreamWrapper view, List<SstFileMeta> files)
-            throws IOException {
-        view.writeInt(files.size());
-        for (SstFileMeta file : files) {
-            sstSerializer.serialize(file, view);
-        }
-    }
-
-    private List<SstFileMeta> deserializeFiles(DataInputDeserializer view) throws IOException {
-        int fileNumber = view.readInt();
-        List<SstFileMeta> files = new ArrayList<>(fileNumber);
-        for (int i = 0; i < fileNumber; i++) {
-            files.add(sstSerializer.deserialize(view));
-        }
-        return files;
     }
 
     @Override
@@ -84,6 +64,8 @@ public class LocalCommittableSerializer implements SimpleVersionedSerializer<Loc
                 partSerializer.deserialize(view),
                 view.readInt(),
                 new Increment(
-                        deserializeFiles(view), deserializeFiles(view), deserializeFiles(view)));
+                        sstSerializer.deserializeList(view),
+                        sstSerializer.deserializeList(view),
+                        sstSerializer.deserializeList(view)));
     }
 }
