@@ -25,6 +25,8 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 /** A {@link Predicate} to eval less. */
 public class LessThan implements Predicate {
 
+    private static final long serialVersionUID = 1L;
+
     private final int index;
 
     private final Literal literal;

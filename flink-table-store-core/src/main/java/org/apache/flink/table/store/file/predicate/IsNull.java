@@ -23,6 +23,8 @@ import org.apache.flink.table.store.file.stats.FieldStats;
 /** A {@link Predicate} to eval is null. */
 public class IsNull implements Predicate {
 
+    private static final long serialVersionUID = 1L;
+
     private final int index;
 
     public IsNull(int index) {

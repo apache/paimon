@@ -20,8 +20,10 @@ package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.file.stats.FieldStats;
 
+import java.io.Serializable;
+
 /** Predicate which returns Boolean and provides testing by stats. */
-public interface Predicate {
+public interface Predicate extends Serializable {
 
     /**
      * Test based on the specific input column values.
