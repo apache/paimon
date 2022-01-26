@@ -23,6 +23,8 @@ import org.apache.flink.table.store.file.stats.FieldStats;
 /** A {@link Predicate} to eval or. */
 public class Or implements Predicate {
 
+    private static final long serialVersionUID = 1L;
+
     private final Predicate predicate1;
     private final Predicate predicate2;
 
