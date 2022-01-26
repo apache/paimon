@@ -27,6 +27,7 @@ import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.FileStoreExpire;
+import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.operation.Lock;
@@ -74,6 +75,11 @@ public class TestFileStore implements FileStore {
                 return new TestRecordWriter();
             }
         };
+    }
+
+    @Override
+    public FileStoreRead newRead() {
+        throw new UnsupportedOperationException();
     }
 
     @Override

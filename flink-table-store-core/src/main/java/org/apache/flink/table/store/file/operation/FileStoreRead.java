@@ -16,26 +16,25 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file;
+package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.table.store.file.operation.FileStoreCommit;
-import org.apache.flink.table.store.file.operation.FileStoreExpire;
-import org.apache.flink.table.store.file.operation.FileStoreRead;
-import org.apache.flink.table.store.file.operation.FileStoreScan;
-import org.apache.flink.table.store.file.operation.FileStoreWrite;
+import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.table.store.file.utils.RecordReader;
 
-import java.io.Serializable;
+import java.io.IOException;
+import java.util.List;
 
-/** File store interface. */
-public interface FileStore extends Serializable {
+/** Read operation which provides {@link RecordReader} creation. */
+public interface FileStoreRead {
 
-    FileStoreWrite newWrite();
+    /** With key nested projection. */
+    void withKeyProjection(int[][] projectedFields);
 
-    FileStoreRead newRead();
+    /** With value nested projection. */
+    void withValueProjection(int[][] projectedFields);
 
-    FileStoreCommit newCommit();
-
-    FileStoreExpire newExpire();
-
-    FileStoreScan newScan();
+    /** Create a {@link RecordReader} from partition and bucket and files. */
+    RecordReader createReader(BinaryRowData partition, int bucket, List<SstFileMeta> files)
+            throws IOException;
 }
