@@ -30,6 +30,7 @@ import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.Lock;
+import org.apache.flink.table.store.sink.SinkRecordConverter;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
@@ -39,7 +40,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 
-import static org.apache.flink.table.store.connector.utils.ProjectionUtils.project;
+import static org.apache.flink.table.store.utils.ProjectionUtils.project;
 
 /** {@link Sink} of dynamic store. */
 public class StoreSink implements Sink<RowData, LocalCommittable, Void, ManifestCommittable> {

@@ -16,13 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.connector.sink;
+package org.apache.flink.table.store.sink;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.generated.Projection;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
-import org.apache.flink.table.store.connector.utils.ProjectionUtils;
+import org.apache.flink.table.store.utils.ProjectionUtils;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 
