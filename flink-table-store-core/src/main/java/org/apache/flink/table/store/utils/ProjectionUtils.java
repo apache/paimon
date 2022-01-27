@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.connector.utils;
+package org.apache.flink.table.store.utils;
 
 import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.data.RowData;

@@ -26,6 +26,8 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.utils.RecordWriter;
+import org.apache.flink.table.store.sink.SinkRecord;
+import org.apache.flink.table.store.sink.SinkRecordConverter;
 import org.apache.flink.types.RowKind;
 
 import java.io.IOException;
