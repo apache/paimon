@@ -46,11 +46,11 @@ public class FileStoreScanImpl implements FileStoreScan {
 
     public FileStoreScanImpl(
             FileStorePathFactory pathFactory,
-            ManifestFile manifestFile,
-            ManifestList manifestList) {
+            ManifestFile.Factory manifestFileFactory,
+            ManifestList.Factory manifestListFactory) {
         this.pathFactory = pathFactory;
-        this.manifestFile = manifestFile;
-        this.manifestList = manifestList;
+        this.manifestFile = manifestFileFactory.create();
+        this.manifestList = manifestListFactory.create();
 
         this.snapshotId = null;
         this.manifests = new ArrayList<>();

@@ -74,6 +74,7 @@ public class TestCommitThread extends Thread {
     private final FileStorePathFactory safePathFactory;
 
     private final Map<BinaryRowData, MergeTreeWriter> writers;
+    private final SstFile.Factory sstFileFactory;
 
     private final FileStoreScan scan;
     private final FileStoreCommit commit;
@@ -86,20 +87,27 @@ public class TestCommitThread extends Thread {
         this.safePathFactory = safePathFactory;
 
         this.writers = new HashMap<>();
+        this.sstFileFactory =
+                new SstFile.Factory(
+                        TestKeyValueGenerator.KEY_TYPE,
+                        TestKeyValueGenerator.ROW_TYPE,
+                        avro,
+                        safePathFactory,
+                        SUGGESTED_SST_FILE_SIZE);
 
         this.scan =
                 new FileStoreScanImpl(
                         safePathFactory,
-                        createManifestFile(safePathFactory),
-                        createManifestList(safePathFactory));
+                        createManifestFileFactory(safePathFactory),
+                        createManifestListFactory(safePathFactory));
 
         ManifestCommittableSerializer serializer =
                 new ManifestCommittableSerializer(
                         TestKeyValueGenerator.PARTITION_TYPE,
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.ROW_TYPE);
-        ManifestFile testManifestFile = createManifestFile(testPathFactory);
-        ManifestList testManifestList = createManifestList(testPathFactory);
+        ManifestFile.Factory testManifestFileFactory = createManifestFileFactory(testPathFactory);
+        ManifestList.Factory testManifestListFactory = createManifestListFactory(testPathFactory);
         Configuration fileStoreConf = new Configuration();
         fileStoreConf.set(FileStoreOptions.BUCKET, 1);
         fileStoreConf.set(
@@ -107,20 +115,21 @@ public class TestCommitThread extends Thread {
                 MemorySize.parse((ThreadLocalRandom.current().nextInt(16) + 1) + "kb"));
         FileStoreOptions fileStoreOptions = new FileStoreOptions(fileStoreConf);
         FileStoreScanImpl testScan =
-                new FileStoreScanImpl(testPathFactory, testManifestFile, testManifestList);
+                new FileStoreScanImpl(
+                        testPathFactory, testManifestFileFactory, testManifestListFactory);
         this.commit =
                 new FileStoreCommitImpl(
                         UUID.randomUUID().toString(),
                         serializer,
                         testPathFactory,
-                        testManifestFile,
-                        testManifestList,
-                        fileStoreOptions,
-                        testScan);
+                        testManifestFileFactory,
+                        testManifestListFactory,
+                        testScan,
+                        fileStoreOptions);
     }
 
-    private ManifestFile createManifestFile(FileStorePathFactory pathFactory) {
-        return new ManifestFile(
+    private ManifestFile.Factory createManifestFileFactory(FileStorePathFactory pathFactory) {
+        return new ManifestFile.Factory(
                 TestKeyValueGenerator.PARTITION_TYPE,
                 TestKeyValueGenerator.KEY_TYPE,
                 TestKeyValueGenerator.ROW_TYPE,
@@ -128,8 +137,8 @@ public class TestCommitThread extends Thread {
                 pathFactory);
     }
 
-    private ManifestList createManifestList(FileStorePathFactory pathFactory) {
-        return new ManifestList(TestKeyValueGenerator.PARTITION_TYPE, avro, pathFactory);
+    private ManifestList.Factory createManifestListFactory(FileStorePathFactory pathFactory) {
+        return new ManifestList.Factory(TestKeyValueGenerator.PARTITION_TYPE, avro, pathFactory);
     }
 
     @Override
@@ -214,13 +223,7 @@ public class TestCommitThread extends Thread {
     }
 
     private MergeTreeWriter createWriter(BinaryRowData partition) {
-        SstFile sstFile =
-                new SstFile(
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.ROW_TYPE,
-                        avro,
-                        safePathFactory.createSstPathFactory(partition, 0),
-                        SUGGESTED_SST_FILE_SIZE);
+        SstFile sstFile = sstFileFactory.create(partition, 0);
         ExecutorService service =
                 Executors.newSingleThreadExecutor(
                         r -> {

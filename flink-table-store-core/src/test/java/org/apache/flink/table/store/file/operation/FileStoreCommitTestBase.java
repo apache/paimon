@@ -143,34 +143,35 @@ public abstract class FileStoreCommitTestBase {
         Long latestSnapshotId = pathFactory.latestSnapshotId();
         assertThat(latestSnapshotId).isNotNull();
 
-        ManifestFile manifestFile =
-                new ManifestFile(
+        ManifestFile.Factory manifestFileFactory =
+                new ManifestFile.Factory(
                         TestKeyValueGenerator.PARTITION_TYPE,
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.ROW_TYPE,
                         avro,
                         pathFactory);
-        ManifestList manifestList =
-                new ManifestList(TestKeyValueGenerator.PARTITION_TYPE, avro, pathFactory);
+        ManifestList.Factory manifestListFactory =
+                new ManifestList.Factory(TestKeyValueGenerator.PARTITION_TYPE, avro, pathFactory);
 
         List<KeyValue> kvs = new ArrayList<>();
         List<ManifestEntry> entries =
-                new FileStoreScanImpl(pathFactory, manifestFile, manifestList)
+                new FileStoreScanImpl(pathFactory, manifestFileFactory, manifestListFactory)
                         .withSnapshot(latestSnapshotId)
                         .plan()
                         .files();
+        SstFile.Factory sstFileFactory =
+                new SstFile.Factory(
+                        TestKeyValueGenerator.KEY_TYPE,
+                        TestKeyValueGenerator.ROW_TYPE,
+                        avro,
+                        pathFactory,
+                        1024 * 1024 // not used
+                        );
         for (ManifestEntry entry : entries) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Reading actual key-values from file " + entry.file().fileName());
             }
-            SstFile sstFile =
-                    new SstFile(
-                            TestKeyValueGenerator.KEY_TYPE,
-                            TestKeyValueGenerator.ROW_TYPE,
-                            avro,
-                            pathFactory.createSstPathFactory(entry.partition(), 0),
-                            1024 * 1024 // not used
-                            );
+            SstFile sstFile = sstFileFactory.create(entry.partition(), entry.bucket());
             RecordReaderIterator iterator =
                     new RecordReaderIterator(sstFile.read(entry.file().fileName()));
             while (iterator.hasNext()) {
