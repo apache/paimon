@@ -325,9 +325,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             return;
         }
 
+        List<BinaryRowData> changedPartitions =
+                changes.stream()
+                        .map(ManifestEntry::partition)
+                        .distinct()
+                        .collect(Collectors.toList());
         try {
-            // TODO use partition filter of scan when implemented
-            for (ManifestEntry entry : scan.withSnapshot(snapshotId).plan().files()) {
+            for (ManifestEntry entry :
+                    scan.withSnapshot(snapshotId)
+                            .withPartitionFilter(changedPartitions)
+                            .plan()
+                            .files()) {
                 removedFiles.remove(entry.identifier());
             }
         } catch (Throwable e) {

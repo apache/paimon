@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -30,6 +31,8 @@ import java.util.List;
 public interface FileStoreScan {
 
     FileStoreScan withPartitionFilter(Predicate predicate);
+
+    FileStoreScan withPartitionFilter(List<BinaryRowData> partitions);
 
     FileStoreScan withKeyFilter(Predicate predicate);
 

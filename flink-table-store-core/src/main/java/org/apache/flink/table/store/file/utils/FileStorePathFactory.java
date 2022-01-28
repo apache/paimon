@@ -37,11 +37,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+import javax.annotation.concurrent.ThreadSafe;
 
 import java.io.IOException;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Factory which produces {@link Path}s for each type of files. */
+@ThreadSafe
 public class FileStorePathFactory {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStorePathFactory.class);
@@ -51,8 +54,8 @@ public class FileStorePathFactory {
     private final String uuid;
     private final RowDataPartitionComputer partitionComputer;
 
-    private int manifestFileCount;
-    private int manifestListCount;
+    private final AtomicInteger manifestFileCount;
+    private final AtomicInteger manifestListCount;
 
     public FileStorePathFactory(Path root) {
         this(root, RowType.of(), FileSystemConnectorOptions.PARTITION_DEFAULT_NAME.defaultValue());
@@ -73,16 +76,22 @@ public class FileStorePathFactory {
                                 .toArray(DataType[]::new),
                         partitionColumns);
 
-        this.manifestFileCount = 0;
-        this.manifestListCount = 0;
+        this.manifestFileCount = new AtomicInteger(0);
+        this.manifestListCount = new AtomicInteger(0);
     }
 
     public Path newManifestFile() {
-        return new Path(root + "/manifest/manifest-" + uuid + "-" + (manifestFileCount++));
+        return new Path(
+                root + "/manifest/manifest-" + uuid + "-" + manifestFileCount.getAndIncrement());
     }
 
     public Path newManifestList() {
-        return new Path(root + "/manifest/manifest-list-" + uuid + "-" + (manifestListCount++));
+        return new Path(
+                root
+                        + "/manifest/manifest-list-"
+                        + uuid
+                        + "-"
+                        + manifestListCount.getAndIncrement());
     }
 
     public Path toManifestFilePath(String manifestFileName) {
@@ -105,6 +114,7 @@ public class FileStorePathFactory {
         return new SstPathFactory(root, getPartitionString(partition), bucket);
     }
 
+    /** IMPORTANT: This method is NOT THREAD SAFE. */
     public String getPartitionString(BinaryRowData partition) {
         return PartitionPathUtils.generatePartitionPath(
                 partitionComputer.generatePartValues(

@@ -39,6 +39,8 @@ import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ForkJoinWorkerThread;
 
 /** Utils for file reading and writing. */
 public class FileUtils {
@@ -49,6 +51,22 @@ public class FileUtils {
 
     static {
         DEFAULT_READER_CONFIG.setInteger(SourceReaderOptions.ELEMENT_QUEUE_CAPACITY, 1);
+    }
+
+    public static final ForkJoinPool COMMON_IO_FORK_JOIN_POOL;
+
+    // if we want to name threads in the fork join pool we need all these
+    // see https://stackoverflow.com/questions/34303094/
+    static {
+        ForkJoinPool.ForkJoinWorkerThreadFactory factory =
+                pool -> {
+                    ForkJoinWorkerThread worker =
+                            ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(pool);
+                    worker.setName("file-store-common-io-" + worker.getPoolIndex());
+                    return worker;
+                };
+        COMMON_IO_FORK_JOIN_POOL =
+                new ForkJoinPool(Runtime.getRuntime().availableProcessors(), factory, null, false);
     }
 
     public static <T> List<T> readListFromFile(
