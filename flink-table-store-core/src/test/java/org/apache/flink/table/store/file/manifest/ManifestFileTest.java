@@ -91,12 +91,13 @@ public class ManifestFileTest {
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
                         new Path(path), TestKeyValueGenerator.PARTITION_TYPE, "default");
-        return new ManifestFile(
-                TestKeyValueGenerator.PARTITION_TYPE,
-                TestKeyValueGenerator.KEY_TYPE,
-                TestKeyValueGenerator.ROW_TYPE,
-                avro,
-                pathFactory);
+        return new ManifestFile.Factory(
+                        TestKeyValueGenerator.PARTITION_TYPE,
+                        TestKeyValueGenerator.KEY_TYPE,
+                        TestKeyValueGenerator.ROW_TYPE,
+                        avro,
+                        pathFactory)
+                .create();
     }
 
     private void checkMetaIgnoringFileNameAndSize(

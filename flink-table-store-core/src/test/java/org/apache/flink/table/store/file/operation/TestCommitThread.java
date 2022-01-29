@@ -19,22 +19,11 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileFormat;
-import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
-import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
-import org.apache.flink.table.store.file.manifest.ManifestEntry;
-import org.apache.flink.table.store.file.manifest.ManifestFile;
-import org.apache.flink.table.store.file.manifest.ManifestList;
-import org.apache.flink.table.store.file.mergetree.MergeTree;
-import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
-import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
-import org.apache.flink.table.store.file.mergetree.sst.SstFile;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 
 import org.slf4j.Logger;
@@ -45,37 +34,19 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.stream.Collectors;
 
 /** Testing {@link Thread}s to perform concurrent commits. */
 public class TestCommitThread extends Thread {
 
     private static final Logger LOG = LoggerFactory.getLogger(TestCommitThread.class);
 
-    private static final MergeTreeOptions MERGE_TREE_OPTIONS;
-    private static final long SUGGESTED_SST_FILE_SIZE = 1024;
-
-    static {
-        Configuration mergeTreeConf = new Configuration();
-        mergeTreeConf.set(MergeTreeOptions.WRITE_BUFFER_SIZE, MemorySize.parse("16 kb"));
-        mergeTreeConf.set(MergeTreeOptions.PAGE_SIZE, MemorySize.parse("4 kb"));
-        MERGE_TREE_OPTIONS = new MergeTreeOptions(mergeTreeConf);
-    }
-
-    private final FileFormat avro =
-            FileFormat.fromIdentifier(
-                    FileStoreCommitTestBase.class.getClassLoader(), "avro", new Configuration());
-
     private final Map<BinaryRowData, List<KeyValue>> data;
-    private final FileStorePathFactory safePathFactory;
-
     private final Map<BinaryRowData, MergeTreeWriter> writers;
 
-    private final FileStoreScan scan;
+    private final FileStoreWrite write;
     private final FileStoreCommit commit;
 
     public TestCommitThread(
@@ -83,53 +54,15 @@ public class TestCommitThread extends Thread {
             FileStorePathFactory testPathFactory,
             FileStorePathFactory safePathFactory) {
         this.data = data;
-        this.safePathFactory = safePathFactory;
-
         this.writers = new HashMap<>();
 
-        this.scan =
-                new FileStoreScanImpl(
-                        safePathFactory,
-                        createManifestFile(safePathFactory),
-                        createManifestList(safePathFactory));
-
-        ManifestCommittableSerializer serializer =
-                new ManifestCommittableSerializer(
-                        TestKeyValueGenerator.PARTITION_TYPE,
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.ROW_TYPE);
-        ManifestFile testManifestFile = createManifestFile(testPathFactory);
-        ManifestList testManifestList = createManifestList(testPathFactory);
-        Configuration fileStoreConf = new Configuration();
-        fileStoreConf.set(FileStoreOptions.BUCKET, 1);
-        fileStoreConf.set(
-                FileStoreOptions.MANIFEST_TARGET_FILE_SIZE,
-                MemorySize.parse((ThreadLocalRandom.current().nextInt(16) + 1) + "kb"));
-        FileStoreOptions fileStoreOptions = new FileStoreOptions(fileStoreConf);
-        FileStoreScanImpl testScan =
-                new FileStoreScanImpl(testPathFactory, testManifestFile, testManifestList);
-        this.commit =
-                new FileStoreCommitImpl(
-                        UUID.randomUUID().toString(),
-                        serializer,
-                        testPathFactory,
-                        testManifestFile,
-                        testManifestList,
-                        fileStoreOptions,
-                        testScan);
-    }
-
-    private ManifestFile createManifestFile(FileStorePathFactory pathFactory) {
-        return new ManifestFile(
-                TestKeyValueGenerator.PARTITION_TYPE,
-                TestKeyValueGenerator.KEY_TYPE,
-                TestKeyValueGenerator.ROW_TYPE,
-                avro,
-                pathFactory);
-    }
-
-    private ManifestList createManifestList(FileStorePathFactory pathFactory) {
-        return new ManifestList(TestKeyValueGenerator.PARTITION_TYPE, avro, pathFactory);
+        FileFormat avro =
+                FileFormat.fromIdentifier(
+                        FileStoreCommitTestBase.class.getClassLoader(),
+                        "avro",
+                        new Configuration());
+        this.write = OperationTestUtils.createWrite(avro, safePathFactory);
+        this.commit = OperationTestUtils.createCommit(avro, testPathFactory);
     }
 
     @Override
@@ -155,11 +88,7 @@ public class TestCommitThread extends Thread {
                     break;
                 } catch (Throwable e) {
                     if (LOG.isDebugEnabled()) {
-                        LOG.warn(
-                                "["
-                                        + Thread.currentThread().getName()
-                                        + "] Failed to commit because of exception, try again",
-                                e);
+                        LOG.warn("Failed to commit because of exception, try again", e);
                     }
                     writers.clear();
                     shouldCheckFilter = true;
@@ -214,13 +143,6 @@ public class TestCommitThread extends Thread {
     }
 
     private MergeTreeWriter createWriter(BinaryRowData partition) {
-        SstFile sstFile =
-                new SstFile(
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.ROW_TYPE,
-                        avro,
-                        safePathFactory.createSstPathFactory(partition, 0),
-                        SUGGESTED_SST_FILE_SIZE);
         ExecutorService service =
                 Executors.newSingleThreadExecutor(
                         r -> {
@@ -228,23 +150,6 @@ public class TestCommitThread extends Thread {
                             t.setName(Thread.currentThread().getName() + "-writer-service-pool");
                             return t;
                         });
-        MergeTree mergeTree =
-                new MergeTree(
-                        MERGE_TREE_OPTIONS,
-                        sstFile,
-                        TestKeyValueGenerator.KEY_COMPARATOR,
-                        service,
-                        new DeduplicateAccumulator());
-        Long latestSnapshotId = safePathFactory.latestSnapshotId();
-        if (latestSnapshotId == null) {
-            return (MergeTreeWriter) mergeTree.createWriter(Collections.emptyList());
-        } else {
-            return (MergeTreeWriter)
-                    mergeTree.createWriter(
-                            scan.withSnapshot(latestSnapshotId).plan().files().stream()
-                                    .filter(e -> partition.equals(e.partition()))
-                                    .map(ManifestEntry::file)
-                                    .collect(Collectors.toList()));
-        }
+        return (MergeTreeWriter) write.createWriter(partition, 0, service);
     }
 }

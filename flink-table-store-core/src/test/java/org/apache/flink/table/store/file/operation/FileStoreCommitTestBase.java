@@ -25,13 +25,8 @@ import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.manifest.ManifestEntry;
-import org.apache.flink.table.store.file.manifest.ManifestFile;
-import org.apache.flink.table.store.file.manifest.ManifestList;
-import org.apache.flink.table.store.file.mergetree.sst.SstFile;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -71,7 +66,7 @@ public abstract class FileStoreCommitTestBase {
         root.getFileSystem().mkdirs(new Path(root + "/snapshot"));
     }
 
-    protected abstract String getSchema();
+    protected abstract String getScheme();
 
     @RepeatedTest(10)
     public void testSingleCommitUser() throws Exception {
@@ -94,7 +89,7 @@ public abstract class FileStoreCommitTestBase {
                                 .collect(Collectors.toList()),
                 "input");
         Map<BinaryRowData, BinaryRowData> expected =
-                toKvMap(
+                OperationTestUtils.toKvMap(
                         data.values().stream()
                                 .flatMap(Collection::stream)
                                 .collect(Collectors.toList()));
@@ -114,7 +109,10 @@ public abstract class FileStoreCommitTestBase {
         for (int i = 0; i < numThreads; i++) {
             TestCommitThread thread =
                     new TestCommitThread(
-                            dataPerThread.get(i), createTestPathFactory(), createSafePathFactory());
+                            dataPerThread.get(i),
+                            OperationTestUtils.createPathFactory(getScheme(), tempDir.toString()),
+                            OperationTestUtils.createPathFactory(
+                                    TestAtomicRenameFileSystem.SCHEME, tempDir.toString()));
             thread.start();
             threads.add(thread);
         }
@@ -123,7 +121,16 @@ public abstract class FileStoreCommitTestBase {
         }
 
         // read actual data and compare
-        Map<BinaryRowData, BinaryRowData> actual = toKvMap(readKvsFromLatestSnapshot());
+        FileStorePathFactory safePathFactory =
+                OperationTestUtils.createPathFactory(
+                        TestAtomicRenameFileSystem.SCHEME, tempDir.toString());
+        Long snapshotId = safePathFactory.latestSnapshotId();
+        assertThat(snapshotId).isNotNull();
+        List<KeyValue> actualKvs =
+                OperationTestUtils.readKvsFromSnapshot(snapshotId, avro, safePathFactory);
+        gen.sort(actualKvs);
+        logData(() -> actualKvs, "raw read results");
+        Map<BinaryRowData, BinaryRowData> actual = OperationTestUtils.toKvMap(actualKvs);
         logData(() -> kvMapToKvList(expected), "expected");
         logData(() -> kvMapToKvList(actual), "actual");
         assertThat(actual).isEqualTo(expected);
@@ -136,90 +143,6 @@ public abstract class FileStoreCommitTestBase {
             data.compute(gen.getPartition(kv), (p, l) -> l == null ? new ArrayList<>() : l).add(kv);
         }
         return data;
-    }
-
-    private List<KeyValue> readKvsFromLatestSnapshot() throws IOException {
-        FileStorePathFactory pathFactory = createSafePathFactory();
-        Long latestSnapshotId = pathFactory.latestSnapshotId();
-        assertThat(latestSnapshotId).isNotNull();
-
-        ManifestFile manifestFile =
-                new ManifestFile(
-                        TestKeyValueGenerator.PARTITION_TYPE,
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.ROW_TYPE,
-                        avro,
-                        pathFactory);
-        ManifestList manifestList =
-                new ManifestList(TestKeyValueGenerator.PARTITION_TYPE, avro, pathFactory);
-
-        List<KeyValue> kvs = new ArrayList<>();
-        List<ManifestEntry> entries =
-                new FileStoreScanImpl(pathFactory, manifestFile, manifestList)
-                        .withSnapshot(latestSnapshotId)
-                        .plan()
-                        .files();
-        for (ManifestEntry entry : entries) {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Reading actual key-values from file " + entry.file().fileName());
-            }
-            SstFile sstFile =
-                    new SstFile(
-                            TestKeyValueGenerator.KEY_TYPE,
-                            TestKeyValueGenerator.ROW_TYPE,
-                            avro,
-                            pathFactory.createSstPathFactory(entry.partition(), 0),
-                            1024 * 1024 // not used
-                            );
-            RecordReaderIterator iterator =
-                    new RecordReaderIterator(sstFile.read(entry.file().fileName()));
-            while (iterator.hasNext()) {
-                kvs.add(
-                        iterator.next()
-                                .copy(
-                                        TestKeyValueGenerator.KEY_SERIALIZER,
-                                        TestKeyValueGenerator.ROW_SERIALIZER));
-            }
-        }
-
-        gen.sort(kvs);
-        logData(() -> kvs, "raw read results");
-        return kvs;
-    }
-
-    private Map<BinaryRowData, BinaryRowData> toKvMap(List<KeyValue> kvs) {
-        Map<BinaryRowData, BinaryRowData> result = new HashMap<>();
-        for (KeyValue kv : kvs) {
-            BinaryRowData key = TestKeyValueGenerator.KEY_SERIALIZER.toBinaryRow(kv.key()).copy();
-            BinaryRowData value =
-                    TestKeyValueGenerator.ROW_SERIALIZER.toBinaryRow(kv.value()).copy();
-            switch (kv.valueKind()) {
-                case ADD:
-                    result.put(key, value);
-                    break;
-                case DELETE:
-                    result.remove(key);
-                    break;
-                default:
-                    throw new UnsupportedOperationException(
-                            "Unknown value kind " + kv.valueKind().name());
-            }
-        }
-        return result;
-    }
-
-    private FileStorePathFactory createTestPathFactory() {
-        return new FileStorePathFactory(
-                new Path(getSchema() + "://" + tempDir.toString()),
-                TestKeyValueGenerator.PARTITION_TYPE,
-                "default");
-    }
-
-    private FileStorePathFactory createSafePathFactory() {
-        return new FileStorePathFactory(
-                new Path(TestAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString()),
-                TestKeyValueGenerator.PARTITION_TYPE,
-                "default");
     }
 
     private List<KeyValue> kvMapToKvList(Map<BinaryRowData, BinaryRowData> map) {
@@ -244,7 +167,7 @@ public abstract class FileStoreCommitTestBase {
     public static class WithTestAtomicRenameFileSystem extends FileStoreCommitTestBase {
 
         @Override
-        protected String getSchema() {
+        protected String getScheme() {
             return TestAtomicRenameFileSystem.SCHEME;
         }
     }
@@ -261,7 +184,7 @@ public abstract class FileStoreCommitTestBase {
         }
 
         @Override
-        protected String getSchema() {
+        protected String getScheme() {
             return FailingAtomicRenameFileSystem.SCHEME;
         }
     }

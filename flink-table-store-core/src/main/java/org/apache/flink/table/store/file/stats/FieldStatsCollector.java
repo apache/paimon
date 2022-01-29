@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.file.stats;
 
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.utils.RowDataToObjectArrayConverter;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.util.Preconditions;
 
 /** Collector to extract statistics of each fields from a series of records. */
 public class FieldStatsCollector {
@@ -28,15 +28,14 @@ public class FieldStatsCollector {
     private final Object[] minValues;
     private final Object[] maxValues;
     private final long[] nullCounts;
-
-    private final RowData.FieldGetter[] fieldGetters;
+    private final RowDataToObjectArrayConverter converter;
 
     public FieldStatsCollector(RowType rowType) {
         int numFields = rowType.getFieldCount();
         this.minValues = new Object[numFields];
         this.maxValues = new Object[numFields];
         this.nullCounts = new long[numFields];
-        this.fieldGetters = FieldStatsArraySerializer.createFieldGetters(rowType);
+        this.converter = new RowDataToObjectArrayConverter(rowType);
     }
 
     /**
@@ -46,13 +45,9 @@ public class FieldStatsCollector {
      * the collector.
      */
     public void collect(RowData row) {
-        Preconditions.checkArgument(
-                fieldGetters.length == row.getArity(),
-                "Expecting row data with %d fields but found row data with %d fields",
-                fieldGetters.length,
-                row.getArity());
+        Object[] objects = converter.convert(row);
         for (int i = 0; i < row.getArity(); i++) {
-            Object obj = fieldGetters[i].getFieldOrNull(row);
+            Object obj = objects[i];
             if (obj == null) {
                 nullCounts[i]++;
                 continue;
@@ -73,7 +68,7 @@ public class FieldStatsCollector {
     }
 
     public FieldStats[] extract() {
-        FieldStats[] stats = new FieldStats[fieldGetters.length];
+        FieldStats[] stats = new FieldStats[nullCounts.length];
         for (int i = 0; i < stats.length; i++) {
             stats[i] = new FieldStats(minValues[i], maxValues[i], nullCounts[i]);
         }
