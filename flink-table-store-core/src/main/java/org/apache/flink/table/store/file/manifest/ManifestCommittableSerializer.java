@@ -55,6 +55,8 @@ public class ManifestCommittableSerializer
     public byte[] serialize(ManifestCommittable obj) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
+        view.writeInt(obj.uuid().length());
+        view.writeBytes(obj.uuid());
         serializeFiles(view, obj.newFiles());
         serializeFiles(view, obj.compactBefore());
         serializeFiles(view, obj.compactAfter());
@@ -104,7 +106,13 @@ public class ManifestCommittableSerializer
     @Override
     public ManifestCommittable deserialize(int version, byte[] serialized) throws IOException {
         DataInputDeserializer view = new DataInputDeserializer(serialized);
+        int uuidLength = view.readInt();
+        byte[] uuidBytes = new byte[uuidLength];
+        view.readFully(uuidBytes);
         return new ManifestCommittable(
-                deserializeFiles(view), deserializeFiles(view), deserializeFiles(view));
+                new String(uuidBytes),
+                deserializeFiles(view),
+                deserializeFiles(view),
+                deserializeFiles(view));
     }
 }

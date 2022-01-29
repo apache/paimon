@@ -22,6 +22,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -44,6 +45,7 @@ public class TestCommitThread extends Thread {
     private static final Logger LOG = LoggerFactory.getLogger(TestCommitThread.class);
 
     private final Map<BinaryRowData, List<KeyValue>> data;
+    private final Map<BinaryRowData, List<KeyValue>> result;
     private final Map<BinaryRowData, MergeTreeWriter> writers;
 
     private final FileStoreWrite write;
@@ -54,6 +56,7 @@ public class TestCommitThread extends Thread {
             FileStorePathFactory testPathFactory,
             FileStorePathFactory safePathFactory) {
         this.data = data;
+        this.result = new HashMap<>();
         this.writers = new HashMap<>();
 
         FileFormat avro =
@@ -65,34 +68,22 @@ public class TestCommitThread extends Thread {
         this.commit = OperationTestUtils.createCommit(avro, testPathFactory);
     }
 
+    public Map<BinaryRowData, List<KeyValue>> getResult() {
+        return result;
+    }
+
     @Override
     public void run() {
         while (!data.isEmpty()) {
-            ManifestCommittable committable;
             try {
-                committable = createCommittable();
+                if (ThreadLocalRandom.current().nextInt(5) == 0) {
+                    // 20% probability to overwrite
+                    doOverwrite();
+                } else {
+                    doCommit();
+                }
             } catch (Exception e) {
                 throw new RuntimeException(e);
-            }
-
-            boolean shouldCheckFilter = false;
-            while (true) {
-                try {
-                    if (shouldCheckFilter) {
-                        if (commit.filterCommitted(Collections.singletonList(committable))
-                                .isEmpty()) {
-                            break;
-                        }
-                    }
-                    commit.commit(committable, Collections.emptyMap());
-                    break;
-                } catch (Throwable e) {
-                    if (LOG.isDebugEnabled()) {
-                        LOG.warn("Failed to commit because of exception, try again", e);
-                    }
-                    writers.clear();
-                    shouldCheckFilter = true;
-                }
             }
         }
 
@@ -105,27 +96,85 @@ public class TestCommitThread extends Thread {
         }
     }
 
-    private ManifestCommittable createCommittable() throws Exception {
+    private void doCommit() throws Exception {
         int numWrites = ThreadLocalRandom.current().nextInt(3) + 1;
         for (int i = 0; i < numWrites && !data.isEmpty(); i++) {
             writeData();
         }
-
         ManifestCommittable committable = new ManifestCommittable();
         for (Map.Entry<BinaryRowData, MergeTreeWriter> entry : writers.entrySet()) {
             committable.add(entry.getKey(), 0, entry.getValue().prepareCommit());
         }
-        return committable;
+
+        runWithRetry(committable, () -> commit.commit(committable, Collections.emptyMap()));
+    }
+
+    private void doOverwrite() throws Exception {
+        BinaryRowData partition = overwriteData();
+        ManifestCommittable committable = new ManifestCommittable();
+        committable.add(partition, 0, writers.get(partition).prepareCommit());
+
+        runWithRetry(
+                committable,
+                () ->
+                        commit.overwrite(
+                                TestKeyValueGenerator.toPartitionMap(partition),
+                                committable,
+                                Collections.emptyMap()));
+    }
+
+    private void runWithRetry(ManifestCommittable committable, Runnable runnable) {
+        boolean shouldCheckFilter = false;
+        while (true) {
+            try {
+                if (shouldCheckFilter) {
+                    if (commit.filterCommitted(Collections.singletonList(committable)).isEmpty()) {
+                        break;
+                    }
+                }
+                runnable.run();
+                break;
+            } catch (Throwable e) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.warn("Failed to commit because of exception, try again", e);
+                }
+                writers.clear();
+                shouldCheckFilter = true;
+            }
+        }
     }
 
     private void writeData() throws Exception {
         List<KeyValue> changes = new ArrayList<>();
         BinaryRowData partition = pickData(changes);
+        result.compute(partition, (p, l) -> l == null ? new ArrayList<>() : l).addAll(changes);
+
         MergeTreeWriter writer =
-                writers.compute(partition, (k, v) -> v == null ? createWriter(k) : v);
+                writers.compute(partition, (p, w) -> w == null ? createWriter(p, false) : w);
         for (KeyValue kv : changes) {
             writer.write(kv.valueKind(), kv.key(), kv.value());
         }
+    }
+
+    private BinaryRowData overwriteData() throws Exception {
+        List<KeyValue> changes = new ArrayList<>();
+        BinaryRowData partition = pickData(changes);
+        List<KeyValue> resultOfPartition =
+                result.compute(partition, (p, l) -> l == null ? new ArrayList<>() : l);
+        resultOfPartition.clear();
+        resultOfPartition.addAll(changes);
+
+        if (writers.containsKey(partition)) {
+            MergeTreeWriter oldWriter = writers.get(partition);
+            oldWriter.close();
+        }
+        MergeTreeWriter writer = createWriter(partition, true);
+        writers.put(partition, writer);
+        for (KeyValue kv : changes) {
+            writer.write(kv.valueKind(), kv.key(), kv.value());
+        }
+
+        return partition;
     }
 
     private BinaryRowData pickData(List<KeyValue> changes) {
@@ -142,7 +191,7 @@ public class TestCommitThread extends Thread {
         return partition;
     }
 
-    private MergeTreeWriter createWriter(BinaryRowData partition) {
+    private MergeTreeWriter createWriter(BinaryRowData partition, boolean empty) {
         ExecutorService service =
                 Executors.newSingleThreadExecutor(
                         r -> {
@@ -150,6 +199,10 @@ public class TestCommitThread extends Thread {
                             t.setName(Thread.currentThread().getName() + "-writer-service-pool");
                             return t;
                         });
-        return (MergeTreeWriter) write.createWriter(partition, 0, service);
+        if (empty) {
+            return (MergeTreeWriter) write.createEmptyWriter(partition, 0, service);
+        } else {
+            return (MergeTreeWriter) write.createWriter(partition, 0, service);
+        }
     }
 }

@@ -88,11 +88,6 @@ public abstract class FileStoreCommitTestBase {
                                 .flatMap(Collection::stream)
                                 .collect(Collectors.toList()),
                 "input");
-        Map<BinaryRowData, BinaryRowData> expected =
-                OperationTestUtils.toKvMap(
-                        data.values().stream()
-                                .flatMap(Collection::stream)
-                                .collect(Collectors.toList()));
 
         List<Map<BinaryRowData, List<KeyValue>>> dataPerThread = new ArrayList<>();
         for (int i = 0; i < numThreads; i++) {
@@ -116,9 +111,20 @@ public abstract class FileStoreCommitTestBase {
             thread.start();
             threads.add(thread);
         }
+
+        // calculate expected results
+        Map<BinaryRowData, List<KeyValue>> threadResults = new HashMap<>();
         for (TestCommitThread thread : threads) {
             thread.join();
+            for (Map.Entry<BinaryRowData, List<KeyValue>> entry : thread.getResult().entrySet()) {
+                threadResults.put(entry.getKey(), entry.getValue());
+            }
         }
+        Map<BinaryRowData, BinaryRowData> expected =
+                OperationTestUtils.toKvMap(
+                        threadResults.values().stream()
+                                .flatMap(Collection::stream)
+                                .collect(Collectors.toList()));
 
         // read actual data and compare
         FileStorePathFactory safePathFactory =

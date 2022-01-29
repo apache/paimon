@@ -28,7 +28,6 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
-import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
@@ -85,18 +84,13 @@ public class OperationTestUtils {
 
     public static FileStoreCommit createCommit(
             FileFormat fileFormat, FileStorePathFactory pathFactory) {
-        ManifestCommittableSerializer serializer =
-                new ManifestCommittableSerializer(
-                        TestKeyValueGenerator.PARTITION_TYPE,
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.ROW_TYPE);
         ManifestFile.Factory testManifestFileFactory =
                 createManifestFileFactory(fileFormat, pathFactory);
         ManifestList.Factory testManifestListFactory =
                 createManifestListFactory(fileFormat, pathFactory);
         return new FileStoreCommitImpl(
                 UUID.randomUUID().toString(),
-                serializer,
+                TestKeyValueGenerator.PARTITION_TYPE,
                 pathFactory,
                 testManifestFileFactory,
                 testManifestListFactory,
