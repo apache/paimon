@@ -47,17 +47,16 @@ public class ManifestFile {
     private final BulkWriter.Factory<RowData> writerFactory;
     private final FileStorePathFactory pathFactory;
 
-    public ManifestFile(
+    private ManifestFile(
             RowType partitionType,
-            RowType keyType,
-            RowType rowType,
-            FileFormat fileFormat,
+            ManifestEntrySerializer serializer,
+            BulkFormat<RowData, FileSourceSplit> readerFactory,
+            BulkWriter.Factory<RowData> writerFactory,
             FileStorePathFactory pathFactory) {
         this.partitionType = partitionType;
-        this.serializer = new ManifestEntrySerializer(partitionType, keyType, rowType);
-        RowType entryType = ManifestEntry.schema(partitionType, keyType, rowType);
-        this.readerFactory = fileFormat.createReaderFactory(entryType);
-        this.writerFactory = fileFormat.createWriterFactory(entryType);
+        this.serializer = serializer;
+        this.readerFactory = readerFactory;
+        this.writerFactory = writerFactory;
         this.pathFactory = pathFactory;
     }
 
@@ -122,5 +121,43 @@ public class ManifestFile {
 
     public void delete(String fileName) {
         FileUtils.deleteOrWarn(pathFactory.toManifestFilePath(fileName));
+    }
+
+    /**
+     * Creator of {@link ManifestFile}. It reueses {@link BulkFormat} and {@link BulkWriter.Factory}
+     * from {@link FileFormat}.
+     */
+    public static class Factory {
+
+        private final RowType partitionType;
+        private final RowType keyType;
+        private final RowType rowType;
+        private final BulkFormat<RowData, FileSourceSplit> readerFactory;
+        private final BulkWriter.Factory<RowData> writerFactory;
+        private final FileStorePathFactory pathFactory;
+
+        public Factory(
+                RowType partitionType,
+                RowType keyType,
+                RowType rowType,
+                FileFormat fileFormat,
+                FileStorePathFactory pathFactory) {
+            this.partitionType = partitionType;
+            this.keyType = keyType;
+            this.rowType = rowType;
+            RowType entryType = ManifestEntry.schema(partitionType, keyType, rowType);
+            this.readerFactory = fileFormat.createReaderFactory(entryType);
+            this.writerFactory = fileFormat.createWriterFactory(entryType);
+            this.pathFactory = pathFactory;
+        }
+
+        public ManifestFile create() {
+            return new ManifestFile(
+                    partitionType,
+                    new ManifestEntrySerializer(partitionType, keyType, rowType),
+                    readerFactory,
+                    writerFactory,
+                    pathFactory);
+        }
     }
 }

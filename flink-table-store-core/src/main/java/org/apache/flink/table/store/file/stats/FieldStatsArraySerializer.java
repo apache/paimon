@@ -22,6 +22,7 @@ import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.utils.ObjectSerializer;
+import org.apache.flink.table.store.file.utils.RowDataToObjectArrayConverter;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -29,18 +30,17 @@ import org.apache.flink.table.types.logical.RowType;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.IntStream;
 
 /** Serializer for array of {@link FieldStats}. */
 public class FieldStatsArraySerializer extends ObjectSerializer<FieldStats[]> {
 
     private static final long serialVersionUID = 1L;
 
-    private final RowData.FieldGetter[] fieldGetters;
+    private final RowDataToObjectArrayConverter converter;
 
     public FieldStatsArraySerializer(RowType rowType) {
         super(schema(rowType));
-        this.fieldGetters = createFieldGetters(toAllFieldsNullableRowType(rowType));
+        this.converter = new RowDataToObjectArrayConverter(toAllFieldsNullableRowType(rowType));
     }
 
     @Override
@@ -59,18 +59,16 @@ public class FieldStatsArraySerializer extends ObjectSerializer<FieldStats[]> {
 
     @Override
     public FieldStats[] fromRow(RowData row) {
-        int rowFieldCount = fieldGetters.length;
+        int rowFieldCount = converter.getArity();
         RowData minValues = row.getRow(0, rowFieldCount);
+        Object[] minValueObjects = converter.convert(minValues);
         RowData maxValues = row.getRow(1, rowFieldCount);
+        Object[] maxValueObjects = converter.convert(maxValues);
         long[] nullValues = row.getArray(2).toLongArray();
 
         FieldStats[] stats = new FieldStats[rowFieldCount];
         for (int i = 0; i < rowFieldCount; i++) {
-            stats[i] =
-                    new FieldStats(
-                            fieldGetters[i].getFieldOrNull(minValues),
-                            fieldGetters[i].getFieldOrNull(maxValues),
-                            nullValues[i]);
+            stats[i] = new FieldStats(minValueObjects[i], maxValueObjects[i], nullValues[i]);
         }
         return stats;
     }
@@ -82,12 +80,6 @@ public class FieldStatsArraySerializer extends ObjectSerializer<FieldStats[]> {
         fields.add(new RowType.RowField("_MAX_VALUES", rowType));
         fields.add(new RowType.RowField("_NULL_COUNTS", new ArrayType(new BigIntType(false))));
         return new RowType(fields);
-    }
-
-    public static RowData.FieldGetter[] createFieldGetters(RowType rowType) {
-        return IntStream.range(0, rowType.getFieldCount())
-                .mapToObj(i -> RowData.createFieldGetter(rowType.getTypeAt(i), i))
-                .toArray(RowData.FieldGetter[]::new);
     }
 
     private static RowType toAllFieldsNullableRowType(RowType rowType) {

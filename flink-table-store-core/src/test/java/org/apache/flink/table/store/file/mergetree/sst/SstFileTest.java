@@ -118,19 +118,18 @@ public class SstFileTest {
     }
 
     private SstFile createSstFile(String path) {
-        FileStorePathFactory fileStorePathFactory = new FileStorePathFactory(new Path(path));
-        SstPathFactory sstPathFactory =
-                fileStorePathFactory.createSstPathFactory(BinaryRowDataUtil.EMPTY_ROW, 0);
+        FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(path));
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
-        return new SstFile(
-                TestKeyValueGenerator.KEY_TYPE,
-                TestKeyValueGenerator.ROW_TYPE,
-                // normal avro format will buffer changes in memory and we can't determine
-                // if the written file size is really larger than suggested, so we use a
-                // special avro format which flushes for every added element
-                flushingAvro,
-                sstPathFactory,
-                suggestedFileSize);
+        return new SstFile.Factory(
+                        TestKeyValueGenerator.KEY_TYPE,
+                        TestKeyValueGenerator.ROW_TYPE,
+                        // normal avro format will buffer changes in memory and we can't determine
+                        // if the written file size is really larger than suggested, so we use a
+                        // special avro format which flushes for every added element
+                        flushingAvro,
+                        pathFactory,
+                        suggestedFileSize)
+                .create(BinaryRowDataUtil.EMPTY_ROW, 0);
     }
 
     private void checkRollingFiles(

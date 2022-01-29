@@ -24,6 +24,7 @@ import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
@@ -31,7 +32,7 @@ import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
 import org.apache.flink.table.store.file.mergetree.sst.SstFile;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileTest;
-import org.apache.flink.table.store.file.mergetree.sst.SstPathFactory;
+import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
@@ -70,7 +71,7 @@ public class MergeTreeTest {
 
     private static ExecutorService service;
 
-    private SstPathFactory fileFactory;
+    private FileStorePathFactory pathFactory;
 
     private Comparator<RowData> comparator;
 
@@ -82,12 +83,11 @@ public class MergeTreeTest {
 
     @BeforeEach
     public void beforeEach() throws IOException {
-        fileFactory = new SstPathFactory(new Path(tempDir.toString()), null, 123);
-        Path bucketDir = fileFactory.toPath("ignore").getParent();
-        bucketDir.getFileSystem().mkdirs(bucketDir);
-
+        pathFactory = new FileStorePathFactory(new Path(tempDir.toString()));
         comparator = Comparator.comparingInt(o -> o.getInt(0));
         recreateWriter(1024 * 1024);
+        Path bucketDir = sstFile.pathFactory().toPath("ignore").getParent();
+        bucketDir.getFileSystem().mkdirs(bucketDir);
     }
 
     private void recreateWriter(long targetFileSize) {
@@ -97,12 +97,15 @@ public class MergeTreeTest {
         configuration.set(MergeTreeOptions.TARGET_FILE_SIZE, new MemorySize(targetFileSize));
         MergeTreeOptions options = new MergeTreeOptions(configuration);
         sstFile =
-                new SstFile(
-                        new RowType(singletonList(new RowType.RowField("k", new IntType()))),
-                        new RowType(singletonList(new RowType.RowField("v", new IntType()))),
-                        new SstFileTest.FlushingAvroFormat(),
-                        fileFactory,
-                        options.targetFileSize);
+                new SstFile.Factory(
+                                new RowType(
+                                        singletonList(new RowType.RowField("k", new IntType()))),
+                                new RowType(
+                                        singletonList(new RowType.RowField("v", new IntType()))),
+                                new SstFileTest.FlushingAvroFormat(),
+                                pathFactory,
+                                options.targetFileSize)
+                        .create(BinaryRowDataUtil.EMPTY_ROW, 0);
         mergeTree =
                 new MergeTree(options, sstFile, comparator, service, new DeduplicateAccumulator());
         writer = mergeTree.createWriter(new ArrayList<>());
@@ -160,7 +163,7 @@ public class MergeTreeTest {
         doTestWriteRead(6);
         List<SstFileMeta> files = writer.close();
         for (SstFileMeta file : files) {
-            Path path = fileFactory.toPath(file.fileName());
+            Path path = sstFile.pathFactory().toPath(file.fileName());
             assertThat(path.getFileSystem().exists(path)).isFalse();
         }
     }
@@ -233,7 +236,7 @@ public class MergeTreeTest {
         // assert records from increment compacted files
         assertRecords(expected, compactedFiles, true);
 
-        Path bucketDir = fileFactory.toPath("ignore").getParent();
+        Path bucketDir = sstFile.pathFactory().toPath("ignore").getParent();
         Set<String> files =
                 Arrays.stream(bucketDir.getFileSystem().listStatus(bucketDir))
                         .map(FileStatus::getPath)

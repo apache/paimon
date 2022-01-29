@@ -45,12 +45,14 @@ public class ManifestList {
     private final BulkWriter.Factory<RowData> writerFactory;
     private final FileStorePathFactory pathFactory;
 
-    public ManifestList(
-            RowType partitionType, FileFormat fileFormat, FileStorePathFactory pathFactory) {
-        this.serializer = new ManifestFileMetaSerializer(partitionType);
-        RowType metaType = ManifestFileMeta.schema(partitionType);
-        this.readerFactory = fileFormat.createReaderFactory(metaType);
-        this.writerFactory = fileFormat.createWriterFactory(metaType);
+    private ManifestList(
+            ManifestFileMetaSerializer serializer,
+            BulkFormat<RowData, FileSourceSplit> readerFactory,
+            BulkWriter.Factory<RowData> writerFactory,
+            FileStorePathFactory pathFactory) {
+        this.serializer = serializer;
+        this.readerFactory = readerFactory;
+        this.writerFactory = writerFactory;
         this.pathFactory = pathFactory;
     }
 
@@ -96,5 +98,34 @@ public class ManifestList {
 
     public void delete(String fileName) {
         FileUtils.deleteOrWarn(pathFactory.toManifestListPath(fileName));
+    }
+
+    /**
+     * Creator of {@link ManifestList}. It reueses {@link BulkFormat} and {@link BulkWriter.Factory}
+     * from {@link FileFormat}.
+     */
+    public static class Factory {
+
+        private final RowType partitionType;
+        private final BulkFormat<RowData, FileSourceSplit> readerFactory;
+        private final BulkWriter.Factory<RowData> writerFactory;
+        private final FileStorePathFactory pathFactory;
+
+        public Factory(
+                RowType partitionType, FileFormat fileFormat, FileStorePathFactory pathFactory) {
+            this.partitionType = partitionType;
+            RowType metaType = ManifestFileMeta.schema(partitionType);
+            this.readerFactory = fileFormat.createReaderFactory(metaType);
+            this.writerFactory = fileFormat.createWriterFactory(metaType);
+            this.pathFactory = pathFactory;
+        }
+
+        public ManifestList create() {
+            return new ManifestList(
+                    new ManifestFileMetaSerializer(partitionType),
+                    readerFactory,
+                    writerFactory,
+                    pathFactory);
+        }
     }
 }

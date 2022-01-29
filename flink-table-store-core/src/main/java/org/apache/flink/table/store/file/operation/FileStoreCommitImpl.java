@@ -73,12 +73,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private final String commitUser;
     private final ManifestCommittableSerializer committableSerializer;
-
     private final FileStorePathFactory pathFactory;
     private final ManifestFile manifestFile;
     private final ManifestList manifestList;
-    private final FileStoreOptions fileStoreOptions;
     private final FileStoreScan scan;
+    private final FileStoreOptions fileStoreOptions;
 
     @Nullable private Lock lock;
 
@@ -86,18 +85,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             String commitUser,
             ManifestCommittableSerializer committableSerializer,
             FileStorePathFactory pathFactory,
-            ManifestFile manifestFile,
-            ManifestList manifestList,
-            FileStoreOptions fileStoreOptions,
-            FileStoreScan scan) {
+            ManifestFile.Factory manifestFileFactory,
+            ManifestList.Factory manifestListFactory,
+            FileStoreScan scan,
+            FileStoreOptions fileStoreOptions) {
         this.commitUser = commitUser;
         this.committableSerializer = committableSerializer;
-
         this.pathFactory = pathFactory;
-        this.manifestFile = manifestFile;
-        this.manifestList = manifestList;
-        this.fileStoreOptions = fileStoreOptions;
+        this.manifestFile = manifestFileFactory.create();
+        this.manifestList = manifestListFactory.create();
         this.scan = scan;
+        this.fileStoreOptions = fileStoreOptions;
 
         this.lock = null;
     }
@@ -327,9 +325,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             return;
         }
 
+        List<BinaryRowData> changedPartitions =
+                changes.stream()
+                        .map(ManifestEntry::partition)
+                        .distinct()
+                        .collect(Collectors.toList());
         try {
-            // TODO use partition filter of scan when implemented
-            for (ManifestEntry entry : scan.withSnapshot(snapshotId).plan().files()) {
+            for (ManifestEntry entry :
+                    scan.withSnapshot(snapshotId)
+                            .withPartitionFilter(changedPartitions)
+                            .plan()
+                            .files()) {
                 removedFiles.remove(entry.identifier());
             }
         } catch (Throwable e) {

@@ -21,25 +21,29 @@ package org.apache.flink.table.store.file.mergetree.sst;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.fs.Path;
 
+import javax.annotation.concurrent.ThreadSafe;
+
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Factory which produces new {@link Path}s for sst files. */
+@ThreadSafe
 public class SstPathFactory {
 
     private final Path bucketDir;
     private final String uuid;
 
-    private int pathCount;
+    private final AtomicInteger pathCount;
 
     public SstPathFactory(Path root, String partition, int bucket) {
         this.bucketDir = new Path(root + "/" + partition + "/bucket-" + bucket);
         this.uuid = UUID.randomUUID().toString();
 
-        this.pathCount = 0;
+        this.pathCount = new AtomicInteger(0);
     }
 
     public Path newPath() {
-        return new Path(bucketDir + "/sst-" + uuid + "-" + (pathCount++));
+        return new Path(bucketDir + "/sst-" + uuid + "-" + pathCount.getAndIncrement());
     }
 
     public Path toPath(String fileName) {

@@ -135,12 +135,13 @@ public class ManifestFileMetaTest {
     }
 
     private ManifestFile createManifestFile(String path) {
-        return new ManifestFile(
-                PARTITION_TYPE,
-                KEY_TYPE,
-                ROW_TYPE,
-                avro,
-                new FileStorePathFactory(new Path(path), PARTITION_TYPE, "default"));
+        return new ManifestFile.Factory(
+                        PARTITION_TYPE,
+                        KEY_TYPE,
+                        ROW_TYPE,
+                        avro,
+                        new FileStorePathFactory(new Path(path), PARTITION_TYPE, "default"))
+                .create();
     }
 
     private void createData(List<ManifestFileMeta> input, List<ManifestFileMeta> expected) {

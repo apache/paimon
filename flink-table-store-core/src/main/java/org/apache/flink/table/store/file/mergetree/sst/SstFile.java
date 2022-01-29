@@ -33,6 +33,7 @@ import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.types.logical.RowType;
@@ -57,24 +58,22 @@ public class SstFile {
 
     private final RowType keyType;
     private final RowType valueType;
-
     private final BulkFormat<RowData, FileSourceSplit> readerFactory;
     private final BulkWriter.Factory<RowData> writerFactory;
     private final SstPathFactory pathFactory;
     private final long suggestedFileSize;
 
-    public SstFile(
+    private SstFile(
             RowType keyType,
             RowType valueType,
-            FileFormat fileFormat,
+            BulkFormat<RowData, FileSourceSplit> readerFactory,
+            BulkWriter.Factory<RowData> writerFactory,
             SstPathFactory pathFactory,
             long suggestedFileSize) {
         this.keyType = keyType;
         this.valueType = valueType;
-
-        RowType recordType = KeyValue.schema(keyType, valueType);
-        this.readerFactory = fileFormat.createReaderFactory(recordType);
-        this.writerFactory = fileFormat.createWriterFactory(recordType);
+        this.readerFactory = readerFactory;
+        this.writerFactory = writerFactory;
         this.pathFactory = pathFactory;
         this.suggestedFileSize = suggestedFileSize;
     }
@@ -85,6 +84,11 @@ public class SstFile {
 
     public RowType valueType() {
         return valueType;
+    }
+
+    @VisibleForTesting
+    public SstPathFactory pathFactory() {
+        return pathFactory;
     }
 
     @VisibleForTesting
@@ -275,6 +279,45 @@ public class SstFile {
                     minSequenceNumber,
                     maxSequenceNumber,
                     level);
+        }
+    }
+
+    /**
+     * Creator of {@link SstFile}. It reueses {@link BulkFormat} and {@link BulkWriter.Factory} from
+     * {@link FileFormat}.
+     */
+    public static class Factory {
+
+        private final RowType keyType;
+        private final RowType valueType;
+        private final BulkFormat<RowData, FileSourceSplit> readerFactory;
+        private final BulkWriter.Factory<RowData> writerFactory;
+        private final FileStorePathFactory pathFactory;
+        private final long suggestedFileSize;
+
+        public Factory(
+                RowType keyType,
+                RowType valueType,
+                FileFormat fileFormat,
+                FileStorePathFactory pathFactory,
+                long suggestedFileSize) {
+            this.keyType = keyType;
+            this.valueType = valueType;
+            RowType recordType = KeyValue.schema(keyType, valueType);
+            this.readerFactory = fileFormat.createReaderFactory(recordType);
+            this.writerFactory = fileFormat.createWriterFactory(recordType);
+            this.pathFactory = pathFactory;
+            this.suggestedFileSize = suggestedFileSize;
+        }
+
+        public SstFile create(BinaryRowData partition, int bucket) {
+            return new SstFile(
+                    keyType,
+                    valueType,
+                    readerFactory,
+                    writerFactory,
+                    pathFactory.createSstPathFactory(partition, bucket),
+                    suggestedFileSize);
         }
     }
 }
