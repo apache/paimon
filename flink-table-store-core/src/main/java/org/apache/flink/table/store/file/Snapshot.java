@@ -39,6 +39,7 @@ public class Snapshot {
     private static final String FIELD_COMMIT_USER = "commitUser";
     private static final String FIELD_COMMIT_DIGEST = "commitDigest";
     private static final String FIELD_COMMIT_KIND = "commitKind";
+    private static final String FIELD_TIME_MILLIS = "timeMillis";
 
     @JsonProperty(FIELD_ID)
     private final long id;
@@ -56,18 +57,23 @@ public class Snapshot {
     @JsonProperty(FIELD_COMMIT_KIND)
     private final CommitKind commitKind;
 
+    @JsonProperty(FIELD_TIME_MILLIS)
+    private final long timeMillis;
+
     @JsonCreator
     public Snapshot(
             @JsonProperty(FIELD_ID) long id,
             @JsonProperty(FIELD_MANIFEST_LIST) String manifestList,
             @JsonProperty(FIELD_COMMIT_USER) String commitUser,
             @JsonProperty(FIELD_COMMIT_DIGEST) String commitDigest,
-            @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind) {
+            @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
+            @JsonProperty(FIELD_TIME_MILLIS) long timeMillis) {
         this.id = id;
         this.manifestList = manifestList;
         this.commitUser = commitUser;
         this.commitDigest = commitDigest;
         this.commitKind = commitKind;
+        this.timeMillis = timeMillis;
     }
 
     @JsonGetter(FIELD_ID)
@@ -93,6 +99,11 @@ public class Snapshot {
     @JsonGetter(FIELD_COMMIT_KIND)
     public CommitKind commitKind() {
         return commitKind;
+    }
+
+    @JsonGetter(FIELD_TIME_MILLIS)
+    public long timeMillis() {
+        return timeMillis;
     }
 
     public String toJson() {

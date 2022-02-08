@@ -25,12 +25,9 @@ import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
-import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
-import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -40,14 +37,10 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
@@ -205,48 +198,10 @@ public class FileStoreScanTest {
     }
 
     private Snapshot writeData(List<KeyValue> kvs) throws Exception {
-        FileStoreWrite write = OperationTestUtils.createWrite(avro, pathFactory);
-        Map<BinaryRowData, Map<Integer, RecordWriter>> writers = new HashMap<>();
-        for (KeyValue kv : kvs) {
-            BinaryRowData partition = gen.getPartition(kv);
-            int bucket = getBucket(kv);
-            writers.compute(partition, (p, m) -> m == null ? new HashMap<>() : m)
-                    .compute(
-                            bucket,
-                            (b, w) -> {
-                                if (w == null) {
-                                    ExecutorService service = Executors.newSingleThreadExecutor();
-                                    return write.createWriter(partition, bucket, service);
-                                } else {
-                                    return w;
-                                }
-                            })
-                    .write(kv.valueKind(), kv.key(), kv.value());
-        }
-
-        FileStoreCommit commit = OperationTestUtils.createCommit(avro, pathFactory);
-        ManifestCommittable committable = new ManifestCommittable();
-        for (Map.Entry<BinaryRowData, Map<Integer, RecordWriter>> entryWithPartition :
-                writers.entrySet()) {
-            for (Map.Entry<Integer, RecordWriter> entryWithBucket :
-                    entryWithPartition.getValue().entrySet()) {
-                Increment increment = entryWithBucket.getValue().prepareCommit();
-                committable.add(entryWithPartition.getKey(), entryWithBucket.getKey(), increment);
-            }
-        }
-        commit.commit(committable, Collections.emptyMap());
-        writers.values().stream()
-                .flatMap(m -> m.values().stream())
-                .forEach(
-                        w -> {
-                            try {
-                                w.close();
-                            } catch (Exception e) {
-                                throw new RuntimeException(e);
-                            }
-                        });
-
-        return Snapshot.fromPath(pathFactory.toSnapshotPath(pathFactory.latestSnapshotId()));
+        List<Snapshot> snapshots =
+                OperationTestUtils.writeAndCommitData(
+                        kvs, gen::getPartition, this::getBucket, avro, pathFactory);
+        return snapshots.get(snapshots.size() - 1);
     }
 
     private int getBucket(KeyValue kv) {

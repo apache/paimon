@@ -243,7 +243,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 // prepare snapshot file
                 manifestListName = manifestList.write(newMetas);
                 newSnapshot =
-                        new Snapshot(newSnapshotId, manifestListName, commitUser, hash, commitKind);
+                        new Snapshot(
+                                newSnapshotId,
+                                manifestListName,
+                                commitUser,
+                                hash,
+                                commitKind,
+                                System.currentTimeMillis());
                 FileUtils.writeFileUtf8(tmpSnapshotPath, newSnapshot.toJson());
             } catch (Throwable e) {
                 // fails when preparing for commit, we should clean up

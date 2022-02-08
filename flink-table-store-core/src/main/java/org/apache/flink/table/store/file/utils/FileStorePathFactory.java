@@ -40,6 +40,8 @@ import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -151,5 +153,27 @@ public class FileStorePathFactory {
     @VisibleForTesting
     public String uuid() {
         return uuid;
+    }
+
+    /** Cache for storing {@link SstPathFactory}s. */
+    public static class SstPathFactoryCache {
+
+        private final FileStorePathFactory pathFactory;
+        private final Map<BinaryRowData, Map<Integer, SstPathFactory>> cache;
+
+        public SstPathFactoryCache(FileStorePathFactory pathFactory) {
+            this.pathFactory = pathFactory;
+            this.cache = new HashMap<>();
+        }
+
+        public SstPathFactory getSstPathFactory(BinaryRowData partition, int bucket) {
+            return cache.compute(partition, (p, m) -> m == null ? new HashMap<>() : m)
+                    .compute(
+                            bucket,
+                            (b, f) ->
+                                    f == null
+                                            ? pathFactory.createSstPathFactory(partition, bucket)
+                                            : f);
+        }
     }
 }
