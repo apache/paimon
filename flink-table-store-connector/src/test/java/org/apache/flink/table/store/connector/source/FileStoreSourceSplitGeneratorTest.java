@@ -30,6 +30,7 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -58,15 +59,34 @@ public class FileStoreSourceSplitGeneratorTest {
                                 makeEntry(2, 0, "f3"),
                                 makeEntry(2, 0, "f4"),
                                 makeEntry(2, 0, "f5"),
-                                makeEntry(2, 1, "f6"));
+                                makeEntry(2, 1, "f6"),
+                                makeEntry(3, 0, "f7"),
+                                makeEntry(3, 1, "f8"),
+                                makeEntry(4, 0, "f9"),
+                                makeEntry(4, 1, "f10"),
+                                makeEntry(5, 0, "f11"),
+                                makeEntry(5, 1, "f12"),
+                                makeEntry(6, 0, "f13"),
+                                makeEntry(6, 1, "f14"));
                     }
                 };
         List<FileStoreSourceSplit> splits = new FileStoreSourceSplitGenerator().createSplits(plan);
-        assertThat(splits.size()).isEqualTo(4);
-        assertSplit(splits.get(0), "0000000001", 2, 0, Arrays.asList("f3", "f4", "f5"));
-        assertSplit(splits.get(1), "0000000002", 2, 1, Collections.singletonList("f6"));
-        assertSplit(splits.get(2), "0000000003", 1, 0, Arrays.asList("f0", "f1"));
-        assertSplit(splits.get(3), "0000000004", 1, 1, Collections.singletonList("f2"));
+        assertThat(splits.size()).isEqualTo(12);
+        splits.sort(
+                Comparator.comparingInt(o -> ((FileStoreSourceSplit) o).partition().getInt(0))
+                        .thenComparing(o -> ((FileStoreSourceSplit) o).bucket()));
+        assertSplit(splits.get(0), "0000000007", 1, 0, Arrays.asList("f0", "f1"));
+        assertSplit(splits.get(1), "0000000008", 1, 1, Collections.singletonList("f2"));
+        assertSplit(splits.get(2), "0000000003", 2, 0, Arrays.asList("f3", "f4", "f5"));
+        assertSplit(splits.get(3), "0000000004", 2, 1, Collections.singletonList("f6"));
+        assertSplit(splits.get(4), "0000000001", 3, 0, Collections.singletonList("f7"));
+        assertSplit(splits.get(5), "0000000002", 3, 1, Collections.singletonList("f8"));
+        assertSplit(splits.get(6), "0000000011", 4, 0, Collections.singletonList("f9"));
+        assertSplit(splits.get(7), "0000000012", 4, 1, Collections.singletonList("f10"));
+        assertSplit(splits.get(8), "0000000005", 5, 0, Collections.singletonList("f11"));
+        assertSplit(splits.get(9), "0000000006", 5, 1, Collections.singletonList("f12"));
+        assertSplit(splits.get(10), "0000000009", 6, 0, Collections.singletonList("f13"));
+        assertSplit(splits.get(11), "0000000010", 6, 1, Collections.singletonList("f14"));
     }
 
     private void assertSplit(

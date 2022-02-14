@@ -63,6 +63,10 @@ public class FileStoreSourceSplitGenerator {
     }
 
     private static void incrementCharArrayByOne(char[] array, int pos) {
+        if (pos < 0) {
+            throw new RuntimeException("Produce too many splits.");
+        }
+
         char c = array[pos];
         c++;
 
