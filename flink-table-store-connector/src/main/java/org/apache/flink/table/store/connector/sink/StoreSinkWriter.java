@@ -89,7 +89,7 @@ public class StoreSinkWriter implements SinkWriter<RowData, LocalCommittable, Vo
     }
 
     private void writeToFileStore(RecordWriter writer, SinkRecord record) throws Exception {
-        switch (record.rowKind()) {
+        switch (record.row().getRowKind()) {
             case INSERT:
             case UPDATE_AFTER:
                 if (record.key().getArity() == 0) {
