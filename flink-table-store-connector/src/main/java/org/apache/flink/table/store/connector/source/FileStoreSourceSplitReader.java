@@ -66,7 +66,8 @@ public class FileStoreSourceSplitReader
     public RecordsWithSplitIds<RecordAndPosition<RowData>> fetch() throws IOException {
         checkSplitOrStartNext();
 
-        // pool first, avoid thread safety issues
+        // pool first, pool size is 1, the underlying implementation does not allow multiple batches
+        // to be read at the same time
         FileStoreRecordIterator iterator = pool();
 
         RecordReader.RecordIterator nextBatch;
