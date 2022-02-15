@@ -232,15 +232,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 if (latestSnapshot != null) {
                     // read all previous manifest files
                     oldMetas.addAll(manifestList.read(latestSnapshot.manifestList()));
-                    // merge manifest files
-                    newMetas.addAll(
-                            ManifestFileMeta.merge(
-                                    oldMetas,
-                                    manifestFile,
-                                    fileStoreOptions.manifestSuggestedSize.getBytes()));
                 }
-                // write all changes to manifest file
-                newMetas.add(manifestFile.write(changes));
+                // merge manifest files with changes
+                newMetas.addAll(
+                        ManifestFileMeta.merge(
+                                oldMetas,
+                                changes,
+                                manifestFile,
+                                fileStoreOptions.manifestSuggestedSize.getBytes()));
                 // prepare snapshot file
                 manifestListName = manifestList.write(newMetas);
                 newSnapshot =
