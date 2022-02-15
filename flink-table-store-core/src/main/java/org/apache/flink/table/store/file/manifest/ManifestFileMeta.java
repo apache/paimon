@@ -152,7 +152,7 @@ public class ManifestFileMeta {
                     if (candidate.size() == 1) {
                         merged = candidate.get(0);
                     } else {
-                        merged = merge(candidate, Collections.emptyList(), manifestFile);
+                        merged = mergeIntoOneFile(candidate, Collections.emptyList(), manifestFile);
                         newMetas.add(merged);
                     }
                     result.add(merged);
@@ -162,7 +162,7 @@ public class ManifestFileMeta {
             }
 
             // merge the last bit of metas with entries
-            ManifestFileMeta merged = merge(candidate, entries, manifestFile);
+            ManifestFileMeta merged = mergeIntoOneFile(candidate, entries, manifestFile);
             newMetas.add(merged);
             result.add(merged);
         } catch (Throwable e) {
@@ -176,17 +176,17 @@ public class ManifestFileMeta {
         return result;
     }
 
-    private static ManifestFileMeta merge(
+    private static ManifestFileMeta mergeIntoOneFile(
             List<ManifestFileMeta> metas, List<ManifestEntry> entries, ManifestFile manifestFile) {
         Map<ManifestEntry.Identifier, ManifestEntry> map = new LinkedHashMap<>();
         for (ManifestFileMeta manifest : metas) {
-            merge(manifestFile.read(manifest.fileName), map);
+            mergeEntries(manifestFile.read(manifest.fileName), map);
         }
-        merge(entries, map);
+        mergeEntries(entries, map);
         return manifestFile.write(new ArrayList<>(map.values()));
     }
 
-    private static void merge(
+    private static void mergeEntries(
             List<ManifestEntry> entries, Map<ManifestEntry.Identifier, ManifestEntry> map) {
         for (ManifestEntry entry : entries) {
             ManifestEntry.Identifier identifier = entry.identifier();
