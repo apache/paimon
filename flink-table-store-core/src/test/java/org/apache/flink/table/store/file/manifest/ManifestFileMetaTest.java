@@ -73,10 +73,11 @@ public class ManifestFileMetaTest {
     @Test
     public void testMerge() {
         List<ManifestFileMeta> input = new ArrayList<>();
+        List<ManifestEntry> entries = new ArrayList<>();
         List<ManifestFileMeta> expected = new ArrayList<>();
-        createData(input, expected);
+        createData(input, entries, expected);
 
-        List<ManifestFileMeta> actual = ManifestFileMeta.merge(input, manifestFile, 500);
+        List<ManifestFileMeta> actual = ManifestFileMeta.merge(input, entries, manifestFile, 500);
         assertThat(actual).hasSameSizeAs(expected);
 
         // these three manifest files are merged from the input
@@ -107,13 +108,14 @@ public class ManifestFileMetaTest {
         FailingAtomicRenameFileSystem.setFailPossibility(10);
 
         List<ManifestFileMeta> input = new ArrayList<>();
-        createData(input, null);
+        List<ManifestEntry> entries = new ArrayList<>();
+        createData(input, entries, null);
         ManifestFile failingManifestFile =
                 createManifestFile(
                         FailingAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString());
 
         try {
-            ManifestFileMeta.merge(input, failingManifestFile, 500);
+            ManifestFileMeta.merge(input, entries, failingManifestFile, 500);
         } catch (Throwable e) {
             assertThat(e)
                     .hasRootCauseExactlyInstanceOf(
@@ -144,14 +146,17 @@ public class ManifestFileMetaTest {
                 .create();
     }
 
-    private void createData(List<ManifestFileMeta> input, List<ManifestFileMeta> expected) {
+    private void createData(
+            List<ManifestFileMeta> input,
+            List<ManifestEntry> entries,
+            List<ManifestFileMeta> expected) {
         // suggested size 500
         // file sizes:
         // 200, 300, -- multiple files exactly the suggested size
         // 100, 200, 300, -- multiple files exceeding the suggested size
         // 500, -- single file exactly the suggested size
         // 600, -- single file exceeding the suggested size
-        // 100, 200 -- not enough sizes, but the last bit
+        // 100, 300 -- not enough sizes, but the last bit
 
         input.add(makeManifest(makeEntry(true, "A"), makeEntry(true, "B")));
         input.add(makeManifest(makeEntry(true, "C"), makeEntry(false, "B"), makeEntry(true, "D")));
@@ -178,7 +183,10 @@ public class ManifestFileMetaTest {
                         makeEntry(true, "L")));
 
         input.add(makeManifest(makeEntry(true, "M")));
-        input.add(makeManifest(makeEntry(false, "M"), makeEntry(true, "N")));
+        input.add(makeManifest(makeEntry(false, "M"), makeEntry(true, "N"), makeEntry(true, "O")));
+
+        entries.add(makeEntry(false, "O"));
+        entries.add(makeEntry(true, "P"));
 
         if (expected == null) {
             return;
@@ -189,7 +197,7 @@ public class ManifestFileMetaTest {
         expected.add(makeManifest(makeEntry(false, "A"), makeEntry(true, "F")));
         expected.add(input.get(5));
         expected.add(input.get(6));
-        expected.add(makeManifest(makeEntry(true, "N")));
+        expected.add(makeManifest(makeEntry(true, "N"), makeEntry(true, "P")));
     }
 
     private ManifestFileMeta makeManifest(ManifestEntry... entries) {
