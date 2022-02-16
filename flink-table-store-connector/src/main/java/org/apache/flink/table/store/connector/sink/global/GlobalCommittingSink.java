@@ -44,7 +44,7 @@ public interface GlobalCommittingSink<InputT, CommT, GlobalCommT> extends Sink<I
 
     /**
      * Creates a {@link GlobalCommitter} that permanently makes the previously written data visible
-     * through {@link GlobalCommitter#commit)}.
+     * through {@link GlobalCommitter#commit}.
      */
     GlobalCommitter<CommT, GlobalCommT> createCommitter() throws IOException;
 
