@@ -55,11 +55,30 @@ public class ManifestCommittableSerializer
     public byte[] serialize(ManifestCommittable obj) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
-        view.writeUTF(obj.uuid());
+        view.writeUTF(obj.identifier());
+        serializeOffsets(view, obj.logOffsets());
         serializeFiles(view, obj.newFiles());
         serializeFiles(view, obj.compactBefore());
         serializeFiles(view, obj.compactAfter());
         return out.toByteArray();
+    }
+
+    private void serializeOffsets(DataOutputViewStreamWrapper view, Map<Integer, Long> offsets)
+            throws IOException {
+        view.writeInt(offsets.size());
+        for (Map.Entry<Integer, Long> entry : offsets.entrySet()) {
+            view.writeInt(entry.getKey());
+            view.writeLong(entry.getValue());
+        }
+    }
+
+    private Map<Integer, Long> deserializeOffsets(DataInputDeserializer view) throws IOException {
+        int size = view.readInt();
+        Map<Integer, Long> offsets = new HashMap<>(size);
+        for (int i = 0; i < size; i++) {
+            offsets.put(view.readInt(), view.readLong());
+        }
+        return offsets;
     }
 
     private void serializeFiles(
@@ -107,6 +126,7 @@ public class ManifestCommittableSerializer
         DataInputDeserializer view = new DataInputDeserializer(serialized);
         return new ManifestCommittable(
                 view.readUTF(),
+                deserializeOffsets(view),
                 deserializeFiles(view),
                 deserializeFiles(view),
                 deserializeFiles(view));

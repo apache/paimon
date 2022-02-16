@@ -27,35 +27,50 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
 
 /** Manifest commit message. */
 public class ManifestCommittable {
 
-    private final String uuid;
+    private final String identifier;
+    private final Map<Integer, Long> logOffsets;
     private final Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> newFiles;
     private final Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> compactBefore;
     private final Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> compactAfter;
 
-    public ManifestCommittable() {
-        this(UUID.randomUUID().toString(), new HashMap<>(), new HashMap<>(), new HashMap<>());
+    public ManifestCommittable(String identifier) {
+        this.identifier = identifier;
+        this.logOffsets = new HashMap<>();
+        this.newFiles = new HashMap<>();
+        this.compactBefore = new HashMap<>();
+        this.compactAfter = new HashMap<>();
     }
 
     public ManifestCommittable(
-            String uuid,
+            String identifier,
+            Map<Integer, Long> logOffsets,
             Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> newFiles,
             Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> compactBefore,
             Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> compactAfter) {
-        this.uuid = uuid;
+        this.identifier = identifier;
+        this.logOffsets = logOffsets;
         this.newFiles = newFiles;
         this.compactBefore = compactBefore;
         this.compactAfter = compactAfter;
     }
 
-    public void add(BinaryRowData partition, int bucket, Increment increment) {
+    public void addFileCommittable(BinaryRowData partition, int bucket, Increment increment) {
         addFiles(newFiles, partition, bucket, increment.newFiles());
         addFiles(compactBefore, partition, bucket, increment.compactBefore());
         addFiles(compactAfter, partition, bucket, increment.compactAfter());
+    }
+
+    public void addLogOffset(int bucket, long offset) {
+        if (logOffsets.containsKey(bucket)) {
+            throw new RuntimeException(
+                    String.format(
+                            "bucket-%d appears multiple times, which is not possible.", bucket));
+        }
+        logOffsets.put(bucket, offset);
     }
 
     private static void addFiles(
@@ -68,8 +83,12 @@ public class ManifestCommittable {
                 .addAll(files);
     }
 
-    public String uuid() {
-        return uuid;
+    public String identifier() {
+        return identifier;
+    }
+
+    public Map<Integer, Long> logOffsets() {
+        return logOffsets;
     }
 
     public Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> newFiles() {
@@ -93,7 +112,8 @@ public class ManifestCommittable {
             return false;
         }
         ManifestCommittable that = (ManifestCommittable) o;
-        return Objects.equals(uuid, that.uuid)
+        return Objects.equals(identifier, that.identifier)
+                && Objects.equals(logOffsets, that.logOffsets)
                 && Objects.equals(newFiles, that.newFiles)
                 && Objects.equals(compactBefore, that.compactBefore)
                 && Objects.equals(compactAfter, that.compactAfter);
@@ -101,19 +121,23 @@ public class ManifestCommittable {
 
     @Override
     public int hashCode() {
-        return Objects.hash(uuid, newFiles, compactBefore, compactAfter);
+        return Objects.hash(identifier, logOffsets, newFiles, compactBefore, compactAfter);
     }
 
     @Override
     public String toString() {
-        return "uuid: "
-                + uuid
-                + "\nnew files:\n"
+        return "ManifestCommittable{"
+                + "identifier="
+                + identifier
+                + ", logOffsets="
+                + logOffsets
+                + ", newFiles="
                 + filesToString(newFiles)
-                + "compact before:\n"
+                + ", compactBefore="
                 + filesToString(compactBefore)
-                + "compact after:\n"
-                + filesToString(compactAfter);
+                + ", compactAfter="
+                + filesToString(compactAfter)
+                + '}';
     }
 
     private static String filesToString(Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> files) {

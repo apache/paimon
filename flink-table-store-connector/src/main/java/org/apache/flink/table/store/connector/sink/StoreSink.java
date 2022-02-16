@@ -18,15 +18,14 @@
 
 package org.apache.flink.table.store.connector.sink;
 
-import org.apache.flink.api.connector.sink.Committer;
-import org.apache.flink.api.connector.sink.GlobalCommitter;
-import org.apache.flink.api.connector.sink.Sink;
+import org.apache.flink.api.connector.sink2.Sink;
+import org.apache.flink.api.connector.sink2.StatefulSink;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.table.catalog.CatalogLock;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.connector.sink.global.GlobalCommittingSink;
 import org.apache.flink.table.store.file.FileStore;
-import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.Lock;
@@ -35,15 +34,17 @@ import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
-import java.util.List;
+import java.io.IOException;
+import java.util.Collection;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.Callable;
 
 import static org.apache.flink.table.store.utils.ProjectionUtils.project;
 
 /** {@link Sink} of dynamic store. */
-public class StoreSink implements Sink<RowData, LocalCommittable, Void, ManifestCommittable> {
+public class StoreSink<WriterStateT, LogCommT>
+        implements StatefulSink<RowData, WriterStateT>,
+                GlobalCommittingSink<RowData, Committable, GlobalCommittable<LogCommT>> {
 
     private static final long serialVersionUID = 1L;
 
@@ -83,26 +84,27 @@ public class StoreSink implements Sink<RowData, LocalCommittable, Void, Manifest
     }
 
     @Override
-    public StoreSinkWriter createWriter(InitContext initContext, List<Void> list) {
-        SinkRecordConverter recordConverter =
-                new SinkRecordConverter(numBucket, rowType, partitions, keys);
-        return new StoreSinkWriter(
-                fileStore.newWrite(), recordConverter, overwritePartition != null);
+    public StoreSinkWriter<WriterStateT> createWriter(InitContext initContext) throws IOException {
+        return restoreWriter(initContext, null);
     }
 
     @Override
-    public Optional<SimpleVersionedSerializer<Void>> getWriterStateSerializer() {
-        return Optional.empty();
+    public StoreSinkWriter<WriterStateT> restoreWriter(
+            InitContext initContext, Collection<WriterStateT> states) throws IOException {
+        return new StoreSinkWriter<>(
+                fileStore.newWrite(),
+                new SinkRecordConverter(numBucket, rowType, partitions, keys),
+                fileCommitSerializer(),
+                overwritePartition != null);
     }
 
     @Override
-    public Optional<Committer<LocalCommittable>> createCommitter() {
-        return Optional.empty();
+    public SimpleVersionedSerializer<WriterStateT> getWriterStateSerializer() {
+        return new NoOutputSerializer<>();
     }
 
     @Override
-    public Optional<GlobalCommitter<LocalCommittable, ManifestCommittable>>
-            createGlobalCommitter() {
+    public StoreGlobalCommitter<LogCommT> createCommitter() throws IOException {
         FileStoreCommit commit = fileStore.newCommit();
         CatalogLock lock;
         if (lockFactory == null) {
@@ -120,22 +122,43 @@ public class StoreSink implements Sink<RowData, LocalCommittable, Void, Manifest
                         }
                     });
         }
-        return Optional.of(
-                new StoreGlobalCommitter(commit, fileStore.newExpire(), lock, overwritePartition));
+
+        return new StoreGlobalCommitter<>(
+                commit, fileStore.newExpire(), fileCommitSerializer(), lock, overwritePartition);
     }
 
     @Override
-    public Optional<SimpleVersionedSerializer<LocalCommittable>> getCommittableSerializer() {
-        return Optional.of(
-                new LocalCommittableSerializer(
-                        project(rowType, partitions), project(rowType, keys), rowType));
+    public SimpleVersionedSerializer<Committable> getCommittableSerializer() {
+        return CommittableSerializer.INSTANCE;
     }
 
     @Override
-    public Optional<SimpleVersionedSerializer<ManifestCommittable>>
-            getGlobalCommittableSerializer() {
-        return Optional.of(
+    public GlobalCommittableSerializer<LogCommT> getGlobalCommittableSerializer() {
+        ManifestCommittableSerializer fileCommSerializer =
                 new ManifestCommittableSerializer(
-                        project(rowType, partitions), project(rowType, keys), rowType));
+                        project(rowType, partitions), project(rowType, keys), rowType);
+        SimpleVersionedSerializer<LogCommT> logCommitSerializer = new NoOutputSerializer<>();
+        return new GlobalCommittableSerializer<>(logCommitSerializer, fileCommSerializer);
+    }
+
+    private FileCommittableSerializer fileCommitSerializer() {
+        return new FileCommittableSerializer(
+                project(rowType, partitions), project(rowType, keys), rowType);
+    }
+
+    private static class NoOutputSerializer<T> implements SimpleVersionedSerializer<T> {
+        private NoOutputSerializer() {}
+
+        public int getVersion() {
+            return 1;
+        }
+
+        public byte[] serialize(T obj) {
+            throw new IllegalStateException("Should not serialize anything");
+        }
+
+        public T deserialize(int version, byte[] serialized) {
+            throw new IllegalStateException("Should not deserialize anything");
+        }
     }
 }

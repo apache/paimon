@@ -18,28 +18,30 @@
 
 package org.apache.flink.table.store.connector.sink;
 
-import org.apache.flink.api.connector.sink.GlobalCommitter;
 import org.apache.flink.table.catalog.CatalogLock;
+import org.apache.flink.table.store.connector.sink.global.GlobalCommitter;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.FileStoreExpire;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
-import static org.apache.flink.util.Preconditions.checkArgument;
+import java.util.stream.Collectors;
 
 /** {@link GlobalCommitter} for dynamic store. */
-public class StoreGlobalCommitter
-        implements GlobalCommitter<LocalCommittable, ManifestCommittable> {
+public class StoreGlobalCommitter<LogCommT>
+        implements GlobalCommitter<Committable, GlobalCommittable<LogCommT>> {
 
     private final FileStoreCommit fileStoreCommit;
 
     private final FileStoreExpire fileStoreExpire;
+
+    private final FileCommittableSerializer fileCommitSerializer;
 
     @Nullable private final CatalogLock lock;
 
@@ -48,55 +50,77 @@ public class StoreGlobalCommitter
     public StoreGlobalCommitter(
             FileStoreCommit fileStoreCommit,
             FileStoreExpire fileStoreExpire,
+            FileCommittableSerializer fileCommitSerializer,
             @Nullable CatalogLock lock,
             @Nullable Map<String, String> overwritePartition) {
         this.fileStoreCommit = fileStoreCommit;
         this.fileStoreExpire = fileStoreExpire;
+        this.fileCommitSerializer = fileCommitSerializer;
         this.lock = lock;
         this.overwritePartition = overwritePartition;
     }
-
-    @Override
-    public List<ManifestCommittable> filterRecoveredCommittables(
-            List<ManifestCommittable> globalCommittables) {
-        return fileStoreCommit.filterCommitted(globalCommittables);
-    }
-
-    @Override
-    public ManifestCommittable combine(List<LocalCommittable> committables) {
-        ManifestCommittable globalCommittable = new ManifestCommittable();
-        committables.forEach(
-                committable ->
-                        globalCommittable.add(
-                                committable.partition(),
-                                committable.bucket(),
-                                committable.increment()));
-        return globalCommittable;
-    }
-
-    @Override
-    public List<ManifestCommittable> commit(List<ManifestCommittable> globalCommittables) {
-        Map<String, String> properties = new HashMap<>();
-        if (overwritePartition == null) {
-            for (ManifestCommittable committable : globalCommittables) {
-                fileStoreCommit.commit(committable, properties);
-            }
-        } else {
-            checkArgument(
-                    globalCommittables.size() == 1, "overwrite is only supported in batch mode.");
-            fileStoreCommit.overwrite(overwritePartition, globalCommittables.get(0), properties);
-        }
-        fileStoreExpire.expire();
-        return Collections.emptyList();
-    }
-
-    @Override
-    public void endOfInput() {}
 
     @Override
     public void close() throws Exception {
         if (lock != null) {
             lock.close();
         }
+    }
+
+    @Override
+    public List<GlobalCommittable<LogCommT>> filterRecoveredCommittables(
+            List<GlobalCommittable<LogCommT>> globalCommittables) {
+        List<ManifestCommittable> filtered =
+                fileStoreCommit.filterCommitted(
+                        globalCommittables.stream()
+                                .map(GlobalCommittable::fileCommittable)
+                                .collect(Collectors.toList()));
+        return globalCommittables.stream()
+                .filter(c -> filtered.contains(c.fileCommittable()))
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public GlobalCommittable<LogCommT> combine(long checkpointId, List<Committable> committables)
+            throws IOException {
+        List<LogCommT> logCommittables = new ArrayList<>();
+        ManifestCommittable fileCommittable = new ManifestCommittable(String.valueOf(checkpointId));
+        for (Committable committable : committables) {
+            switch (committable.kind()) {
+                case FILE:
+                    FileCommittable file =
+                            fileCommitSerializer.deserialize(
+                                    committable.serializerVersion(),
+                                    committable.wrappedCommittable());
+                    fileCommittable.addFileCommittable(
+                            file.partition(), file.bucket(), file.increment());
+                    break;
+                case LOG_OFFSET:
+                    LogOffsetCommittable offset =
+                            LogOffsetCommittable.fromBytes(committable.wrappedCommittable());
+                    fileCommittable.addLogOffset(offset.bucket(), offset.offset());
+                    break;
+                case LOG:
+                    throw new UnsupportedOperationException();
+            }
+        }
+        return new GlobalCommittable<>(logCommittables, fileCommittable);
+    }
+
+    @Override
+    public void commit(List<GlobalCommittable<LogCommT>> committables) {
+        if (overwritePartition == null) {
+            for (GlobalCommittable<LogCommT> committable : committables) {
+                fileStoreCommit.commit(committable.fileCommittable(), new HashMap<>());
+            }
+        } else {
+            for (GlobalCommittable<LogCommT> committable : committables) {
+                fileStoreCommit.overwrite(
+                        overwritePartition, committable.fileCommittable(), new HashMap<>());
+            }
+        }
+
+        // TODO introduce check interval
+        fileStoreExpire.expire();
     }
 }

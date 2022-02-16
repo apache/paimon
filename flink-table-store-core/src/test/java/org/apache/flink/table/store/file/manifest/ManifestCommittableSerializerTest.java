@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
@@ -41,30 +42,43 @@ public class ManifestCommittableSerializerTest {
 
     @Test
     public void testCommittableSerDe() throws IOException {
-        ManifestCommittableSerializer serializer =
-                new ManifestCommittableSerializer(
-                        RowType.of(new IntType()),
-                        RowType.of(new IntType()),
-                        RowType.of(new IntType()));
-        ManifestCommittable committable = new ManifestCommittable();
-        addAndAssert(committable, row(0), 0);
-        addAndAssert(committable, row(0), 1);
-        addAndAssert(committable, row(1), 0);
-        addAndAssert(committable, row(1), 1);
+        ManifestCommittableSerializer serializer = serializer();
+        ManifestCommittable committable = create();
         byte[] serialized = serializer.serialize(committable);
         assertThat(serializer.deserialize(1, serialized)).isEqualTo(committable);
     }
 
-    private void addAndAssert(
+    public static ManifestCommittableSerializer serializer() {
+        return new ManifestCommittableSerializer(
+                RowType.of(new IntType()), RowType.of(new IntType()), RowType.of(new IntType()));
+    }
+
+    public static ManifestCommittable create() {
+        ManifestCommittable committable =
+                new ManifestCommittable(String.valueOf(new Random().nextLong()));
+        addAndAssert(committable, row(0), 0);
+        addAndAssert(committable, row(0), 1);
+        addAndAssert(committable, row(1), 0);
+        addAndAssert(committable, row(1), 1);
+        return committable;
+    }
+
+    private static void addAndAssert(
             ManifestCommittable committable, BinaryRowData partition, int bucket) {
         Increment increment = randomIncrement();
-        committable.add(partition, bucket, increment);
+        committable.addFileCommittable(partition, bucket, increment);
         assertThat(committable.newFiles().get(partition).get(bucket))
                 .isEqualTo(increment.newFiles());
         assertThat(committable.compactBefore().get(partition).get(bucket))
                 .isEqualTo(increment.compactBefore());
         assertThat(committable.compactAfter().get(partition).get(bucket))
                 .isEqualTo(increment.compactAfter());
+
+        if (!committable.logOffsets().containsKey(bucket)) {
+            int offset = ID.incrementAndGet();
+            committable.addLogOffset(bucket, offset);
+            assertThat(committable.logOffsets().get(bucket)).isEqualTo(offset);
+        }
     }
 
     public static Increment randomIncrement() {
