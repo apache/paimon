@@ -69,38 +69,21 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             return;
         }
 
-        // binary search for the last snapshot to expire
         long currentMillis = System.currentTimeMillis();
-        long head = Math.max(Snapshot.FIRST_SNAPSHOT_ID - 1, latestSnapshotId - numRetained);
-        long tail = latestSnapshotId;
-        while (head < tail) {
-            long mid = (head + tail + 1) / 2;
-            Path snapshotPath = pathFactory.toSnapshotPath(mid);
-            try {
-                if (!snapshotPath.getFileSystem().exists(snapshotPath)
-                        || currentMillis - Snapshot.fromPath(snapshotPath).timeMillis()
-                                > millisRetained) {
-                    head = mid;
-                } else {
-                    tail = mid - 1;
-                }
-            } catch (IOException e) {
-                throw new RuntimeException(
-                        "Failed to determine if snapshot #" + mid + " still exists", e);
-            }
-        }
 
-        // determine the exact expire range, we also keep at least 1 snapshot not to expire
-        long lastSnapshotIdToExpire = Math.min(head, latestSnapshotId - 1);
-        long firstSnapshotIdToExpire = Snapshot.FIRST_SNAPSHOT_ID;
-        for (long id = lastSnapshotIdToExpire; id >= Snapshot.FIRST_SNAPSHOT_ID; id--) {
+        // find earliest snapshot to retain
+        for (long id = Math.max(latestSnapshotId - numRetained + 1, Snapshot.FIRST_SNAPSHOT_ID);
+                id <= latestSnapshotId;
+                id++) {
             Path snapshotPath = pathFactory.toSnapshotPath(id);
             try {
-                if (!snapshotPath.getFileSystem().exists(snapshotPath)) {
-                    // only latest snapshots are retained, as we cannot find this snapshot, we can
-                    // assume that all snapshots preceding it have been removed
-                    firstSnapshotIdToExpire = id + 1;
-                    break;
+                if (snapshotPath.getFileSystem().exists(snapshotPath)
+                        && currentMillis - Snapshot.fromPath(snapshotPath).timeMillis()
+                                <= millisRetained) {
+                    // within time threshold, can assume that all snapshots after it are also within
+                    // the threshold
+                    expireUntil(id);
+                    return;
                 }
             } catch (IOException e) {
                 throw new RuntimeException(
@@ -108,48 +91,76 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             }
         }
 
-        // expire each snapshot
-        for (long id = firstSnapshotIdToExpire; id <= lastSnapshotIdToExpire; id++) {
-            expire(id);
-        }
+        // no snapshot can be retained, expire all but last one
+        expireUntil(latestSnapshotId);
     }
 
-    private void expire(long snapshotId) {
-        Snapshot toExpire = Snapshot.fromPath(pathFactory.toSnapshotPath(snapshotId));
-        Snapshot nextSnapshot = Snapshot.fromPath(pathFactory.toSnapshotPath(snapshotId + 1));
+    private void expireUntil(long exclusiveId) {
+        if (exclusiveId <= Snapshot.FIRST_SNAPSHOT_ID) {
+            // fast exit
+            return;
+        }
 
-        // if sst file in only used in snapshot to expire but not in next snapshot we can delete it
+        Snapshot exclusiveSnapshot = Snapshot.fromPath(pathFactory.toSnapshotPath(exclusiveId));
+
+        // if sst file is only used in snapshots to expire but not in next snapshot we can delete it
         // because each sst file will only be added and deleted once
         Set<Path> sstInUse = new HashSet<>();
         FileStorePathFactory.SstPathFactoryCache sstPathFactoryCache =
                 new FileStorePathFactory.SstPathFactoryCache(pathFactory);
-        for (ManifestEntry entry : scan.withSnapshot(nextSnapshot.id()).plan().files()) {
+        for (ManifestEntry entry : scan.withSnapshot(exclusiveId).plan().files()) {
             SstPathFactory sstPathFactory =
                     sstPathFactoryCache.getSstPathFactory(entry.partition(), entry.bucket());
             sstInUse.add(sstPathFactory.toPath(entry.file().fileName()));
         }
-        for (ManifestEntry entry : scan.withSnapshot(toExpire.id()).plan().files()) {
-            SstPathFactory sstPathFactory =
-                    sstPathFactoryCache.getSstPathFactory(entry.partition(), entry.bucket());
-            Path sstPath = sstPathFactory.toPath(entry.file().fileName());
-            if (!sstInUse.contains(sstPath)) {
-                FileUtils.deleteOrWarn(sstPath);
-            }
-        }
 
-        // delete manifest file not used by the following snapshots
+        // the same with sst, manifests are only added and deleted once
         Set<ManifestFileMeta> manifestsInUse =
-                new HashSet<>(manifestList.read(nextSnapshot.manifestList()));
-        for (ManifestFileMeta manifest : manifestList.read(toExpire.manifestList())) {
-            if (!manifestsInUse.contains(manifest)) {
-                FileUtils.deleteOrWarn(pathFactory.toManifestFilePath(manifest.fileName()));
+                new HashSet<>(manifestList.read(exclusiveSnapshot.manifestList()));
+
+        Set<Path> sstToDelete = new HashSet<>();
+        Set<String> manifestsToDelete = new HashSet<>();
+
+        for (long id = exclusiveId - 1; id >= Snapshot.FIRST_SNAPSHOT_ID; id--) {
+            Path snapshotPath = pathFactory.toSnapshotPath(id);
+            try {
+                if (!snapshotPath.getFileSystem().exists(snapshotPath)) {
+                    // only latest snapshots are retained, as we cannot find this snapshot, we can
+                    // assume that all snapshots preceding it have been removed
+                    break;
+                }
+
+                Snapshot toExpire = Snapshot.fromPath(pathFactory.toSnapshotPath(id));
+
+                for (ManifestEntry entry : scan.withSnapshot(toExpire.id()).plan().files()) {
+                    SstPathFactory sstPathFactory =
+                            sstPathFactoryCache.getSstPathFactory(
+                                    entry.partition(), entry.bucket());
+                    Path sstPath = sstPathFactory.toPath(entry.file().fileName());
+                    if (!sstInUse.contains(sstPath)) {
+                        sstToDelete.add(sstPath);
+                    }
+                }
+
+                for (ManifestFileMeta manifest : manifestList.read(toExpire.manifestList())) {
+                    if (!manifestsInUse.contains(manifest)) {
+                        manifestsToDelete.add(manifest.fileName());
+                    }
+                }
+
+                manifestList.delete(toExpire.manifestList());
+                FileUtils.deleteOrWarn(pathFactory.toSnapshotPath(id));
+            } catch (IOException e) {
+                throw new RuntimeException(
+                        "Failed to determine if snapshot #" + id + " still exists", e);
             }
         }
 
-        // delete manifest list
-        manifestList.delete(toExpire.manifestList());
-
-        // delete snapshot file
-        FileUtils.deleteOrWarn(pathFactory.toSnapshotPath(snapshotId));
+        for (Path sst : sstToDelete) {
+            FileUtils.deleteOrWarn(sst);
+        }
+        for (String manifestName : manifestsToDelete) {
+            FileUtils.deleteOrWarn(pathFactory.toManifestFilePath(manifestName));
+        }
     }
 }
