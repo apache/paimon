@@ -25,25 +25,33 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
+import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
+import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.mergetree.MergeTreeFactory;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
 import org.apache.flink.table.store.file.mergetree.sst.SstFile;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
+import org.apache.flink.table.store.file.utils.RecordWriter;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Function;
 
 /** Utils for operation tests. */
 public class OperationTestUtils {
@@ -106,9 +114,22 @@ public class OperationTestUtils {
                         new DeduplicateAccumulator(),
                         fileFormat,
                         pathFactory,
-                        OperationTestUtils.getMergeTreeOptions(false));
+                        getMergeTreeOptions(false));
         return new FileStoreWriteImpl(
                 pathFactory, mergeTreeFactory, createScan(fileFormat, pathFactory));
+    }
+
+    public static FileStoreExpire createExpire(
+            int numRetained,
+            long millisRetained,
+            FileFormat fileFormat,
+            FileStorePathFactory pathFactory) {
+        return new FileStoreExpireImpl(
+                numRetained,
+                millisRetained,
+                pathFactory,
+                createManifestListFactory(fileFormat, pathFactory),
+                createScan(fileFormat, pathFactory));
     }
 
     public static FileStorePathFactory createPathFactory(String scheme, String root) {
@@ -130,6 +151,71 @@ public class OperationTestUtils {
             FileFormat fileFormat, FileStorePathFactory pathFactory) {
         return new ManifestList.Factory(
                 TestKeyValueGenerator.PARTITION_TYPE, fileFormat, pathFactory);
+    }
+
+    public static List<Snapshot> writeAndCommitData(
+            List<KeyValue> kvs,
+            Function<KeyValue, BinaryRowData> partitionCalculator,
+            Function<KeyValue, Integer> bucketCalculator,
+            FileFormat fileFormat,
+            FileStorePathFactory pathFactory)
+            throws Exception {
+        FileStoreWrite write = createWrite(fileFormat, pathFactory);
+        Map<BinaryRowData, Map<Integer, RecordWriter>> writers = new HashMap<>();
+        for (KeyValue kv : kvs) {
+            BinaryRowData partition = partitionCalculator.apply(kv);
+            int bucket = bucketCalculator.apply(kv);
+            writers.compute(partition, (p, m) -> m == null ? new HashMap<>() : m)
+                    .compute(
+                            bucket,
+                            (b, w) -> {
+                                if (w == null) {
+                                    ExecutorService service = Executors.newSingleThreadExecutor();
+                                    return write.createWriter(partition, bucket, service);
+                                } else {
+                                    return w;
+                                }
+                            })
+                    .write(kv.valueKind(), kv.key(), kv.value());
+        }
+
+        FileStoreCommit commit = createCommit(fileFormat, pathFactory);
+        ManifestCommittable committable = new ManifestCommittable();
+        for (Map.Entry<BinaryRowData, Map<Integer, RecordWriter>> entryWithPartition :
+                writers.entrySet()) {
+            for (Map.Entry<Integer, RecordWriter> entryWithBucket :
+                    entryWithPartition.getValue().entrySet()) {
+                Increment increment = entryWithBucket.getValue().prepareCommit();
+                committable.add(entryWithPartition.getKey(), entryWithBucket.getKey(), increment);
+            }
+        }
+
+        Long snapshotIdBeforeCommit = pathFactory.latestSnapshotId();
+        if (snapshotIdBeforeCommit == null) {
+            snapshotIdBeforeCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
+        }
+        commit.commit(committable, Collections.emptyMap());
+        Long snapshotIdAfterCommit = pathFactory.latestSnapshotId();
+        if (snapshotIdAfterCommit == null) {
+            snapshotIdAfterCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
+        }
+
+        writers.values().stream()
+                .flatMap(m -> m.values().stream())
+                .forEach(
+                        w -> {
+                            try {
+                                w.close();
+                            } catch (Exception e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
+
+        List<Snapshot> snapshots = new ArrayList<>();
+        for (long id = snapshotIdBeforeCommit + 1; id <= snapshotIdAfterCommit; id++) {
+            snapshots.add(Snapshot.fromPath(pathFactory.toSnapshotPath(id)));
+        }
+        return snapshots;
     }
 
     public static List<KeyValue> readKvsFromSnapshot(
