@@ -30,8 +30,10 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.RepeatedTest;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,13 +50,13 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link FileStoreCommitImpl}. */
-public abstract class FileStoreCommitTestBase {
+public class FileStoreCommitTest {
 
-    private static final Logger LOG = LoggerFactory.getLogger(FileStoreCommitTestBase.class);
+    private static final Logger LOG = LoggerFactory.getLogger(FileStoreCommitTest.class);
 
     private final FileFormat avro =
             FileFormat.fromIdentifier(
-                    FileStoreCommitTestBase.class.getClassLoader(), "avro", new Configuration());
+                    FileStoreCommitTest.class.getClassLoader(), "avro", new Configuration());
 
     private TestKeyValueGenerator gen;
     @TempDir java.nio.file.Path tempDir;
@@ -64,21 +66,26 @@ public abstract class FileStoreCommitTestBase {
         gen = new TestKeyValueGenerator();
         Path root = new Path(tempDir.toString());
         root.getFileSystem().mkdirs(new Path(root + "/snapshot"));
+        // for failure tests
+        FailingAtomicRenameFileSystem.resetFailCounter(100);
+        FailingAtomicRenameFileSystem.setFailPossibility(5000);
     }
 
-    protected abstract String getScheme();
-
-    @RepeatedTest(10)
-    public void testSingleCommitUser() throws Exception {
-        testRandomConcurrentNoConflict(1);
+    @ParameterizedTest
+    @ValueSource(
+            strings = {TestAtomicRenameFileSystem.SCHEME, FailingAtomicRenameFileSystem.SCHEME})
+    public void testSingleCommitUser(String scheme) throws Exception {
+        testRandomConcurrentNoConflict(1, scheme);
     }
 
-    @RepeatedTest(10)
-    public void testManyCommitUsersNoConflict() throws Exception {
-        testRandomConcurrentNoConflict(ThreadLocalRandom.current().nextInt(3) + 2);
+    @ParameterizedTest
+    @ValueSource(
+            strings = {TestAtomicRenameFileSystem.SCHEME, FailingAtomicRenameFileSystem.SCHEME})
+    public void testManyCommitUsersNoConflict(String scheme) throws Exception {
+        testRandomConcurrentNoConflict(ThreadLocalRandom.current().nextInt(3) + 2, scheme);
     }
 
-    protected void testRandomConcurrentNoConflict(int numThreads) throws Exception {
+    protected void testRandomConcurrentNoConflict(int numThreads, String scheme) throws Exception {
         // prepare test data
         Map<BinaryRowData, List<KeyValue>> data =
                 generateData(ThreadLocalRandom.current().nextInt(1000) + 1);
@@ -88,11 +95,6 @@ public abstract class FileStoreCommitTestBase {
                                 .flatMap(Collection::stream)
                                 .collect(Collectors.toList()),
                 "input");
-        Map<BinaryRowData, BinaryRowData> expected =
-                OperationTestUtils.toKvMap(
-                        data.values().stream()
-                                .flatMap(Collection::stream)
-                                .collect(Collectors.toList()));
 
         List<Map<BinaryRowData, List<KeyValue>>> dataPerThread = new ArrayList<>();
         for (int i = 0; i < numThreads; i++) {
@@ -110,15 +112,26 @@ public abstract class FileStoreCommitTestBase {
             TestCommitThread thread =
                     new TestCommitThread(
                             dataPerThread.get(i),
-                            OperationTestUtils.createPathFactory(getScheme(), tempDir.toString()),
+                            OperationTestUtils.createPathFactory(scheme, tempDir.toString()),
                             OperationTestUtils.createPathFactory(
                                     TestAtomicRenameFileSystem.SCHEME, tempDir.toString()));
             thread.start();
             threads.add(thread);
         }
+
+        // calculate expected results
+        Map<BinaryRowData, List<KeyValue>> threadResults = new HashMap<>();
         for (TestCommitThread thread : threads) {
             thread.join();
+            for (Map.Entry<BinaryRowData, List<KeyValue>> entry : thread.getResult().entrySet()) {
+                threadResults.put(entry.getKey(), entry.getValue());
+            }
         }
+        Map<BinaryRowData, BinaryRowData> expected =
+                OperationTestUtils.toKvMap(
+                        threadResults.values().stream()
+                                .flatMap(Collection::stream)
+                                .collect(Collectors.toList()));
 
         // read actual data and compare
         FileStorePathFactory safePathFactory =
@@ -131,6 +144,79 @@ public abstract class FileStoreCommitTestBase {
         gen.sort(actualKvs);
         logData(() -> actualKvs, "raw read results");
         Map<BinaryRowData, BinaryRowData> actual = OperationTestUtils.toKvMap(actualKvs);
+        logData(() -> kvMapToKvList(expected), "expected");
+        logData(() -> kvMapToKvList(actual), "actual");
+        assertThat(actual).isEqualTo(expected);
+    }
+
+    @Test
+    public void testOverwritePartialCommit() throws Exception {
+        Map<BinaryRowData, List<KeyValue>> data1 =
+                generateData(ThreadLocalRandom.current().nextInt(1000) + 1);
+        logData(
+                () ->
+                        data1.values().stream()
+                                .flatMap(Collection::stream)
+                                .collect(Collectors.toList()),
+                "data1");
+
+        FileStorePathFactory pathFactory =
+                OperationTestUtils.createPathFactory(
+                        TestAtomicRenameFileSystem.SCHEME, tempDir.toString());
+        OperationTestUtils.commitData(
+                data1.values().stream().flatMap(Collection::stream).collect(Collectors.toList()),
+                gen::getPartition,
+                kv -> 0,
+                avro,
+                pathFactory);
+
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        String dtToOverwrite =
+                new ArrayList<>(data1.keySet())
+                        .get(random.nextInt(data1.size()))
+                        .getString(0)
+                        .toString();
+        Map<String, String> partitionToOverwrite = new HashMap<>();
+        partitionToOverwrite.put("dt", dtToOverwrite);
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("dtToOverwrite " + dtToOverwrite);
+        }
+
+        Map<BinaryRowData, List<KeyValue>> data2 =
+                generateData(ThreadLocalRandom.current().nextInt(1000) + 1);
+        // remove all records not belonging to dtToOverwrite
+        data2.entrySet().removeIf(e -> !dtToOverwrite.equals(e.getKey().getString(0).toString()));
+        logData(
+                () ->
+                        data2.values().stream()
+                                .flatMap(Collection::stream)
+                                .collect(Collectors.toList()),
+                "data2");
+        OperationTestUtils.overwriteData(
+                data2.values().stream().flatMap(Collection::stream).collect(Collectors.toList()),
+                gen::getPartition,
+                kv -> 0,
+                avro,
+                pathFactory,
+                partitionToOverwrite);
+
+        List<KeyValue> expectedKvs = new ArrayList<>();
+        for (Map.Entry<BinaryRowData, List<KeyValue>> entry : data1.entrySet()) {
+            if (dtToOverwrite.equals(entry.getKey().getString(0).toString())) {
+                continue;
+            }
+            expectedKvs.addAll(entry.getValue());
+        }
+        data2.values().forEach(expectedKvs::addAll);
+        gen.sort(expectedKvs);
+        Map<BinaryRowData, BinaryRowData> expected = OperationTestUtils.toKvMap(expectedKvs);
+
+        List<KeyValue> actualKvs =
+                OperationTestUtils.readKvsFromSnapshot(
+                        pathFactory.latestSnapshotId(), avro, pathFactory);
+        gen.sort(actualKvs);
+        Map<BinaryRowData, BinaryRowData> actual = OperationTestUtils.toKvMap(actualKvs);
+
         logData(() -> kvMapToKvList(expected), "expected");
         logData(() -> kvMapToKvList(actual), "actual");
         assertThat(actual).isEqualTo(expected);
@@ -161,31 +247,5 @@ public abstract class FileStoreCommitTestBase {
             LOG.debug(kv.toString(TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.ROW_TYPE));
         }
         LOG.debug("========== End of " + name + " ==========");
-    }
-
-    /** Tests for {@link FileStoreCommitImpl} with {@link TestAtomicRenameFileSystem}. */
-    public static class WithTestAtomicRenameFileSystem extends FileStoreCommitTestBase {
-
-        @Override
-        protected String getScheme() {
-            return TestAtomicRenameFileSystem.SCHEME;
-        }
-    }
-
-    /** Tests for {@link FileStoreCommitImpl} with {@link FailingAtomicRenameFileSystem}. */
-    public static class WithFailingAtomicRenameFileSystem extends FileStoreCommitTestBase {
-
-        @BeforeEach
-        @Override
-        public void beforeEach() throws IOException {
-            super.beforeEach();
-            FailingAtomicRenameFileSystem.resetFailCounter(100);
-            FailingAtomicRenameFileSystem.setFailPossibility(5000);
-        }
-
-        @Override
-        protected String getScheme() {
-            return FailingAtomicRenameFileSystem.SCHEME;
-        }
     }
 }

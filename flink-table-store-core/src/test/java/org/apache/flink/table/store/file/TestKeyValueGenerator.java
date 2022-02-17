@@ -34,7 +34,9 @@ import org.apache.flink.table.types.logical.VarCharType;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 /** Random {@link KeyValue} generator. */
@@ -157,6 +159,13 @@ public class TestKeyValueGenerator {
         return PARTITION_SERIALIZER
                 .toBinaryRow(GenericRowData.of(kv.value().getString(0), kv.value().getInt(1)))
                 .copy();
+    }
+
+    public static Map<String, String> toPartitionMap(BinaryRowData partition) {
+        Map<String, String> map = new HashMap<>();
+        map.put("dt", partition.getString(0).toString());
+        map.put("hr", String.valueOf(partition.getInt(1)));
+        return map;
     }
 
     public void sort(List<KeyValue> kvs) {

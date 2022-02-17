@@ -29,7 +29,6 @@ import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
 import java.util.List;
@@ -71,9 +70,6 @@ public class ManifestList {
      * <p>NOTE: This method is atomic.
      */
     public String write(List<ManifestFileMeta> metas) {
-        Preconditions.checkArgument(
-                metas.size() > 0, "Manifest file metas to write must not be empty.");
-
         Path path = pathFactory.newManifestList();
         try {
             return write(metas, path);

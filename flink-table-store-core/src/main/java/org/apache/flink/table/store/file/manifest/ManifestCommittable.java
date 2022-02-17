@@ -27,26 +27,26 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 /** Manifest commit message. */
 public class ManifestCommittable {
 
+    private final String uuid;
     private final Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> newFiles;
-
     private final Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> compactBefore;
-
     private final Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> compactAfter;
 
     public ManifestCommittable() {
-        this.newFiles = new HashMap<>();
-        this.compactBefore = new HashMap<>();
-        this.compactAfter = new HashMap<>();
+        this(UUID.randomUUID().toString(), new HashMap<>(), new HashMap<>(), new HashMap<>());
     }
 
     public ManifestCommittable(
+            String uuid,
             Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> newFiles,
             Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> compactBefore,
             Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> compactAfter) {
+        this.uuid = uuid;
         this.newFiles = newFiles;
         this.compactBefore = compactBefore;
         this.compactAfter = compactAfter;
@@ -66,6 +66,10 @@ public class ManifestCommittable {
         map.computeIfAbsent(partition, k -> new HashMap<>())
                 .computeIfAbsent(bucket, k -> new ArrayList<>())
                 .addAll(files);
+    }
+
+    public String uuid() {
+        return uuid;
     }
 
     public Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> newFiles() {
@@ -89,19 +93,22 @@ public class ManifestCommittable {
             return false;
         }
         ManifestCommittable that = (ManifestCommittable) o;
-        return Objects.equals(newFiles, that.newFiles)
+        return Objects.equals(uuid, that.uuid)
+                && Objects.equals(newFiles, that.newFiles)
                 && Objects.equals(compactBefore, that.compactBefore)
                 && Objects.equals(compactAfter, that.compactAfter);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(newFiles, compactBefore, compactAfter);
+        return Objects.hash(uuid, newFiles, compactBefore, compactAfter);
     }
 
     @Override
     public String toString() {
-        return "new files:\n"
+        return "uuid: "
+                + uuid
+                + "\nnew files:\n"
                 + filesToString(newFiles)
                 + "compact before:\n"
                 + filesToString(compactBefore)

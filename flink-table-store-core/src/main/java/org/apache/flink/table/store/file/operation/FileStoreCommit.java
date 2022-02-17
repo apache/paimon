@@ -39,7 +39,9 @@ public interface FileStoreCommit {
      * Overwrite from manifest committable and partition.
      *
      * @param partition A single partition maps each partition key to a partition value. Depending
-     *     on the * user-defined statement, the partition might not include all partition keys.
+     *     on the user-defined statement, the partition might not include all partition keys. Also
+     *     note that this partition does not necessarily equal to the partitions of the newly added
+     *     key-values. This is just the partition to be cleaned up.
      */
     void overwrite(
             Map<String, String> partition,

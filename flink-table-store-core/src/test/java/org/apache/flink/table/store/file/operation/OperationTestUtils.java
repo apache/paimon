@@ -28,7 +28,6 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
-import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
@@ -40,6 +39,7 @@ import org.apache.flink.table.store.file.mergetree.sst.SstFile;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
+import org.apache.flink.util.function.QuadFunction;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -51,6 +51,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 /** Utils for operation tests. */
@@ -85,18 +86,13 @@ public class OperationTestUtils {
 
     public static FileStoreCommit createCommit(
             FileFormat fileFormat, FileStorePathFactory pathFactory) {
-        ManifestCommittableSerializer serializer =
-                new ManifestCommittableSerializer(
-                        TestKeyValueGenerator.PARTITION_TYPE,
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.ROW_TYPE);
         ManifestFile.Factory testManifestFileFactory =
                 createManifestFileFactory(fileFormat, pathFactory);
         ManifestList.Factory testManifestListFactory =
                 createManifestListFactory(fileFormat, pathFactory);
         return new FileStoreCommitImpl(
                 UUID.randomUUID().toString(),
-                serializer,
+                TestKeyValueGenerator.PARTITION_TYPE,
                 pathFactory,
                 testManifestFileFactory,
                 testManifestListFactory,
@@ -153,12 +149,51 @@ public class OperationTestUtils {
                 TestKeyValueGenerator.PARTITION_TYPE, fileFormat, pathFactory);
     }
 
-    public static List<Snapshot> writeAndCommitData(
+    public static List<Snapshot> commitData(
             List<KeyValue> kvs,
             Function<KeyValue, BinaryRowData> partitionCalculator,
             Function<KeyValue, Integer> bucketCalculator,
             FileFormat fileFormat,
             FileStorePathFactory pathFactory)
+            throws Exception {
+        return commitDataImpl(
+                kvs,
+                partitionCalculator,
+                bucketCalculator,
+                fileFormat,
+                pathFactory,
+                FileStoreWrite::createWriter,
+                (commit, committable) -> commit.commit(committable, Collections.emptyMap()));
+    }
+
+    public static List<Snapshot> overwriteData(
+            List<KeyValue> kvs,
+            Function<KeyValue, BinaryRowData> partitionCalculator,
+            Function<KeyValue, Integer> bucketCalculator,
+            FileFormat fileFormat,
+            FileStorePathFactory pathFactory,
+            Map<String, String> partition)
+            throws Exception {
+        return commitDataImpl(
+                kvs,
+                partitionCalculator,
+                bucketCalculator,
+                fileFormat,
+                pathFactory,
+                FileStoreWrite::createEmptyWriter,
+                (commit, committable) ->
+                        commit.overwrite(partition, committable, Collections.emptyMap()));
+    }
+
+    private static List<Snapshot> commitDataImpl(
+            List<KeyValue> kvs,
+            Function<KeyValue, BinaryRowData> partitionCalculator,
+            Function<KeyValue, Integer> bucketCalculator,
+            FileFormat fileFormat,
+            FileStorePathFactory pathFactory,
+            QuadFunction<FileStoreWrite, BinaryRowData, Integer, ExecutorService, RecordWriter>
+                    createWriterFunction,
+            BiConsumer<FileStoreCommit, ManifestCommittable> commitFunction)
             throws Exception {
         FileStoreWrite write = createWrite(fileFormat, pathFactory);
         Map<BinaryRowData, Map<Integer, RecordWriter>> writers = new HashMap<>();
@@ -171,7 +206,8 @@ public class OperationTestUtils {
                             (b, w) -> {
                                 if (w == null) {
                                     ExecutorService service = Executors.newSingleThreadExecutor();
-                                    return write.createWriter(partition, bucket, service);
+                                    return createWriterFunction.apply(
+                                            write, partition, bucket, service);
                                 } else {
                                     return w;
                                 }
@@ -194,7 +230,7 @@ public class OperationTestUtils {
         if (snapshotIdBeforeCommit == null) {
             snapshotIdBeforeCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
         }
-        commit.commit(committable, Collections.emptyMap());
+        commitFunction.accept(commit, committable);
         Long snapshotIdAfterCommit = pathFactory.latestSnapshotId();
         if (snapshotIdAfterCommit == null) {
             snapshotIdAfterCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;

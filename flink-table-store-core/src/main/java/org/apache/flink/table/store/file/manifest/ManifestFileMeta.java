@@ -32,6 +32,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /** Metadata of a manifest file. */
 public class ManifestFileMeta {
@@ -148,23 +149,29 @@ public class ManifestFileMeta {
                 candidate.add(manifest);
                 if (totalSize >= suggestedMetaSize) {
                     // reach suggested file size, perform merging and produce new file
-                    ManifestFileMeta merged;
                     if (candidate.size() == 1) {
-                        merged = candidate.get(0);
+                        result.add(candidate.get(0));
                     } else {
-                        merged = mergeIntoOneFile(candidate, Collections.emptyList(), manifestFile);
-                        newMetas.add(merged);
+                        mergeIntoOneFile(candidate, Collections.emptyList(), manifestFile)
+                                .ifPresent(
+                                        merged -> {
+                                            newMetas.add(merged);
+                                            result.add(merged);
+                                        });
                     }
-                    result.add(merged);
+
                     candidate.clear();
                     totalSize = 0;
                 }
             }
 
             // merge the last bit of metas with entries
-            ManifestFileMeta merged = mergeIntoOneFile(candidate, entries, manifestFile);
-            newMetas.add(merged);
-            result.add(merged);
+            mergeIntoOneFile(candidate, entries, manifestFile)
+                    .ifPresent(
+                            merged -> {
+                                newMetas.add(merged);
+                                result.add(merged);
+                            });
         } catch (Throwable e) {
             // exception occurs, clean up and rethrow
             for (ManifestFileMeta manifest : newMetas) {
@@ -176,14 +183,16 @@ public class ManifestFileMeta {
         return result;
     }
 
-    private static ManifestFileMeta mergeIntoOneFile(
+    private static Optional<ManifestFileMeta> mergeIntoOneFile(
             List<ManifestFileMeta> metas, List<ManifestEntry> entries, ManifestFile manifestFile) {
         Map<ManifestEntry.Identifier, ManifestEntry> map = new LinkedHashMap<>();
         for (ManifestFileMeta manifest : metas) {
             mergeEntries(manifestFile.read(manifest.fileName), map);
         }
         mergeEntries(entries, map);
-        return manifestFile.write(new ArrayList<>(map.values()));
+        return map.isEmpty()
+                ? Optional.empty()
+                : Optional.of(manifestFile.write(new ArrayList<>(map.values())));
     }
 
     private static void mergeEntries(
