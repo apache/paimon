@@ -28,9 +28,13 @@ import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
+import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
+import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.table.store.file.mergetree.sst.SstFileReader;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileWriter;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FlushingAvroFormat;
@@ -73,9 +77,9 @@ public class MergeTreeTest {
     private FileStorePathFactory pathFactory;
     private Comparator<RowData> comparator;
 
+    private MergeTreeOptions options;
+    private SstFileReader sstFileReader;
     private SstFileWriter sstFileWriter;
-    private MergeTreeReaderFactory mergeTreeReaderFactory;
-    private MergeTreeWriterFactory mergeTreeWriterFactory;
     private RecordWriter writer;
 
     @BeforeEach
@@ -92,10 +96,13 @@ public class MergeTreeTest {
         configuration.set(MergeTreeOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
         configuration.set(MergeTreeOptions.PAGE_SIZE, new MemorySize(4096));
         configuration.set(MergeTreeOptions.TARGET_FILE_SIZE, new MemorySize(targetFileSize));
-        MergeTreeOptions options = new MergeTreeOptions(configuration);
+        options = new MergeTreeOptions(configuration);
         RowType keyType = new RowType(singletonList(new RowType.RowField("k", new IntType())));
         RowType valueType = new RowType(singletonList(new RowType.RowField("v", new IntType())));
         FileFormat flushingAvro = new FlushingAvroFormat();
+        sstFileReader =
+                new SstFileReader.Factory(keyType, valueType, flushingAvro, pathFactory)
+                        .create(BinaryRowDataUtil.EMPTY_ROW, 0);
         sstFileWriter =
                 new SstFileWriter.Factory(
                                 keyType,
@@ -104,26 +111,7 @@ public class MergeTreeTest {
                                 pathFactory,
                                 options.targetFileSize)
                         .create(BinaryRowDataUtil.EMPTY_ROW, 0);
-        mergeTreeReaderFactory =
-                new MergeTreeReaderFactory(
-                        keyType,
-                        valueType,
-                        comparator,
-                        new DeduplicateAccumulator(),
-                        flushingAvro,
-                        pathFactory);
-        mergeTreeWriterFactory =
-                new MergeTreeWriterFactory(
-                        keyType,
-                        valueType,
-                        comparator,
-                        new DeduplicateAccumulator(),
-                        flushingAvro,
-                        pathFactory,
-                        options);
-        writer =
-                mergeTreeWriterFactory.create(
-                        BinaryRowDataUtil.EMPTY_ROW, 0, Collections.emptyList(), service);
+        writer = createMergeTreeWriter(Collections.emptyList());
     }
 
     @BeforeAll
@@ -166,7 +154,7 @@ public class MergeTreeTest {
     public void testRestore() throws Exception {
         List<TestRecord> expected = new ArrayList<>(writeBatch());
         List<SstFileMeta> newFiles = writer.prepareCommit().newFiles();
-        writer = mergeTreeWriterFactory.create(BinaryRowDataUtil.EMPTY_ROW, 0, newFiles, service);
+        writer = createMergeTreeWriter(newFiles);
         expected.addAll(writeBatch());
         writer.prepareCommit();
         writer.sync();
@@ -262,6 +250,46 @@ public class MergeTreeTest {
         assertThat(files).isEqualTo(Collections.emptySet());
     }
 
+    private MergeTreeWriter createMergeTreeWriter(List<SstFileMeta> files) {
+        long maxSequenceNumber =
+                files.stream().map(SstFileMeta::maxSequenceNumber).max(Long::compare).orElse(-1L);
+        return new MergeTreeWriter(
+                new SortBufferMemTable(
+                        sstFileWriter.keyType(),
+                        sstFileWriter.valueType(),
+                        options.writeBufferSize,
+                        options.pageSize),
+                createCompactManager(sstFileWriter, service),
+                new Levels(comparator, files, options.numLevels),
+                maxSequenceNumber,
+                comparator,
+                new DeduplicateAccumulator(),
+                sstFileWriter,
+                options.commitForceCompact);
+    }
+
+    private CompactManager createCompactManager(
+            SstFileWriter sstFileWriter, ExecutorService compactExecutor) {
+        CompactStrategy compactStrategy =
+                new UniversalCompaction(
+                        options.maxSizeAmplificationPercent,
+                        options.sizeRatio,
+                        options.numSortedRunMax);
+        CompactManager.Rewriter rewriter =
+                (outputLevel, dropDelete, sections) ->
+                        sstFileWriter.write(
+                                new RecordReaderIterator(
+                                        new MergeTreeReader(
+                                                sections,
+                                                dropDelete,
+                                                sstFileReader,
+                                                comparator,
+                                                new DeduplicateAccumulator())),
+                                outputLevel);
+        return new CompactManager(
+                compactExecutor, compactStrategy, comparator, options.targetFileSize, rewriter);
+    }
+
     private void mergeCompacted(
             Set<String> newFileNames, List<SstFileMeta> compactedFiles, Increment increment) {
         increment.newFiles().stream().map(SstFileMeta::fileName).forEach(newFileNames::add);
@@ -324,11 +352,12 @@ public class MergeTreeTest {
 
     private List<TestRecord> readAll(List<SstFileMeta> files, boolean dropDelete) throws Exception {
         RecordReader reader =
-                mergeTreeReaderFactory.create(
-                        BinaryRowDataUtil.EMPTY_ROW,
-                        0,
+                new MergeTreeReader(
                         new IntervalPartition(files, comparator).partition(),
-                        dropDelete);
+                        dropDelete,
+                        sstFileReader,
+                        comparator,
+                        new DeduplicateAccumulator());
         List<TestRecord> records = new ArrayList<>();
         try (RecordReaderIterator iterator = new RecordReaderIterator(reader)) {
             while (iterator.hasNext()) {

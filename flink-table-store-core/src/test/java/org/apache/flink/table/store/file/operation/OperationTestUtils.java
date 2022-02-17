@@ -33,8 +33,6 @@ import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
-import org.apache.flink.table.store.file.mergetree.MergeTreeReaderFactory;
-import org.apache.flink.table.store.file.mergetree.MergeTreeWriterFactory;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -103,17 +101,15 @@ public class OperationTestUtils {
 
     public static FileStoreWrite createWrite(
             FileFormat fileFormat, FileStorePathFactory pathFactory) {
-        MergeTreeWriterFactory mergeTreeWriterFactory =
-                new MergeTreeWriterFactory(
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.ROW_TYPE,
-                        TestKeyValueGenerator.KEY_COMPARATOR,
-                        new DeduplicateAccumulator(),
-                        fileFormat,
-                        pathFactory,
-                        getMergeTreeOptions(false));
         return new FileStoreWriteImpl(
-                pathFactory, mergeTreeWriterFactory, createScan(fileFormat, pathFactory));
+                TestKeyValueGenerator.KEY_TYPE,
+                TestKeyValueGenerator.ROW_TYPE,
+                TestKeyValueGenerator.KEY_COMPARATOR,
+                new DeduplicateAccumulator(),
+                fileFormat,
+                pathFactory,
+                createScan(fileFormat, pathFactory),
+                getMergeTreeOptions(false));
     }
 
     public static FileStoreExpire createExpire(
@@ -131,15 +127,13 @@ public class OperationTestUtils {
 
     public static FileStoreRead createRead(
             FileFormat fileFormat, FileStorePathFactory pathFactory) {
-        MergeTreeReaderFactory factory =
-                new MergeTreeReaderFactory(
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.ROW_TYPE,
-                        TestKeyValueGenerator.KEY_COMPARATOR,
-                        new DeduplicateAccumulator(),
-                        fileFormat,
-                        pathFactory);
-        return new FileStoreReadImpl(factory);
+        return new FileStoreReadImpl(
+                TestKeyValueGenerator.KEY_TYPE,
+                TestKeyValueGenerator.ROW_TYPE,
+                TestKeyValueGenerator.KEY_COMPARATOR,
+                new DeduplicateAccumulator(),
+                fileFormat,
+                pathFactory);
     }
 
     public static FileStorePathFactory createPathFactory(String scheme, String root) {

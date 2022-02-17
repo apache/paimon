@@ -27,12 +27,11 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
-import org.apache.flink.table.store.file.mergetree.MergeTreeReaderFactory;
-import org.apache.flink.table.store.file.mergetree.MergeTreeWriterFactory;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreReadImpl;
+import org.apache.flink.table.store.file.operation.FileStoreWriteImpl;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.types.logical.IntType;
@@ -40,7 +39,6 @@ import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -72,15 +70,8 @@ public class TestDataReadWrite {
     }
 
     public FileStoreRead createRead() {
-        MergeTreeReaderFactory factory =
-                new MergeTreeReaderFactory(
-                        KEY_TYPE,
-                        VALUE_TYPE,
-                        COMPARATOR,
-                        new DeduplicateAccumulator(),
-                        avro,
-                        pathFactory);
-        return new FileStoreReadImpl(factory);
+        return new FileStoreReadImpl(
+                KEY_TYPE, VALUE_TYPE, COMPARATOR, new DeduplicateAccumulator(), avro, pathFactory);
     }
 
     public List<SstFileMeta> writeFiles(
@@ -99,14 +90,15 @@ public class TestDataReadWrite {
 
     private RecordWriter createMergeTreeWriter(BinaryRowData partition, int bucket) {
         MergeTreeOptions options = new MergeTreeOptions(new Configuration());
-        return new MergeTreeWriterFactory(
+        return new FileStoreWriteImpl(
                         KEY_TYPE,
                         VALUE_TYPE,
                         COMPARATOR,
                         new DeduplicateAccumulator(),
                         avro,
                         pathFactory,
+                        null, // not used, we only create an empty writer
                         options)
-                .create(partition, bucket, Collections.emptyList(), service);
+                .createEmptyWriter(partition, bucket, service);
     }
 }
