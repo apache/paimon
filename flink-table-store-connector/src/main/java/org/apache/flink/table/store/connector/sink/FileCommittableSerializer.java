@@ -29,13 +29,13 @@ import org.apache.flink.table.types.logical.RowType;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
-/** {@link SimpleVersionedSerializer} for {@link LocalCommittable}. */
-public class LocalCommittableSerializer implements SimpleVersionedSerializer<LocalCommittable> {
+/** {@link SimpleVersionedSerializer} for {@link FileCommittable}. */
+public class FileCommittableSerializer implements SimpleVersionedSerializer<FileCommittable> {
 
     private final BinaryRowDataSerializer partSerializer;
     private final SstFileMetaSerializer sstSerializer;
 
-    public LocalCommittableSerializer(RowType partitionType, RowType keyType, RowType rowType) {
+    public FileCommittableSerializer(RowType partitionType, RowType keyType, RowType rowType) {
         this.partSerializer = new BinaryRowDataSerializer(partitionType.getFieldCount());
         this.sstSerializer = new SstFileMetaSerializer(keyType, rowType);
     }
@@ -46,7 +46,7 @@ public class LocalCommittableSerializer implements SimpleVersionedSerializer<Loc
     }
 
     @Override
-    public byte[] serialize(LocalCommittable obj) throws IOException {
+    public byte[] serialize(FileCommittable obj) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
         partSerializer.serialize(obj.partition(), view);
@@ -58,9 +58,9 @@ public class LocalCommittableSerializer implements SimpleVersionedSerializer<Loc
     }
 
     @Override
-    public LocalCommittable deserialize(int version, byte[] serialized) throws IOException {
+    public FileCommittable deserialize(int version, byte[] serialized) throws IOException {
         DataInputDeserializer view = new DataInputDeserializer(serialized);
-        return new LocalCommittable(
+        return new FileCommittable(
                 partSerializer.deserialize(view),
                 view.readInt(),
                 new Increment(

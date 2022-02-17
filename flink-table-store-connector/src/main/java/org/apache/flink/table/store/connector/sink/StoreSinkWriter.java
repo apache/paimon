@@ -19,7 +19,9 @@
 package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.api.connector.sink.SinkWriter;
+import org.apache.flink.api.connector.sink2.SinkWriter;
+import org.apache.flink.api.connector.sink2.StatefulSink.StatefulSinkWriter;
+import org.apache.flink.api.connector.sink2.TwoPhaseCommittingSink.PrecommittingSinkWriter;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
@@ -28,10 +30,10 @@ import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.sink.SinkRecord;
 import org.apache.flink.table.store.sink.SinkRecordConverter;
-import org.apache.flink.types.RowKind;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,11 +41,15 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /** A {@link SinkWriter} for dynamic store. */
-public class StoreSinkWriter implements SinkWriter<RowData, LocalCommittable, Void> {
+public class StoreSinkWriter<WriterStateT>
+        implements StatefulSinkWriter<RowData, WriterStateT>,
+                PrecommittingSinkWriter<RowData, Committable> {
 
     private final FileStoreWrite fileStoreWrite;
 
     private final SinkRecordConverter recordConverter;
+
+    private final FileCommittableSerializer fileCommitSerializer;
 
     private final boolean overwrite;
 
@@ -52,9 +58,13 @@ public class StoreSinkWriter implements SinkWriter<RowData, LocalCommittable, Vo
     private final Map<BinaryRowData, Map<Integer, RecordWriter>> writers;
 
     public StoreSinkWriter(
-            FileStoreWrite fileStoreWrite, SinkRecordConverter recordConverter, boolean overwrite) {
+            FileStoreWrite fileStoreWrite,
+            SinkRecordConverter recordConverter,
+            FileCommittableSerializer fileCommitSerializer,
+            boolean overwrite) {
         this.fileStoreWrite = fileStoreWrite;
         this.recordConverter = recordConverter;
+        this.fileCommitSerializer = fileCommitSerializer;
         this.overwrite = overwrite;
         this.compactExecutor = Executors.newSingleThreadScheduledExecutor();
         this.writers = new HashMap<>();
@@ -76,8 +86,7 @@ public class StoreSinkWriter implements SinkWriter<RowData, LocalCommittable, Vo
     }
 
     @Override
-    public void write(RowData rowData, Context context) throws IOException {
-        RowKind rowKind = rowData.getRowKind();
+    public void write(RowData rowData, Context context) throws IOException, InterruptedException {
         SinkRecord record = recordConverter.convert(rowData);
         RecordWriter writer = getWriter(record.partition(), record.bucket());
         try {
@@ -85,7 +94,6 @@ public class StoreSinkWriter implements SinkWriter<RowData, LocalCommittable, Vo
         } catch (Exception e) {
             throw new IOException(e);
         }
-        rowData.setRowKind(rowKind);
     }
 
     private void writeToFileStore(RecordWriter writer, SinkRecord record) throws Exception {
@@ -110,23 +118,31 @@ public class StoreSinkWriter implements SinkWriter<RowData, LocalCommittable, Vo
     }
 
     @Override
-    public List<LocalCommittable> prepareCommit(boolean flush) throws IOException {
-        try {
-            return prepareCommit();
-        } catch (Exception e) {
-            throw new IOException(e);
-        }
+    public void flush(boolean endOfInput) {}
+
+    @Override
+    public List<WriterStateT> snapshotState(long checkpointId) throws IOException {
+        return Collections.emptyList();
     }
 
-    private List<LocalCommittable> prepareCommit() throws Exception {
-        List<LocalCommittable> committables = new ArrayList<>();
+    @Override
+    public List<Committable> prepareCommit() throws IOException {
+        List<Committable> committables = new ArrayList<>();
         for (BinaryRowData partition : writers.keySet()) {
             Map<Integer, RecordWriter> buckets = writers.get(partition);
             for (Integer bucket : buckets.keySet()) {
                 RecordWriter writer = buckets.get(bucket);
-                LocalCommittable committable =
-                        new LocalCommittable(partition, bucket, writer.prepareCommit());
-                committables.add(committable);
+                FileCommittable committable;
+                try {
+                    committable = new FileCommittable(partition, bucket, writer.prepareCommit());
+                } catch (Exception e) {
+                    throw new IOException(e);
+                }
+                committables.add(
+                        new Committable(
+                                Committable.Kind.FILE,
+                                fileCommitSerializer.serialize(committable),
+                                fileCommitSerializer.getVersion()));
 
                 // clear if no update
                 // we need a mechanism to clear writers, otherwise there will be more and more
@@ -141,12 +157,17 @@ public class StoreSinkWriter implements SinkWriter<RowData, LocalCommittable, Vo
                 writers.remove(partition);
             }
         }
+
         return committables;
     }
 
-    private void closeWriter(RecordWriter writer) throws Exception {
-        writer.sync();
-        writer.close();
+    private void closeWriter(RecordWriter writer) throws IOException {
+        try {
+            writer.sync();
+            writer.close();
+        } catch (Exception e) {
+            throw new IOException(e);
+        }
     }
 
     @Override

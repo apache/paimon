@@ -37,7 +37,7 @@ public class Snapshot {
     private static final String FIELD_ID = "id";
     private static final String FIELD_MANIFEST_LIST = "manifestList";
     private static final String FIELD_COMMIT_USER = "commitUser";
-    private static final String FIELD_COMMIT_UUID = "commitUuid";
+    private static final String FIELD_COMMIT_IDENTIFIER = "commitIdentifier";
     private static final String FIELD_COMMIT_KIND = "commitKind";
     private static final String FIELD_TIME_MILLIS = "timeMillis";
 
@@ -51,8 +51,8 @@ public class Snapshot {
     private final String commitUser;
 
     // for deduplication
-    @JsonProperty(FIELD_COMMIT_UUID)
-    private final String commitUuid;
+    @JsonProperty(FIELD_COMMIT_IDENTIFIER)
+    private final String commitIdentifier;
 
     @JsonProperty(FIELD_COMMIT_KIND)
     private final CommitKind commitKind;
@@ -65,13 +65,13 @@ public class Snapshot {
             @JsonProperty(FIELD_ID) long id,
             @JsonProperty(FIELD_MANIFEST_LIST) String manifestList,
             @JsonProperty(FIELD_COMMIT_USER) String commitUser,
-            @JsonProperty(FIELD_COMMIT_UUID) String commitUuid,
+            @JsonProperty(FIELD_COMMIT_IDENTIFIER) String commitIdentifier,
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
             @JsonProperty(FIELD_TIME_MILLIS) long timeMillis) {
         this.id = id;
         this.manifestList = manifestList;
         this.commitUser = commitUser;
-        this.commitUuid = commitUuid;
+        this.commitIdentifier = commitIdentifier;
         this.commitKind = commitKind;
         this.timeMillis = timeMillis;
     }
@@ -91,9 +91,9 @@ public class Snapshot {
         return commitUser;
     }
 
-    @JsonGetter(FIELD_COMMIT_UUID)
-    public String commitUuid() {
-        return commitUuid;
+    @JsonGetter(FIELD_COMMIT_IDENTIFIER)
+    public String commitIdentifier() {
+        return commitIdentifier;
     }
 
     @JsonGetter(FIELD_COMMIT_KIND)

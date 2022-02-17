@@ -46,6 +46,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -224,13 +225,15 @@ public class OperationTestUtils {
         }
 
         FileStoreCommit commit = createCommit(fileFormat, pathFactory);
-        ManifestCommittable committable = new ManifestCommittable();
+        ManifestCommittable committable =
+                new ManifestCommittable(String.valueOf(new Random().nextLong()));
         for (Map.Entry<BinaryRowData, Map<Integer, RecordWriter>> entryWithPartition :
                 writers.entrySet()) {
             for (Map.Entry<Integer, RecordWriter> entryWithBucket :
                     entryWithPartition.getValue().entrySet()) {
                 Increment increment = entryWithBucket.getValue().prepareCommit();
-                committable.add(entryWithPartition.getKey(), entryWithBucket.getKey(), increment);
+                committable.addFileCommittable(
+                        entryWithPartition.getKey(), entryWithBucket.getKey(), increment);
             }
         }
 
