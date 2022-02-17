@@ -22,43 +22,51 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.mergetree.compact.Accumulator;
-import org.apache.flink.table.store.file.mergetree.sst.SstFile;
+import org.apache.flink.table.store.file.mergetree.sst.SstFileReader;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.types.logical.RowType;
 
+import java.io.IOException;
 import java.util.Comparator;
-import java.util.concurrent.ExecutorService;
+import java.util.List;
 
-/** Create a new {@link MergeTree} with specific partition and bucket. */
-public class MergeTreeFactory {
+/** Creates {@link MergeTreeReader}. */
+public class MergeTreeReaderFactory {
 
+    private final SstFileReader.Factory sstFileReaderFactory;
     private final Comparator<RowData> keyComparator;
     private final Accumulator accumulator;
-    private final MergeTreeOptions mergeTreeOptions;
-    private final SstFile.Factory sstFileFactory;
 
-    public MergeTreeFactory(
+    public MergeTreeReaderFactory(
             RowType keyType,
-            RowType rowType,
+            RowType valueType,
             Comparator<RowData> keyComparator,
             Accumulator accumulator,
             FileFormat fileFormat,
-            FileStorePathFactory pathFactory,
-            MergeTreeOptions mergeTreeOptions) {
+            FileStorePathFactory pathFactory) {
+        this.sstFileReaderFactory =
+                new SstFileReader.Factory(keyType, valueType, fileFormat, pathFactory);
         this.keyComparator = keyComparator;
         this.accumulator = accumulator;
-        this.mergeTreeOptions = mergeTreeOptions;
-        this.sstFileFactory =
-                new SstFile.Factory(
-                        keyType, rowType, fileFormat, pathFactory, mergeTreeOptions.targetFileSize);
     }
 
-    public MergeTree create(BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
-        return new MergeTree(
-                mergeTreeOptions,
-                sstFileFactory.create(partition, bucket),
+    public Comparator<RowData> keyComparator() {
+        return keyComparator;
+    }
+
+    /**
+     * Create {@link RecordReader} from file sections. The caller can decide whether to drop the
+     * deletion record.
+     */
+    public RecordReader create(
+            BinaryRowData partition, int bucket, List<List<SortedRun>> sections, boolean dropDelete)
+            throws IOException {
+        return new MergeTreeReader(
+                sections,
+                dropDelete,
+                sstFileReaderFactory.create(partition, bucket),
                 keyComparator,
-                compactExecutor,
-                accumulator);
+                accumulator.copy());
     }
 }

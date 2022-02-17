@@ -25,8 +25,8 @@ import org.apache.flink.table.store.file.mergetree.compact.Accumulator;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.flink.table.store.file.mergetree.compact.SortMergeReader;
-import org.apache.flink.table.store.file.mergetree.sst.SstFile;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.table.store.file.mergetree.sst.SstFileReader;
 import org.apache.flink.table.store.file.utils.RecordReader;
 
 import javax.annotation.Nullable;
@@ -46,7 +46,7 @@ public class MergeTreeReader implements RecordReader {
     public MergeTreeReader(
             List<List<SortedRun>> sections,
             boolean dropDelete,
-            SstFile sstFile,
+            SstFileReader sstFileReader,
             Comparator<RowData> userKeyComparator,
             Accumulator accumulator)
             throws IOException {
@@ -54,7 +54,8 @@ public class MergeTreeReader implements RecordReader {
 
         List<ReaderSupplier> readers = new ArrayList<>();
         for (List<SortedRun> section : sections) {
-            readers.add(() -> readerForSection(section, sstFile, userKeyComparator, accumulator));
+            readers.add(
+                    () -> readerForSection(section, sstFileReader, userKeyComparator, accumulator));
         }
         this.reader = ConcatRecordReader.create(readers);
     }
@@ -101,21 +102,22 @@ public class MergeTreeReader implements RecordReader {
 
     public static RecordReader readerForSection(
             List<SortedRun> section,
-            SstFile sstFile,
+            SstFileReader sstFileReader,
             Comparator<RowData> userKeyComparator,
             Accumulator accumulator)
             throws IOException {
         List<RecordReader> readers = new ArrayList<>();
         for (SortedRun run : section) {
-            readers.add(readerForRun(run, sstFile));
+            readers.add(readerForRun(run, sstFileReader));
         }
         return SortMergeReader.create(readers, userKeyComparator, accumulator);
     }
 
-    public static RecordReader readerForRun(SortedRun run, SstFile sstFile) throws IOException {
+    public static RecordReader readerForRun(SortedRun run, SstFileReader sstFileReader)
+            throws IOException {
         List<ReaderSupplier> readers = new ArrayList<>();
         for (SstFileMeta file : run.files()) {
-            readers.add(() -> sstFile.read(file.fileName()));
+            readers.add(() -> sstFileReader.read(file.fileName()));
         }
         return ConcatRecordReader.create(readers);
     }

@@ -20,9 +20,6 @@ package org.apache.flink.table.store.file.mergetree.sst;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.connector.file.src.FileSourceSplit;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
-import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
@@ -35,44 +32,35 @@ import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.stats.FieldStats;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
-import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.CloseableIterator;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * This file includes several {@link KeyValue}s, representing the changes inserted into the file
- * storage.
- */
-public class SstFile {
+/** Writes {@link KeyValue}s into sst files. */
+public class SstFileWriter {
 
-    private static final Logger LOG = LoggerFactory.getLogger(SstFile.class);
+    private static final Logger LOG = LoggerFactory.getLogger(SstFileWriter.class);
 
     private final RowType keyType;
     private final RowType valueType;
-    private final BulkFormat<RowData, FileSourceSplit> readerFactory;
     private final BulkWriter.Factory<RowData> writerFactory;
     private final SstPathFactory pathFactory;
     private final long suggestedFileSize;
 
-    private SstFile(
+    private SstFileWriter(
             RowType keyType,
             RowType valueType,
-            BulkFormat<RowData, FileSourceSplit> readerFactory,
             BulkWriter.Factory<RowData> writerFactory,
             SstPathFactory pathFactory,
             long suggestedFileSize) {
         this.keyType = keyType;
         this.valueType = valueType;
-        this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
         this.pathFactory = pathFactory;
         this.suggestedFileSize = suggestedFileSize;
@@ -87,17 +75,13 @@ public class SstFile {
     }
 
     @VisibleForTesting
-    public SstPathFactory pathFactory() {
-        return pathFactory;
-    }
-
-    @VisibleForTesting
     public long suggestedFileSize() {
         return suggestedFileSize;
     }
 
-    public RecordReader read(String fileName) throws IOException {
-        return new SstFileRecordReader(pathFactory.toPath(fileName));
+    @VisibleForTesting
+    public SstPathFactory pathFactory() {
+        return pathFactory;
     }
 
     /**
@@ -146,54 +130,6 @@ public class SstFile {
 
     public void delete(SstFileMeta file) {
         FileUtils.deleteOrWarn(pathFactory.toPath(file.fileName()));
-    }
-
-    private class SstFileRecordReader implements RecordReader {
-
-        private final BulkFormat.Reader<RowData> reader;
-        private final KeyValueSerializer serializer;
-
-        private SstFileRecordReader(Path path) throws IOException {
-            long fileSize = FileUtils.getFileSize(path);
-            FileSourceSplit split = new FileSourceSplit("ignore", path, 0, fileSize, 0, fileSize);
-            this.reader = readerFactory.createReader(FileUtils.DEFAULT_READER_CONFIG, split);
-            this.serializer = new KeyValueSerializer(keyType, valueType);
-        }
-
-        @Nullable
-        @Override
-        public RecordIterator readBatch() throws IOException {
-            BulkFormat.RecordIterator<RowData> iterator = reader.readBatch();
-            return iterator == null ? null : new SstFileRecordIterator(iterator, serializer);
-        }
-
-        @Override
-        public void close() throws IOException {
-            reader.close();
-        }
-    }
-
-    private static class SstFileRecordIterator implements RecordReader.RecordIterator {
-
-        private final BulkFormat.RecordIterator<RowData> iterator;
-        private final KeyValueSerializer serializer;
-
-        private SstFileRecordIterator(
-                BulkFormat.RecordIterator<RowData> iterator, KeyValueSerializer serializer) {
-            this.iterator = iterator;
-            this.serializer = serializer;
-        }
-
-        @Override
-        public KeyValue next() throws IOException {
-            RecordAndPosition<RowData> result = iterator.next();
-            return result == null ? null : serializer.fromRow(result.getRecord());
-        }
-
-        @Override
-        public void releaseBatch() {
-            iterator.releaseBatch();
-        }
     }
 
     private class RollingFile {
@@ -282,15 +218,11 @@ public class SstFile {
         }
     }
 
-    /**
-     * Creator of {@link SstFile}. It reueses {@link BulkFormat} and {@link BulkWriter.Factory} from
-     * {@link FileFormat}.
-     */
+    /** Creates {@link SstFileWriter}. */
     public static class Factory {
 
         private final RowType keyType;
         private final RowType valueType;
-        private final BulkFormat<RowData, FileSourceSplit> readerFactory;
         private final BulkWriter.Factory<RowData> writerFactory;
         private final FileStorePathFactory pathFactory;
         private final long suggestedFileSize;
@@ -304,17 +236,15 @@ public class SstFile {
             this.keyType = keyType;
             this.valueType = valueType;
             RowType recordType = KeyValue.schema(keyType, valueType);
-            this.readerFactory = fileFormat.createReaderFactory(recordType);
             this.writerFactory = fileFormat.createWriterFactory(recordType);
             this.pathFactory = pathFactory;
             this.suggestedFileSize = suggestedFileSize;
         }
 
-        public SstFile create(BinaryRowData partition, int bucket) {
-            return new SstFile(
+        public SstFileWriter create(BinaryRowData partition, int bucket) {
+            return new SstFileWriter(
                     keyType,
                     valueType,
-                    readerFactory,
                     writerFactory,
                     pathFactory.createSstPathFactory(partition, bucket),
                     suggestedFileSize);

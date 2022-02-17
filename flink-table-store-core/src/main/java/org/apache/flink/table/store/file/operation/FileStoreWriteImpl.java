@@ -20,8 +20,7 @@ package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
-import org.apache.flink.table.store.file.mergetree.MergeTree;
-import org.apache.flink.table.store.file.mergetree.MergeTreeFactory;
+import org.apache.flink.table.store.file.mergetree.MergeTreeWriterFactory;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 
@@ -33,15 +32,15 @@ import java.util.stream.Collectors;
 public class FileStoreWriteImpl implements FileStoreWrite {
 
     private final FileStorePathFactory pathFactory;
-    private final MergeTreeFactory mergeTreeFactory;
+    private final MergeTreeWriterFactory mergeTreeWriterFactory;
     private final FileStoreScan scan;
 
     public FileStoreWriteImpl(
             FileStorePathFactory pathFactory,
-            MergeTreeFactory mergeTreeFactory,
+            MergeTreeWriterFactory mergeTreeWriterFactory,
             FileStoreScan scan) {
         this.pathFactory = pathFactory;
-        this.mergeTreeFactory = mergeTreeFactory;
+        this.mergeTreeWriterFactory = mergeTreeWriterFactory;
         this.scan = scan;
     }
 
@@ -52,20 +51,22 @@ public class FileStoreWriteImpl implements FileStoreWrite {
         if (latestSnapshotId == null) {
             return createEmptyWriter(partition, bucket, compactExecutor);
         } else {
-            MergeTree mergeTree = mergeTreeFactory.create(partition, bucket, compactExecutor);
-            return mergeTree.createWriter(
+            return mergeTreeWriterFactory.create(
+                    partition,
+                    bucket,
                     scan.withSnapshot(latestSnapshotId)
                             .withPartitionFilter(Collections.singletonList(partition))
                             .withBucket(bucket).plan().files().stream()
                             .map(ManifestEntry::file)
-                            .collect(Collectors.toList()));
+                            .collect(Collectors.toList()),
+                    compactExecutor);
         }
     }
 
     @Override
     public RecordWriter createEmptyWriter(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
-        MergeTree mergeTree = mergeTreeFactory.create(partition, bucket, compactExecutor);
-        return mergeTree.createWriter(Collections.emptyList());
+        return mergeTreeWriterFactory.create(
+                partition, bucket, Collections.emptyList(), compactExecutor);
     }
 }

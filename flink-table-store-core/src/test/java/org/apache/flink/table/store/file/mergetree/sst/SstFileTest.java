@@ -49,7 +49,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link SstFile}. */
+/** Tests for {@link SstFileReader} and {@link SstFileWriter}. */
 public class SstFileTest {
 
     private final SstTestDataGenerator gen =
@@ -61,21 +61,22 @@ public class SstFileTest {
     @RepeatedTest(10)
     public void testWriteAndReadSstFile() throws Exception {
         SstTestDataGenerator.Data data = gen.next();
-        SstFile sstFile = createSstFile(tempDir.toString());
+        SstFileWriter writer = createSstFileWriter(tempDir.toString());
         SstFileMetaSerializer serializer =
                 new SstFileMetaSerializer(
                         TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.ROW_TYPE);
 
         List<SstFileMeta> actualMetas =
-                sstFile.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
+                writer.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
 
-        checkRollingFiles(data.meta, actualMetas, sstFile.suggestedFileSize());
+        checkRollingFiles(data.meta, actualMetas, writer.suggestedFileSize());
 
+        SstFileReader reader = createSstFileReader(tempDir.toString());
         Iterator<KeyValue> expectedIterator = data.content.iterator();
         for (SstFileMeta meta : actualMetas) {
             // check the contents of sst file
             CloseableIterator<KeyValue> actualKvsIterator =
-                    new RecordReaderIterator(sstFile.read(meta.fileName()));
+                    new RecordReaderIterator(reader.read(meta.fileName()));
             while (actualKvsIterator.hasNext()) {
                 assertThat(expectedIterator.hasNext()).isTrue();
                 KeyValue actualKv = actualKvsIterator.next();
@@ -100,11 +101,12 @@ public class SstFileTest {
         FailingAtomicRenameFileSystem.resetFailCounter(1);
         FailingAtomicRenameFileSystem.setFailPossibility(10);
         SstTestDataGenerator.Data data = gen.next();
-        SstFile sstFile =
-                createSstFile(FailingAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString());
+        SstFileWriter writer =
+                createSstFileWriter(
+                        FailingAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString());
 
         try {
-            sstFile.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
+            writer.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
         } catch (Throwable e) {
             assertThat(e)
                     .isExactlyInstanceOf(FailingAtomicRenameFileSystem.ArtificialException.class);
@@ -117,10 +119,10 @@ public class SstFileTest {
         }
     }
 
-    private SstFile createSstFile(String path) {
+    private SstFileWriter createSstFileWriter(String path) {
         FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(path));
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
-        return new SstFile.Factory(
+        return new SstFileWriter.Factory(
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.ROW_TYPE,
                         // normal avro format will buffer changes in memory and we can't determine
@@ -130,6 +132,17 @@ public class SstFileTest {
                         pathFactory,
                         suggestedFileSize)
                 .create(BinaryRowDataUtil.EMPTY_ROW, 0);
+    }
+
+    private SstFileReader createSstFileReader(String path) {
+        FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(path));
+        SstFileReader.Factory factory =
+                new SstFileReader.Factory(
+                        TestKeyValueGenerator.KEY_TYPE,
+                        TestKeyValueGenerator.ROW_TYPE,
+                        flushingAvro,
+                        pathFactory);
+        return factory.create(BinaryRowDataUtil.EMPTY_ROW, 0);
     }
 
     private void checkRollingFiles(
