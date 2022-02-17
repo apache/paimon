@@ -32,10 +32,9 @@ import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.Increment;
-import org.apache.flink.table.store.file.mergetree.MergeTreeFactory;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
-import org.apache.flink.table.store.file.mergetree.sst.SstFile;
+import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
@@ -102,17 +101,15 @@ public class OperationTestUtils {
 
     public static FileStoreWrite createWrite(
             FileFormat fileFormat, FileStorePathFactory pathFactory) {
-        MergeTreeFactory mergeTreeFactory =
-                new MergeTreeFactory(
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.ROW_TYPE,
-                        TestKeyValueGenerator.KEY_COMPARATOR,
-                        new DeduplicateAccumulator(),
-                        fileFormat,
-                        pathFactory,
-                        getMergeTreeOptions(false));
         return new FileStoreWriteImpl(
-                pathFactory, mergeTreeFactory, createScan(fileFormat, pathFactory));
+                TestKeyValueGenerator.KEY_TYPE,
+                TestKeyValueGenerator.ROW_TYPE,
+                TestKeyValueGenerator.KEY_COMPARATOR,
+                new DeduplicateAccumulator(),
+                fileFormat,
+                pathFactory,
+                createScan(fileFormat, pathFactory),
+                getMergeTreeOptions(false));
     }
 
     public static FileStoreExpire createExpire(
@@ -126,6 +123,17 @@ public class OperationTestUtils {
                 pathFactory,
                 createManifestListFactory(fileFormat, pathFactory),
                 createScan(fileFormat, pathFactory));
+    }
+
+    public static FileStoreRead createRead(
+            FileFormat fileFormat, FileStorePathFactory pathFactory) {
+        return new FileStoreReadImpl(
+                TestKeyValueGenerator.KEY_TYPE,
+                TestKeyValueGenerator.ROW_TYPE,
+                TestKeyValueGenerator.KEY_COMPARATOR,
+                new DeduplicateAccumulator(),
+                fileFormat,
+                pathFactory);
     }
 
     public static FileStorePathFactory createPathFactory(String scheme, String root) {
@@ -265,25 +273,34 @@ public class OperationTestUtils {
     public static List<KeyValue> readKvsFromManifestEntries(
             List<ManifestEntry> entries, FileFormat fileFormat, FileStorePathFactory pathFactory)
             throws IOException {
-        List<KeyValue> kvs = new ArrayList<>();
-        SstFile.Factory sstFileFactory =
-                new SstFile.Factory(
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.ROW_TYPE,
-                        fileFormat,
-                        pathFactory,
-                        1024 * 1024 // not used
-                        );
+        Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> filesPerPartitionAndBucket =
+                new HashMap<>();
         for (ManifestEntry entry : entries) {
-            SstFile sstFile = sstFileFactory.create(entry.partition(), entry.bucket());
-            RecordReaderIterator iterator =
-                    new RecordReaderIterator(sstFile.read(entry.file().fileName()));
-            while (iterator.hasNext()) {
-                kvs.add(
-                        iterator.next()
-                                .copy(
-                                        TestKeyValueGenerator.KEY_SERIALIZER,
-                                        TestKeyValueGenerator.ROW_SERIALIZER));
+            filesPerPartitionAndBucket
+                    .compute(entry.partition(), (p, m) -> m == null ? new HashMap<>() : m)
+                    .compute(entry.bucket(), (b, l) -> l == null ? new ArrayList<>() : l)
+                    .add(entry.file());
+        }
+
+        List<KeyValue> kvs = new ArrayList<>();
+        FileStoreRead read = createRead(fileFormat, pathFactory);
+        for (Map.Entry<BinaryRowData, Map<Integer, List<SstFileMeta>>> entryWithPartition :
+                filesPerPartitionAndBucket.entrySet()) {
+            for (Map.Entry<Integer, List<SstFileMeta>> entryWithBucket :
+                    entryWithPartition.getValue().entrySet()) {
+                RecordReaderIterator iterator =
+                        new RecordReaderIterator(
+                                read.createReader(
+                                        entryWithPartition.getKey(),
+                                        entryWithBucket.getKey(),
+                                        entryWithBucket.getValue()));
+                while (iterator.hasNext()) {
+                    kvs.add(
+                            iterator.next()
+                                    .copy(
+                                            TestKeyValueGenerator.KEY_SERIALIZER,
+                                            TestKeyValueGenerator.ROW_SERIALIZER));
+                }
             }
         }
         return kvs;
