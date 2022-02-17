@@ -39,11 +39,13 @@ public class FileStoreReadImpl implements FileStoreRead {
     @Override
     public void withKeyProjection(int[][] projectedFields) {
         // TODO
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public void withValueProjection(int[][] projectedFields) {
         // TODO
+        throw new UnsupportedOperationException();
     }
 
     @Override
