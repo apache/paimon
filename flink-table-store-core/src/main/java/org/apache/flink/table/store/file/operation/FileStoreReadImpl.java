@@ -16,49 +16,64 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.mergetree;
+package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileFormat;
+import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
 import org.apache.flink.table.store.file.mergetree.compact.Accumulator;
-import org.apache.flink.table.store.file.mergetree.sst.SstFile;
+import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
+import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.table.store.file.mergetree.sst.SstFileReader;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.types.logical.RowType;
 
+import java.io.IOException;
 import java.util.Comparator;
-import java.util.concurrent.ExecutorService;
+import java.util.List;
 
-/** Create a new {@link MergeTree} with specific partition and bucket. */
-public class MergeTreeFactory {
+/** Default implementation of {@link FileStoreRead}. */
+public class FileStoreReadImpl implements FileStoreRead {
 
+    private final SstFileReader.Factory sstFileReaderFactory;
     private final Comparator<RowData> keyComparator;
     private final Accumulator accumulator;
-    private final MergeTreeOptions mergeTreeOptions;
-    private final SstFile.Factory sstFileFactory;
 
-    public MergeTreeFactory(
+    public FileStoreReadImpl(
             RowType keyType,
-            RowType rowType,
+            RowType valueType,
             Comparator<RowData> keyComparator,
             Accumulator accumulator,
             FileFormat fileFormat,
-            FileStorePathFactory pathFactory,
-            MergeTreeOptions mergeTreeOptions) {
+            FileStorePathFactory pathFactory) {
+        this.sstFileReaderFactory =
+                new SstFileReader.Factory(keyType, valueType, fileFormat, pathFactory);
         this.keyComparator = keyComparator;
         this.accumulator = accumulator;
-        this.mergeTreeOptions = mergeTreeOptions;
-        this.sstFileFactory =
-                new SstFile.Factory(
-                        keyType, rowType, fileFormat, pathFactory, mergeTreeOptions.targetFileSize);
     }
 
-    public MergeTree create(BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
-        return new MergeTree(
-                mergeTreeOptions,
-                sstFileFactory.create(partition, bucket),
+    @Override
+    public void withKeyProjection(int[][] projectedFields) {
+        // TODO
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void withValueProjection(int[][] projectedFields) {
+        // TODO
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public RecordReader createReader(BinaryRowData partition, int bucket, List<SstFileMeta> files)
+            throws IOException {
+        return new MergeTreeReader(
+                new IntervalPartition(files, keyComparator).partition(),
+                true,
+                sstFileReaderFactory.create(partition, bucket),
                 keyComparator,
-                compactExecutor,
-                accumulator);
+                accumulator.copy());
     }
 }

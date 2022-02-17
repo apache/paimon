@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
-import org.apache.flink.core.fs.Path;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -59,7 +58,7 @@ public class FileStoreSourceReaderTest {
 
     private FileStoreSourceReader createReader(TestingReaderContext context) {
         return new FileStoreSourceReader(
-                context, new TestFileStoreRead(new Path(tempDir.toUri()), null), false);
+                context, new TestDataReadWrite(tempDir.toString(), null).createRead(), false);
     }
 
     private static FileStoreSourceSplit createTestFileSplit() {

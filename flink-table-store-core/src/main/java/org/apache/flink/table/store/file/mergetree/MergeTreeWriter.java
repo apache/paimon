@@ -24,8 +24,8 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.mergetree.compact.Accumulator;
 import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
-import org.apache.flink.table.store.file.mergetree.sst.SstFile;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.table.store.file.mergetree.sst.SstFileWriter;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.util.CloseableIterator;
 
@@ -53,7 +53,7 @@ public class MergeTreeWriter implements RecordWriter {
 
     private final Accumulator accumulator;
 
-    private final SstFile sstFile;
+    private final SstFileWriter sstFileWriter;
 
     private final boolean commitForceCompact;
 
@@ -72,7 +72,7 @@ public class MergeTreeWriter implements RecordWriter {
             long maxSequenceNumber,
             Comparator<RowData> keyComparator,
             Accumulator accumulator,
-            SstFile sstFile,
+            SstFileWriter sstFileWriter,
             boolean commitForceCompact) {
         this.memTable = memTable;
         this.compactManager = compactManager;
@@ -80,7 +80,7 @@ public class MergeTreeWriter implements RecordWriter {
         this.newSequenceNumber = maxSequenceNumber + 1;
         this.keyComparator = keyComparator;
         this.accumulator = accumulator;
-        this.sstFile = sstFile;
+        this.sstFileWriter = sstFileWriter;
         this.commitForceCompact = commitForceCompact;
         this.newFiles = new LinkedHashSet<>();
         this.compactBefore = new LinkedHashMap<>();
@@ -114,7 +114,7 @@ public class MergeTreeWriter implements RecordWriter {
             finishCompaction();
             Iterator<KeyValue> iterator = memTable.iterator(keyComparator, accumulator);
             List<SstFileMeta> files =
-                    sstFile.write(CloseableIterator.adapterForIterator(iterator), 0);
+                    sstFileWriter.write(CloseableIterator.adapterForIterator(iterator), 0);
             newFiles.addAll(files);
             files.forEach(levels::addLevel0File);
             memTable.clear();
@@ -160,7 +160,7 @@ public class MergeTreeWriter implements RecordWriter {
                 // 2. This file is not the input of upgraded.
                 if (!compactBefore.containsKey(file.fileName())
                         && !afterFiles.contains(file.fileName())) {
-                    sstFile.delete(file);
+                    sstFileWriter.delete(file);
                 }
             } else {
                 compactBefore.put(file.fileName(), file);
@@ -191,7 +191,7 @@ public class MergeTreeWriter implements RecordWriter {
             }
         }
         for (SstFileMeta file : delete) {
-            sstFile.delete(file);
+            sstFileWriter.delete(file);
         }
         newFiles.clear();
         compactAfter.clear();
