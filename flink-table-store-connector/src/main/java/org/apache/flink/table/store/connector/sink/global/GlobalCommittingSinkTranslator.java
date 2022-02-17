@@ -45,15 +45,14 @@ public class GlobalCommittingSinkTranslator {
         SingleOutputStreamOperator<CommittableMessage<CommT>> written =
                 input.transform(WRITER_NAME, commitType, new SinkWriterOperatorFactory<>(sink));
 
-        GlobalCommitterHandler<CommT, GlobalCommT> committerHandler =
-                new GlobalCommitterHandler<>(
-                        sink.createCommitter(), sink.getGlobalCommittableSerializer());
         SingleOutputStreamOperator<Void> committed =
                 written.global()
                         .transform(
                                 GLOBAL_COMMITTER_NAME,
                                 Types.VOID,
-                                new GlobalCommitterOperator<>(committerHandler))
+                                new GlobalCommitterOperator<>(
+                                        sink.createCommitter(),
+                                        sink.getGlobalCommittableSerializer()))
                         .setParallelism(1)
                         .setMaxParallelism(1);
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);

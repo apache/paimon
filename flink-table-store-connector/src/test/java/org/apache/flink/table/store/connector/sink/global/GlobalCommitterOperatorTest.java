@@ -43,8 +43,8 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link GlobalCommitterHandler}. */
-public class GlobalCommitterHandlerTest {
+/** Test for {@link GlobalCommitterOperator}. */
+public class GlobalCommitterOperatorTest {
 
     @Test
     public void closeCommitter() throws Exception {
@@ -175,8 +175,7 @@ public class GlobalCommitterHandlerTest {
             GlobalCommitter<String, String> globalCommitter) throws Exception {
         return new OneInputStreamOperatorTestHarness<>(
                 new GlobalCommitterOperator<>(
-                        new GlobalCommitterHandler<>(
-                                globalCommitter, StringCommittableSerializer.INSTANCE)),
+                        globalCommitter, StringCommittableSerializer.INSTANCE),
                 CommittableMessageTypeInfo.of(
                                 (SerializableSupplier<SimpleVersionedSerializer<String>>)
                                         () -> StringCommittableSerializer.INSTANCE)
@@ -191,7 +190,7 @@ public class GlobalCommitterHandlerTest {
         testHarness.open();
         testHarness.processElements(
                 input.stream()
-                        .map(GlobalCommitterHandlerTest::toCommittableMessage)
+                        .map(GlobalCommitterOperatorTest::toCommittableMessage)
                         .map(StreamRecord::new)
                         .collect(Collectors.toList()));
         testHarness.prepareSnapshotPreBarrier(1L);
@@ -203,7 +202,7 @@ public class GlobalCommitterHandlerTest {
     private static List<StreamRecord<CommittableMessage<String>>> committableRecords(
             Collection<String> elements) {
         return elements.stream()
-                .map(GlobalCommitterHandlerTest::toCommittableMessage)
+                .map(GlobalCommitterOperatorTest::toCommittableMessage)
                 .map(StreamRecord::new)
                 .collect(Collectors.toList());
     }
