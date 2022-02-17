@@ -25,25 +25,24 @@ import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
-import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
+import org.apache.flink.table.store.file.utils.RowDataToObjectArrayConverter;
+import org.apache.flink.table.store.file.utils.TypeUtils;
+import org.apache.flink.table.types.logical.RowType;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -72,7 +71,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreCommitImpl.class);
 
     private final String commitUser;
-    private final ManifestCommittableSerializer committableSerializer;
+    private final RowType partitionType;
+    private final RowDataToObjectArrayConverter partitionObjectConverter;
     private final FileStorePathFactory pathFactory;
     private final ManifestFile manifestFile;
     private final ManifestList manifestList;
@@ -83,14 +83,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     public FileStoreCommitImpl(
             String commitUser,
-            ManifestCommittableSerializer committableSerializer,
+            RowType partitionType,
             FileStorePathFactory pathFactory,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             FileStoreScan scan,
             FileStoreOptions fileStoreOptions) {
         this.commitUser = commitUser;
-        this.committableSerializer = committableSerializer;
+        this.partitionType = partitionType;
+        this.partitionObjectConverter = new RowDataToObjectArrayConverter(partitionType);
         this.pathFactory = pathFactory;
         this.manifestFile = manifestFileFactory.create();
         this.manifestList = manifestListFactory.create();
@@ -108,29 +109,24 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @Override
     public List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committableList) {
-        committableList = new ArrayList<>(committableList);
-
-        // filter out commits with no new files
-        committableList.removeIf(committable -> committable.newFiles().isEmpty());
-
         // if there is no previous snapshots then nothing should be filtered
         Long latestSnapshotId = pathFactory.latestSnapshotId();
         if (latestSnapshotId == null) {
             return committableList;
         }
 
-        // check if a committable is already committed by its hash
-        Map<String, ManifestCommittable> digests = new LinkedHashMap<>();
+        // check if a committable is already committed by its uuid
+        Map<String, ManifestCommittable> uuids = new LinkedHashMap<>();
         for (ManifestCommittable committable : committableList) {
-            digests.put(digestManifestCommittable(committable), committable);
+            uuids.put(committable.uuid(), committable);
         }
 
         for (long id = latestSnapshotId; id >= Snapshot.FIRST_SNAPSHOT_ID; id--) {
             Path snapshotPath = pathFactory.toSnapshotPath(id);
             Snapshot snapshot = Snapshot.fromPath(snapshotPath);
             if (commitUser.equals(snapshot.commitUser())) {
-                if (digests.containsKey(snapshot.commitDigest())) {
-                    digests.remove(snapshot.commitDigest());
+                if (uuids.containsKey(snapshot.commitUuid())) {
+                    uuids.remove(snapshot.commitUuid());
                 } else {
                     // early exit, because committableList must be the latest commits by this
                     // commit user
@@ -139,7 +135,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
-        return new ArrayList<>(digests.values());
+        return new ArrayList<>(uuids.values());
     }
 
     @Override
@@ -148,18 +144,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             LOG.debug("Ready to commit\n" + committable.toString());
         }
 
-        String hash = digestManifestCommittable(committable);
-
         List<ManifestEntry> appendChanges = collectChanges(committable.newFiles(), ValueKind.ADD);
-        if (!appendChanges.isEmpty()) {
-            tryCommit(appendChanges, hash, Snapshot.CommitKind.APPEND);
-        }
+        tryCommit(appendChanges, committable.uuid(), Snapshot.CommitKind.APPEND, false);
 
         List<ManifestEntry> compactChanges = new ArrayList<>();
         compactChanges.addAll(collectChanges(committable.compactBefore(), ValueKind.DELETE));
         compactChanges.addAll(collectChanges(committable.compactAfter(), ValueKind.ADD));
         if (!compactChanges.isEmpty()) {
-            tryCommit(compactChanges, hash, Snapshot.CommitKind.COMPACT);
+            tryCommit(compactChanges, committable.uuid(), Snapshot.CommitKind.COMPACT, true);
         }
     }
 
@@ -168,21 +160,82 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Map<String, String> partition,
             ManifestCommittable committable,
             Map<String, String> properties) {
-        throw new UnsupportedOperationException();
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Ready to overwrite partition "
+                            + partition.toString()
+                            + "\n"
+                            + committable.toString());
+        }
+
+        List<ManifestEntry> appendChanges = collectChanges(committable.newFiles(), ValueKind.ADD);
+        // sanity check, all changes must be done within the given partition
+        Predicate partitionFilter = TypeUtils.partitionMapToPredicate(partition, partitionType);
+        for (ManifestEntry entry : appendChanges) {
+            if (!partitionFilter.test(partitionObjectConverter.convert(entry.partition()))) {
+                throw new IllegalArgumentException(
+                        "Trying to overwrite partition "
+                                + partition.toString()
+                                + ", but the changes in "
+                                + pathFactory.getPartitionString(entry.partition())
+                                + " does not belong to this partition");
+            }
+        }
+        // overwrite new files
+        tryOverwrite(
+                partitionFilter, appendChanges, committable.uuid(), Snapshot.CommitKind.APPEND);
+
+        List<ManifestEntry> compactChanges = new ArrayList<>();
+        compactChanges.addAll(collectChanges(committable.compactBefore(), ValueKind.DELETE));
+        compactChanges.addAll(collectChanges(committable.compactAfter(), ValueKind.ADD));
+        if (!compactChanges.isEmpty()) {
+            tryCommit(compactChanges, committable.uuid(), Snapshot.CommitKind.COMPACT, true);
+        }
     }
 
-    private String digestManifestCommittable(ManifestCommittable committable) {
-        try {
-            return new String(
-                    Base64.getEncoder()
-                            .encode(
-                                    MessageDigest.getInstance("MD5")
-                                            .digest(committableSerializer.serialize(committable))));
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("MD5 algorithm not found. This is impossible.", e);
-        } catch (IOException e) {
-            throw new RuntimeException(
-                    "Failed to serialize ManifestCommittable. This is unexpected.", e);
+    private void tryCommit(
+            List<ManifestEntry> changes,
+            String hash,
+            Snapshot.CommitKind commitKind,
+            boolean checkDeletedFiles) {
+        while (true) {
+            Long latestSnapshotId = pathFactory.latestSnapshotId();
+            if (tryCommitOnce(changes, hash, commitKind, latestSnapshotId, checkDeletedFiles)) {
+                break;
+            }
+        }
+    }
+
+    private void tryOverwrite(
+            Predicate partitionFilter,
+            List<ManifestEntry> changes,
+            String hash,
+            Snapshot.CommitKind commitKind) {
+        while (true) {
+            Long latestSnapshotId = pathFactory.latestSnapshotId();
+
+            List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
+            if (latestSnapshotId != null) {
+                List<ManifestEntry> currentEntries =
+                        scan.withSnapshot(latestSnapshotId)
+                                .withPartitionFilter(partitionFilter)
+                                .plan()
+                                .files();
+                for (ManifestEntry entry : currentEntries) {
+                    changesWithOverwrite.add(
+                            new ManifestEntry(
+                                    ValueKind.DELETE,
+                                    entry.partition(),
+                                    entry.bucket(),
+                                    entry.totalBuckets(),
+                                    entry.file()));
+                }
+            }
+            changesWithOverwrite.addAll(changes);
+
+            if (tryCommitOnce(changesWithOverwrite, hash, commitKind, latestSnapshotId, false)) {
+                break;
+            }
         }
     }
 
@@ -209,114 +262,125 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return changes;
     }
 
-    private void tryCommit(
-            List<ManifestEntry> changes, String hash, Snapshot.CommitKind commitKind) {
-        while (true) {
-            Long latestSnapshotId = pathFactory.latestSnapshotId();
-            long newSnapshotId =
-                    latestSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshotId + 1;
-            Path newSnapshotPath = pathFactory.toSnapshotPath(newSnapshotId);
-            Path tmpSnapshotPath = pathFactory.toTmpSnapshotPath(newSnapshotId);
+    private boolean tryCommitOnce(
+            List<ManifestEntry> changes,
+            String hash,
+            Snapshot.CommitKind commitKind,
+            Long latestSnapshotId,
+            boolean checkDeletedFiles) {
+        long newSnapshotId =
+                latestSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshotId + 1;
+        Path newSnapshotPath = pathFactory.toSnapshotPath(newSnapshotId);
+        Path tmpSnapshotPath = pathFactory.toTmpSnapshotPath(newSnapshotId);
 
-            Snapshot latestSnapshot = null;
-            if (latestSnapshotId != null) {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Ready to commit changes to snapshot #" + newSnapshotId);
+            for (ManifestEntry entry : changes) {
+                LOG.debug("  * " + entry.toString());
+            }
+        }
+
+        Snapshot latestSnapshot = null;
+        if (latestSnapshotId != null) {
+            if (checkDeletedFiles) {
                 noConflictsOrFail(latestSnapshotId, changes);
-                latestSnapshot = Snapshot.fromPath(pathFactory.toSnapshotPath(latestSnapshotId));
             }
+            latestSnapshot = Snapshot.fromPath(pathFactory.toSnapshotPath(latestSnapshotId));
+        }
 
-            Snapshot newSnapshot;
-            String manifestListName = null;
-            List<ManifestFileMeta> oldMetas = new ArrayList<>();
-            List<ManifestFileMeta> newMetas = new ArrayList<>();
-            try {
-                if (latestSnapshot != null) {
-                    // read all previous manifest files
-                    oldMetas.addAll(manifestList.read(latestSnapshot.manifestList()));
-                }
-                // merge manifest files with changes
-                newMetas.addAll(
-                        ManifestFileMeta.merge(
-                                oldMetas,
-                                changes,
-                                manifestFile,
-                                fileStoreOptions.manifestSuggestedSize.getBytes()));
-                // prepare snapshot file
-                manifestListName = manifestList.write(newMetas);
-                newSnapshot =
-                        new Snapshot(
-                                newSnapshotId,
-                                manifestListName,
-                                commitUser,
-                                hash,
-                                commitKind,
-                                System.currentTimeMillis());
-                FileUtils.writeFileUtf8(tmpSnapshotPath, newSnapshot.toJson());
-            } catch (Throwable e) {
-                // fails when preparing for commit, we should clean up
-                cleanUpTmpSnapshot(tmpSnapshotPath, manifestListName, oldMetas, newMetas);
-                throw new RuntimeException(
-                        String.format(
-                                "Exception occurs when preparing snapshot #%d (path %s) by user %s "
-                                        + "with hash %s and kind %s. Clean up.",
-                                newSnapshotId,
-                                newSnapshotPath.toString(),
-                                commitUser,
-                                hash,
-                                commitKind.name()),
-                        e);
+        Snapshot newSnapshot;
+        String manifestListName = null;
+        List<ManifestFileMeta> oldMetas = new ArrayList<>();
+        List<ManifestFileMeta> newMetas = new ArrayList<>();
+        try {
+            if (latestSnapshot != null) {
+                // read all previous manifest files
+                oldMetas.addAll(manifestList.read(latestSnapshot.manifestList()));
             }
-
-            boolean success;
-            try {
-                FileSystem fs = tmpSnapshotPath.getFileSystem();
-                // atomic rename
-                if (lock != null) {
-                    success =
-                            lock.runWithLock(
-                                    () ->
-                                            // fs.rename may not returns false if target file
-                                            // already exists, or even not atomic
-                                            // as we're relying on external locking, we can first
-                                            // check if file exist then rename to work around this
-                                            // case
-                                            !fs.exists(newSnapshotPath)
-                                                    && fs.rename(tmpSnapshotPath, newSnapshotPath));
-                } else {
-                    success = fs.rename(tmpSnapshotPath, newSnapshotPath);
-                }
-            } catch (Throwable e) {
-                // exception when performing the atomic rename,
-                // we cannot clean up because we can't determine the success
-                throw new RuntimeException(
-                        String.format(
-                                "Exception occurs when committing snapshot #%d (path %s) by user %s "
-                                        + "with hash %s and kind %s. "
-                                        + "Cannot clean up because we can't determine the success.",
-                                newSnapshotId,
-                                newSnapshotPath.toString(),
-                                commitUser,
-                                hash,
-                                commitKind.name()),
-                        e);
-            }
-
-            if (success) {
-                return;
-            }
-
-            // atomic rename fails, clean up and try again
-            LOG.warn(
+            // merge manifest files with changes
+            newMetas.addAll(
+                    ManifestFileMeta.merge(
+                            oldMetas,
+                            changes,
+                            manifestFile,
+                            fileStoreOptions.manifestSuggestedSize.getBytes()));
+            // prepare snapshot file
+            manifestListName = manifestList.write(newMetas);
+            newSnapshot =
+                    new Snapshot(
+                            newSnapshotId,
+                            manifestListName,
+                            commitUser,
+                            hash,
+                            commitKind,
+                            System.currentTimeMillis());
+            FileUtils.writeFileUtf8(tmpSnapshotPath, newSnapshot.toJson());
+        } catch (Throwable e) {
+            // fails when preparing for commit, we should clean up
+            cleanUpTmpSnapshot(tmpSnapshotPath, manifestListName, oldMetas, newMetas);
+            throw new RuntimeException(
                     String.format(
-                            "Atomic rename failed for snapshot #%d (path %s) by user %s "
-                                    + "with hash %s and kind %s. "
-                                    + "Clean up and try again.",
+                            "Exception occurs when preparing snapshot #%d (path %s) by user %s "
+                                    + "with hash %s and kind %s. Clean up.",
                             newSnapshotId,
                             newSnapshotPath.toString(),
                             commitUser,
                             hash,
-                            commitKind.name()));
-            cleanUpTmpSnapshot(tmpSnapshotPath, manifestListName, oldMetas, newMetas);
+                            commitKind.name()),
+                    e);
         }
+
+        boolean success;
+        try {
+            FileSystem fs = tmpSnapshotPath.getFileSystem();
+            // atomic rename
+            if (lock != null) {
+                success =
+                        lock.runWithLock(
+                                () ->
+                                        // fs.rename may not returns false if target file
+                                        // already exists, or even not atomic
+                                        // as we're relying on external locking, we can first
+                                        // check if file exist then rename to work around this
+                                        // case
+                                        !fs.exists(newSnapshotPath)
+                                                && fs.rename(tmpSnapshotPath, newSnapshotPath));
+            } else {
+                success = fs.rename(tmpSnapshotPath, newSnapshotPath);
+            }
+        } catch (Throwable e) {
+            // exception when performing the atomic rename,
+            // we cannot clean up because we can't determine the success
+            throw new RuntimeException(
+                    String.format(
+                            "Exception occurs when committing snapshot #%d (path %s) by user %s "
+                                    + "with hash %s and kind %s. "
+                                    + "Cannot clean up because we can't determine the success.",
+                            newSnapshotId,
+                            newSnapshotPath.toString(),
+                            commitUser,
+                            hash,
+                            commitKind.name()),
+                    e);
+        }
+
+        if (success) {
+            return true;
+        }
+
+        // atomic rename fails, clean up and try again
+        LOG.warn(
+                String.format(
+                        "Atomic rename failed for snapshot #%d (path %s) by user %s "
+                                + "with hash %s and kind %s. "
+                                + "Clean up and try again.",
+                        newSnapshotId,
+                        newSnapshotPath.toString(),
+                        commitUser,
+                        hash,
+                        commitKind.name()));
+        cleanUpTmpSnapshot(tmpSnapshotPath, manifestListName, oldMetas, newMetas);
+        return false;
     }
 
     private void noConflictsOrFail(long snapshotId, List<ManifestEntry> changes) {
