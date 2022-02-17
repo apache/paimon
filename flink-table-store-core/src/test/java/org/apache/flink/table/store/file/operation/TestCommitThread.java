@@ -61,9 +61,7 @@ public class TestCommitThread extends Thread {
 
         FileFormat avro =
                 FileFormat.fromIdentifier(
-                        FileStoreCommitTestBase.class.getClassLoader(),
-                        "avro",
-                        new Configuration());
+                        FileStoreCommitTest.class.getClassLoader(), "avro", new Configuration());
         this.write = OperationTestUtils.createWrite(avro, safePathFactory);
         this.commit = OperationTestUtils.createCommit(avro, testPathFactory);
     }

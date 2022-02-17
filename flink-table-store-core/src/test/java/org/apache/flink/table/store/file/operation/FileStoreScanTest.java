@@ -53,7 +53,7 @@ public class FileStoreScanTest {
 
     private final FileFormat avro =
             FileFormat.fromIdentifier(
-                    FileStoreCommitTestBase.class.getClassLoader(), "avro", new Configuration());
+                    FileStoreCommitTest.class.getClassLoader(), "avro", new Configuration());
 
     private TestKeyValueGenerator gen;
     @TempDir java.nio.file.Path tempDir;
@@ -199,7 +199,7 @@ public class FileStoreScanTest {
 
     private Snapshot writeData(List<KeyValue> kvs) throws Exception {
         List<Snapshot> snapshots =
-                OperationTestUtils.writeAndCommitData(
+                OperationTestUtils.commitData(
                         kvs, gen::getPartition, this::getBucket, avro, pathFactory);
         return snapshots.get(snapshots.size() - 1);
     }

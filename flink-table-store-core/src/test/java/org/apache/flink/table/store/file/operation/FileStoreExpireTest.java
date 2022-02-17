@@ -46,7 +46,7 @@ public class FileStoreExpireTest {
 
     private final FileFormat avro =
             FileFormat.fromIdentifier(
-                    FileStoreCommitTestBase.class.getClassLoader(), "avro", new Configuration());
+                    FileStoreCommitTest.class.getClassLoader(), "avro", new Configuration());
 
     private TestKeyValueGenerator gen;
     @TempDir java.nio.file.Path tempDir;
@@ -187,7 +187,7 @@ public class FileStoreExpireTest {
             }
             allData.addAll(data);
             List<Snapshot> snapshots =
-                    OperationTestUtils.writeAndCommitData(
+                    OperationTestUtils.commitData(
                             data, gen::getPartition, kv -> 0, avro, pathFactory);
             for (int j = 0; j < snapshots.size(); j++) {
                 snapshotPositions.add(allData.size());

@@ -30,8 +30,10 @@ import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
+import org.apache.flink.table.store.file.utils.RowDataToObjectArrayConverter;
 import org.apache.flink.table.store.file.utils.TypeUtils;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -41,7 +43,6 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -71,6 +72,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private final String commitUser;
     private final RowType partitionType;
+    private final RowDataToObjectArrayConverter partitionObjectConverter;
     private final FileStorePathFactory pathFactory;
     private final ManifestFile manifestFile;
     private final ManifestList manifestList;
@@ -89,6 +91,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             FileStoreOptions fileStoreOptions) {
         this.commitUser = commitUser;
         this.partitionType = partitionType;
+        this.partitionObjectConverter = new RowDataToObjectArrayConverter(partitionType);
         this.pathFactory = pathFactory;
         this.manifestFile = manifestFileFactory.create();
         this.manifestList = manifestListFactory.create();
@@ -142,13 +145,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         List<ManifestEntry> appendChanges = collectChanges(committable.newFiles(), ValueKind.ADD);
-        tryCommit(appendChanges, committable.uuid(), Snapshot.CommitKind.APPEND);
+        tryCommit(appendChanges, committable.uuid(), Snapshot.CommitKind.APPEND, false);
 
         List<ManifestEntry> compactChanges = new ArrayList<>();
         compactChanges.addAll(collectChanges(committable.compactBefore(), ValueKind.DELETE));
         compactChanges.addAll(collectChanges(committable.compactAfter(), ValueKind.ADD));
         if (!compactChanges.isEmpty()) {
-            tryCommit(compactChanges, committable.uuid(), Snapshot.CommitKind.COMPACT);
+            tryCommit(compactChanges, committable.uuid(), Snapshot.CommitKind.COMPACT, true);
         }
     }
 
@@ -165,31 +168,46 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             + committable.toString());
         }
 
-        BinaryRowData partitionRowData =
-                TypeUtils.partitionMapToBinaryRowData(partition, partitionType);
-
         List<ManifestEntry> appendChanges = collectChanges(committable.newFiles(), ValueKind.ADD);
+        // sanity check, all changes must be done within the given partition
+        Predicate partitionFilter = TypeUtils.partitionMapToPredicate(partition, partitionType);
+        for (ManifestEntry entry : appendChanges) {
+            if (!partitionFilter.test(partitionObjectConverter.convert(entry.partition()))) {
+                throw new IllegalArgumentException(
+                        "Trying to overwrite partition "
+                                + partition.toString()
+                                + ", but the changes in "
+                                + pathFactory.getPartitionString(entry.partition())
+                                + " does not belong to this partition");
+            }
+        }
+        // overwrite new files
         tryOverwrite(
-                partitionRowData, appendChanges, committable.uuid(), Snapshot.CommitKind.APPEND);
+                partitionFilter, appendChanges, committable.uuid(), Snapshot.CommitKind.APPEND);
 
         List<ManifestEntry> compactChanges = new ArrayList<>();
         compactChanges.addAll(collectChanges(committable.compactBefore(), ValueKind.DELETE));
         compactChanges.addAll(collectChanges(committable.compactAfter(), ValueKind.ADD));
-        tryCommit(compactChanges, committable.uuid(), Snapshot.CommitKind.COMPACT);
+        if (!compactChanges.isEmpty()) {
+            tryCommit(compactChanges, committable.uuid(), Snapshot.CommitKind.COMPACT, true);
+        }
     }
 
     private void tryCommit(
-            List<ManifestEntry> changes, String hash, Snapshot.CommitKind commitKind) {
+            List<ManifestEntry> changes,
+            String hash,
+            Snapshot.CommitKind commitKind,
+            boolean checkDeletedFiles) {
         while (true) {
             Long latestSnapshotId = pathFactory.latestSnapshotId();
-            if (tryCommitOnce(changes, hash, commitKind, latestSnapshotId)) {
+            if (tryCommitOnce(changes, hash, commitKind, latestSnapshotId, checkDeletedFiles)) {
                 break;
             }
         }
     }
 
     private void tryOverwrite(
-            BinaryRowData partition,
+            Predicate partitionFilter,
             List<ManifestEntry> changes,
             String hash,
             Snapshot.CommitKind commitKind) {
@@ -200,7 +218,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (latestSnapshotId != null) {
                 List<ManifestEntry> currentEntries =
                         scan.withSnapshot(latestSnapshotId)
-                                .withPartitionFilter(Collections.singletonList(partition))
+                                .withPartitionFilter(partitionFilter)
                                 .plan()
                                 .files();
                 for (ManifestEntry entry : currentEntries) {
@@ -215,7 +233,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
             changesWithOverwrite.addAll(changes);
 
-            if (tryCommitOnce(changesWithOverwrite, hash, commitKind, latestSnapshotId)) {
+            if (tryCommitOnce(changesWithOverwrite, hash, commitKind, latestSnapshotId, false)) {
                 break;
             }
         }
@@ -248,7 +266,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<ManifestEntry> changes,
             String hash,
             Snapshot.CommitKind commitKind,
-            Long latestSnapshotId) {
+            Long latestSnapshotId,
+            boolean checkDeletedFiles) {
         long newSnapshotId =
                 latestSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshotId + 1;
         Path newSnapshotPath = pathFactory.toSnapshotPath(newSnapshotId);
@@ -263,7 +282,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         Snapshot latestSnapshot = null;
         if (latestSnapshotId != null) {
-            noConflictsOrFail(latestSnapshotId, changes);
+            if (checkDeletedFiles) {
+                noConflictsOrFail(latestSnapshotId, changes);
+            }
             latestSnapshot = Snapshot.fromPath(pathFactory.toSnapshotPath(latestSnapshotId));
         }
 

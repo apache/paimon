@@ -18,11 +18,12 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.binary.BinaryStringData;
 import org.apache.flink.table.data.binary.BinaryStringDataUtil;
-import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
+import org.apache.flink.table.store.file.predicate.And;
+import org.apache.flink.table.store.file.predicate.Equal;
+import org.apache.flink.table.store.file.predicate.Literal;
+import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -33,16 +34,21 @@ import java.util.Map;
 /** Utils for parsing among different types. */
 public class TypeUtils {
 
-    public static BinaryRowData partitionMapToBinaryRowData(
+    public static Predicate partitionMapToPredicate(
             Map<String, String> partition, RowType partitionType) {
         List<String> fieldNames = partitionType.getFieldNames();
-        RowDataSerializer serializer = new RowDataSerializer(partitionType);
-        GenericRowData rowData = new GenericRowData(partitionType.getFieldCount());
+        Predicate predicate = null;
         for (Map.Entry<String, String> entry : partition.entrySet()) {
             int idx = fieldNames.indexOf(entry.getKey());
-            rowData.setField(idx, castFromString(entry.getValue(), partitionType.getTypeAt(idx)));
+            LogicalType type = partitionType.getTypeAt(idx);
+            Literal literal = new Literal(type, castFromString(entry.getValue(), type));
+            if (predicate == null) {
+                predicate = new Equal(idx, literal);
+            } else {
+                predicate = new And(predicate, new Equal(idx, literal));
+            }
         }
-        return serializer.toBinaryRow(rowData);
+        return predicate;
     }
 
     private static Object castFromString(String s, LogicalType type) {
