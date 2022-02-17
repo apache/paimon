@@ -30,19 +30,19 @@ import static org.apache.flink.table.store.file.manifest.ManifestCommittableSeri
 import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link LocalCommittableSerializer}. */
-public class LocalCommittableSerializerTest {
+/** Test for {@link FileCommittableSerializer}. */
+public class FileCommittableSerializerTest {
 
     @Test
     public void test() throws IOException {
-        LocalCommittableSerializer serializer =
-                new LocalCommittableSerializer(
+        FileCommittableSerializer serializer =
+                new FileCommittableSerializer(
                         RowType.of(new IntType()),
                         RowType.of(new IntType()),
                         RowType.of(new IntType()));
         Increment increment = randomIncrement();
-        LocalCommittable committable = new LocalCommittable(row(0), 1, increment);
-        LocalCommittable newCommittable =
+        FileCommittable committable = new FileCommittable(row(0), 1, increment);
+        FileCommittable newCommittable =
                 serializer.deserialize(1, serializer.serialize(committable));
         assertThat(newCommittable).isEqualTo(committable);
     }

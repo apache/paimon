@@ -23,8 +23,8 @@ import org.apache.flink.table.store.file.mergetree.Increment;
 
 import java.util.Objects;
 
-/** Local committable for sink. */
-public class LocalCommittable {
+/** File committable for sink. */
+public class FileCommittable {
 
     private final BinaryRowData partition;
 
@@ -32,7 +32,7 @@ public class LocalCommittable {
 
     private final Increment increment;
 
-    public LocalCommittable(BinaryRowData partition, int bucket, Increment increment) {
+    public FileCommittable(BinaryRowData partition, int bucket, Increment increment) {
         this.partition = partition;
         this.bucket = bucket;
         this.increment = increment;
@@ -58,7 +58,7 @@ public class LocalCommittable {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        LocalCommittable that = (LocalCommittable) o;
+        FileCommittable that = (FileCommittable) o;
         return bucket == that.bucket
                 && Objects.equals(partition, that.partition)
                 && Objects.equals(increment, that.increment);

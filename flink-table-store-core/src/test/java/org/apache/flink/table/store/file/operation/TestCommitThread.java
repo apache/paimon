@@ -35,6 +35,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
@@ -99,9 +100,10 @@ public class TestCommitThread extends Thread {
         for (int i = 0; i < numWrites && !data.isEmpty(); i++) {
             writeData();
         }
-        ManifestCommittable committable = new ManifestCommittable();
+        ManifestCommittable committable =
+                new ManifestCommittable(String.valueOf(new Random().nextLong()));
         for (Map.Entry<BinaryRowData, MergeTreeWriter> entry : writers.entrySet()) {
-            committable.add(entry.getKey(), 0, entry.getValue().prepareCommit());
+            committable.addFileCommittable(entry.getKey(), 0, entry.getValue().prepareCommit());
         }
 
         runWithRetry(committable, () -> commit.commit(committable, Collections.emptyMap()));
@@ -109,8 +111,9 @@ public class TestCommitThread extends Thread {
 
     private void doOverwrite() throws Exception {
         BinaryRowData partition = overwriteData();
-        ManifestCommittable committable = new ManifestCommittable();
-        committable.add(partition, 0, writers.get(partition).prepareCommit());
+        ManifestCommittable committable =
+                new ManifestCommittable(String.valueOf(new Random().nextLong()));
+        committable.addFileCommittable(partition, 0, writers.get(partition).prepareCommit());
 
         runWithRetry(
                 committable,

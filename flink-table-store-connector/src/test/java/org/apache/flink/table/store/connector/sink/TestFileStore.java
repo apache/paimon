@@ -31,6 +31,7 @@ import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.operation.Lock;
+import org.apache.flink.table.store.file.stats.FieldStats;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 
 import java.util.ArrayList;
@@ -130,7 +131,22 @@ public class TestFileStore implements FileStore {
         public Increment prepareCommit() {
             List<SstFileMeta> newFiles =
                     records.stream()
-                            .map(s -> new SstFileMeta(s, 0, 0, null, null, null, 0, 0, 0))
+                            .map(
+                                    s ->
+                                            new SstFileMeta(
+                                                    s,
+                                                    0,
+                                                    0,
+                                                    null,
+                                                    null,
+                                                    new FieldStats[] {
+                                                        new FieldStats(null, null, 0),
+                                                        new FieldStats(null, null, 0),
+                                                        new FieldStats(null, null, 0)
+                                                    },
+                                                    0,
+                                                    0,
+                                                    0))
                             .collect(Collectors.toList());
             return new Increment(newFiles, Collections.emptyList(), Collections.emptyList());
         }

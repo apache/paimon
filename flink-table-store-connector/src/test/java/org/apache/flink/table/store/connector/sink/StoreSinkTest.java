@@ -24,7 +24,6 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.connector.sink.TestFileStore.TestRecordWriter;
-import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -56,7 +55,7 @@ public class StoreSinkTest {
 
     @Test
     public void testChangelogs() throws Exception {
-        StoreSink sink = newSink(null);
+        StoreSink<?, ?> sink = newSink(null);
         writeAndCommit(
                 sink,
                 GenericRowData.ofKind(RowKind.INSERT, 0, 0, 1),
@@ -73,8 +72,8 @@ public class StoreSinkTest {
 
     @Test
     public void testNoKeyChangelogs() throws Exception {
-        StoreSink sink =
-                new StoreSink(
+        StoreSink<?, ?> sink =
+                new StoreSink<>(
                         identifier,
                         fileStore,
                         rowType,
@@ -99,7 +98,7 @@ public class StoreSinkTest {
 
     @Test
     public void testAppend() throws Exception {
-        StoreSink sink = newSink(null);
+        StoreSink<?, ?> sink = newSink(null);
         writeAndAssert(sink);
 
         writeAndCommit(sink, GenericRowData.of(0, 8, 9), GenericRowData.of(1, 10, 11));
@@ -111,7 +110,7 @@ public class StoreSinkTest {
 
     @Test
     public void testOverwrite() throws Exception {
-        StoreSink sink = newSink(new HashMap<>());
+        StoreSink<?, ?> sink = newSink(new HashMap<>());
         writeAndAssert(sink);
 
         writeAndCommit(sink, GenericRowData.of(0, 8, 9), GenericRowData.of(1, 10, 11));
@@ -126,7 +125,7 @@ public class StoreSinkTest {
     public void testOverwritePartition() throws Exception {
         HashMap<String, String> partition = new HashMap<>();
         partition.put("part", "0");
-        StoreSink sink = newSink(partition);
+        StoreSink<?, ?> sink = newSink(partition);
         writeAndAssert(sink);
 
         writeAndCommit(sink, GenericRowData.of(0, 8, 9), GenericRowData.of(1, 10, 11));
@@ -138,7 +137,7 @@ public class StoreSinkTest {
                 .isEqualTo(Collections.singletonList("ADD-key-8-value-0/8/9"));
     }
 
-    private void writeAndAssert(StoreSink sink) throws Exception {
+    private void writeAndAssert(StoreSink<?, ?> sink) throws Exception {
         writeAndCommit(
                 sink,
                 GenericRowData.of(0, 0, 1),
@@ -153,17 +152,17 @@ public class StoreSinkTest {
                 .isEqualTo(Arrays.asList("ADD-key-0-value-0/0/1", "ADD-key-7-value-0/7/5"));
     }
 
-    private void writeAndCommit(StoreSink sink, RowData... rows) throws Exception {
+    private void writeAndCommit(StoreSink<?, ?> sink, RowData... rows) throws Exception {
         commit(sink, write(sink, rows));
     }
 
-    private List<LocalCommittable> write(StoreSink sink, RowData... rows) throws Exception {
-        StoreSinkWriter writer = sink.createWriter(null, null);
+    private List<Committable> write(StoreSink<?, ?> sink, RowData... rows) throws Exception {
+        StoreSinkWriter<?> writer = sink.createWriter(null);
         for (RowData row : rows) {
             writer.write(row, null);
         }
 
-        List<LocalCommittable> localCommittables = writer.prepareCommit(true);
+        List<Committable> committables = writer.prepareCommit();
         Map<BinaryRowData, Map<Integer, RecordWriter>> writers = new HashMap<>(writer.writers());
         assertThat(writers.size()).isGreaterThan(0);
 
@@ -176,12 +175,12 @@ public class StoreSinkTest {
                                     assertThat(testWriter.synced).isTrue();
                                     assertThat(testWriter.closed).isTrue();
                                 }));
-        return localCommittables;
+        return committables;
     }
 
-    private void commit(StoreSink sink, List<LocalCommittable> localCommittables) throws Exception {
-        StoreGlobalCommitter committer = (StoreGlobalCommitter) sink.createGlobalCommitter().get();
-        ManifestCommittable committable = committer.combine(localCommittables);
+    private void commit(StoreSink<?, ?> sink, List<Committable> fileCommittables) throws Exception {
+        StoreGlobalCommitter committer = sink.createCommitter();
+        GlobalCommittable<?> committable = committer.combine(0, fileCommittables);
 
         fileStore.expired = false;
         lock.locked = false;
@@ -200,8 +199,8 @@ public class StoreSinkTest {
         assertThat(lock.closed).isTrue();
     }
 
-    private StoreSink newSink(Map<String, String> overwritePartition) {
-        return new StoreSink(
+    private StoreSink<?, ?> newSink(Map<String, String> overwritePartition) {
+        return new StoreSink<>(
                 identifier,
                 fileStore,
                 rowType,
