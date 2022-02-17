@@ -132,9 +132,7 @@ public class GlobalCommitterOperator<CommT, GlobalCommT> extends AbstractStreamO
     public void processElement(StreamRecord<CommittableMessage<CommT>> element) {
         CommittableMessage<CommT> message = element.getValue();
         if (message instanceof CommittableWithLineage) {
-            this.committables.addAll(
-                    Collections.singletonList(
-                            ((CommittableWithLineage<CommT>) message).getCommittable()));
+            this.committables.add(((CommittableWithLineage<CommT>) message).getCommittable());
         }
     }
 
