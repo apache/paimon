@@ -28,6 +28,7 @@ import org.apache.flink.types.RowKind;
 
 import org.junit.Assert;
 import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
 
 import java.util.Comparator;
 import java.util.List;
@@ -39,6 +40,7 @@ import static org.apache.flink.table.store.kafka.KafkaLogTestUtils.SOURCE_CONTEX
 import static org.apache.flink.table.store.kafka.KafkaLogTestUtils.discoverKafkaLogFactory;
 import static org.apache.flink.table.store.kafka.KafkaLogTestUtils.testContext;
 import static org.apache.flink.table.store.kafka.KafkaLogTestUtils.testRecord;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for {@link KafkaLogStoreFactory}. */
 public class KafkaLogITCase extends KafkaTableTestBase {
@@ -47,6 +49,7 @@ public class KafkaLogITCase extends KafkaTableTestBase {
 
     @Test
     public void testDropEmpty() {
+        // Expect no exceptions to be thrown
         factory.onDropTable(testContext(getBootstrapServers(), LogChangelogMode.AUTO, true));
     }
 
@@ -83,24 +86,49 @@ public class KafkaLogITCase extends KafkaTableTestBase {
                 false);
     }
 
-    @Test(expected = IllegalArgumentException.class)
-    public void testUpsertTransactionNonKeyed() throws Exception {
-        innerTest(
-                "UpsertTransactionNonKeyed",
-                LogChangelogMode.UPSERT,
-                LogConsistency.TRANSACTIONAL,
-                false);
+    @Test
+    public void testUpsertTransactionNonKeyed() {
+        IllegalArgumentException exception =
+                Assertions.assertThrows(
+                        IllegalArgumentException.class,
+                        () ->
+                                innerTest(
+                                        "UpsertTransactionNonKeyed",
+                                        LogChangelogMode.UPSERT,
+                                        LogConsistency.TRANSACTIONAL,
+                                        false));
+        assertThat(exception.getMessage())
+                .isEqualTo("Can not use upsert changelog mode for non-pk table.");
     }
 
-    @Test(expected = IllegalArgumentException.class)
-    public void testUpsertEventualNonKeyed() throws Exception {
-        innerTest(
-                "UpsertEventualNonKeyed", LogChangelogMode.UPSERT, LogConsistency.EVENTUAL, false);
+    @Test
+    public void testUpsertEventualNonKeyed() {
+        IllegalArgumentException exception =
+                Assertions.assertThrows(
+                        IllegalArgumentException.class,
+                        () ->
+                                innerTest(
+                                        "UpsertEventualNonKeyed",
+                                        LogChangelogMode.UPSERT,
+                                        LogConsistency.EVENTUAL,
+                                        false));
+        assertThat(exception.getMessage())
+                .isEqualTo("Can not use EVENTUAL consistency mode for non-pk table.");
     }
 
-    @Test(expected = IllegalArgumentException.class)
-    public void testAllEventualNonKeyed() throws Exception {
-        innerTest("AllEventualNonKeyed", LogChangelogMode.ALL, LogConsistency.EVENTUAL, false);
+    @Test
+    public void testAllEventualNonKeyed() {
+        IllegalArgumentException exception =
+                Assertions.assertThrows(
+                        IllegalArgumentException.class,
+                        () ->
+                                innerTest(
+                                        "AllEventualNonKeyed",
+                                        LogChangelogMode.ALL,
+                                        LogConsistency.EVENTUAL,
+                                        false));
+        assertThat(exception.getMessage())
+                .isEqualTo("Can not use EVENTUAL consistency mode for non-pk table.");
     }
 
     private void innerTest(
@@ -125,7 +153,7 @@ public class KafkaLogITCase extends KafkaTableTestBase {
                             testRecord(true, 1, 3, 4, RowKind.INSERT),
                             testRecord(true, 0, 5, 6, RowKind.INSERT),
                             testRecord(true, 0, 7, 8, RowKind.INSERT))
-                    .sinkTo(new TestOffsetsLogSink(sinkProvider, uuid));
+                    .sinkTo(new TestOffsetsLogSink<>(sinkProvider, uuid));
             env.execute();
 
             // 1.2 read
@@ -154,7 +182,7 @@ public class KafkaLogITCase extends KafkaTableTestBase {
                             testRecord(true, 0, 9, 10, RowKind.INSERT),
                             testRecord(true, 1, 11, 12, RowKind.INSERT),
                             testRecord(true, 2, 13, 14, RowKind.INSERT))
-                    .sinkTo(new TestOffsetsLogSink(sinkProvider, UUID.randomUUID().toString()));
+                    .sinkTo(new TestOffsetsLogSink<>(sinkProvider, UUID.randomUUID().toString()));
             env.execute();
 
             // 2.2 read from offsets

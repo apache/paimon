@@ -38,7 +38,7 @@ public class LogOptions {
                     .defaultValue(LogStartupMode.FULL)
                     .withDescription(
                             Description.builder()
-                                    .text("Specifies the startup mode for log consumer.")
+                                    .text("Specify the startup mode for log consumer.")
                                     .linebreak()
                                     .list(formatEnumOption(LogStartupMode.FULL))
                                     .list(formatEnumOption(LogStartupMode.LATEST))
@@ -65,7 +65,7 @@ public class LogOptions {
                     .defaultValue(LogConsistency.TRANSACTIONAL)
                     .withDescription(
                             Description.builder()
-                                    .text("Specifies the log consistency mode for table.")
+                                    .text("Specify the log consistency mode for table.")
                                     .linebreak()
                                     .list(
                                             formatEnumOption(LogConsistency.TRANSACTIONAL),
@@ -78,7 +78,7 @@ public class LogOptions {
                     .defaultValue(LogChangelogMode.AUTO)
                     .withDescription(
                             Description.builder()
-                                    .text("Specifies the log changelog mode for table.")
+                                    .text("Specify the log changelog mode for table.")
                                     .linebreak()
                                     .list(
                                             formatEnumOption(LogChangelogMode.AUTO),
@@ -91,19 +91,19 @@ public class LogOptions {
                     .stringType()
                     .defaultValue("json")
                     .withDescription(
-                            "Specifies the key message format of log system with primary key.");
+                            "Specify the key message format of log system with primary key.");
 
     public static final ConfigOption<String> FORMAT =
             ConfigOptions.key("format")
                     .stringType()
                     .defaultValue("debezium-json")
-                    .withDescription("Specifies the message format of log system.");
+                    .withDescription("Specify the message format of log system.");
 
     /** Specifies the startup mode for log consumer. */
     public enum LogStartupMode implements DescribedEnum {
         FULL(
                 "full",
-                "Performs a snapshot on the table upon first startup,"
+                "Perform a snapshot on the table upon first startup,"
                         + " and continue to read the latest changes."),
 
         LATEST("latest", "Start from the latest."),
@@ -133,12 +133,12 @@ public class LogOptions {
     public enum LogConsistency implements DescribedEnum {
         TRANSACTIONAL(
                 "transactional",
-                "only the data after the checkpoint can be seen by readers, the latency depends on checkpoint interval."),
+                "Only the data after the checkpoint can be seen by readers, the latency depends on checkpoint interval."),
 
         EVENTUAL(
                 "eventual",
                 "Immediate data visibility, you may see some intermediate states, "
-                        + "but eventually the right results will be produced, only works in table with primary key.");
+                        + "but eventually the right results will be produced, only works for table with primary key.");
 
         private final String value;
         private final String description;
@@ -161,9 +161,9 @@ public class LogOptions {
 
     /** Specifies the log changelog mode for table. */
     public enum LogChangelogMode implements DescribedEnum {
-        AUTO("auto", "upsert for table with primary key, all for table without primary key.."),
+        AUTO("auto", "Upsert for table with primary key, all for table without primary key.."),
 
-        ALL("all", "the log system stores all changes including UPDATE_BEFORE."),
+        ALL("all", "The log system stores all changes including UPDATE_BEFORE."),
 
         UPSERT(
                 "upsert",

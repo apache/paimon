@@ -127,7 +127,7 @@ public class KafkaLogSourceProvider implements LogSourceProvider {
             case FROM_TIMESTAMP:
                 if (timestampMills == null) {
                     throw new NullPointerException(
-                            "Must specific a timestamp if you choose timestamp startup mode.");
+                            "Must specify a timestamp if you choose timestamp startup mode.");
                 }
                 return OffsetsInitializer.timestamp(timestampMills);
             default:

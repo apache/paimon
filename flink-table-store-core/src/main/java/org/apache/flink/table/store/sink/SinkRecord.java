@@ -24,7 +24,7 @@ import org.apache.flink.types.RowKind;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
 
-/** A sink records contains key, value and partition, bucket, row kind information. */
+/** A sink record contains key, row and partition, bucket information. */
 public class SinkRecord {
 
     private final BinaryRowData partition;

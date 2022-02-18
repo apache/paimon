@@ -125,7 +125,7 @@ public class KafkaLogTestUtils {
         return new FactoryUtil.DefaultDynamicTableContext(
                 ObjectIdentifier.of("catalog", "database", name),
                 KafkaLogTestUtils.createResolvedTable(options, rowType, pk),
-                new HashMap<>(),
+                Collections.emptyMap(),
                 new Configuration(),
                 Thread.currentThread().getContextClassLoader(),
                 false);
