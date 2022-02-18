@@ -22,6 +22,7 @@ import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.connector.Projection;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileFormat;
@@ -36,7 +37,12 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 
-/** Reads {@link KeyValue}s from sst files. */
+/**
+ * Reads {@link KeyValue}s from sst files.
+ *
+ * <p>NOTE: Sst files store records ordered by keys without projections. If key projections are
+ * applied the produced iterator is no longer ordered.
+ */
 public class SstFileReader {
 
     private final RowType keyType;
@@ -112,8 +118,14 @@ public class SstFileReader {
 
         private final RowType keyType;
         private final RowType valueType;
+        private final FileFormat fileFormat;
         private final FileStorePathFactory pathFactory;
-        private final BulkFormat<RowData, FileSourceSplit> readerFactory;
+
+        private int[][] keyProjection;
+        private int[][] valueProjection;
+        private RowType projectedKeyType;
+        private RowType projectedValueType;
+        private BulkFormat<RowData, FileSourceSplit> readerFactory;
 
         public Factory(
                 RowType keyType,
@@ -122,17 +134,42 @@ public class SstFileReader {
                 FileStorePathFactory pathFactory) {
             this.keyType = keyType;
             this.valueType = valueType;
+            this.fileFormat = fileFormat;
             this.pathFactory = pathFactory;
-            RowType recordType = KeyValue.schema(keyType, valueType);
-            this.readerFactory = fileFormat.createReaderFactory(recordType);
+
+            this.keyProjection = Projection.range(0, keyType.getFieldCount()).toNestedIndexes();
+            this.valueProjection = Projection.range(0, valueType.getFieldCount()).toNestedIndexes();
+            applyProjection();
+        }
+
+        public Factory withKeyProjection(int[][] projection) {
+            keyProjection = projection;
+            applyProjection();
+            return this;
+        }
+
+        public Factory withValueProjection(int[][] projection) {
+            valueProjection = projection;
+            applyProjection();
+            return this;
         }
 
         public SstFileReader create(BinaryRowData partition, int bucket) {
             return new SstFileReader(
-                    keyType,
-                    valueType,
+                    projectedKeyType,
+                    projectedValueType,
                     readerFactory,
                     pathFactory.createSstPathFactory(partition, bucket));
+        }
+
+        private void applyProjection() {
+            projectedKeyType = (RowType) Projection.of(keyProjection).project(keyType);
+            projectedValueType = (RowType) Projection.of(valueProjection).project(valueType);
+
+            RowType recordType = KeyValue.schema(keyType, valueType);
+            int[][] projection =
+                    KeyValue.project(keyProjection, valueProjection, keyType.getFieldCount());
+            readerFactory = fileFormat.createReaderFactory(recordType, projection);
         }
     }
 }
