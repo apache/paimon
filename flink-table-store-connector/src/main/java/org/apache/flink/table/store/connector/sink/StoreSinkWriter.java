@@ -97,7 +97,7 @@ public class StoreSinkWriter<WriterStateT>
     }
 
     private void writeToFileStore(RecordWriter writer, SinkRecord record) throws Exception {
-        switch (record.rowKind()) {
+        switch (record.row().getRowKind()) {
             case INSERT:
             case UPDATE_AFTER:
                 if (record.key().getArity() == 0) {

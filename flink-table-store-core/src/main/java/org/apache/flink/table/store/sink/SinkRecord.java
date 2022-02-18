@@ -24,27 +24,22 @@ import org.apache.flink.types.RowKind;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
 
-/** A sink records contains key, value and partition, bucket, row kind information. */
+/** A sink record contains key, row and partition, bucket information. */
 public class SinkRecord {
 
     private final BinaryRowData partition;
 
     private final int bucket;
 
-    private final RowKind rowKind;
-
     private final BinaryRowData key;
 
     private final RowData row;
 
-    public SinkRecord(
-            BinaryRowData partition, int bucket, RowKind rowKind, BinaryRowData key, RowData row) {
+    public SinkRecord(BinaryRowData partition, int bucket, BinaryRowData key, RowData row) {
         checkArgument(partition.getRowKind() == RowKind.INSERT);
         checkArgument(key.getRowKind() == RowKind.INSERT);
-        checkArgument(row.getRowKind() == RowKind.INSERT);
         this.partition = partition;
         this.bucket = bucket;
-        this.rowKind = rowKind;
         this.key = key;
         this.row = row;
     }
@@ -63,9 +58,5 @@ public class SinkRecord {
 
     public RowData row() {
         return row;
-    }
-
-    public RowKind rowKind() {
-        return rowKind;
     }
 }

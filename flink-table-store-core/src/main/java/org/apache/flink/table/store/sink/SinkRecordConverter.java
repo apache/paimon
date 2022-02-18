@@ -21,17 +21,18 @@ package org.apache.flink.table.store.sink;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.generated.Projection;
-import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.utils.ProjectionUtils;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
+
+import java.util.stream.IntStream;
 
 /** Converter for converting {@link RowData} to {@link SinkRecord}. */
 public class SinkRecordConverter {
 
     private final int numBucket;
 
-    private final RowDataSerializer rowSerializer;
+    private final Projection<RowData, BinaryRowData> allProjection;
 
     private final Projection<RowData, BinaryRowData> partProjection;
 
@@ -39,18 +40,30 @@ public class SinkRecordConverter {
 
     public SinkRecordConverter(int numBucket, RowType inputType, int[] partitions, int[] keys) {
         this.numBucket = numBucket;
-        this.rowSerializer = new RowDataSerializer(inputType);
+        this.allProjection =
+                ProjectionUtils.newProjection(
+                        inputType, IntStream.range(0, inputType.getFieldCount()).toArray());
         this.partProjection = ProjectionUtils.newProjection(inputType, partitions);
         this.keyProjection = ProjectionUtils.newProjection(inputType, keys);
     }
 
     public SinkRecord convert(RowData row) {
-        RowKind rowKind = row.getRowKind();
-        row.setRowKind(RowKind.INSERT);
         BinaryRowData partition = partProjection.apply(row);
         BinaryRowData key = keyProjection.apply(row);
-        int hash = key.getArity() == 0 ? rowSerializer.toBinaryRow(row).hashCode() : key.hashCode();
+        int hash = key.getArity() == 0 ? hashRow(row) : key.hashCode();
         int bucket = Math.abs(hash % numBucket);
-        return new SinkRecord(partition, bucket, rowKind, key, row);
+        return new SinkRecord(partition, bucket, key, row);
+    }
+
+    private int hashRow(RowData row) {
+        if (row instanceof BinaryRowData) {
+            RowKind rowKind = row.getRowKind();
+            row.setRowKind(RowKind.INSERT);
+            int hash = row.hashCode();
+            row.setRowKind(rowKind);
+            return hash;
+        } else {
+            return allProjection.apply(row).hashCode();
+        }
     }
 }
