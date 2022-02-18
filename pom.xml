@@ -54,6 +54,7 @@ under the License.
     <modules>
         <module>flink-table-store-core</module>
         <module>flink-table-store-connector</module>
+        <module>flink-table-store-kafka</module>
     </modules>
 
     <properties>
@@ -61,6 +62,7 @@ under the License.
         <scala.binary.version>2.12</scala.binary.version>
         <slf4j.version>1.7.15</slf4j.version>
         <log4j.version>2.17.1</log4j.version>
+        <junit4.version>4.13.2</junit4.version>
         <junit5.version>5.8.1</junit5.version>
         <spotless.version>2.4.2</spotless.version>
         <target.java.version>1.8</target.java.version>
@@ -68,6 +70,7 @@ under the License.
         <javax.annotation-api.version>1.3.2</javax.annotation-api.version>
         <flink.forkCount>1C</flink.forkCount>
         <flink.reuseForks>true</flink.reuseForks>
+        <testcontainers.version>1.16.2</testcontainers.version>
 
         <!-- Can be set to any value to reproduce a specific build. -->
         <test.randomization.seed/>
