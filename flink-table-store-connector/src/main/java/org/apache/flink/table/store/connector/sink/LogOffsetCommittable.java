@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.connector.sink;
 
 import java.nio.ByteBuffer;
+import java.util.Objects;
 
 /** Log offset committable for a bucket. */
 public class LogOffsetCommittable {
@@ -47,5 +48,22 @@ public class LogOffsetCommittable {
     public static LogOffsetCommittable fromBytes(byte[] bytes) {
         ByteBuffer buffer = ByteBuffer.wrap(bytes);
         return new LogOffsetCommittable(buffer.getInt(), buffer.getLong());
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        LogOffsetCommittable that = (LogOffsetCommittable) o;
+        return bucket == that.bucket && offset == that.offset;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(bucket, offset);
     }
 }

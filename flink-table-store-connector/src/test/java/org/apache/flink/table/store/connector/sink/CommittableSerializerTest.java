@@ -18,21 +18,74 @@
 
 package org.apache.flink.table.store.connector.sink;
 
+import org.apache.flink.core.io.SimpleVersionedSerializer;
+import org.apache.flink.table.store.file.mergetree.Increment;
+import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.types.logical.RowType;
+
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+
+import static org.apache.flink.table.store.file.manifest.ManifestCommittableSerializerTest.randomIncrement;
+import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link CommittableSerializer}. */
 public class CommittableSerializerTest {
 
+    private final FileCommittableSerializer fileSerializer =
+            new FileCommittableSerializer(
+                    RowType.of(new IntType()),
+                    RowType.of(new IntType()),
+                    RowType.of(new IntType()));
+
+    private final CommittableSerializer serializer =
+            new CommittableSerializer(fileSerializer, (SimpleVersionedSerializer) fileSerializer);
+
     @Test
-    public void test() {
-        byte[] bytes = new byte[] {4, 5, 1};
-        Committable committable = new Committable(Committable.Kind.LOG, bytes, 9);
-        byte[] serialize = CommittableSerializer.INSTANCE.serialize(committable);
-        Committable deser = CommittableSerializer.INSTANCE.deserialize(1, serialize);
-        assertThat(deser.kind()).isEqualTo(Committable.Kind.LOG);
-        assertThat(deser.serializerVersion()).isEqualTo(9);
-        assertThat(deser.wrappedCommittable()).isEqualTo(bytes);
+    public void testFile() throws IOException {
+        Increment increment = randomIncrement();
+        FileCommittable committable = new FileCommittable(row(0), 1, increment);
+        FileCommittable newCommittable =
+                (FileCommittable)
+                        serializer
+                                .deserialize(
+                                        1,
+                                        serializer.serialize(
+                                                new Committable(
+                                                        Committable.Kind.FILE, committable)))
+                                .wrappedCommittable();
+        assertThat(newCommittable).isEqualTo(committable);
+    }
+
+    @Test
+    public void testLogOffset() throws IOException {
+        LogOffsetCommittable committable = new LogOffsetCommittable(2, 3);
+        LogOffsetCommittable newCommittable =
+                (LogOffsetCommittable)
+                        serializer
+                                .deserialize(
+                                        1,
+                                        serializer.serialize(
+                                                new Committable(
+                                                        Committable.Kind.LOG_OFFSET, committable)))
+                                .wrappedCommittable();
+        assertThat(newCommittable).isEqualTo(committable);
+    }
+
+    @Test
+    public void testLog() throws IOException {
+        Increment increment = randomIncrement();
+        FileCommittable committable = new FileCommittable(row(0), 1, increment);
+        FileCommittable newCommittable =
+                (FileCommittable)
+                        serializer
+                                .deserialize(
+                                        1,
+                                        serializer.serialize(
+                                                new Committable(Committable.Kind.LOG, committable)))
+                                .wrappedCommittable();
+        assertThat(newCommittable).isEqualTo(committable);
     }
 }

@@ -49,7 +49,7 @@ public class GlobalCommitterOperatorTest {
     @Test
     public void closeCommitter() throws Exception {
         final DefaultGlobalCommitter globalCommitter = new DefaultGlobalCommitter();
-        final OneInputStreamOperatorTestHarness<CommittableMessage<String>, Void> testHarness =
+        final OneInputStreamOperatorTestHarness<CommittableMessage<String>, ?> testHarness =
                 createTestHarness(globalCommitter);
         testHarness.initializeEmptyState();
         testHarness.open();
@@ -69,7 +69,7 @@ public class GlobalCommitterOperatorTest {
                 buildSubtaskState(createTestHarness(), input2);
 
         final DefaultGlobalCommitter globalCommitter = new DefaultGlobalCommitter();
-        final OneInputStreamOperatorTestHarness<CommittableMessage<String>, Void> testHarness =
+        final OneInputStreamOperatorTestHarness<CommittableMessage<String>, ?> testHarness =
                 createTestHarness(globalCommitter);
 
         final OperatorSubtaskState mergedOperatorSubtaskState =
@@ -108,7 +108,7 @@ public class GlobalCommitterOperatorTest {
         expectedOutput.add(DefaultGlobalCommitter.COMBINER.apply(input2));
         expectedOutput.add(DefaultGlobalCommitter.COMBINER.apply(input3));
 
-        final OneInputStreamOperatorTestHarness<CommittableMessage<String>, Void> testHarness =
+        final OneInputStreamOperatorTestHarness<CommittableMessage<String>, ?> testHarness =
                 createTestHarness(globalCommitter);
         testHarness.initializeEmptyState();
         testHarness.open();
@@ -138,7 +138,7 @@ public class GlobalCommitterOperatorTest {
         final DefaultGlobalCommitter globalCommitter =
                 new DefaultGlobalCommitter(successCommittedCommittable);
 
-        final OneInputStreamOperatorTestHarness<CommittableMessage<String>, Void> testHarness =
+        final OneInputStreamOperatorTestHarness<CommittableMessage<String>, ?> testHarness =
                 createTestHarness(globalCommitter);
 
         // all data from previous checkpoint are expected to be committed,
@@ -155,7 +155,7 @@ public class GlobalCommitterOperatorTest {
     public void endOfInput() throws Exception {
         final DefaultGlobalCommitter globalCommitter = new DefaultGlobalCommitter();
 
-        final OneInputStreamOperatorTestHarness<CommittableMessage<String>, Void> testHarness =
+        final OneInputStreamOperatorTestHarness<CommittableMessage<String>, ?> testHarness =
                 createTestHarness(globalCommitter);
         testHarness.initializeEmptyState();
         testHarness.open();
@@ -166,12 +166,12 @@ public class GlobalCommitterOperatorTest {
         assertThat(globalCommitter.getCommittedData()).contains("elder+patience+silent");
     }
 
-    private OneInputStreamOperatorTestHarness<CommittableMessage<String>, Void> createTestHarness()
+    private OneInputStreamOperatorTestHarness<CommittableMessage<String>, ?> createTestHarness()
             throws Exception {
         return createTestHarness(new DefaultGlobalCommitter());
     }
 
-    private OneInputStreamOperatorTestHarness<CommittableMessage<String>, Void> createTestHarness(
+    private OneInputStreamOperatorTestHarness<CommittableMessage<String>, ?> createTestHarness(
             GlobalCommitter<String, String> globalCommitter) throws Exception {
         return new OneInputStreamOperatorTestHarness<>(
                 new GlobalCommitterOperator<>(
@@ -183,7 +183,7 @@ public class GlobalCommitterOperatorTest {
     }
 
     public static OperatorSubtaskState buildSubtaskState(
-            OneInputStreamOperatorTestHarness<CommittableMessage<String>, Void> testHarness,
+            OneInputStreamOperatorTestHarness<CommittableMessage<String>, ?> testHarness,
             List<String> input)
             throws Exception {
         testHarness.initializeEmptyState();
@@ -199,7 +199,7 @@ public class GlobalCommitterOperatorTest {
         return operatorSubtaskState;
     }
 
-    private static List<StreamRecord<CommittableMessage<String>>> committableRecords(
+    static List<StreamRecord<CommittableMessage<String>>> committableRecords(
             Collection<String> elements) {
         return elements.stream()
                 .map(GlobalCommitterOperatorTest::toCommittableMessage)

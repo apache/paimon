@@ -23,26 +23,19 @@ public class Committable {
 
     private final Kind kind;
 
-    private final byte[] wrappedCommittable;
+    private final Object wrappedCommittable;
 
-    private final int serializerVersion;
-
-    public Committable(Kind kind, byte[] wrappedCommittable, int serializerVersion) {
+    public Committable(Kind kind, Object wrappedCommittable) {
         this.kind = kind;
         this.wrappedCommittable = wrappedCommittable;
-        this.serializerVersion = serializerVersion;
     }
 
     public Kind kind() {
         return kind;
     }
 
-    public byte[] wrappedCommittable() {
+    public Object wrappedCommittable() {
         return wrappedCommittable;
-    }
-
-    public int serializerVersion() {
-        return serializerVersion;
     }
 
     enum Kind {
