@@ -16,30 +16,30 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.operation;
+package org.apache.flink.table.store.file;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.FileFormat;
-import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.TestKeyValueGenerator;
+import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
-import org.apache.flink.table.store.file.manifest.ManifestFile;
-import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
-import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
+import org.apache.flink.table.store.file.mergetree.compact.Accumulator;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
-import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
+import org.apache.flink.table.store.file.operation.FileStoreCommit;
+import org.apache.flink.table.store.file.operation.FileStoreExpireImpl;
+import org.apache.flink.table.store.file.operation.FileStoreRead;
+import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
-import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
+import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.function.QuadFunction;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -55,154 +55,93 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 
-/** Utils for operation tests. */
-public class OperationTestUtils {
+/** {@link FileStore} for tests. */
+public class TestFileStore extends FileStoreImpl {
 
-    public static MergeTreeOptions getMergeTreeOptions(boolean forceCompact) {
+    private static final Logger LOG = LoggerFactory.getLogger(TestFileStore.class);
+
+    private final RowDataSerializer keySerializer;
+    private final RowDataSerializer valueSerializer;
+
+    public static TestFileStore create(
+            String format,
+            String root,
+            int numBuckets,
+            RowType partitionType,
+            RowType keyType,
+            RowType valueType,
+            Accumulator accumulator) {
         Configuration conf = new Configuration();
+
         conf.set(MergeTreeOptions.WRITE_BUFFER_SIZE, MemorySize.parse("16 kb"));
         conf.set(MergeTreeOptions.PAGE_SIZE, MemorySize.parse("4 kb"));
         conf.set(MergeTreeOptions.TARGET_FILE_SIZE, MemorySize.parse("1 kb"));
-        conf.set(MergeTreeOptions.COMMIT_FORCE_COMPACT, forceCompact);
-        return new MergeTreeOptions(conf);
+
+        conf.set(
+                FileStoreOptions.MANIFEST_TARGET_FILE_SIZE,
+                MemorySize.parse((ThreadLocalRandom.current().nextInt(16) + 1) + "kb"));
+
+        conf.set(FileStoreOptions.FILE_FORMAT, format);
+        conf.set(FileStoreOptions.MANIFEST_FORMAT, format);
+        conf.set(FileStoreOptions.FILE_PATH, root);
+        conf.set(FileStoreOptions.BUCKET, numBuckets);
+
+        return new TestFileStore(conf, partitionType, keyType, valueType, accumulator);
     }
 
-    public static FileStoreScan createScan(
-            FileFormat fileFormat, FileStorePathFactory pathFactory) {
-        return new FileStoreScanImpl(
-                TestKeyValueGenerator.PARTITION_TYPE,
-                pathFactory,
-                createManifestFileFactory(fileFormat, pathFactory),
-                createManifestListFactory(fileFormat, pathFactory));
+    public TestFileStore(
+            Configuration conf,
+            RowType partitionType,
+            RowType keyType,
+            RowType valueType,
+            Accumulator accumulator) {
+        super(conf, UUID.randomUUID().toString(), partitionType, keyType, valueType, accumulator);
+        this.keySerializer = new RowDataSerializer(keyType);
+        this.valueSerializer = new RowDataSerializer(valueType);
     }
 
-    public static FileStoreCommit createCommit(
-            FileFormat fileFormat, FileStorePathFactory pathFactory) {
-        ManifestFile.Factory testManifestFileFactory =
-                createManifestFileFactory(fileFormat, pathFactory);
-        ManifestList.Factory testManifestListFactory =
-                createManifestListFactory(fileFormat, pathFactory);
-        return new FileStoreCommitImpl(
-                UUID.randomUUID().toString(),
-                TestKeyValueGenerator.PARTITION_TYPE,
-                pathFactory,
-                testManifestFileFactory,
-                testManifestListFactory,
-                createScan(fileFormat, pathFactory),
-                1,
-                MemorySize.parse((ThreadLocalRandom.current().nextInt(16) + 1) + "kb"),
-                30);
-    }
-
-    public static FileStoreWrite createWrite(
-            FileFormat fileFormat, FileStorePathFactory pathFactory) {
-        return new FileStoreWriteImpl(
-                TestKeyValueGenerator.KEY_TYPE,
-                TestKeyValueGenerator.ROW_TYPE,
-                TestKeyValueGenerator.KEY_COMPARATOR,
-                new DeduplicateAccumulator(),
-                fileFormat,
-                pathFactory,
-                createScan(fileFormat, pathFactory),
-                getMergeTreeOptions(false));
-    }
-
-    public static FileStoreExpire createExpire(
-            int numRetained,
-            long millisRetained,
-            FileFormat fileFormat,
-            FileStorePathFactory pathFactory) {
+    public FileStoreExpireImpl newExpire(int numRetained, long millisRetained) {
         return new FileStoreExpireImpl(
-                numRetained,
-                millisRetained,
-                pathFactory,
-                createManifestListFactory(fileFormat, pathFactory),
-                createScan(fileFormat, pathFactory));
+                numRetained, millisRetained, pathFactory(), manifestListFactory(), newScan());
     }
 
-    public static FileStoreRead createRead(
-            FileFormat fileFormat, FileStorePathFactory pathFactory) {
-        return new FileStoreReadImpl(
-                TestKeyValueGenerator.KEY_TYPE,
-                TestKeyValueGenerator.ROW_TYPE,
-                TestKeyValueGenerator.KEY_COMPARATOR,
-                new DeduplicateAccumulator(),
-                fileFormat,
-                pathFactory);
-    }
-
-    public static FileStorePathFactory createPathFactory(boolean failing, String root) {
-        String path =
-                failing
-                        ? FailingAtomicRenameFileSystem.getFailingPath(root)
-                        : TestAtomicRenameFileSystem.SCHEME + "://" + root;
-        return new FileStorePathFactory(
-                new Path(path), TestKeyValueGenerator.PARTITION_TYPE, "default");
-    }
-
-    private static ManifestFile.Factory createManifestFileFactory(
-            FileFormat fileFormat, FileStorePathFactory pathFactory) {
-        return new ManifestFile.Factory(
-                TestKeyValueGenerator.PARTITION_TYPE,
-                TestKeyValueGenerator.KEY_TYPE,
-                TestKeyValueGenerator.ROW_TYPE,
-                fileFormat,
-                pathFactory);
-    }
-
-    private static ManifestList.Factory createManifestListFactory(
-            FileFormat fileFormat, FileStorePathFactory pathFactory) {
-        return new ManifestList.Factory(
-                TestKeyValueGenerator.PARTITION_TYPE, fileFormat, pathFactory);
-    }
-
-    public static List<Snapshot> commitData(
+    public List<Snapshot> commitData(
             List<KeyValue> kvs,
             Function<KeyValue, BinaryRowData> partitionCalculator,
-            Function<KeyValue, Integer> bucketCalculator,
-            FileFormat fileFormat,
-            FileStorePathFactory pathFactory)
+            Function<KeyValue, Integer> bucketCalculator)
             throws Exception {
         return commitDataImpl(
                 kvs,
                 partitionCalculator,
                 bucketCalculator,
-                fileFormat,
-                pathFactory,
                 FileStoreWrite::createWriter,
                 (commit, committable) -> commit.commit(committable, Collections.emptyMap()));
     }
 
-    public static List<Snapshot> overwriteData(
+    public List<Snapshot> overwriteData(
             List<KeyValue> kvs,
             Function<KeyValue, BinaryRowData> partitionCalculator,
             Function<KeyValue, Integer> bucketCalculator,
-            FileFormat fileFormat,
-            FileStorePathFactory pathFactory,
             Map<String, String> partition)
             throws Exception {
         return commitDataImpl(
                 kvs,
                 partitionCalculator,
                 bucketCalculator,
-                fileFormat,
-                pathFactory,
                 FileStoreWrite::createEmptyWriter,
                 (commit, committable) ->
                         commit.overwrite(partition, committable, Collections.emptyMap()));
     }
 
-    private static List<Snapshot> commitDataImpl(
+    private List<Snapshot> commitDataImpl(
             List<KeyValue> kvs,
             Function<KeyValue, BinaryRowData> partitionCalculator,
             Function<KeyValue, Integer> bucketCalculator,
-            FileFormat fileFormat,
-            FileStorePathFactory pathFactory,
             QuadFunction<FileStoreWrite, BinaryRowData, Integer, ExecutorService, RecordWriter>
                     createWriterFunction,
             BiConsumer<FileStoreCommit, ManifestCommittable> commitFunction)
             throws Exception {
-        FileStoreWrite write = createWrite(fileFormat, pathFactory);
+        FileStoreWrite write = newWrite();
         Map<BinaryRowData, Map<Integer, RecordWriter>> writers = new HashMap<>();
         for (KeyValue kv : kvs) {
             BinaryRowData partition = partitionCalculator.apply(kv);
@@ -222,7 +161,7 @@ public class OperationTestUtils {
                     .write(kv.valueKind(), kv.key(), kv.value());
         }
 
-        FileStoreCommit commit = createCommit(fileFormat, pathFactory);
+        FileStoreCommit commit = newCommit();
         ManifestCommittable committable =
                 new ManifestCommittable(String.valueOf(new Random().nextLong()));
         for (Map.Entry<BinaryRowData, Map<Integer, RecordWriter>> entryWithPartition :
@@ -235,6 +174,7 @@ public class OperationTestUtils {
             }
         }
 
+        FileStorePathFactory pathFactory = pathFactory();
         Long snapshotIdBeforeCommit = pathFactory.latestSnapshotId();
         if (snapshotIdBeforeCommit == null) {
             snapshotIdBeforeCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
@@ -263,17 +203,19 @@ public class OperationTestUtils {
         return snapshots;
     }
 
-    public static List<KeyValue> readKvsFromSnapshot(
-            long snapshotId, FileFormat fileFormat, FileStorePathFactory pathFactory)
-            throws IOException {
-        List<ManifestEntry> entries =
-                createScan(fileFormat, pathFactory).withSnapshot(snapshotId).plan().files();
-        return readKvsFromManifestEntries(entries, fileFormat, pathFactory);
+    public List<KeyValue> readKvsFromSnapshot(long snapshotId) throws IOException {
+        List<ManifestEntry> entries = newScan().withSnapshot(snapshotId).plan().files();
+        return readKvsFromManifestEntries(entries);
     }
 
-    public static List<KeyValue> readKvsFromManifestEntries(
-            List<ManifestEntry> entries, FileFormat fileFormat, FileStorePathFactory pathFactory)
+    public List<KeyValue> readKvsFromManifestEntries(List<ManifestEntry> entries)
             throws IOException {
+        if (LOG.isDebugEnabled()) {
+            for (ManifestEntry entry : entries) {
+                LOG.debug("reading from " + entry.toString());
+            }
+        }
+
         Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> filesPerPartitionAndBucket =
                 new HashMap<>();
         for (ManifestEntry entry : entries) {
@@ -284,7 +226,7 @@ public class OperationTestUtils {
         }
 
         List<KeyValue> kvs = new ArrayList<>();
-        FileStoreRead read = createRead(fileFormat, pathFactory);
+        FileStoreRead read = newRead();
         for (Map.Entry<BinaryRowData, Map<Integer, List<SstFileMeta>>> entryWithPartition :
                 filesPerPartitionAndBucket.entrySet()) {
             for (Map.Entry<Integer, List<SstFileMeta>> entryWithBucket :
@@ -296,23 +238,18 @@ public class OperationTestUtils {
                                         entryWithBucket.getKey(),
                                         entryWithBucket.getValue()));
                 while (iterator.hasNext()) {
-                    kvs.add(
-                            iterator.next()
-                                    .copy(
-                                            TestKeyValueGenerator.KEY_SERIALIZER,
-                                            TestKeyValueGenerator.ROW_SERIALIZER));
+                    kvs.add(iterator.next().copy(keySerializer, valueSerializer));
                 }
             }
         }
         return kvs;
     }
 
-    public static Map<BinaryRowData, BinaryRowData> toKvMap(List<KeyValue> kvs) {
+    public Map<BinaryRowData, BinaryRowData> toKvMap(List<KeyValue> kvs) {
         Map<BinaryRowData, BinaryRowData> result = new HashMap<>();
         for (KeyValue kv : kvs) {
-            BinaryRowData key = TestKeyValueGenerator.KEY_SERIALIZER.toBinaryRow(kv.key()).copy();
-            BinaryRowData value =
-                    TestKeyValueGenerator.ROW_SERIALIZER.toBinaryRow(kv.value()).copy();
+            BinaryRowData key = keySerializer.toBinaryRow(kv.key()).copy();
+            BinaryRowData value = valueSerializer.toBinaryRow(kv.value()).copy();
             switch (kv.valueKind()) {
                 case ADD:
                     result.put(key, value);
