@@ -133,6 +133,9 @@ public class FileStorePathFactory {
             FileStatus[] statuses = fs.listStatus(snapshotDir);
 
             long latestId = Snapshot.FIRST_SNAPSHOT_ID - 1;
+            if (statuses == null) {
+                return null;
+            }
             for (FileStatus status : statuses) {
                 String fileName = status.getPath().getName();
                 if (fileName.startsWith(SNAPSHOT_PREFIX)) {

@@ -175,7 +175,7 @@ public class GlobalCommitterOperatorTest {
             GlobalCommitter<String, String> globalCommitter) throws Exception {
         return new OneInputStreamOperatorTestHarness<>(
                 new GlobalCommitterOperator<>(
-                        globalCommitter, StringCommittableSerializer.INSTANCE),
+                        () -> globalCommitter, () -> StringCommittableSerializer.INSTANCE),
                 CommittableMessageTypeInfo.of(
                                 (SerializableSupplier<SimpleVersionedSerializer<String>>)
                                         () -> StringCommittableSerializer.INSTANCE)

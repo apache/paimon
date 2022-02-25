@@ -20,17 +20,42 @@ package org.apache.flink.table.store.file;
 
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
-import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
+
+import java.io.Serializable;
+import java.time.Duration;
+
+import static org.apache.flink.configuration.ConfigOptions.key;
 
 /** Options for {@link FileStore}. */
-public class FileStoreOptions {
+public class FileStoreOptions implements Serializable {
 
     public static final ConfigOption<Integer> BUCKET =
             ConfigOptions.key("bucket")
                     .intType()
                     .defaultValue(1)
                     .withDescription("Bucket number for file store.");
+
+    public static final ConfigOption<String> FILE_PATH =
+            ConfigOptions.key("file.path")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("The file path of the table store in the filesystem.");
+
+    public static final ConfigOption<String> FILE_FORMAT =
+            ConfigOptions.key("file.format")
+                    .stringType()
+                    .defaultValue("orc")
+                    .withDescription("Specify the message format of data files.");
+
+    public static final ConfigOption<String> MANIFEST_FORMAT =
+            ConfigOptions.key("manifest.format")
+                    .stringType()
+                    .defaultValue("avro")
+                    .withDescription("Specify the message format of manifest files.");
 
     public static final ConfigOption<MemorySize> MANIFEST_TARGET_FILE_SIZE =
             ConfigOptions.key("manifest.target-file-size")
@@ -46,21 +71,72 @@ public class FileStoreOptions {
                             "To avoid frequent manifest merges, this parameter specifies the minimum number "
                                     + "of ManifestFileMeta to merge.");
 
-    public final int bucket;
-    public final MemorySize manifestSuggestedSize;
-    public final int manifestMergeMinCount;
+    public static final ConfigOption<String> PARTITION_DEFAULT_NAME =
+            key("partition.default-name")
+                    .stringType()
+                    .defaultValue("__DEFAULT_PARTITION__")
+                    .withDescription(
+                            "The default partition name in case the dynamic partition"
+                                    + " column value is null/empty string.");
 
-    public FileStoreOptions(
-            int bucket, MemorySize manifestSuggestedSize, int manifestMergeMinCount) {
-        this.bucket = bucket;
-        this.manifestSuggestedSize = manifestSuggestedSize;
-        this.manifestMergeMinCount = manifestMergeMinCount;
+    public static final ConfigOption<Integer> SNAPSHOT_NUM_RETAINED =
+            ConfigOptions.key("snapshot.num-retained")
+                    .intType()
+                    .defaultValue(Integer.MAX_VALUE)
+                    .withDescription("The maximum number of completed snapshots to retain.");
+
+    public static final ConfigOption<Duration> SNAPSHOT_TIME_RETAINED =
+            ConfigOptions.key("snapshot.time-retained")
+                    .durationType()
+                    .defaultValue(Duration.ofDays(1))
+                    .withDescription("The maximum time of completed snapshots to retain.");
+
+    private final Configuration options;
+
+    public FileStoreOptions(Configuration options) {
+        this.options = options;
+        // TODO validate all keys
     }
 
-    public FileStoreOptions(ReadableConfig config) {
-        this(
-                config.get(BUCKET),
-                config.get(MANIFEST_TARGET_FILE_SIZE),
-                config.get(MANIFEST_MERGE_MIN_COUNT));
+    public int bucket() {
+        return options.get(BUCKET);
+    }
+
+    public Path path() {
+        return new Path(options.get(FILE_PATH));
+    }
+
+    public FileFormat fileFormat() {
+        return FileFormat.fromTableOptions(
+                Thread.currentThread().getContextClassLoader(), options, FILE_FORMAT);
+    }
+
+    public FileFormat manifestFormat() {
+        return FileFormat.fromTableOptions(
+                Thread.currentThread().getContextClassLoader(), options, MANIFEST_FORMAT);
+    }
+
+    public MemorySize manifestTargetSize() {
+        return options.get(MANIFEST_TARGET_FILE_SIZE);
+    }
+
+    public String partitionDefaultName() {
+        return options.get(PARTITION_DEFAULT_NAME);
+    }
+
+    public MergeTreeOptions mergeTreeOptions() {
+        return new MergeTreeOptions(options);
+    }
+
+    public int snapshotNumRetain() {
+        return options.get(SNAPSHOT_NUM_RETAINED);
+    }
+
+    public Duration snapshotTimeRetain() {
+        return options.get(SNAPSHOT_TIME_RETAINED);
+    }
+
+    public int manifestMergeMinCount() {
+        return options.get(MANIFEST_MERGE_MIN_COUNT);
     }
 }

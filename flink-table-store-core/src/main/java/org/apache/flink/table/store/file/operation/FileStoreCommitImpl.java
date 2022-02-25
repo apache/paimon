@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
@@ -77,7 +77,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final ManifestFile manifestFile;
     private final ManifestList manifestList;
     private final FileStoreScan scan;
-    private final FileStoreOptions fileStoreOptions;
+    private final int numBucket;
+    private final MemorySize manifestTargetSize;
+    private final int manifestMergeMinCount;
 
     @Nullable private Lock lock;
 
@@ -88,7 +90,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             FileStoreScan scan,
-            FileStoreOptions fileStoreOptions) {
+            int numBucket,
+            MemorySize manifestTargetSize,
+            int manifestMergeMinCount) {
         this.commitUser = commitUser;
         this.partitionType = partitionType;
         this.partitionObjectConverter = new RowDataToObjectArrayConverter(partitionType);
@@ -96,7 +100,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.manifestFile = manifestFileFactory.create();
         this.manifestList = manifestListFactory.create();
         this.scan = scan;
-        this.fileStoreOptions = fileStoreOptions;
+        this.numBucket = numBucket;
+        this.manifestTargetSize = manifestTargetSize;
+        this.manifestMergeMinCount = manifestMergeMinCount;
 
         this.lock = null;
     }
@@ -258,7 +264,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                         kind,
                                                         entryWithPartition.getKey(),
                                                         entryWithBucket.getKey(),
-                                                        fileStoreOptions.bucket,
+                                                        numBucket,
                                                         file))
                                 .collect(Collectors.toList()));
             }
@@ -307,8 +313,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             oldMetas,
                             changes,
                             manifestFile,
-                            fileStoreOptions.manifestSuggestedSize.getBytes(),
-                            fileStoreOptions.manifestMergeMinCount));
+                            manifestTargetSize.getBytes(),
+                            manifestMergeMinCount));
             // prepare snapshot file
             manifestListName = manifestList.write(newMetas);
             newSnapshot =

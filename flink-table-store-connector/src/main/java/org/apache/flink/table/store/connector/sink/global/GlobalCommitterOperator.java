@@ -28,9 +28,11 @@ import org.apache.flink.streaming.api.connector.sink2.CommittableMessage;
 import org.apache.flink.streaming.api.connector.sink2.CommittableWithLineage;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
+import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.util.function.SerializableSupplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,7 +60,7 @@ public class GlobalCommitterOperator<CommT, GlobalCommT> extends AbstractStreamO
      * Aggregate committables to global committables and commit the global committables to the
      * external system.
      */
-    private final GlobalCommitter<CommT, GlobalCommT> globalCommitter;
+    private final SerializableSupplier<GlobalCommitter<CommT, GlobalCommT>> committerFactory;
 
     /** The operator's state descriptor. */
     private static final ListStateDescriptor<byte[]> STREAMING_COMMITTER_RAW_STATES_DESC =
@@ -69,31 +71,36 @@ public class GlobalCommitterOperator<CommT, GlobalCommT> extends AbstractStreamO
     private final NavigableMap<Long, GlobalCommT> committablesPerCheckpoint;
 
     /** The committable's serializer. */
-    private final SimpleVersionedSerializer<GlobalCommT> committableSerializer;
+    private final SerializableSupplier<SimpleVersionedSerializer<GlobalCommT>>
+            committableSerializer;
 
     /** The operator's state. */
     private ListState<GlobalCommT> streamingCommitterState;
 
+    private GlobalCommitter<CommT, GlobalCommT> committer;
+
     public GlobalCommitterOperator(
-            GlobalCommitter<CommT, GlobalCommT> globalCommitter,
-            SimpleVersionedSerializer<GlobalCommT> committableSerializer) {
-        this.globalCommitter = checkNotNull(globalCommitter);
+            SerializableSupplier<GlobalCommitter<CommT, GlobalCommT>> committerFactory,
+            SerializableSupplier<SimpleVersionedSerializer<GlobalCommT>> committableSerializer) {
+        this.committerFactory = checkNotNull(committerFactory);
         this.committableSerializer = committableSerializer;
         this.committablesPerCheckpoint = new TreeMap<>();
+        setChainingStrategy(ChainingStrategy.ALWAYS);
     }
 
     @Override
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
+        committer = committerFactory.get();
         streamingCommitterState =
                 new SimpleVersionedListState<>(
                         context.getOperatorStateStore()
                                 .getListState(STREAMING_COMMITTER_RAW_STATES_DESC),
-                        committableSerializer);
+                        committableSerializer.get());
         List<GlobalCommT> restored = new ArrayList<>();
         streamingCommitterState.get().forEach(restored::add);
         streamingCommitterState.clear();
-        globalCommitter.commit(globalCommitter.filterRecoveredCommittables(restored));
+        committer.commit(committer.filterRecoveredCommittables(restored));
     }
 
     @Override
@@ -103,7 +110,7 @@ public class GlobalCommitterOperator<CommT, GlobalCommT> extends AbstractStreamO
         if (committables.size() > 0) {
             committablesPerCheckpoint.put(
                     context.getCheckpointId(),
-                    globalCommitter.combine(context.getCheckpointId(), committables));
+                    committer.combine(context.getCheckpointId(), committables));
         }
         streamingCommitterState.update(new ArrayList<>(committablesPerCheckpoint.values()));
     }
@@ -112,9 +119,8 @@ public class GlobalCommitterOperator<CommT, GlobalCommT> extends AbstractStreamO
     public void endInput() throws Exception {
         List<CommT> allCommittables = pollCommittables();
         if (!allCommittables.isEmpty()) {
-            globalCommitter.commit(
-                    Collections.singletonList(
-                            globalCommitter.combine(Long.MAX_VALUE, allCommittables)));
+            committer.commit(
+                    Collections.singletonList(committer.combine(Long.MAX_VALUE, allCommittables)));
         }
     }
 
@@ -124,7 +130,7 @@ public class GlobalCommitterOperator<CommT, GlobalCommT> extends AbstractStreamO
         LOG.info("Committing the state for checkpoint {}", checkpointId);
         NavigableMap<Long, GlobalCommT> headMap =
                 committablesPerCheckpoint.headMap(checkpointId, true);
-        globalCommitter.commit(new ArrayList<>(headMap.values()));
+        committer.commit(new ArrayList<>(headMap.values()));
         headMap.clear();
     }
 
@@ -138,7 +144,7 @@ public class GlobalCommitterOperator<CommT, GlobalCommT> extends AbstractStreamO
 
     @Override
     public void close() throws Exception {
-        globalCommitter.close();
+        committer.close();
         committablesPerCheckpoint.clear();
         committables.clear();
         super.close();
