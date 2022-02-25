@@ -177,14 +177,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<ManifestEntry> appendChanges = collectChanges(committable.newFiles(), ValueKind.ADD);
         // sanity check, all changes must be done within the given partition
         Predicate partitionFilter = TypeUtils.partitionMapToPredicate(partition, partitionType);
-        for (ManifestEntry entry : appendChanges) {
-            if (!partitionFilter.test(partitionObjectConverter.convert(entry.partition()))) {
-                throw new IllegalArgumentException(
-                        "Trying to overwrite partition "
-                                + partition.toString()
-                                + ", but the changes in "
-                                + pathFactory.getPartitionString(entry.partition())
-                                + " does not belong to this partition");
+        if (partitionFilter != null) {
+            for (ManifestEntry entry : appendChanges) {
+                if (!partitionFilter.test(partitionObjectConverter.convert(entry.partition()))) {
+                    throw new IllegalArgumentException(
+                            "Trying to overwrite partition "
+                                    + partition
+                                    + ", but the changes in "
+                                    + pathFactory.getPartitionString(entry.partition())
+                                    + " does not belong to this partition");
+                }
             }
         }
         // overwrite new files

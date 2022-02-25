@@ -130,12 +130,19 @@ public class FileStorePathFactory {
         try {
             Path snapshotDir = new Path(root + "/snapshot");
             FileSystem fs = snapshotDir.getFileSystem();
-            FileStatus[] statuses = fs.listStatus(snapshotDir);
 
-            long latestId = Snapshot.FIRST_SNAPSHOT_ID - 1;
-            if (statuses == null) {
+            if (!fs.exists(snapshotDir)) {
+                LOG.debug("The snapshot director '{}' is not exist.", snapshotDir);
                 return null;
             }
+
+            FileStatus[] statuses = fs.listStatus(snapshotDir);
+            if (statuses == null) {
+                throw new RuntimeException(
+                        "The return value is null of the listStatus for the snapshot director.");
+            }
+
+            long latestId = Snapshot.FIRST_SNAPSHOT_ID - 1;
             for (FileStatus status : statuses) {
                 String fileName = status.getPath().getName();
                 if (fileName.startsWith(SNAPSHOT_PREFIX)) {

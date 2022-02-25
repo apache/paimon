@@ -27,6 +27,9 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.logical.TimestampType;
+
+import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.Map;
@@ -34,6 +37,7 @@ import java.util.Map;
 /** Utils for parsing among different types. */
 public class TypeUtils {
 
+    @Nullable
     public static Predicate partitionMapToPredicate(
             Map<String, String> partition, RowType partitionType) {
         List<String> fieldNames = partitionType.getFieldNames();
@@ -85,7 +89,8 @@ public class TypeUtils {
             case TIME_WITHOUT_TIME_ZONE:
                 return BinaryStringDataUtil.toTime(str);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
-                return BinaryStringDataUtil.toTimestamp(str);
+                TimestampType timestampType = (TimestampType) type;
+                return BinaryStringDataUtil.toTimestamp(str, timestampType.getPrecision());
             default:
                 throw new UnsupportedOperationException("Unsupported type " + type.toString());
         }

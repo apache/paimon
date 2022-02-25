@@ -147,7 +147,7 @@ public class GlobalCommitterOperatorTest {
         testHarness.open();
         testHarness.snapshot(1L, 1L);
         testHarness.notifyOfCompletedCheckpoint(1L);
-        assertThat(globalCommitter.getCommittedData().isEmpty()).isTrue();
+        assertThat(globalCommitter.getCommittedData()).isEmpty();
         testHarness.close();
     }
 
