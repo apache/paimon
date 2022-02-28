@@ -46,6 +46,7 @@ import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 
+import org.junit.Assume;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -84,7 +85,7 @@ public class FileStoreITCase extends AbstractTestBase {
                             new RowType.RowField("_k", new IntType())));
 
     @SuppressWarnings({"unchecked", "rawtypes"})
-    public static final DataStructureConverter<RowData, Row> CONVERTER =
+    private static final DataStructureConverter<RowData, Row> CONVERTER =
             (DataStructureConverter)
                     DataStructureConverters.getConverter(
                             TypeConversions.fromLogicalToDataType(VALUE_TYPE));
@@ -106,7 +107,7 @@ public class FileStoreITCase extends AbstractTestBase {
         this.isBatch = isBatch;
     }
 
-    @Parameterized.Parameters(name = "isBounded-{0}")
+    @Parameterized.Parameters(name = "isBatch-{0}")
     public static List<Boolean> getVarSeg() {
         return Arrays.asList(true, false);
     }
@@ -127,9 +128,7 @@ public class FileStoreITCase extends AbstractTestBase {
 
     @Test
     public void testOverwrite() throws Exception {
-        if (!isBatch) {
-            return;
-        }
+        Assume.assumeTrue(isBatch);
 
         StreamExecutionEnvironment env = buildBatchEnv();
         FileStore fileStore =
@@ -227,8 +226,8 @@ public class FileStoreITCase extends AbstractTestBase {
     }
 
     public static DataStreamSource<RowData> buildTestSource(
-            StreamExecutionEnvironment env, boolean isBounded) {
-        return isBounded
+            StreamExecutionEnvironment env, boolean isBatch) {
+        return isBatch
                 ? env.fromCollection(SOURCE_DATA, InternalTypeInfo.of(VALUE_TYPE))
                 : env.addSource(
                         new FiniteTestSource<>(null, SOURCE_DATA), InternalTypeInfo.of(VALUE_TYPE));

@@ -139,7 +139,7 @@ public class FileStorePathFactory {
             FileStatus[] statuses = fs.listStatus(snapshotDir);
             if (statuses == null) {
                 throw new RuntimeException(
-                        "The return value is null of the listStatus for the snapshot director.");
+                        "The return value is null of the listStatus for the snapshot directory.");
             }
 
             long latestId = Snapshot.FIRST_SNAPSHOT_ID - 1;

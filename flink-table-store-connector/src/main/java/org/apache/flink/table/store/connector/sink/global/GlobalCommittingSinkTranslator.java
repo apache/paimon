@@ -44,17 +44,16 @@ public class GlobalCommittingSinkTranslator {
                 input.getExecutionEnvironment().getCheckpointConfig().isCheckpointingEnabled();
 
         // We cannot determine the mode, when the execution mode is auto.
-        // We set inBatch to false and only use checkpointingEnabled to determine if we want to do
+        // We set isBatch to false and only use checkpointingEnabled to determine if we want to do
         // the final commit.
-        // When inBatch is true, only the checkpointID is different, which has no effect on the
+        // When isBatch is true, only the checkpointID is different, which has no effect on the
         // commit operator.
-        boolean isBatchMode = false;
 
         SingleOutputStreamOperator<CommittableMessage<CommT>> written =
                 input.transform(
                         WRITER_NAME,
                         commitType,
-                        new SinkWriterOperatorFactory<>(sink, isBatchMode, checkpointingEnabled));
+                        new SinkWriterOperatorFactory<>(sink, false, checkpointingEnabled));
 
         SingleOutputStreamOperator<Void> committed =
                 written.global()
