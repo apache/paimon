@@ -18,12 +18,11 @@
 
 package org.apache.flink.table.store.connector.sink.global;
 
+import org.apache.flink.api.connector.sink2.Committer;
 import org.apache.flink.api.connector.sink2.Sink;
 import org.apache.flink.api.connector.sink2.SinkWriter;
-import org.apache.flink.api.connector.sink2.TwoPhaseCommittingSink.PrecommittingSinkWriter;
+import org.apache.flink.api.connector.sink2.TwoPhaseCommittingSink;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
-
-import java.io.IOException;
 
 /**
  * A {@link Sink} for exactly-once semantics using a two-phase commit protocol. The {@link Sink}
@@ -34,22 +33,19 @@ import java.io.IOException;
  * @param <CommT> The type of the committables.
  * @param <GlobalCommT> The type of the aggregated committable.
  */
-public interface GlobalCommittingSink<InputT, CommT, GlobalCommT> extends Sink<InputT> {
+public interface GlobalCommittingSink<InputT, CommT, GlobalCommT>
+        extends TwoPhaseCommittingSink<InputT, CommT> {
 
-    /**
-     * Creates a {@link PrecommittingSinkWriter} that creates committables on checkpoint or end of
-     * input.
-     */
-    PrecommittingSinkWriter<InputT, CommT> createWriter(InitContext context) throws IOException;
+    @Override
+    default Committer<CommT> createCommitter() {
+        throw new UnsupportedOperationException("Please create global committer.");
+    }
 
     /**
      * Creates a {@link GlobalCommitter} that permanently makes the previously written data visible
      * through {@link GlobalCommitter#commit}.
      */
-    GlobalCommitter<CommT, GlobalCommT> createCommitter() throws IOException;
-
-    /** Returns the serializer of the committable type. */
-    SimpleVersionedSerializer<CommT> getCommittableSerializer();
+    GlobalCommitter<CommT, GlobalCommT> createGlobalCommitter();
 
     /** Returns the serializer of the global committable type. */
     SimpleVersionedSerializer<GlobalCommT> getGlobalCommittableSerializer();

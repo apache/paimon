@@ -23,7 +23,6 @@ import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileFormat;
-import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
@@ -66,15 +65,6 @@ public class OperationTestUtils {
         return new MergeTreeOptions(conf);
     }
 
-    private static FileStoreOptions getFileStoreOptions() {
-        Configuration conf = new Configuration();
-        conf.set(FileStoreOptions.BUCKET, 1);
-        conf.set(
-                FileStoreOptions.MANIFEST_TARGET_FILE_SIZE,
-                MemorySize.parse((ThreadLocalRandom.current().nextInt(16) + 1) + "kb"));
-        return new FileStoreOptions(conf);
-    }
-
     public static FileStoreScan createScan(
             FileFormat fileFormat, FileStorePathFactory pathFactory) {
         return new FileStoreScanImpl(
@@ -97,7 +87,9 @@ public class OperationTestUtils {
                 testManifestFileFactory,
                 testManifestListFactory,
                 createScan(fileFormat, pathFactory),
-                getFileStoreOptions());
+                1,
+                MemorySize.parse((ThreadLocalRandom.current().nextInt(16) + 1) + "kb"),
+                30);
     }
 
     public static FileStoreWrite createWrite(

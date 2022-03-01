@@ -170,10 +170,12 @@ public class ManifestFileMeta {
             }
 
             // both size and count conditions not satisfied, create new file from entries
-            ManifestFileMeta newManifestFileMeta = manifestFile.write(entries);
             result.addAll(candidate);
-            newMetas.add(newManifestFileMeta);
-            result.add(newManifestFileMeta);
+            if (entries.size() > 0) {
+                ManifestFileMeta newManifestFileMeta = manifestFile.write(entries);
+                newMetas.add(newManifestFileMeta);
+                result.add(newManifestFileMeta);
+            }
         } catch (Throwable e) {
             // exception occurs, clean up and rethrow
             for (ManifestFileMeta manifest : newMetas) {

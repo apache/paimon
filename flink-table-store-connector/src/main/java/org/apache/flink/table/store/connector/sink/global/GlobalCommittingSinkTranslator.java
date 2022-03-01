@@ -28,8 +28,6 @@ import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.streaming.runtime.operators.sink.SinkWriterOperatorFactory;
 
-import java.io.IOException;
-
 /** A translator for the {@link GlobalCommittingSink}. */
 public class GlobalCommittingSinkTranslator {
 
@@ -38,12 +36,24 @@ public class GlobalCommittingSinkTranslator {
     private static final String WRITER_NAME = "Writer";
 
     public static <T, CommT, GlobalCommT> DataStreamSink<?> translate(
-            DataStream<T> input, GlobalCommittingSink<T, CommT, GlobalCommT> sink)
-            throws IOException {
+            DataStream<T> input, GlobalCommittingSink<T, CommT, GlobalCommT> sink) {
         TypeInformation<CommittableMessage<CommT>> commitType =
                 CommittableMessageTypeInfo.of(sink::getCommittableSerializer);
+
+        boolean checkpointingEnabled =
+                input.getExecutionEnvironment().getCheckpointConfig().isCheckpointingEnabled();
+
+        // We cannot determine the mode, when the execution mode is auto.
+        // We set isBatch to false and only use checkpointingEnabled to determine if we want to do
+        // the final commit.
+        // When isBatch is true, only the checkpointID is different, which has no effect on the
+        // commit operator.
+
         SingleOutputStreamOperator<CommittableMessage<CommT>> written =
-                input.transform(WRITER_NAME, commitType, new SinkWriterOperatorFactory<>(sink));
+                input.transform(
+                        WRITER_NAME,
+                        commitType,
+                        new SinkWriterOperatorFactory<>(sink, false, checkpointingEnabled));
 
         SingleOutputStreamOperator<Void> committed =
                 written.global()
@@ -51,8 +61,8 @@ public class GlobalCommittingSinkTranslator {
                                 GLOBAL_COMMITTER_NAME,
                                 Types.VOID,
                                 new GlobalCommitterOperator<>(
-                                        sink.createCommitter(),
-                                        sink.getGlobalCommittableSerializer()))
+                                        sink::createGlobalCommitter,
+                                        sink::getGlobalCommittableSerializer))
                         .setParallelism(1)
                         .setMaxParallelism(1);
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
