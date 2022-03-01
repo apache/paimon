@@ -34,7 +34,18 @@ public interface FileStoreRead {
     /** With value nested projection. */
     void withValueProjection(int[][] projectedFields);
 
-    /** Create a {@link RecordReader} from partition and bucket and files. */
+    /**
+     * Create a {@link RecordReader} from partition and bucket and files.
+     *
+     * <p>The resulting reader has the following characteristics:
+     *
+     * <ul>
+     *   <li>If {@link FileStoreRead#withKeyProjection} is called, key-values produced by this
+     *       reader may be unordered and may contain duplicated keys.
+     *   <li>If {@link FileStoreRead#withKeyProjection} is not called, key-values produced by this
+     *       reader is guaranteed to be ordered by keys and does not contain duplicated keys.
+     * </ul>
+     */
     RecordReader createReader(BinaryRowData partition, int bucket, List<SstFileMeta> files)
             throws IOException;
 }

@@ -18,16 +18,12 @@
 
 package org.apache.flink.table.store.file.mergetree.sst;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.connector.file.src.FileSourceSplit;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.binary.BinaryRowDataUtil;
-import org.apache.flink.table.expressions.ResolvedExpression;
+import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializerTest;
@@ -35,17 +31,24 @@ import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.stats.FieldStats;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.file.utils.FlushingAvroFormat;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
+import org.apache.flink.table.types.logical.BigIntType;
+import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.util.CloseableIterator;
 
 import org.junit.jupiter.api.RepeatedTest;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -71,29 +74,15 @@ public class SstFileTest {
 
         checkRollingFiles(data.meta, actualMetas, writer.suggestedFileSize());
 
-        SstFileReader reader = createSstFileReader(tempDir.toString());
-        Iterator<KeyValue> expectedIterator = data.content.iterator();
-        for (SstFileMeta meta : actualMetas) {
-            // check the contents of sst file
-            CloseableIterator<KeyValue> actualKvsIterator =
-                    new RecordReaderIterator(reader.read(meta.fileName()));
-            while (actualKvsIterator.hasNext()) {
-                assertThat(expectedIterator.hasNext()).isTrue();
-                KeyValue actualKv = actualKvsIterator.next();
-                assertThat(
-                                KeyValueSerializerTest.equals(
-                                        expectedIterator.next(),
-                                        actualKv,
-                                        TestKeyValueGenerator.KEY_SERIALIZER,
-                                        TestKeyValueGenerator.ROW_SERIALIZER))
-                        .isTrue();
-            }
-            actualKvsIterator.close();
-
-            // check that each sst file meta is serializable
-            assertThat(serializer.fromRow(serializer.toRow(meta))).isEqualTo(meta);
-        }
-        assertThat(expectedIterator.hasNext()).isFalse();
+        SstFileReader reader = createSstFileReader(tempDir.toString(), null, null);
+        assertData(
+                data,
+                actualMetas,
+                TestKeyValueGenerator.KEY_SERIALIZER,
+                TestKeyValueGenerator.ROW_SERIALIZER,
+                serializer,
+                reader,
+                kv -> kv);
     }
 
     @RepeatedTest(10)
@@ -118,6 +107,88 @@ public class SstFileTest {
         }
     }
 
+    @Test
+    public void testKeyProjection() throws Exception {
+        SstTestDataGenerator.Data data = gen.next();
+        SstFileWriter sstFileWriter = createSstFileWriter(tempDir.toString());
+        SstFileMetaSerializer serializer =
+                new SstFileMetaSerializer(
+                        TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.ROW_TYPE);
+        List<SstFileMeta> actualMetas =
+                sstFileWriter.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
+
+        // projection: (shopId, orderId) -> (orderId)
+        SstFileReader sstFileReader =
+                createSstFileReader(tempDir.toString(), new int[][] {new int[] {1}}, null);
+        RowType projectedKeyType =
+                RowType.of(new LogicalType[] {new BigIntType(false)}, new String[] {"key_orderId"});
+        RowDataSerializer projectedKeySerializer = new RowDataSerializer(projectedKeyType);
+        assertData(
+                data,
+                actualMetas,
+                projectedKeySerializer,
+                TestKeyValueGenerator.ROW_SERIALIZER,
+                serializer,
+                sstFileReader,
+                kv ->
+                        new KeyValue()
+                                .replace(
+                                        GenericRowData.of(kv.key().getLong(1)),
+                                        kv.sequenceNumber(),
+                                        kv.valueKind(),
+                                        kv.value()));
+    }
+
+    @Test
+    public void testValueProjection() throws Exception {
+        SstTestDataGenerator.Data data = gen.next();
+        SstFileWriter sstFileWriter = createSstFileWriter(tempDir.toString());
+        SstFileMetaSerializer serializer =
+                new SstFileMetaSerializer(
+                        TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.ROW_TYPE);
+        List<SstFileMeta> actualMetas =
+                sstFileWriter.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
+
+        // projection:
+        // (dt, hr, shopId, orderId, itemId, priceAmount, comment) ->
+        // (shopId, itemId, dt, hr)
+        SstFileReader sstFileReader =
+                createSstFileReader(
+                        tempDir.toString(),
+                        null,
+                        new int[][] {new int[] {2}, new int[] {4}, new int[] {0}, new int[] {1}});
+        RowType projectedValueType =
+                RowType.of(
+                        new LogicalType[] {
+                            new IntType(false),
+                            new BigIntType(),
+                            new VarCharType(false, 8),
+                            new IntType(false)
+                        },
+                        new String[] {"shopId", "itemId", "dt", "hr"});
+        RowDataSerializer projectedValueSerializer = new RowDataSerializer(projectedValueType);
+        assertData(
+                data,
+                actualMetas,
+                TestKeyValueGenerator.KEY_SERIALIZER,
+                projectedValueSerializer,
+                serializer,
+                sstFileReader,
+                kv ->
+                        new KeyValue()
+                                .replace(
+                                        kv.key(),
+                                        kv.sequenceNumber(),
+                                        kv.valueKind(),
+                                        GenericRowData.of(
+                                                kv.value().getInt(2),
+                                                kv.value().isNullAt(4)
+                                                        ? null
+                                                        : kv.value().getLong(4),
+                                                kv.value().getString(0),
+                                                kv.value().getInt(1))));
+    }
+
     private SstFileWriter createSstFileWriter(String path) {
         FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(path));
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
@@ -133,7 +204,8 @@ public class SstFileTest {
                 .create(BinaryRowDataUtil.EMPTY_ROW, 0);
     }
 
-    private SstFileReader createSstFileReader(String path) {
+    private SstFileReader createSstFileReader(
+            String path, int[][] keyProjection, int[][] valueProjection) {
         FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(path));
         SstFileReader.Factory factory =
                 new SstFileReader.Factory(
@@ -141,7 +213,47 @@ public class SstFileTest {
                         TestKeyValueGenerator.ROW_TYPE,
                         flushingAvro,
                         pathFactory);
+        if (keyProjection != null) {
+            factory.withKeyProjection(keyProjection);
+        }
+        if (valueProjection != null) {
+            factory.withValueProjection(valueProjection);
+        }
         return factory.create(BinaryRowDataUtil.EMPTY_ROW, 0);
+    }
+
+    private void assertData(
+            SstTestDataGenerator.Data data,
+            List<SstFileMeta> actualMetas,
+            RowDataSerializer keySerializer,
+            RowDataSerializer projectedValueSerializer,
+            SstFileMetaSerializer sstFileMetaSerializer,
+            SstFileReader sstFileReader,
+            Function<KeyValue, KeyValue> toExpectedKv)
+            throws Exception {
+        Iterator<KeyValue> expectedIterator = data.content.iterator();
+        for (SstFileMeta meta : actualMetas) {
+            // check the contents of sst file
+            CloseableIterator<KeyValue> actualKvsIterator =
+                    new RecordReaderIterator(sstFileReader.read(meta.fileName()));
+            while (actualKvsIterator.hasNext()) {
+                assertThat(expectedIterator.hasNext()).isTrue();
+                KeyValue actualKv = actualKvsIterator.next();
+                assertThat(
+                                KeyValueSerializerTest.equals(
+                                        toExpectedKv.apply(expectedIterator.next()),
+                                        actualKv,
+                                        keySerializer,
+                                        projectedValueSerializer))
+                        .isTrue();
+            }
+            actualKvsIterator.close();
+
+            // check that each sst file meta is serializable
+            assertThat(sstFileMetaSerializer.fromRow(sstFileMetaSerializer.toRow(meta)))
+                    .isEqualTo(meta);
+        }
+        assertThat(expectedIterator.hasNext()).isFalse();
     }
 
     private void checkRollingFiles(
@@ -215,44 +327,5 @@ public class SstFileTest {
         }
         assertThat(actual.stream().mapToLong(FieldStats::nullCount).sum())
                 .isEqualTo(expected.nullCount());
-    }
-
-    /** A special avro {@link FileFormat} which flushes for every added element. */
-    public static class FlushingAvroFormat implements FileFormat {
-
-        private final FileFormat avro =
-                FileFormat.fromIdentifier(
-                        SstFileTest.class.getClassLoader(), "avro", new Configuration());
-
-        @Override
-        public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
-                RowType type, List<ResolvedExpression> filters) {
-            return avro.createReaderFactory(type, filters);
-        }
-
-        @Override
-        public BulkWriter.Factory<RowData> createWriterFactory(RowType type) {
-            return fsDataOutputStream -> {
-                BulkWriter<RowData> wrapped =
-                        avro.createWriterFactory(type).create(fsDataOutputStream);
-                return new BulkWriter<RowData>() {
-                    @Override
-                    public void addElement(RowData rowData) throws IOException {
-                        wrapped.addElement(rowData);
-                        wrapped.flush();
-                    }
-
-                    @Override
-                    public void flush() throws IOException {
-                        wrapped.flush();
-                    }
-
-                    @Override
-                    public void finish() throws IOException {
-                        wrapped.finish();
-                    }
-                };
-            };
-        }
     }
 }

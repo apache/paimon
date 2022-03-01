@@ -37,18 +37,29 @@ import java.util.List;
 public interface FileFormat {
 
     /**
-     * Create a {@link BulkFormat} from the type.
+     * Create a {@link BulkFormat} from the type, with projection pushed down.
      *
+     * @param type Type without projection.
+     * @param projection See {@link org.apache.flink.table.connector.Projection#toNestedIndexes()}.
      * @param filters A list of filters in conjunctive form for filtering on a best-effort basis.
      */
     BulkFormat<RowData, FileSourceSplit> createReaderFactory(
-            RowType type, List<ResolvedExpression> filters);
+            RowType type, int[][] projection, List<ResolvedExpression> filters);
 
     /** Create a {@link BulkWriter.Factory} from the type. */
     BulkWriter.Factory<RowData> createWriterFactory(RowType type);
 
     default BulkFormat<RowData, FileSourceSplit> createReaderFactory(RowType rowType) {
-        return createReaderFactory(rowType, new ArrayList<>());
+        int[][] projection = new int[rowType.getFieldCount()][];
+        for (int i = 0; i < projection.length; i++) {
+            projection[i] = new int[] {i};
+        }
+        return createReaderFactory(rowType, projection);
+    }
+
+    default BulkFormat<RowData, FileSourceSplit> createReaderFactory(
+            RowType rowType, int[][] projection) {
+        return createReaderFactory(rowType, projection, new ArrayList<>());
     }
 
     /** Create a {@link FileFormatImpl} from format identifier and format options. */
