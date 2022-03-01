@@ -38,15 +38,29 @@ public class FileStoreOptions {
                     .defaultValue(MemorySize.ofMebiBytes(8))
                     .withDescription("Suggested file size of a manifest file.");
 
+    public static final ConfigOption<Integer> MANIFEST_MERGE_MIN_COUNT =
+            ConfigOptions.key("manifest.merge-min-count")
+                    .intType()
+                    .defaultValue(30)
+                    .withDescription(
+                            "To avoid frequent manifest merges, this parameter specifies the minimum number "
+                                    + "of ManifestFileMeta to merge.");
+
     public final int bucket;
     public final MemorySize manifestSuggestedSize;
+    public final int manifestMergeMinCount;
 
-    public FileStoreOptions(int bucket, MemorySize manifestSuggestedSize) {
+    public FileStoreOptions(
+            int bucket, MemorySize manifestSuggestedSize, int manifestMergeMinCount) {
         this.bucket = bucket;
         this.manifestSuggestedSize = manifestSuggestedSize;
+        this.manifestMergeMinCount = manifestMergeMinCount;
     }
 
     public FileStoreOptions(ReadableConfig config) {
-        this(config.get(BUCKET), config.get(MANIFEST_TARGET_FILE_SIZE));
+        this(
+                config.get(BUCKET),
+                config.get(MANIFEST_TARGET_FILE_SIZE),
+                config.get(MANIFEST_MERGE_MIN_COUNT));
     }
 }

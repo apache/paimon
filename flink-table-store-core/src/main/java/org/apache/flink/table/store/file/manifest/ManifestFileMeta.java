@@ -135,19 +135,22 @@ public class ManifestFileMeta {
             List<ManifestFileMeta> metas,
             List<ManifestEntry> entries,
             ManifestFile manifestFile,
-            long suggestedMetaSize) {
+            long suggestedMetaSize,
+            int suggestedMinMetaCount) {
         List<ManifestFileMeta> result = new ArrayList<>();
         // these are the newly created manifest files, clean them up if exception occurs
         List<ManifestFileMeta> newMetas = new ArrayList<>();
         List<ManifestFileMeta> candidate = new ArrayList<>();
         long totalSize = 0;
+        int metaCount = 0;
 
         try {
             // merge existing manifests first
             for (ManifestFileMeta manifest : metas) {
                 totalSize += manifest.fileSize;
+                metaCount += 1;
                 candidate.add(manifest);
-                if (totalSize >= suggestedMetaSize) {
+                if (totalSize >= suggestedMetaSize || metaCount >= suggestedMinMetaCount) {
                     // reach suggested file size, perform merging and produce new file
                     if (candidate.size() == 1) {
                         result.add(candidate.get(0));
@@ -162,16 +165,15 @@ public class ManifestFileMeta {
 
                     candidate.clear();
                     totalSize = 0;
+                    metaCount = 0;
                 }
             }
 
-            // merge the last bit of metas with entries
-            mergeIntoOneFile(candidate, entries, manifestFile)
-                    .ifPresent(
-                            merged -> {
-                                newMetas.add(merged);
-                                result.add(merged);
-                            });
+            // both size and count conditions not satisfied, create new file from entries
+            ManifestFileMeta newManifestFileMeta = manifestFile.write(entries);
+            result.addAll(candidate);
+            newMetas.add(newManifestFileMeta);
+            result.add(newManifestFileMeta);
         } catch (Throwable e) {
             // exception occurs, clean up and rethrow
             for (ManifestFileMeta manifest : newMetas) {
