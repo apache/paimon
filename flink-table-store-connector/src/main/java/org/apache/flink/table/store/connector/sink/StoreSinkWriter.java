@@ -35,6 +35,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -128,10 +129,17 @@ public class StoreSinkWriter<WriterStateT>
     @Override
     public List<Committable> prepareCommit() throws IOException {
         List<Committable> committables = new ArrayList<>();
-        for (BinaryRowData partition : writers.keySet()) {
-            Map<Integer, RecordWriter> buckets = writers.get(partition);
-            for (Integer bucket : buckets.keySet()) {
-                RecordWriter writer = buckets.get(bucket);
+        Iterator<Map.Entry<BinaryRowData, Map<Integer, RecordWriter>>> partIter =
+                writers.entrySet().iterator();
+        while (partIter.hasNext()) {
+            Map.Entry<BinaryRowData, Map<Integer, RecordWriter>> partEntry = partIter.next();
+            BinaryRowData partition = partEntry.getKey();
+            Iterator<Map.Entry<Integer, RecordWriter>> bucketIter =
+                    partEntry.getValue().entrySet().iterator();
+            while (bucketIter.hasNext()) {
+                Map.Entry<Integer, RecordWriter> entry = bucketIter.next();
+                int bucket = entry.getKey();
+                RecordWriter writer = entry.getValue();
                 FileCommittable committable;
                 try {
                     committable = new FileCommittable(partition, bucket, writer.prepareCommit());
@@ -149,12 +157,12 @@ public class StoreSinkWriter<WriterStateT>
                 // such as yesterday's partition that no longer needs to be written.
                 if (committable.increment().newFiles().isEmpty()) {
                     closeWriter(writer);
-                    buckets.remove(bucket);
+                    bucketIter.remove();
                 }
             }
 
-            if (buckets.isEmpty()) {
-                writers.remove(partition);
+            if (partEntry.getValue().isEmpty()) {
+                partIter.remove();
             }
         }
 

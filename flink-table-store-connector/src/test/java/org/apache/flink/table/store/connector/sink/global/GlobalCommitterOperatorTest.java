@@ -147,7 +147,7 @@ public class GlobalCommitterOperatorTest {
         testHarness.open();
         testHarness.snapshot(1L, 1L);
         testHarness.notifyOfCompletedCheckpoint(1L);
-        assertThat(globalCommitter.getCommittedData().isEmpty()).isTrue();
+        assertThat(globalCommitter.getCommittedData()).isEmpty();
         testHarness.close();
     }
 
@@ -175,7 +175,7 @@ public class GlobalCommitterOperatorTest {
             GlobalCommitter<String, String> globalCommitter) throws Exception {
         return new OneInputStreamOperatorTestHarness<>(
                 new GlobalCommitterOperator<>(
-                        globalCommitter, StringCommittableSerializer.INSTANCE),
+                        () -> globalCommitter, () -> StringCommittableSerializer.INSTANCE),
                 CommittableMessageTypeInfo.of(
                                 (SerializableSupplier<SimpleVersionedSerializer<String>>)
                                         () -> StringCommittableSerializer.INSTANCE)

@@ -38,6 +38,7 @@ import org.apache.flink.util.Preconditions;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,12 +55,13 @@ public class FileStoreScanImpl implements FileStoreScan {
     private final ManifestFile.Factory manifestFileFactory;
     private final ManifestList manifestList;
 
-    private Long snapshotId;
-    private List<ManifestFileMeta> manifests;
     private Predicate partitionFilter;
     private Predicate keyFilter;
     private Predicate valueFilter;
-    private Integer bucket;
+
+    private Long specifiedSnapshotId = null;
+    private Integer specifiedBucket = null;
+    private List<ManifestFileMeta> specifiedManifests = null;
 
     public FileStoreScanImpl(
             RowType partitionType,
@@ -70,9 +72,6 @@ public class FileStoreScanImpl implements FileStoreScan {
         this.pathFactory = pathFactory;
         this.manifestFileFactory = manifestFileFactory;
         this.manifestList = manifestListFactory.create();
-
-        this.snapshotId = null;
-        this.manifests = new ArrayList<>();
     }
 
     @Override
@@ -122,50 +121,54 @@ public class FileStoreScanImpl implements FileStoreScan {
 
     @Override
     public FileStoreScan withBucket(int bucket) {
-        this.bucket = bucket;
+        this.specifiedBucket = bucket;
         return this;
     }
 
     @Override
     public FileStoreScan withSnapshot(long snapshotId) {
-        this.snapshotId = snapshotId;
-        Snapshot snapshot = Snapshot.fromPath(pathFactory.toSnapshotPath(snapshotId));
-        this.manifests = manifestList.read(snapshot.manifestList());
+        this.specifiedSnapshotId = snapshotId;
+        if (specifiedManifests != null) {
+            throw new IllegalStateException("Cannot set both snapshot id and manifests.");
+        }
         return this;
     }
 
     @Override
     public FileStoreScan withManifestList(List<ManifestFileMeta> manifests) {
-        this.manifests = manifests;
+        this.specifiedManifests = manifests;
+        if (specifiedSnapshotId != null) {
+            throw new IllegalStateException("Cannot set both snapshot id and manifests.");
+        }
         return this;
     }
 
     @Override
     public Plan plan() {
-        List<ManifestEntry> files = scan();
-
-        return new Plan() {
-            @Nullable
-            @Override
-            public Long snapshotId() {
-                return snapshotId;
+        List<ManifestFileMeta> manifests = specifiedManifests;
+        Long snapshotId = specifiedSnapshotId;
+        if (manifests == null) {
+            if (snapshotId == null) {
+                snapshotId = pathFactory.latestSnapshotId();
             }
-
-            @Override
-            public List<ManifestEntry> files() {
-                return files;
+            if (snapshotId == null) {
+                manifests = Collections.emptyList();
+            } else {
+                Snapshot snapshot = Snapshot.fromPath(pathFactory.toSnapshotPath(snapshotId));
+                manifests = manifestList.read(snapshot.manifestList());
             }
-        };
-    }
+        }
 
-    private List<ManifestEntry> scan() {
+        final Long readSnapshot = snapshotId;
+        final List<ManifestFileMeta> readManifests = manifests;
+
         List<ManifestEntry> entries;
         try {
             entries =
                     FileUtils.COMMON_IO_FORK_JOIN_POOL
                             .submit(
                                     () ->
-                                            manifests
+                                            readManifests
                                                     .parallelStream()
                                                     .filter(this::filterManifestFileMeta)
                                                     .flatMap(m -> readManifestFileMeta(m).stream())
@@ -201,7 +204,20 @@ public class FileStoreScanImpl implements FileStoreScan {
                             "Unknown value kind " + entry.kind().name());
             }
         }
-        return new ArrayList<>(map.values());
+        List<ManifestEntry> files = new ArrayList<>(map.values());
+
+        return new Plan() {
+            @Nullable
+            @Override
+            public Long snapshotId() {
+                return readSnapshot;
+            }
+
+            @Override
+            public List<ManifestEntry> files() {
+                return files;
+            }
+        };
     }
 
     private boolean filterManifestFileMeta(ManifestFileMeta manifest) {
@@ -216,7 +232,7 @@ public class FileStoreScanImpl implements FileStoreScan {
         //  SstFile.RollingFile#finish
         return (partitionFilter == null
                         || partitionFilter.test(partitionConverter.convert(entry.partition())))
-                && (bucket == null || entry.bucket() == bucket);
+                && (specifiedBucket == null || entry.bucket() == specifiedBucket);
     }
 
     private List<ManifestEntry> readManifestFileMeta(ManifestFileMeta manifest) {

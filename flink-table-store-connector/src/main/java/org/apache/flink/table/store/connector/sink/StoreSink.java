@@ -104,7 +104,7 @@ public class StoreSink<WriterStateT, LogCommT>
     }
 
     @Override
-    public StoreGlobalCommitter<LogCommT> createCommitter() throws IOException {
+    public StoreGlobalCommitter<LogCommT> createGlobalCommitter() {
         FileStoreCommit commit = fileStore.newCommit();
         CatalogLock lock;
         if (lockFactory == null) {

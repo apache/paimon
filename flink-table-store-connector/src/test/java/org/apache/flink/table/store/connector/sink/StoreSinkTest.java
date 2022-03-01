@@ -179,7 +179,7 @@ public class StoreSinkTest {
     }
 
     private void commit(StoreSink<?, ?> sink, List<Committable> fileCommittables) throws Exception {
-        StoreGlobalCommitter committer = sink.createCommitter();
+        StoreGlobalCommitter committer = sink.createGlobalCommitter();
         GlobalCommittable<?> committable = committer.combine(0, fileCommittables);
 
         fileStore.expired = false;
