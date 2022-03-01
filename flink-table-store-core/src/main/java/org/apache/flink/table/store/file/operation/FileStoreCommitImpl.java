@@ -378,6 +378,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         if (success) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        String.format(
+                                "Successfully commit snapshot #%d (path %s) by user %s "
+                                        + "with identifier %s and kind %s.",
+                                newSnapshotId,
+                                newSnapshotPath.toString(),
+                                commitUser,
+                                identifier,
+                                commitKind.name()));
+            }
             return true;
         }
 

@@ -18,19 +18,19 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
+import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.RepeatedTest;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
@@ -50,23 +50,29 @@ public class FileStoreScanTest {
 
     private static final int NUM_BUCKETS = 10;
 
-    private final FileFormat avro =
-            FileFormat.fromIdentifier(
-                    FileStoreCommitTest.class.getClassLoader(), "avro", new Configuration());
-
     private TestKeyValueGenerator gen;
     @TempDir java.nio.file.Path tempDir;
+    private TestFileStore store;
     private FileStorePathFactory pathFactory;
 
     @BeforeEach
     public void beforeEach() throws IOException {
         gen = new TestKeyValueGenerator();
-        pathFactory = OperationTestUtils.createPathFactory(false, tempDir.toString());
         Path root = new Path(tempDir.toString());
         root.getFileSystem().mkdirs(new Path(root + "/snapshot"));
+        store =
+                TestFileStore.create(
+                        "avro",
+                        tempDir.toString(),
+                        NUM_BUCKETS,
+                        TestKeyValueGenerator.PARTITION_TYPE,
+                        TestKeyValueGenerator.KEY_TYPE,
+                        TestKeyValueGenerator.ROW_TYPE,
+                        new DeduplicateAccumulator());
+        pathFactory = store.pathFactory();
     }
 
-    @RepeatedTest(10)
+    @Test
     public void testWithPartitionFilter() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<KeyValue> data = generateData(random.nextInt(1000) + 1);
@@ -82,12 +88,12 @@ public class FileStoreScanTest {
             wantedPartitions.add(partitions.get(random.nextInt(partitions.size())));
         }
 
-        FileStoreScan scan = OperationTestUtils.createScan(avro, pathFactory);
+        FileStoreScan scan = store.newScan();
         scan.withSnapshot(snapshot.id());
         scan.withPartitionFilter(new ArrayList<>(wantedPartitions));
 
         Map<BinaryRowData, BinaryRowData> expected =
-                OperationTestUtils.toKvMap(
+                store.toKvMap(
                         wantedPartitions.isEmpty()
                                 ? data
                                 : data.stream()
@@ -99,7 +105,7 @@ public class FileStoreScanTest {
         runTest(scan, snapshot.id(), expected);
     }
 
-    @RepeatedTest(10)
+    @Test
     public void testWithBucket() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<KeyValue> data = generateData(random.nextInt(1000) + 1);
@@ -107,19 +113,19 @@ public class FileStoreScanTest {
 
         int wantedBucket = random.nextInt(NUM_BUCKETS);
 
-        FileStoreScan scan = OperationTestUtils.createScan(avro, pathFactory);
+        FileStoreScan scan = store.newScan();
         scan.withSnapshot(snapshot.id());
         scan.withBucket(wantedBucket);
 
         Map<BinaryRowData, BinaryRowData> expected =
-                OperationTestUtils.toKvMap(
+                store.toKvMap(
                         data.stream()
                                 .filter(kv -> getBucket(kv) == wantedBucket)
                                 .collect(Collectors.toList()));
         runTest(scan, snapshot.id(), expected);
     }
 
-    @RepeatedTest(10)
+    @Test
     public void testWithSnapshot() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int numCommits = random.nextInt(10) + 1;
@@ -134,18 +140,18 @@ public class FileStoreScanTest {
         }
         long wantedSnapshot = snapshots.get(wantedCommit).id();
 
-        FileStoreScan scan = OperationTestUtils.createScan(avro, pathFactory);
+        FileStoreScan scan = store.newScan();
         scan.withSnapshot(wantedSnapshot);
 
         Map<BinaryRowData, BinaryRowData> expected =
-                OperationTestUtils.toKvMap(
+                store.toKvMap(
                         allData.subList(0, wantedCommit + 1).stream()
                                 .flatMap(Collection::stream)
                                 .collect(Collectors.toList()));
         runTest(scan, wantedSnapshot, expected);
     }
 
-    @RepeatedTest(10)
+    @Test
     public void testWithManifestList() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int numCommits = random.nextInt(10) + 1;
@@ -154,22 +160,19 @@ public class FileStoreScanTest {
             writeData(data);
         }
 
-        ManifestList manifestList =
-                new ManifestList.Factory(TestKeyValueGenerator.PARTITION_TYPE, avro, pathFactory)
-                        .create();
+        ManifestList manifestList = store.manifestListFactory().create();
         long wantedSnapshot = random.nextLong(pathFactory.latestSnapshotId()) + 1;
         List<ManifestFileMeta> wantedManifests =
                 manifestList.read(
                         Snapshot.fromPath(pathFactory.toSnapshotPath(wantedSnapshot))
                                 .manifestList());
 
-        FileStoreScan scan = OperationTestUtils.createScan(avro, pathFactory);
+        FileStoreScan scan = store.newScan();
         scan.withManifestList(wantedManifests);
 
-        List<KeyValue> expectedKvs =
-                OperationTestUtils.readKvsFromSnapshot(wantedSnapshot, avro, pathFactory);
+        List<KeyValue> expectedKvs = store.readKvsFromSnapshot(wantedSnapshot);
         gen.sort(expectedKvs);
-        Map<BinaryRowData, BinaryRowData> expected = OperationTestUtils.toKvMap(expectedKvs);
+        Map<BinaryRowData, BinaryRowData> expected = store.toKvMap(expectedKvs);
         runTest(scan, null, expected);
     }
 
@@ -179,10 +182,9 @@ public class FileStoreScanTest {
         FileStoreScan.Plan plan = scan.plan();
         assertThat(plan.snapshotId()).isEqualTo(expectedSnapshotId);
 
-        List<KeyValue> actualKvs =
-                OperationTestUtils.readKvsFromManifestEntries(plan.files(), avro, pathFactory);
+        List<KeyValue> actualKvs = store.readKvsFromManifestEntries(plan.files());
         gen.sort(actualKvs);
-        Map<BinaryRowData, BinaryRowData> actual = OperationTestUtils.toKvMap(actualKvs);
+        Map<BinaryRowData, BinaryRowData> actual = store.toKvMap(actualKvs);
         assertThat(actual).isEqualTo(expected);
     }
 
@@ -195,9 +197,7 @@ public class FileStoreScanTest {
     }
 
     private Snapshot writeData(List<KeyValue> kvs) throws Exception {
-        List<Snapshot> snapshots =
-                OperationTestUtils.commitData(
-                        kvs, gen::getPartition, this::getBucket, avro, pathFactory);
+        List<Snapshot> snapshots = store.commitData(kvs, gen::getPartition, this::getBucket);
         return snapshots.get(snapshots.size() - 1);
     }
 

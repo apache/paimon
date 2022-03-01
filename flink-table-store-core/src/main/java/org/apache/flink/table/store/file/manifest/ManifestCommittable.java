@@ -126,16 +126,16 @@ public class ManifestCommittable {
 
     @Override
     public String toString() {
-        return "ManifestCommittable{"
-                + "identifier="
+        return "ManifestCommittable { "
+                + "identifier = "
                 + identifier
-                + ", logOffsets="
+                + ", logOffsets = "
                 + logOffsets
-                + ", newFiles="
+                + ", newFiles =\n"
                 + filesToString(newFiles)
-                + ", compactBefore="
+                + ", compactBefore =\n"
                 + filesToString(compactBefore)
-                + ", compactAfter="
+                + ", compactAfter =\n"
                 + filesToString(compactAfter)
                 + '}';
     }

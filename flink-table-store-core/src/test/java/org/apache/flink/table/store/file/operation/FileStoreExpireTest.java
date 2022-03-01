@@ -18,14 +18,14 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
+import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -43,26 +43,31 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests for {@link FileStoreExpireImpl}. */
 public class FileStoreExpireTest {
 
-    private final FileFormat avro =
-            FileFormat.fromIdentifier(
-                    FileStoreCommitTest.class.getClassLoader(), "avro", new Configuration());
-
     private TestKeyValueGenerator gen;
     @TempDir java.nio.file.Path tempDir;
+    private TestFileStore store;
     private FileStorePathFactory pathFactory;
 
     @BeforeEach
     public void beforeEach() throws IOException {
         gen = new TestKeyValueGenerator();
-        pathFactory = OperationTestUtils.createPathFactory(false, tempDir.toString());
         Path root = new Path(tempDir.toString());
         root.getFileSystem().mkdirs(new Path(root + "/snapshot"));
+        store =
+                TestFileStore.create(
+                        "avro",
+                        tempDir.toString(),
+                        1,
+                        TestKeyValueGenerator.PARTITION_TYPE,
+                        TestKeyValueGenerator.KEY_TYPE,
+                        TestKeyValueGenerator.ROW_TYPE,
+                        new DeduplicateAccumulator());
+        pathFactory = store.pathFactory();
     }
 
     @Test
     public void testNoSnapshot() {
-        FileStoreExpire expire =
-                OperationTestUtils.createExpire(3, Long.MAX_VALUE, avro, pathFactory);
+        FileStoreExpire expire = store.newExpire(3, Long.MAX_VALUE);
         expire.expire();
 
         assertThat(pathFactory.latestSnapshotId()).isNull();
@@ -74,9 +79,7 @@ public class FileStoreExpireTest {
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(2, allData, snapshotPositions);
         int latestSnapshotId = pathFactory.latestSnapshotId().intValue();
-        FileStoreExpire expire =
-                OperationTestUtils.createExpire(
-                        latestSnapshotId + 1, Long.MAX_VALUE, avro, pathFactory);
+        FileStoreExpire expire = store.newExpire(latestSnapshotId + 1, Long.MAX_VALUE);
         expire.expire();
 
         FileSystem fs = pathFactory.toSnapshotPath(latestSnapshotId).getFileSystem();
@@ -92,9 +95,7 @@ public class FileStoreExpireTest {
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(5, allData, snapshotPositions);
         int latestSnapshotId = pathFactory.latestSnapshotId().intValue();
-        FileStoreExpire expire =
-                OperationTestUtils.createExpire(
-                        Integer.MAX_VALUE, Long.MAX_VALUE, avro, pathFactory);
+        FileStoreExpire expire = store.newExpire(Integer.MAX_VALUE, Long.MAX_VALUE);
         expire.expire();
 
         FileSystem fs = pathFactory.toSnapshotPath(latestSnapshotId).getFileSystem();
@@ -111,8 +112,7 @@ public class FileStoreExpireTest {
         commit(3, allData, snapshotPositions);
         int latestSnapshotId = pathFactory.latestSnapshotId().intValue();
         Thread.sleep(100);
-        FileStoreExpire expire =
-                OperationTestUtils.createExpire(Integer.MAX_VALUE, 1, avro, pathFactory);
+        FileStoreExpire expire = store.newExpire(Integer.MAX_VALUE, 1);
         expire.expire();
 
         FileSystem fs = pathFactory.toSnapshotPath(latestSnapshotId).getFileSystem();
@@ -125,8 +125,7 @@ public class FileStoreExpireTest {
 
     @Test
     public void testExpireWithNumber() throws Exception {
-        FileStoreExpire expire =
-                OperationTestUtils.createExpire(3, Long.MAX_VALUE, avro, pathFactory);
+        FileStoreExpire expire = store.newExpire(3, Long.MAX_VALUE);
 
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
@@ -149,8 +148,7 @@ public class FileStoreExpireTest {
 
     @Test
     public void testExpireWithTime() throws Exception {
-        FileStoreExpire expire =
-                OperationTestUtils.createExpire(Integer.MAX_VALUE, 1000, avro, pathFactory);
+        FileStoreExpire expire = store.newExpire(Integer.MAX_VALUE, 1000);
 
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
@@ -183,9 +181,7 @@ public class FileStoreExpireTest {
                 data.add(gen.next());
             }
             allData.addAll(data);
-            List<Snapshot> snapshots =
-                    OperationTestUtils.commitData(
-                            data, gen::getPartition, kv -> 0, avro, pathFactory);
+            List<Snapshot> snapshots = store.commitData(data, gen::getPartition, kv -> 0);
             for (int j = 0; j < snapshots.size(); j++) {
                 snapshotPositions.add(allData.size());
             }
@@ -196,18 +192,12 @@ public class FileStoreExpireTest {
             int snapshotId, List<KeyValue> allData, List<Integer> snapshotPositions)
             throws Exception {
         Map<BinaryRowData, BinaryRowData> expected =
-                OperationTestUtils.toKvMap(
-                        allData.subList(0, snapshotPositions.get(snapshotId - 1)));
+                store.toKvMap(allData.subList(0, snapshotPositions.get(snapshotId - 1)));
         List<KeyValue> actualKvs =
-                OperationTestUtils.readKvsFromManifestEntries(
-                        OperationTestUtils.createScan(avro, pathFactory)
-                                .withSnapshot(snapshotId)
-                                .plan()
-                                .files(),
-                        avro,
-                        pathFactory);
+                store.readKvsFromManifestEntries(
+                        store.newScan().withSnapshot(snapshotId).plan().files());
         gen.sort(actualKvs);
-        Map<BinaryRowData, BinaryRowData> actual = OperationTestUtils.toKvMap(actualKvs);
+        Map<BinaryRowData, BinaryRowData> actual = store.toKvMap(actualKvs);
         assertThat(actual).isEqualTo(expected);
     }
 }
