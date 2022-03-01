@@ -132,7 +132,7 @@ public class FileStoreITCase extends AbstractTestBase {
 
         StreamExecutionEnvironment env = buildBatchEnv();
         FileStore fileStore =
-                buildFileStore(buildConfiguration(TEMPORARY_FOLDER.newFolder()), true);
+                buildFileStore(buildConfiguration(isBatch, TEMPORARY_FOLDER.newFolder()), true);
 
         // sink
         DataStreamSource<RowData> finiteSource = buildTestSource(env, true);
@@ -171,7 +171,8 @@ public class FileStoreITCase extends AbstractTestBase {
     private void innerTest(boolean partitioned) throws Exception {
         StreamExecutionEnvironment env = isBatch ? buildBatchEnv() : buildStreamEnv();
         FileStore fileStore =
-                buildFileStore(buildConfiguration(TEMPORARY_FOLDER.newFolder()), partitioned);
+                buildFileStore(
+                        buildConfiguration(isBatch, TEMPORARY_FOLDER.newFolder()), partitioned);
 
         // sink
         DataStreamSource<RowData> finiteSource = buildTestSource(env, isBatch);
@@ -207,10 +208,15 @@ public class FileStoreITCase extends AbstractTestBase {
         return env;
     }
 
-    public static Configuration buildConfiguration(File folder) {
+    public static Configuration buildConfiguration(boolean isBatch, File folder) {
         Configuration options = new Configuration();
         options.set(BUCKET, NUM_BUCKET);
-        options.set(FILE_PATH, folder.toURI().toString());
+        if (isBatch) {
+            options.set(FILE_PATH, folder.toURI().toString());
+        } else {
+            options.set(FILE_PATH, "fail://" + folder.getPath());
+            // FailingAtomicRenameFileSystem.setFailPossibility(20);
+        }
         options.set(FILE_FORMAT, "avro");
         return options;
     }
