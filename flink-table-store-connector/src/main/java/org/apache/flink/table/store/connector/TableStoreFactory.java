@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
@@ -26,24 +27,21 @@ import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.factories.ManagedTableFactory;
-import org.apache.flink.table.store.kafka.KafkaLogStoreFactory;
-import org.apache.flink.table.store.log.LogStoreTableFactory;
+import org.apache.flink.table.store.file.FileStoreOptions;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.CHANGE_TRACKING;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.FILE_PATH;
-import static org.apache.flink.table.store.file.FileStoreOptions.MANIFEST_TARGET_FILE_SIZE;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
+import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
+import static org.apache.flink.table.store.log.LogStoreTableFactory.discoverLogStoreFactory;
 
 /** Default implementation of {@link ManagedTableFactory}. */
 public class TableStoreFactory implements ManagedTableFactory {
@@ -65,7 +63,7 @@ public class TableStoreFactory implements ManagedTableFactory {
 
     @Override
     public void onCreateTable(Context context, boolean ignoreIfExists) {
-        Map<String, String> enrichedOptions = new HashMap<>(context.getCatalogTable().getOptions());
+        Map<String, String> enrichedOptions = context.getCatalogTable().getOptions();
         Path path = tablePath(enrichedOptions, context.getObjectIdentifier());
         try {
             if (path.getFileSystem().exists(path) && !ignoreIfExists) {
@@ -93,13 +91,13 @@ public class TableStoreFactory implements ManagedTableFactory {
                     new FactoryUtil.DefaultDynamicTableContext(
                             context.getObjectIdentifier(),
                             context.getCatalogTable().copy(filterLogStoreOptions(enrichedOptions)),
-                            context.getEnrichmentOptions(),
+                            filterLogStoreOptions(context.getEnrichmentOptions()),
                             context.getConfiguration(),
                             context.getClassLoader(),
                             context.isTemporary());
-            LogStoreTableFactory.discoverLogStoreFactory(
+            discoverLogStoreFactory(
                             Thread.currentThread().getContextClassLoader(),
-                            KafkaLogStoreFactory.IDENTIFIER)
+                            TableStoreFactoryOptions.LOG_SYSTEM.defaultValue())
                     .onCreateTable(
                             logStoreContext,
                             Integer.parseInt(
@@ -136,9 +134,9 @@ public class TableStoreFactory implements ManagedTableFactory {
                             context.getConfiguration(),
                             context.getClassLoader(),
                             context.isTemporary());
-            LogStoreTableFactory.discoverLogStoreFactory(
+            discoverLogStoreFactory(
                             Thread.currentThread().getContextClassLoader(),
-                            KafkaLogStoreFactory.IDENTIFIER)
+                            TableStoreFactoryOptions.LOG_SYSTEM.defaultValue())
                     .onDropTable(logStoreContext, ignoreIfNotExists);
         }
     }
@@ -146,8 +144,7 @@ public class TableStoreFactory implements ManagedTableFactory {
     @Override
     public Map<String, String> onCompactTable(
             Context context, CatalogPartitionSpec catalogPartitionSpec) {
-        // TODO: next commit
-        return Collections.emptyMap();
+        throw new UnsupportedOperationException("Not implement yet");
     }
 
     @Override
@@ -157,44 +154,33 @@ public class TableStoreFactory implements ManagedTableFactory {
 
     @Override
     public Set<ConfigOption<?>> optionalOptions() {
-        LogStoreTableFactory logStoreTableFactory =
-                LogStoreTableFactory.discoverLogStoreFactory(
-                        Thread.currentThread().getContextClassLoader(),
-                        KafkaLogStoreFactory.IDENTIFIER);
-        Set<ConfigOption<?>> options = new HashSet<>(logStoreTableFactory.optionalOptions());
-        options.addAll(logStoreTableFactory.requiredOptions());
-        options.add(BUCKET);
-        options.add(MANIFEST_TARGET_FILE_SIZE);
+        Set<ConfigOption<?>> options = FileStoreOptions.allOptions();
         options.add(CHANGE_TRACKING);
         return options;
     }
 
     // ~ Tools ------------------------------------------------------------------
 
-    private Map<String, String> filterLogStoreOptions(Map<String, String> enrichedOptions) {
+    @VisibleForTesting
+    Map<String, String> filterLogStoreOptions(Map<String, String> enrichedOptions) {
         Map<String, String> logStoreOptions = new HashMap<>();
-        LogStoreTableFactory logStoreTableFactory =
-                LogStoreTableFactory.discoverLogStoreFactory(
-                        Thread.currentThread().getContextClassLoader(),
-                        KafkaLogStoreFactory.IDENTIFIER);
-        Set<String> logStoreOptionKeys =
-                Stream.concat(
-                                logStoreTableFactory.requiredOptions().stream()
-                                        .map(ConfigOption::key),
-                                logStoreTableFactory.optionalOptions().stream()
-                                        .map(ConfigOption::key))
-                        .collect(Collectors.toSet());
         enrichedOptions.forEach(
                 (k, v) -> {
-                    if (logStoreOptionKeys.contains(k)) {
-                        logStoreOptions.put(k, v);
+                    if (k.startsWith(LOG_PREFIX)) {
+                        logStoreOptions.put(k.substring(LOG_PREFIX.length()), v);
                     }
                 });
         return logStoreOptions;
     }
 
     private static Path tablePath(Map<String, String> options, ObjectIdentifier identifier) {
-        return new Path(new Path(options.get(FILE_PATH.key())), identifier.asSummaryString());
+        return new Path(
+                new Path(options.get(FILE_PATH.key())),
+                String.format(
+                        "root/%s.catalog/%s.db/%s",
+                        identifier.getCatalogName(),
+                        identifier.getDatabaseName(),
+                        identifier.getObjectName()));
     }
 
     private static boolean enableChangeTracking(Map<String, String> options) {

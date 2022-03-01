@@ -115,7 +115,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                 }
                 throw new TableException(
                         String.format(
-                                "Failed to create log store topic. "
+                                "Failed to create kafka topic. "
                                         + "Reason: topic %s exists for table %s. "
                                         + "Suggestion: please try `DESCRIBE TABLE %s` to "
                                         + "check whether table exists in current catalog. "
@@ -145,7 +145,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                 }
                 throw new TableException(
                         String.format(
-                                "Failed to delete log store topic. "
+                                "Failed to delete kafka topic. "
                                         + "Reason: topic %s doesn't exist for table %s. "
                                         + "Suggestion: please try `DROP TABLE IF EXISTS` ddl instead.",
                                 topic(context),

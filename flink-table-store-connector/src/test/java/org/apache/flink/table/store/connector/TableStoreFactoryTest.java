@@ -28,7 +28,9 @@ import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.factories.ManagedTableFactory;
+import org.apache.flink.table.store.log.LogOptions;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -49,6 +51,7 @@ import static org.apache.flink.table.store.file.FileStoreOptions.FILE_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.flink.table.store.log.LogOptions.CONSISTENCY;
+import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -58,7 +61,7 @@ public class TableStoreFactoryTest {
     private static final ObjectIdentifier TABLE_IDENTIFIER =
             ObjectIdentifier.of("catalog", "database", "table");
 
-    private final ManagedTableFactory managedTableFactory = new TableStoreFactory();
+    private final ManagedTableFactory tableStoreFactory = new TableStoreFactory();
 
     @TempDir private static java.nio.file.Path sharedTempDir;
     private DynamicTableFactory.Context context;
@@ -70,7 +73,7 @@ public class TableStoreFactoryTest {
             Map<String, String> tableOptions,
             Map<String, String> expectedEnrichedOptions) {
         context = createTableContext(sessionOptions, tableOptions);
-        Map<String, String> actualEnrichedOptions = managedTableFactory.enrichOptions(context);
+        Map<String, String> actualEnrichedOptions = tableStoreFactory.enrichOptions(context);
         assertThat(actualEnrichedOptions)
                 .containsExactlyInAnyOrderEntriesOf(expectedEnrichedOptions);
     }
@@ -82,13 +85,17 @@ public class TableStoreFactoryTest {
         Path expectedPath =
                 Paths.get(
                         sharedTempDir.toAbsolutePath().toString(),
-                        TABLE_IDENTIFIER.asSummaryString());
+                        String.format(
+                                "root/%s.catalog/%s.db/%s",
+                                TABLE_IDENTIFIER.getCatalogName(),
+                                TABLE_IDENTIFIER.getDatabaseName(),
+                                TABLE_IDENTIFIER.getObjectName()));
         boolean exist = expectedPath.toFile().exists();
         if (ignoreIfExists || !exist) {
-            managedTableFactory.onCreateTable(context, ignoreIfExists);
+            tableStoreFactory.onCreateTable(context, ignoreIfExists);
             assertThat(expectedPath).exists();
         } else {
-            assertThatThrownBy(() -> managedTableFactory.onCreateTable(context, false))
+            assertThatThrownBy(() -> tableStoreFactory.onCreateTable(context, false))
                     .isInstanceOf(TableException.class)
                     .hasMessageContaining(
                             String.format(
@@ -113,13 +120,17 @@ public class TableStoreFactoryTest {
         Path expectedPath =
                 Paths.get(
                         sharedTempDir.toAbsolutePath().toString(),
-                        TABLE_IDENTIFIER.asSummaryString());
+                        String.format(
+                                "root/%s.catalog/%s.db/%s",
+                                TABLE_IDENTIFIER.getCatalogName(),
+                                TABLE_IDENTIFIER.getDatabaseName(),
+                                TABLE_IDENTIFIER.getObjectName()));
         boolean exist = expectedPath.toFile().exists();
         if (exist || ignoreIfNotExists) {
-            managedTableFactory.onDropTable(context, ignoreIfNotExists);
+            tableStoreFactory.onDropTable(context, ignoreIfNotExists);
             assertThat(expectedPath).doesNotExist();
         } else {
-            assertThatThrownBy(() -> managedTableFactory.onDropTable(context, false))
+            assertThatThrownBy(() -> tableStoreFactory.onDropTable(context, false))
                     .isInstanceOf(TableException.class)
                     .hasMessageContaining(
                             String.format(
@@ -128,6 +139,27 @@ public class TableStoreFactoryTest {
                                             + "Suggestion: please try `DROP TABLE IF EXISTS` ddl instead.",
                                     expectedPath, TABLE_IDENTIFIER.asSerializableString()));
         }
+    }
+
+    @Test
+    public void testFilterLogStoreOptions() {
+        // mix invalid key and leave value to empty to emphasize the deferred validation
+        Map<String, String> expectedLogOptions =
+                of(
+                        LogOptions.SCAN.key(),
+                        "",
+                        LogOptions.RETENTION.key(),
+                        "",
+                        "dummy.key",
+                        "",
+                        LogOptions.CHANGELOG_MODE.key(),
+                        "");
+        Map<String, String> enrichedOptions =
+                addPrefix(expectedLogOptions, LOG_PREFIX, (key) -> true);
+        enrichedOptions.put("foo", "bar");
+
+        assertThat(((TableStoreFactory) tableStoreFactory).filterLogStoreOptions(enrichedOptions))
+                .containsExactlyInAnyOrderEntriesOf(expectedLogOptions);
     }
 
     // ~ Tools ------------------------------------------------------------------
@@ -139,9 +171,9 @@ public class TableStoreFactoryTest {
                         BUCKET.defaultValue().toString(),
                         FILE_PATH.key(),
                         sharedTempDir.toString(),
-                        BOOTSTRAP_SERVERS.key(),
+                        LOG_PREFIX + BOOTSTRAP_SERVERS.key(),
                         "localhost:9092",
-                        CONSISTENCY.key(),
+                        LOG_PREFIX + CONSISTENCY.key(),
                         CONSISTENCY.defaultValue().name());
 
         // default
@@ -152,7 +184,7 @@ public class TableStoreFactoryTest {
         // set configuration under session level
         Arguments arg1 =
                 Arguments.of(
-                        addPrefix(enrichedOptions, (key) -> true),
+                        addPrefix(enrichedOptions, TABLE_STORE_PREFIX, (key) -> true),
                         Collections.emptyMap(),
                         enrichedOptions);
 
@@ -165,7 +197,10 @@ public class TableStoreFactoryTest {
         tableOptions.remove(CONSISTENCY.key());
         Arguments arg3 =
                 Arguments.of(
-                        addPrefix(enrichedOptions, (key) -> !tableOptions.containsKey(key)),
+                        addPrefix(
+                                enrichedOptions,
+                                TABLE_STORE_PREFIX,
+                                (key) -> !tableOptions.containsKey(key)),
                         tableOptions,
                         enrichedOptions);
 
@@ -206,12 +241,12 @@ public class TableStoreFactoryTest {
     }
 
     private static Map<String, String> addPrefix(
-            Map<String, String> options, Predicate<String> predicate) {
+            Map<String, String> options, String prefix, Predicate<String> predicate) {
         Map<String, String> newOptions = new HashMap<>();
         options.forEach(
                 (k, v) -> {
                     if (predicate.test(k)) {
-                        newOptions.put(TABLE_STORE_PREFIX + k, v);
+                        newOptions.put(prefix + k, v);
                     }
                 });
         return newOptions;

@@ -70,6 +70,7 @@ import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.FILE_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
+import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -157,7 +158,8 @@ public class TableStoreITCase extends KafkaTableTestBase {
             assertThat(((TableEnvironmentImpl) tEnv).getCatalogManager().getTable(tableIdentifier))
                     .isPresent();
             // check table store
-            assertThat(Paths.get(rootPath, tableIdentifier.asSummaryString()).toFile()).exists();
+            assertThat(Paths.get(rootPath, getRelativeFileStoreTablePath(tableIdentifier)).toFile())
+                    .exists();
             // check log store
             assertThat(topicExists(tableIdentifier.asSummaryString()))
                     .isEqualTo(enableChangeTracking);
@@ -202,7 +204,7 @@ public class TableStoreITCase extends KafkaTableTestBase {
             assertThat(((TableEnvironmentImpl) tEnv).getCatalogManager().getTable(tableIdentifier))
                     .isNotPresent();
             // check table store
-            assertThat(Paths.get(rootPath, tableIdentifier.asSummaryString()).toFile())
+            assertThat(Paths.get(rootPath, getRelativeFileStoreTablePath(tableIdentifier)).toFile())
                     .doesNotExist();
             // check log store
             assertThat(topicExists(tableIdentifier.asSummaryString())).isFalse();
@@ -293,7 +295,7 @@ public class TableStoreITCase extends KafkaTableTestBase {
                     new ExpectedResult()
                             .success(false)
                             .expectedType(TableException.class)
-                            .expectedMessage("Failed to create log store topic.")
+                            .expectedMessage("Failed to create kafka topic.")
                 });
         final String tableName = "table_" + UUID.randomUUID();
         specs.add(
@@ -376,7 +378,7 @@ public class TableStoreITCase extends KafkaTableTestBase {
                     new ExpectedResult()
                             .success(false)
                             .expectedType(TableException.class)
-                            .expectedMessage("Failed to delete log store topic.")
+                            .expectedMessage("Failed to delete kafka topic.")
                 });
         final String tableName = "table_" + UUID.randomUUID();
         specs.add(
@@ -404,7 +406,7 @@ public class TableStoreITCase extends KafkaTableTestBase {
         Configuration configuration = tEnv.getConfig().getConfiguration();
         configuration.setString(TABLE_STORE_PREFIX + FILE_PATH.key(), rootPath);
         configuration.setString(
-                TABLE_STORE_PREFIX + BOOTSTRAP_SERVERS.key(), getBootstrapServers());
+                TABLE_STORE_PREFIX + LOG_PREFIX + BOOTSTRAP_SERVERS.key(), getBootstrapServers());
         configuration.setBoolean(TABLE_STORE_PREFIX + CHANGE_TRACKING.key(), enableChangeTracking);
     }
 
@@ -426,8 +428,8 @@ public class TableStoreITCase extends KafkaTableTestBase {
             }
         } else if (expectedResult.expectedMessage.startsWith("Failed to create file store path.")) {
             // failed when creating file store
-            Paths.get(rootPath, tableIdentifier.asSummaryString()).toFile().mkdirs();
-        } else if (expectedResult.expectedMessage.startsWith("Failed to create log store topic.")) {
+            Paths.get(rootPath, getRelativeFileStoreTablePath(tableIdentifier)).toFile().mkdirs();
+        } else if (expectedResult.expectedMessage.startsWith("Failed to create kafka topic.")) {
             // failed when creating log store
             createTopicIfNotExists(tableIdentifier.asSummaryString(), BUCKET.defaultValue());
         } else {
@@ -472,7 +474,7 @@ public class TableStoreITCase extends KafkaTableTestBase {
         } else if (expectedResult.expectedMessage.startsWith("Failed to delete file store path.")) {
             // failed when deleting file path
             deleteTablePath();
-        } else if (expectedResult.expectedMessage.startsWith("Failed to delete log store topic.")) {
+        } else if (expectedResult.expectedMessage.startsWith("Failed to delete kafka topic.")) {
             // failed when deleting topic
             deleteTopicIfExists(tableIdentifier.asSummaryString());
         } else {
@@ -492,7 +494,7 @@ public class TableStoreITCase extends KafkaTableTestBase {
     private void deleteTablePath() {
         try {
             FileUtils.deleteDirectory(
-                    Paths.get(rootPath, tableIdentifier.asSummaryString()).toFile());
+                    Paths.get(rootPath, getRelativeFileStoreTablePath(tableIdentifier)).toFile());
         } catch (IOException ignored) {
             // ignored
         }
@@ -523,6 +525,14 @@ public class TableStoreITCase extends KafkaTableTestBase {
         }
         return new ResolvedCatalogTable(
                 origin, new ResolvedSchema(resolvedColumns, Collections.emptyList(), constraint));
+    }
+
+    static String getRelativeFileStoreTablePath(ObjectIdentifier tableIdentifier) {
+        return String.format(
+                "root/%s.catalog/%s.db/%s",
+                tableIdentifier.getCatalogName(),
+                tableIdentifier.getDatabaseName(),
+                tableIdentifier.getObjectName());
     }
 
     enum StatementType {

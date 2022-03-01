@@ -27,6 +27,8 @@ import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 
 import java.io.Serializable;
 import java.time.Duration;
+import java.util.HashSet;
+import java.util.Set;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
 
@@ -94,6 +96,20 @@ public class FileStoreOptions implements Serializable {
                     .withDescription("The maximum time of completed snapshots to retain.");
 
     private final Configuration options;
+
+    public static Set<ConfigOption<?>> allOptions() {
+        Set<ConfigOption<?>> allOptions = new HashSet<>();
+        allOptions.add(BUCKET);
+        allOptions.add(FILE_PATH);
+        allOptions.add(FILE_FORMAT);
+        allOptions.add(MANIFEST_FORMAT);
+        allOptions.add(MANIFEST_TARGET_FILE_SIZE);
+        allOptions.add(MANIFEST_MERGE_MIN_COUNT);
+        allOptions.add(PARTITION_DEFAULT_NAME);
+        allOptions.add(SNAPSHOT_NUM_RETAINED);
+        allOptions.add(SNAPSHOT_TIME_RETAINED);
+        return allOptions;
+    }
 
     public FileStoreOptions(Configuration options) {
         this.options = options;
