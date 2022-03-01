@@ -40,8 +40,8 @@ public class FlushingAvroFormat implements FileFormat {
 
     @Override
     public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
-            RowType type, List<ResolvedExpression> filters) {
-        return avro.createReaderFactory(type, filters);
+            RowType type, int[][] projection, List<ResolvedExpression> filters) {
+        return avro.createReaderFactory(type, projection, filters);
     }
 
     @Override

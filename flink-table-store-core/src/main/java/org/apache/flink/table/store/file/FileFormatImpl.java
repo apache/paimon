@@ -26,6 +26,7 @@ import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.table.factories.BulkReaderFormatFactory;
 import org.apache.flink.connector.file.table.factories.BulkWriterFormatFactory;
 import org.apache.flink.connector.file.table.format.BulkDecodingFormat;
+import org.apache.flink.table.connector.format.ProjectableDecodingFormat;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.data.RowData;
@@ -35,6 +36,7 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.Preconditions;
 
 import java.util.List;
 
@@ -54,15 +56,24 @@ public class FileFormatImpl implements FileFormat {
         this.formatOptions = formatOptions;
     }
 
+    @SuppressWarnings("unchecked")
     @Override
     public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
-            RowType rowType, List<ResolvedExpression> filters) {
-        BulkDecodingFormat<RowData> decodingFormat =
-                FactoryUtil.discoverFactory(
-                                classLoader, BulkReaderFormatFactory.class, formatIdentifier)
-                        .createDecodingFormat(null, formatOptions); // context is useless
+            RowType rowType, int[][] projection, List<ResolvedExpression> filters) {
+        BulkDecodingFormat<RowData> decodingFormat = getDecodingFormat();
+        // TODO use ProjectingBulkFormat if not supported
+        Preconditions.checkState(
+                decodingFormat instanceof ProjectableDecodingFormat,
+                "Format " + formatIdentifier + " does not support projection push down");
         decodingFormat.applyFilters(filters);
-        return decodingFormat.createRuntimeDecoder(SOURCE_CONTEXT, fromLogicalToDataType(rowType));
+        return ((ProjectableDecodingFormat<BulkFormat<RowData, FileSourceSplit>>) decodingFormat)
+                .createRuntimeDecoder(SOURCE_CONTEXT, fromLogicalToDataType(rowType), projection);
+    }
+
+    private BulkDecodingFormat<RowData> getDecodingFormat() {
+        return FactoryUtil.discoverFactory(
+                        classLoader, BulkReaderFormatFactory.class, formatIdentifier)
+                .createDecodingFormat(null, formatOptions); // context is useless
     }
 
     @Override

@@ -78,6 +78,33 @@ public class KeyValue {
         return new RowType(fields);
     }
 
+    public static int[][] project(
+            int[][] keyProjection, int[][] valueProjection, int numKeyFields) {
+        int[][] projection = new int[keyProjection.length + 2 + valueProjection.length][];
+
+        // key
+        for (int i = 0; i < keyProjection.length; i++) {
+            projection[i] = new int[keyProjection[i].length];
+            System.arraycopy(keyProjection[i], 0, projection[i], 0, keyProjection[i].length);
+        }
+
+        // seq
+        projection[keyProjection.length] = new int[] {numKeyFields};
+
+        // value kind
+        projection[keyProjection.length + 1] = new int[] {numKeyFields + 1};
+
+        // value
+        for (int i = 0; i < valueProjection.length; i++) {
+            int idx = keyProjection.length + 2 + i;
+            projection[idx] = new int[valueProjection[i].length];
+            System.arraycopy(valueProjection[i], 0, projection[idx], 0, valueProjection[i].length);
+            projection[idx][0] += numKeyFields + 2;
+        }
+
+        return projection;
+    }
+
     @VisibleForTesting
     public KeyValue copy(RowDataSerializer keySerializer, RowDataSerializer valueSerializer) {
         return new KeyValue()
