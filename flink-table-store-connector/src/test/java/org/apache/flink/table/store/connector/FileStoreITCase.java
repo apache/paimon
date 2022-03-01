@@ -38,6 +38,7 @@ import org.apache.flink.table.store.connector.source.FileStoreSource;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
+import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
@@ -214,8 +215,8 @@ public class FileStoreITCase extends AbstractTestBase {
         if (isBatch) {
             options.set(FILE_PATH, folder.toURI().toString());
         } else {
-            options.set(FILE_PATH, "fail://" + folder.getPath());
-            // FailingAtomicRenameFileSystem.setFailPossibility(20);
+            FailingAtomicRenameFileSystem.get().reset(3, 100);
+            options.set(FILE_PATH, FailingAtomicRenameFileSystem.getFailingPath(folder.getPath()));
         }
         options.set(FILE_FORMAT, "avro");
         return options;

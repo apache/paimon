@@ -60,12 +60,11 @@ public class ManifestFileTest {
 
     @RepeatedTest(10)
     public void testCleanUpForException() throws IOException {
-        FailingAtomicRenameFileSystem.resetFailCounter(1);
-        FailingAtomicRenameFileSystem.setFailPossibility(10);
+        FailingAtomicRenameFileSystem.get().reset(1, 10);
         List<ManifestEntry> entries = generateData();
         ManifestFile manifestFile =
                 createManifestFile(
-                        FailingAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString());
+                        FailingAtomicRenameFileSystem.getFailingPath(tempDir.toString()));
 
         try {
             manifestFile.write(entries);

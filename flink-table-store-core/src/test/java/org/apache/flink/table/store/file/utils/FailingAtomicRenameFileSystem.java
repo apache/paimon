@@ -39,15 +39,31 @@ public class FailingAtomicRenameFileSystem extends TestAtomicRenameFileSystem {
 
     public static final String SCHEME = "fail";
 
-    private static final AtomicInteger failCounter = new AtomicInteger();
-    private static int failPossibility = 1000;
+    private final String threadName;
+    private final AtomicInteger failCounter = new AtomicInteger();
+    private int failPossibility;
 
-    public static void resetFailCounter(int maxValue) {
-        failCounter.set(maxValue);
+    public FailingAtomicRenameFileSystem(String threadName) {
+        this.threadName = threadName;
     }
 
-    public static void setFailPossibility(int v) {
-        failPossibility = v;
+    public static FailingAtomicRenameFileSystem get() {
+        try {
+            return (FailingAtomicRenameFileSystem) new Path(getFailingPath("/")).getFileSystem();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static String getFailingPath(String path) {
+        // set authority as thread name so that different testing threads use different instances
+        // for more information see FileSystem#getUnguardedFileSystem for the caching strategy
+        return SCHEME + "://" + Thread.currentThread().getName() + path;
+    }
+
+    public void reset(int maxFails, int failPossibility) {
+        failCounter.set(maxFails);
+        this.failPossibility = failPossibility;
     }
 
     @Override
@@ -68,7 +84,7 @@ public class FailingAtomicRenameFileSystem extends TestAtomicRenameFileSystem {
 
     @Override
     public URI getUri() {
-        return URI.create(SCHEME + ":///");
+        return URI.create(SCHEME + "://" + threadName + "/");
     }
 
     /** {@link FileSystemFactory} for {@link FailingAtomicRenameFileSystem}. */
@@ -81,7 +97,7 @@ public class FailingAtomicRenameFileSystem extends TestAtomicRenameFileSystem {
 
         @Override
         public FileSystem create(URI uri) throws IOException {
-            return new FailingAtomicRenameFileSystem();
+            return new FailingAtomicRenameFileSystem(uri.getAuthority());
         }
     }
 
@@ -93,7 +109,7 @@ public class FailingAtomicRenameFileSystem extends TestAtomicRenameFileSystem {
         }
     }
 
-    private static class FailingFSDataInputStreamWrapper extends FSDataInputStreamWrapper {
+    private class FailingFSDataInputStreamWrapper extends FSDataInputStreamWrapper {
 
         public FailingFSDataInputStreamWrapper(FSDataInputStream inputStream) {
             super(inputStream);
@@ -118,7 +134,7 @@ public class FailingAtomicRenameFileSystem extends TestAtomicRenameFileSystem {
         }
     }
 
-    private static class FailingFSDataOutputStreamWrapper extends FSDataOutputStreamWrapper {
+    private class FailingFSDataOutputStreamWrapper extends FSDataOutputStreamWrapper {
 
         public FailingFSDataOutputStreamWrapper(FSDataOutputStream outputStream) {
             super(outputStream);
@@ -126,7 +142,8 @@ public class FailingAtomicRenameFileSystem extends TestAtomicRenameFileSystem {
 
         @Override
         public void write(int b) throws IOException {
-            if (ThreadLocalRandom.current().nextInt(failPossibility) == 0) {
+            if (ThreadLocalRandom.current().nextInt(failPossibility) == 0
+                    && failCounter.getAndDecrement() > 0) {
                 throw new ArtificialException();
             }
             super.write(b);
@@ -134,7 +151,8 @@ public class FailingAtomicRenameFileSystem extends TestAtomicRenameFileSystem {
 
         @Override
         public void write(byte[] b, int off, int len) throws IOException {
-            if (ThreadLocalRandom.current().nextInt(failPossibility) == 0) {
+            if (ThreadLocalRandom.current().nextInt(failPossibility) == 0
+                    && failCounter.getAndDecrement() > 0) {
                 throw new ArtificialException();
             }
             super.write(b, off, len);

@@ -28,7 +28,6 @@ import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.RepeatedTest;
@@ -62,9 +61,7 @@ public class FileStoreScanTest {
     @BeforeEach
     public void beforeEach() throws IOException {
         gen = new TestKeyValueGenerator();
-        pathFactory =
-                OperationTestUtils.createPathFactory(
-                        TestAtomicRenameFileSystem.SCHEME, tempDir.toString());
+        pathFactory = OperationTestUtils.createPathFactory(false, tempDir.toString());
         Path root = new Path(tempDir.toString());
         root.getFileSystem().mkdirs(new Path(root + "/snapshot"));
     }
