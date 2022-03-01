@@ -18,14 +18,12 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
-import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,17 +52,14 @@ public class TestCommitThread extends Thread {
 
     public TestCommitThread(
             Map<BinaryRowData, List<KeyValue>> data,
-            FileStorePathFactory testPathFactory,
-            FileStorePathFactory safePathFactory) {
+            TestFileStore testStore,
+            TestFileStore safeStore) {
         this.data = data;
         this.result = new HashMap<>();
         this.writers = new HashMap<>();
 
-        FileFormat avro =
-                FileFormat.fromIdentifier(
-                        FileStoreCommitTest.class.getClassLoader(), "avro", new Configuration());
-        this.write = OperationTestUtils.createWrite(avro, safePathFactory);
-        this.commit = OperationTestUtils.createCommit(avro, testPathFactory);
+        this.write = safeStore.newWrite();
+        this.commit = testStore.newCommit();
     }
 
     public Map<BinaryRowData, List<KeyValue>> getResult() {

@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.planner.codegen.sort.SortCodeGenerator;
@@ -71,7 +72,8 @@ public class FileStoreImpl implements FileStore {
                         .generateRecordComparator("KeyComparator");
     }
 
-    private FileStorePathFactory pathFactory() {
+    @VisibleForTesting
+    public FileStorePathFactory pathFactory() {
         return new FileStorePathFactory(
                 options.path(), partitionType, options.partitionDefaultName());
     }
@@ -81,7 +83,8 @@ public class FileStoreImpl implements FileStore {
                 partitionType, keyType, valueType, options.manifestFormat(), pathFactory());
     }
 
-    private ManifestList.Factory manifestListFactory() {
+    @VisibleForTesting
+    public ManifestList.Factory manifestListFactory() {
         return new ManifestList.Factory(partitionType, options.manifestFormat(), pathFactory());
     }
 
