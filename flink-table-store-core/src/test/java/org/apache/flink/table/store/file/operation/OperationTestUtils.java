@@ -34,9 +34,11 @@ import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
+import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
 import org.apache.flink.util.function.QuadFunction;
 
 import java.io.IOException;
@@ -129,9 +131,13 @@ public class OperationTestUtils {
                 pathFactory);
     }
 
-    public static FileStorePathFactory createPathFactory(String scheme, String root) {
+    public static FileStorePathFactory createPathFactory(boolean failing, String root) {
+        String path =
+                failing
+                        ? FailingAtomicRenameFileSystem.getFailingPath(root)
+                        : TestAtomicRenameFileSystem.SCHEME + "://" + root;
         return new FileStorePathFactory(
-                new Path(scheme + "://" + root), TestKeyValueGenerator.PARTITION_TYPE, "default");
+                new Path(path), TestKeyValueGenerator.PARTITION_TYPE, "default");
     }
 
     private static ManifestFile.Factory createManifestFileFactory(

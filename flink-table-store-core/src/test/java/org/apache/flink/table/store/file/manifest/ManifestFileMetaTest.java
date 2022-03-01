@@ -110,15 +110,13 @@ public class ManifestFileMetaTest {
 
     @RepeatedTest(10)
     public void testCleanUpForException() throws IOException {
-        FailingAtomicRenameFileSystem.resetFailCounter(1);
-        FailingAtomicRenameFileSystem.setFailPossibility(10);
-
+        FailingAtomicRenameFileSystem.get().reset(1, 10);
         List<ManifestFileMeta> input = new ArrayList<>();
         List<ManifestEntry> entries = new ArrayList<>();
         createData(input, entries, null);
         ManifestFile failingManifestFile =
                 createManifestFile(
-                        FailingAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString());
+                        FailingAtomicRenameFileSystem.getFailingPath(tempDir.toString()));
 
         try {
             ManifestFileMeta.merge(input, entries, failingManifestFile, 500, 30);

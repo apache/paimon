@@ -98,12 +98,11 @@ public class SstFileTest {
 
     @RepeatedTest(10)
     public void testCleanUpForException() throws IOException {
-        FailingAtomicRenameFileSystem.resetFailCounter(1);
-        FailingAtomicRenameFileSystem.setFailPossibility(10);
+        FailingAtomicRenameFileSystem.get().reset(1, 10);
         SstTestDataGenerator.Data data = gen.next();
         SstFileWriter writer =
                 createSstFileWriter(
-                        FailingAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString());
+                        FailingAtomicRenameFileSystem.getFailingPath(tempDir.toString()));
 
         try {
             writer.write(CloseableIterator.fromList(data.content, kv -> {}), 0);

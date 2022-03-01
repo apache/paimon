@@ -27,7 +27,6 @@ import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -67,25 +66,23 @@ public class FileStoreCommitTest {
         Path root = new Path(tempDir.toString());
         root.getFileSystem().mkdirs(new Path(root + "/snapshot"));
         // for failure tests
-        FailingAtomicRenameFileSystem.resetFailCounter(100);
-        FailingAtomicRenameFileSystem.setFailPossibility(5000);
+        FailingAtomicRenameFileSystem.get().reset(100, 5000);
     }
 
     @ParameterizedTest
-    @ValueSource(
-            strings = {TestAtomicRenameFileSystem.SCHEME, FailingAtomicRenameFileSystem.SCHEME})
-    public void testSingleCommitUser(String scheme) throws Exception {
-        testRandomConcurrentNoConflict(1, scheme);
+    @ValueSource(booleans = {false, true})
+    public void testSingleCommitUser(boolean failing) throws Exception {
+        testRandomConcurrentNoConflict(1, failing);
     }
 
     @ParameterizedTest
-    @ValueSource(
-            strings = {TestAtomicRenameFileSystem.SCHEME, FailingAtomicRenameFileSystem.SCHEME})
-    public void testManyCommitUsersNoConflict(String scheme) throws Exception {
-        testRandomConcurrentNoConflict(ThreadLocalRandom.current().nextInt(3) + 2, scheme);
+    @ValueSource(booleans = {false, true})
+    public void testManyCommitUsersNoConflict(boolean failing) throws Exception {
+        testRandomConcurrentNoConflict(ThreadLocalRandom.current().nextInt(3) + 2, failing);
     }
 
-    protected void testRandomConcurrentNoConflict(int numThreads, String scheme) throws Exception {
+    protected void testRandomConcurrentNoConflict(int numThreads, boolean failing)
+            throws Exception {
         // prepare test data
         Map<BinaryRowData, List<KeyValue>> data =
                 generateData(ThreadLocalRandom.current().nextInt(1000) + 1);
@@ -112,9 +109,8 @@ public class FileStoreCommitTest {
             TestCommitThread thread =
                     new TestCommitThread(
                             dataPerThread.get(i),
-                            OperationTestUtils.createPathFactory(scheme, tempDir.toString()),
-                            OperationTestUtils.createPathFactory(
-                                    TestAtomicRenameFileSystem.SCHEME, tempDir.toString()));
+                            OperationTestUtils.createPathFactory(failing, tempDir.toString()),
+                            OperationTestUtils.createPathFactory(false, tempDir.toString()));
             thread.start();
             threads.add(thread);
         }
@@ -135,8 +131,7 @@ public class FileStoreCommitTest {
 
         // read actual data and compare
         FileStorePathFactory safePathFactory =
-                OperationTestUtils.createPathFactory(
-                        TestAtomicRenameFileSystem.SCHEME, tempDir.toString());
+                OperationTestUtils.createPathFactory(false, tempDir.toString());
         Long snapshotId = safePathFactory.latestSnapshotId();
         assertThat(snapshotId).isNotNull();
         List<KeyValue> actualKvs =
@@ -161,8 +156,7 @@ public class FileStoreCommitTest {
                 "data1");
 
         FileStorePathFactory pathFactory =
-                OperationTestUtils.createPathFactory(
-                        TestAtomicRenameFileSystem.SCHEME, tempDir.toString());
+                OperationTestUtils.createPathFactory(false, tempDir.toString());
         OperationTestUtils.commitData(
                 data1.values().stream().flatMap(Collection::stream).collect(Collectors.toList()),
                 gen::getPartition,
