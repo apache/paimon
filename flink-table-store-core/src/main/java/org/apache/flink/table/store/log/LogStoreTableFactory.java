@@ -46,10 +46,10 @@ import org.apache.flink.types.RowKind;
 public interface LogStoreTableFactory extends DynamicTableFactory {
 
     /** Notifies the listener that a table creation occurred. */
-    void onCreateTable(Context context, int numBucket);
+    void onCreateTable(Context context, int numBucket, boolean ignoreIfExists);
 
     /** Notifies the listener that a table drop occurred. */
-    void onDropTable(Context context);
+    void onDropTable(Context context, boolean ignoreIfNotExists);
 
     /**
      * Creates a {@link LogSourceProvider} instance from a {@link CatalogTable} and additional

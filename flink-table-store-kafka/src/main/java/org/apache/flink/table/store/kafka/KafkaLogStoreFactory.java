@@ -35,6 +35,7 @@ import org.apache.flink.table.types.utils.DataTypeUtils;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.common.config.TopicConfig;
+import org.apache.kafka.common.errors.TopicExistsException;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 
 import java.util.Collections;
@@ -91,7 +92,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
     }
 
     @Override
-    public void onCreateTable(DynamicTableFactory.Context context, int numBucket) {
+    public void onCreateTable(Context context, int numBucket, boolean ignoreIfExists) {
         FactoryUtil.TableFactoryHelper helper = createTableFactoryHelper(this, context);
         helper.validateExcept(KAFKA_PREFIX);
         try (AdminClient adminClient = AdminClient.create(toKafkaProperties(helper.getOptions()))) {
@@ -103,27 +104,54 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                                     configs.put(
                                             TopicConfig.RETENTION_MS_CONFIG,
                                             String.valueOf(retention.toMillis())));
-
             NewTopic topicObj =
                     new NewTopic(topic(context), Optional.of(numBucket), Optional.empty())
                             .configs(configs);
             adminClient.createTopics(Collections.singleton(topicObj)).all().get();
         } catch (ExecutionException | InterruptedException e) {
+            if (e.getCause() instanceof TopicExistsException) {
+                if (ignoreIfExists) {
+                    return;
+                }
+                throw new TableException(
+                        String.format(
+                                "Failed to create kafka topic. "
+                                        + "Reason: topic %s exists for table %s. "
+                                        + "Suggestion: please try `DESCRIBE TABLE %s` to "
+                                        + "check whether table exists in current catalog. "
+                                        + "If table exists and the DDL needs to be executed "
+                                        + "multiple times, please use `CREATE TABLE IF NOT EXISTS` ddl instead. "
+                                        + "Otherwise, please choose another table name "
+                                        + "or manually delete the current topic and try again.",
+                                topic(context),
+                                context.getObjectIdentifier().asSerializableString(),
+                                context.getObjectIdentifier().asSerializableString()));
+            }
             throw new TableException("Error in createTopic", e);
         }
     }
 
     @Override
-    public void onDropTable(DynamicTableFactory.Context context) {
+    public void onDropTable(Context context, boolean ignoreIfNotExists) {
         try (AdminClient adminClient =
                 AdminClient.create(
                         toKafkaProperties(createTableFactoryHelper(this, context).getOptions()))) {
             adminClient.deleteTopics(Collections.singleton(topic(context))).all().get();
         } catch (ExecutionException e) {
-            // ignore topic not exists
-            if (!(e.getCause() instanceof UnknownTopicOrPartitionException)) {
-                throw new TableException("Error in deleteTopic", e);
+            // check the cause to ignore topic not exists conditionally
+            if (e.getCause() instanceof UnknownTopicOrPartitionException) {
+                if (ignoreIfNotExists) {
+                    return;
+                }
+                throw new TableException(
+                        String.format(
+                                "Failed to delete kafka topic. "
+                                        + "Reason: topic %s doesn't exist for table %s. "
+                                        + "Suggestion: please try `DROP TABLE IF EXISTS` ddl instead.",
+                                topic(context),
+                                context.getObjectIdentifier().asSerializableString()));
             }
+            throw new TableException("Error in deleteTopic", e);
         } catch (InterruptedException e) {
             throw new TableException("Error in deleteTopic", e);
         }

@@ -50,7 +50,7 @@ public class KafkaLogITCase extends KafkaTableTestBase {
     @Test
     public void testDropEmpty() {
         // Expect no exceptions to be thrown
-        factory.onDropTable(testContext(getBootstrapServers(), LogChangelogMode.AUTO, true));
+        factory.onDropTable(testContext(getBootstrapServers(), LogChangelogMode.AUTO, true), true);
     }
 
     @Test
@@ -141,7 +141,7 @@ public class KafkaLogITCase extends KafkaTableTestBase {
         KafkaLogSourceProvider sourceProvider =
                 factory.createSourceProvider(context, SOURCE_CONTEXT);
 
-        factory.onCreateTable(context, 3);
+        factory.onCreateTable(context, 3, true);
         try {
             // transactional need to commit
             enableCheckpoint();
@@ -198,7 +198,7 @@ public class KafkaLogITCase extends KafkaTableTestBase {
             assertRow(records.get(1), RowKind.INSERT, 11, 12);
             assertRow(records.get(2), RowKind.INSERT, 13, 14);
         } finally {
-            factory.onDropTable(context);
+            factory.onDropTable(context, true);
         }
     }
 
