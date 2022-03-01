@@ -32,6 +32,8 @@ import static org.apache.flink.table.store.utils.OptionsUtils.formatEnumOption;
 /** Options for log store. */
 public class LogOptions {
 
+    public static final String LOG_PREFIX = "log.";
+
     public static final ConfigOption<LogStartupMode> SCAN =
             ConfigOptions.key("scan")
                     .enumType(LogStartupMode.class)
