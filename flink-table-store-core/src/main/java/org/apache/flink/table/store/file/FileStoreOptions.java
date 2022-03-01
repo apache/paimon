@@ -33,6 +33,8 @@ import static org.apache.flink.configuration.ConfigOptions.key;
 /** Options for {@link FileStore}. */
 public class FileStoreOptions implements Serializable {
 
+    public static final String TABLE_STORE_PREFIX = "table-store.";
+
     public static final ConfigOption<Integer> BUCKET =
             ConfigOptions.key("bucket")
                     .intType()

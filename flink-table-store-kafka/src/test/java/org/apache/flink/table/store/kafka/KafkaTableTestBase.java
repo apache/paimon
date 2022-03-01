@@ -25,11 +25,14 @@ import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.util.DockerImageVersions;
 
 import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.clients.admin.TopicListing;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.TopicExistsException;
+import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.After;
 import org.junit.Before;
@@ -43,8 +46,10 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -124,6 +129,44 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
 
     public String getBootstrapServers() {
         return KAFKA_CONTAINER.getBootstrapServers();
+    }
+
+    protected boolean topicExists(String topicName) {
+        return describeExternalTopics().containsKey(topicName);
+    }
+
+    protected void createTopicIfNotExists(String topicName, int numBucket) {
+        try (final AdminClient adminClient = AdminClient.create(getStandardProps())) {
+            if (!adminClient.listTopics().names().get().contains(topicName)) {
+                adminClient
+                        .createTopics(
+                                Collections.singleton(
+                                        new NewTopic(
+                                                topicName,
+                                                Optional.of(numBucket),
+                                                Optional.empty())))
+                        .all()
+                        .get();
+            }
+        } catch (Exception e) {
+            if (!(e.getCause() instanceof TopicExistsException)) {
+                throw new RuntimeException(
+                        String.format("Failed to create Kafka topic %s", topicName), e);
+            }
+        }
+    }
+
+    protected void deleteTopicIfExists(String topicName) {
+        try (final AdminClient adminClient = AdminClient.create(getStandardProps())) {
+            if (adminClient.listTopics().names().get().contains(topicName)) {
+                adminClient.deleteTopics(Collections.singleton(topicName)).all().get();
+            }
+        } catch (Exception e) {
+            if (!(e.getCause() instanceof UnknownTopicOrPartitionException)) {
+                throw new RuntimeException(
+                        String.format("Failed to drop Kafka topic %s", topicName), e);
+            }
+        }
     }
 
     // ------------------------ For Debug Logging Purpose ----------------------------------
