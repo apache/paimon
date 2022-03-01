@@ -77,7 +77,8 @@ public class ManifestFileMetaTest {
         List<ManifestFileMeta> expected = new ArrayList<>();
         createData(input, entries, expected);
 
-        List<ManifestFileMeta> actual = ManifestFileMeta.merge(input, entries, manifestFile, 500);
+        List<ManifestFileMeta> actual =
+                ManifestFileMeta.merge(input, entries, manifestFile, 500, 3);
         assertThat(actual).hasSameSizeAs(expected);
 
         // these three manifest files are merged from the input
@@ -85,9 +86,14 @@ public class ManifestFileMetaTest {
         assertSameContent(expected.get(1), actual.get(1), manifestFile);
         assertSameContent(expected.get(4), actual.get(4), manifestFile);
 
-        // these two manifest files should be kept without modification
+        // these four manifest files should be kept without modification
         assertThat(actual.get(2)).isEqualTo(input.get(5));
         assertThat(actual.get(3)).isEqualTo(input.get(6));
+        assertThat(actual.get(5)).isEqualTo(input.get(10));
+        assertThat(actual.get(6)).isEqualTo(input.get(11));
+
+        // this manifest file should be created from entries
+        assertSameContent(expected.get(7), actual.get(7), manifestFile);
     }
 
     private void assertSameContent(
@@ -115,7 +121,7 @@ public class ManifestFileMetaTest {
                         FailingAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString());
 
         try {
-            ManifestFileMeta.merge(input, entries, failingManifestFile, 500);
+            ManifestFileMeta.merge(input, entries, failingManifestFile, 500, 30);
         } catch (Throwable e) {
             assertThat(e)
                     .hasRootCauseExactlyInstanceOf(
@@ -150,13 +156,16 @@ public class ManifestFileMetaTest {
             List<ManifestFileMeta> input,
             List<ManifestEntry> entries,
             List<ManifestFileMeta> expected) {
-        // suggested size 500
+        // suggested size 500 and suggested count 3
         // file sizes:
         // 200, 300, -- multiple files exactly the suggested size
         // 100, 200, 300, -- multiple files exceeding the suggested size
         // 500, -- single file exactly the suggested size
         // 600, -- single file exceeding the suggested size
-        // 100, 300 -- not enough sizes, but the last bit
+        // 100, 100, 100, -- multiple files exceeding the suggested count
+        // 100, -- the last bit, not enough size or count, won't merge
+        // 300, -- the last bit, not enough size or count, won't merge
+        // 200, -- file created from entries
 
         input.add(makeManifest(makeEntry(true, "A"), makeEntry(true, "B")));
         input.add(makeManifest(makeEntry(true, "C"), makeEntry(false, "B"), makeEntry(true, "D")));
@@ -183,10 +192,14 @@ public class ManifestFileMetaTest {
                         makeEntry(true, "L")));
 
         input.add(makeManifest(makeEntry(true, "M")));
-        input.add(makeManifest(makeEntry(false, "M"), makeEntry(true, "N"), makeEntry(true, "O")));
+        input.add(makeManifest(makeEntry(true, "N")));
+        input.add(makeManifest(makeEntry(true, "O")));
 
-        entries.add(makeEntry(false, "O"));
-        entries.add(makeEntry(true, "P"));
+        input.add(makeManifest(makeEntry(true, "P")));
+        input.add(makeManifest(makeEntry(false, "Q"), makeEntry(true, "R"), makeEntry(true, "S")));
+
+        entries.add(makeEntry(false, "S"));
+        entries.add(makeEntry(true, "T"));
 
         if (expected == null) {
             return;
@@ -197,7 +210,11 @@ public class ManifestFileMetaTest {
         expected.add(makeManifest(makeEntry(false, "A"), makeEntry(true, "F")));
         expected.add(input.get(5));
         expected.add(input.get(6));
-        expected.add(makeManifest(makeEntry(true, "N"), makeEntry(true, "P")));
+        expected.add(
+                makeManifest(makeEntry(true, "M"), makeEntry(true, "N"), makeEntry(true, "O")));
+        expected.add(input.get(10));
+        expected.add(input.get(11));
+        expected.add(makeManifest(makeEntry(false, "S"), makeEntry(true, "T")));
     }
 
     private ManifestFileMeta makeManifest(ManifestEntry... entries) {

@@ -307,7 +307,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             oldMetas,
                             changes,
                             manifestFile,
-                            fileStoreOptions.manifestSuggestedSize.getBytes()));
+                            fileStoreOptions.manifestSuggestedSize.getBytes(),
+                            fileStoreOptions.manifestMergeMinCount));
             // prepare snapshot file
             manifestListName = manifestList.write(newMetas);
             newSnapshot =
