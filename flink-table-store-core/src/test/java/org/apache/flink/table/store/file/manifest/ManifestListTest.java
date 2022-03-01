@@ -58,12 +58,11 @@ public class ManifestListTest {
 
     @RepeatedTest(10)
     public void testCleanUpForException() throws IOException {
-        FailingAtomicRenameFileSystem.resetFailCounter(1);
-        FailingAtomicRenameFileSystem.setFailPossibility(3);
+        FailingAtomicRenameFileSystem.get().reset(1, 3);
         List<ManifestFileMeta> metas = generateData();
         ManifestList manifestList =
                 createManifestList(
-                        FailingAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString());
+                        FailingAtomicRenameFileSystem.getFailingPath(tempDir.toString()));
 
         try {
             manifestList.write(metas);

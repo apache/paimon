@@ -137,7 +137,7 @@ public class TestCommitThread extends Thread {
                 break;
             } catch (Throwable e) {
                 if (LOG.isDebugEnabled()) {
-                    LOG.warn("Failed to commit because of exception, try again", e);
+                    LOG.debug("Failed to commit because of exception, try again", e);
                 }
                 writers.clear();
                 shouldCheckFilter = true;
