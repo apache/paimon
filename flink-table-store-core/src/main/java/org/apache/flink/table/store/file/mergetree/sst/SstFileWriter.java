@@ -21,7 +21,6 @@ package org.apache.flink.table.store.file.mergetree.sst;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.core.fs.FSDataOutputStream;
-import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
@@ -32,6 +31,7 @@ import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.stats.FieldStats;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
+import org.apache.flink.table.store.file.utils.RollingFile;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.CloseableIterator;
 
@@ -92,39 +92,23 @@ public class SstFileWriter {
     public List<SstFileMeta> write(CloseableIterator<KeyValue> iterator, int level)
             throws Exception {
         List<SstFileMeta> result = new ArrayList<>();
-
-        RollingFile rollingFile = null;
-        Path currentPath = null;
+        List<Path> filesToCleanUp = new ArrayList<>();
         try {
-            while (iterator.hasNext()) {
-                if (rollingFile == null) {
-                    currentPath = pathFactory.newPath();
-                    rollingFile = new RollingFile(currentPath, suggestedFileSize);
-                }
-                rollingFile.write(iterator.next());
-                if (rollingFile.exceedsSuggestedFileSize()) {
-                    result.add(rollingFile.finish(level));
-                    rollingFile = null;
-                }
-            }
-            // finish last file
-            if (rollingFile != null) {
-                result.add(rollingFile.finish(level));
-            }
-            iterator.close();
+            RollingFile.write(
+                    iterator,
+                    suggestedFileSize,
+                    new StatsCollectingRollingFileContext(level),
+                    result,
+                    filesToCleanUp);
         } catch (Throwable e) {
             LOG.warn("Exception occurs when writing sst files. Cleaning up.", e);
-            // clean up finished files
-            for (SstFileMeta meta : result) {
-                FileUtils.deleteOrWarn(pathFactory.toPath(meta.fileName()));
-            }
-            // clean up in-progress file
-            if (currentPath != null) {
-                FileUtils.deleteOrWarn(currentPath);
+            for (Path path : filesToCleanUp) {
+                FileUtils.deleteOrWarn(path);
             }
             throw e;
+        } finally {
+            iterator.close();
         }
-
         return result;
     }
 
@@ -132,12 +116,10 @@ public class SstFileWriter {
         FileUtils.deleteOrWarn(pathFactory.toPath(file.fileName()));
     }
 
-    private class RollingFile {
-        private final Path path;
-        private final long suggestedFileSize;
+    private abstract class AbstractRollingFileContext
+            implements RollingFile.Context<KeyValue, SstFileMeta> {
 
-        private final FSDataOutputStream out;
-        private final BulkWriter<RowData> writer;
+        private final int level;
         private final KeyValueSerializer serializer;
         private final RowDataSerializer keySerializer;
 
@@ -147,37 +129,29 @@ public class SstFileWriter {
         private long minSequenceNumber;
         private long maxSequenceNumber;
 
-        private RollingFile(Path path, long suggestedFileSize) throws IOException {
-            this.path = path;
-            this.suggestedFileSize = suggestedFileSize;
-
-            this.out =
-                    this.path.getFileSystem().create(this.path, FileSystem.WriteMode.NO_OVERWRITE);
-            this.writer = writerFactory.create(out);
+        private AbstractRollingFileContext(int level) {
+            this.level = level;
             this.serializer = new KeyValueSerializer(keyType, valueType);
             this.keySerializer = new RowDataSerializer(keyType);
-
-            this.rowCount = 0;
-            this.minKey = null;
-            this.maxKey = null;
-            this.minSequenceNumber = Long.MAX_VALUE;
-            this.maxSequenceNumber = Long.MIN_VALUE;
-
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Creating new sst file " + path);
-            }
+            resetMeta();
         }
 
-        private void write(KeyValue kv) throws IOException {
+        @Override
+        public Path newPath() {
+            return pathFactory.newPath();
+        }
+
+        @Override
+        public BulkWriter<RowData> newWriter(FSDataOutputStream out) throws IOException {
+            return writerFactory.create(out);
+        }
+
+        @Override
+        public RowData serialize(KeyValue kv) {
             if (LOG.isDebugEnabled()) {
-                LOG.debug(
-                        "Writing key-value to sst file "
-                                + path
-                                + ", kv: "
-                                + kv.toString(keyType, valueType));
+                LOG.debug("Writing key-value to sst file, kv: " + kv.toString(keyType, valueType));
             }
 
-            writer.addElement(serializer.toRow(kv));
             rowCount++;
             if (minKey == null) {
                 minKey = keySerializer.toBinaryRow(kv.key()).copy();
@@ -185,17 +159,46 @@ public class SstFileWriter {
             maxKey = kv.key();
             minSequenceNumber = Math.min(minSequenceNumber, kv.sequenceNumber());
             maxSequenceNumber = Math.max(maxSequenceNumber, kv.sequenceNumber());
+
+            return serializer.toRow(kv);
         }
 
-        private boolean exceedsSuggestedFileSize() throws IOException {
-            // NOTE: this method is inaccurate for formats buffering changes in memory
-            return out.getPos() >= suggestedFileSize;
+        @Override
+        public SstFileMeta collectFile(Path path) throws IOException {
+            SstFileMeta result =
+                    new SstFileMeta(
+                            path.getName(),
+                            FileUtils.getFileSize(path),
+                            rowCount,
+                            minKey,
+                            keySerializer.toBinaryRow(maxKey).copy(),
+                            collectStats(path),
+                            minSequenceNumber,
+                            maxSequenceNumber,
+                            level);
+            resetMeta();
+            return result;
         }
 
-        private SstFileMeta finish(int level) throws IOException {
-            writer.finish();
-            out.close();
+        private void resetMeta() {
+            rowCount = 0;
+            minKey = null;
+            maxKey = null;
+            minSequenceNumber = Long.MAX_VALUE;
+            maxSequenceNumber = Long.MIN_VALUE;
+        }
 
+        protected abstract FieldStats[] collectStats(Path path);
+    }
+
+    private class StatsCollectingRollingFileContext extends AbstractRollingFileContext {
+
+        private StatsCollectingRollingFileContext(int level) {
+            super(level);
+        }
+
+        @Override
+        protected FieldStats[] collectStats(Path path) {
             // TODO
             //  1. Read statistics directly from the written orc/parquet files.
             //  2. For other file formats use StatsCollector. Make sure fields are not reused
@@ -204,17 +207,7 @@ public class SstFileWriter {
             for (int i = 0; i < stats.length; i++) {
                 stats[i] = new FieldStats(null, null, 0);
             }
-
-            return new SstFileMeta(
-                    path.getName(),
-                    FileUtils.getFileSize(path),
-                    rowCount,
-                    minKey,
-                    keySerializer.toBinaryRow(maxKey).copy(),
-                    stats,
-                    minSequenceNumber,
-                    maxSequenceNumber,
-                    level);
+            return stats;
         }
     }
 

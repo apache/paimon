@@ -28,7 +28,6 @@ import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializerTest;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
-import org.apache.flink.table.store.file.stats.FieldStats;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FlushingAvroFormat;
@@ -296,36 +295,5 @@ public class SstFileTest {
         for (SstFileMeta meta : actual) {
             assertThat(meta.level()).isEqualTo(expected.level());
         }
-    }
-
-    @SuppressWarnings("unchecked")
-    private void checkRollingFileStats(FieldStats expected, List<FieldStats> actual) {
-        if (expected.minValue() instanceof Comparable) {
-            Object actualMin = null;
-            Object actualMax = null;
-            for (FieldStats stats : actual) {
-                if (stats.minValue() != null
-                        && (actualMin == null
-                                || ((Comparable<Object>) stats.minValue()).compareTo(actualMin)
-                                        < 0)) {
-                    actualMin = stats.minValue();
-                }
-                if (stats.maxValue() != null
-                        && (actualMax == null
-                                || ((Comparable<Object>) stats.maxValue()).compareTo(actualMax)
-                                        > 0)) {
-                    actualMax = stats.maxValue();
-                }
-            }
-            assertThat(actualMin).isEqualTo(expected.minValue());
-            assertThat(actualMax).isEqualTo(expected.maxValue());
-        } else {
-            for (FieldStats stats : actual) {
-                assertThat(stats.minValue()).isNull();
-                assertThat(stats.maxValue()).isNull();
-            }
-        }
-        assertThat(actual.stream().mapToLong(FieldStats::nullCount).sum())
-                .isEqualTo(expected.nullCount());
     }
 }

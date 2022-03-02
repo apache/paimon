@@ -23,6 +23,8 @@ import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
+import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 
@@ -32,6 +34,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -51,10 +55,12 @@ public class ManifestFileTest {
         ManifestFileMeta meta = gen.createManifestFileMeta(entries);
         ManifestFile manifestFile = createManifestFile(tempDir.toString());
 
-        ManifestFileMeta actualMeta = manifestFile.write(entries);
-        // we do not check file name and size as we can't know in advance
-        checkMetaIgnoringFileNameAndSize(meta, actualMeta);
-        List<ManifestEntry> actualEntries = manifestFile.read(actualMeta.fileName());
+        List<ManifestFileMeta> actualMetas = manifestFile.write(entries);
+        checkRollingFiles(meta, actualMetas, manifestFile.suggestedFileSize());
+        List<ManifestEntry> actualEntries =
+                actualMetas.stream()
+                        .flatMap(m -> manifestFile.read(m.fileName()).stream())
+                        .collect(Collectors.toList());
         assertThat(actualEntries).isEqualTo(entries);
     }
 
@@ -90,19 +96,39 @@ public class ManifestFileTest {
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
                         new Path(path), TestKeyValueGenerator.PARTITION_TYPE, "default");
+        int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         return new ManifestFile.Factory(
                         TestKeyValueGenerator.PARTITION_TYPE,
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.ROW_TYPE,
                         avro,
-                        pathFactory)
+                        pathFactory,
+                        suggestedFileSize)
                 .create();
     }
 
-    private void checkMetaIgnoringFileNameAndSize(
-            ManifestFileMeta expected, ManifestFileMeta actual) {
-        assertThat(actual.numAddedFiles()).isEqualTo(expected.numAddedFiles());
-        assertThat(actual.numDeletedFiles()).isEqualTo(expected.numDeletedFiles());
-        assertThat(actual.partitionStats()).isEqualTo(expected.partitionStats());
+    private void checkRollingFiles(
+            ManifestFileMeta expected, List<ManifestFileMeta> actual, long suggestedFileSize) {
+        // all but last file should be no smaller than suggestedFileSize
+        for (int i = 0; i + 1 < actual.size(); i++) {
+            assertThat(actual.get(i).fileSize() >= suggestedFileSize).isTrue();
+        }
+
+        // expected.numAddedFiles == sum(numAddedFiles)
+        assertThat(actual.stream().mapToLong(ManifestFileMeta::numAddedFiles).sum())
+                .isEqualTo(expected.numAddedFiles());
+
+        // expected.numDeletedFiles == sum(numDeletedFiles)
+        assertThat(actual.stream().mapToLong(ManifestFileMeta::numDeletedFiles).sum())
+                .isEqualTo(expected.numDeletedFiles());
+
+        // check stats
+        for (int i = 0; i < expected.partitionStats().length; i++) {
+            List<FieldStats> actualStats = new ArrayList<>();
+            for (ManifestFileMeta meta : actual) {
+                actualStats.add(meta.partitionStats()[i]);
+            }
+            StatsTestUtils.checkRollingFileStats(expected.partitionStats()[i], actualStats);
+        }
     }
 }
