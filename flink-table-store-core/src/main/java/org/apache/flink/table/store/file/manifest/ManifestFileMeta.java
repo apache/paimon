@@ -27,12 +27,10 @@ import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 
 /** Metadata of a manifest file. */
 public class ManifestFileMeta {
@@ -125,56 +123,40 @@ public class ManifestFileMeta {
     }
 
     /**
-     * Merge several {@link ManifestFileMeta}s with several {@link ManifestEntry}s. {@link
-     * ManifestEntry}s representing first adding and then deleting the same sst file will cancel
-     * each other.
+     * Merge several {@link ManifestFileMeta}s. {@link ManifestEntry}s representing first adding and
+     * then deleting the same sst file will cancel each other.
      *
      * <p>NOTE: This method is atomic.
      */
     public static List<ManifestFileMeta> merge(
             List<ManifestFileMeta> metas,
-            List<ManifestEntry> entries,
             ManifestFile manifestFile,
             long suggestedMetaSize,
             int suggestedMinMetaCount) {
         List<ManifestFileMeta> result = new ArrayList<>();
         // these are the newly created manifest files, clean them up if exception occurs
         List<ManifestFileMeta> newMetas = new ArrayList<>();
-        List<ManifestFileMeta> candidate = new ArrayList<>();
+        List<ManifestFileMeta> candidates = new ArrayList<>();
         long totalSize = 0;
-        int metaCount = 0;
 
         try {
             // merge existing manifests first
             for (ManifestFileMeta manifest : metas) {
                 totalSize += manifest.fileSize;
-                metaCount += 1;
-                candidate.add(manifest);
-                if (totalSize >= suggestedMetaSize || metaCount >= suggestedMinMetaCount) {
+                candidates.add(manifest);
+                if (totalSize >= suggestedMetaSize) {
                     // reach suggested file size, perform merging and produce new file
-                    if (candidate.size() == 1) {
-                        result.add(candidate.get(0));
-                    } else {
-                        mergeIntoOneFile(candidate, Collections.emptyList(), manifestFile)
-                                .ifPresent(
-                                        merged -> {
-                                            newMetas.add(merged);
-                                            result.add(merged);
-                                        });
-                    }
-
-                    candidate.clear();
+                    mergeCandidates(candidates, manifestFile, result, newMetas);
+                    candidates.clear();
                     totalSize = 0;
-                    metaCount = 0;
                 }
             }
 
-            // both size and count conditions not satisfied, create new file from entries
-            result.addAll(candidate);
-            if (entries.size() > 0) {
-                ManifestFileMeta newManifestFileMeta = manifestFile.write(entries);
-                newMetas.add(newManifestFileMeta);
-                result.add(newManifestFileMeta);
+            // merge the last bit of manifests if there are too many
+            if (candidates.size() >= suggestedMinMetaCount) {
+                mergeCandidates(candidates, manifestFile, result, newMetas);
+            } else {
+                result.addAll(candidates);
             }
         } catch (Throwable e) {
             // exception occurs, clean up and rethrow
@@ -187,16 +169,25 @@ public class ManifestFileMeta {
         return result;
     }
 
-    private static Optional<ManifestFileMeta> mergeIntoOneFile(
-            List<ManifestFileMeta> metas, List<ManifestEntry> entries, ManifestFile manifestFile) {
+    private static void mergeCandidates(
+            List<ManifestFileMeta> candidates,
+            ManifestFile manifestFile,
+            List<ManifestFileMeta> result,
+            List<ManifestFileMeta> newMetas) {
+        if (candidates.size() == 1) {
+            result.add(candidates.get(0));
+            return;
+        }
+
         Map<ManifestEntry.Identifier, ManifestEntry> map = new LinkedHashMap<>();
-        for (ManifestFileMeta manifest : metas) {
+        for (ManifestFileMeta manifest : candidates) {
             mergeEntries(manifestFile.read(manifest.fileName), map);
         }
-        mergeEntries(entries, map);
-        return map.isEmpty()
-                ? Optional.empty()
-                : Optional.of(manifestFile.write(new ArrayList<>(map.values())));
+        if (!map.isEmpty()) {
+            List<ManifestFileMeta> merged = manifestFile.write(new ArrayList<>(map.values()));
+            result.addAll(merged);
+            newMetas.addAll(merged);
+        }
     }
 
     private static void mergeEntries(

@@ -35,15 +35,18 @@ import org.apache.flink.table.types.logical.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.RepeatedTest;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.TreeSet;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -70,30 +73,28 @@ public class ManifestFileMetaTest {
         manifestFile = createManifestFile(tempDir.toString());
     }
 
-    @Test
-    public void testMerge() {
+    @ParameterizedTest
+    @ValueSource(ints = {2, 3, 4})
+    public void testMerge(int numLastBits) {
         List<ManifestFileMeta> input = new ArrayList<>();
-        List<ManifestEntry> entries = new ArrayList<>();
         List<ManifestFileMeta> expected = new ArrayList<>();
-        createData(input, entries, expected);
+        createData(numLastBits, input, expected);
 
-        List<ManifestFileMeta> actual =
-                ManifestFileMeta.merge(input, entries, manifestFile, 500, 3);
+        List<ManifestFileMeta> actual = ManifestFileMeta.merge(input, manifestFile, 500, 3);
         assertThat(actual).hasSameSizeAs(expected);
 
-        // these three manifest files are merged from the input
+        // these two manifest files are merged from the input
         assertSameContent(expected.get(0), actual.get(0), manifestFile);
         assertSameContent(expected.get(1), actual.get(1), manifestFile);
-        assertSameContent(expected.get(4), actual.get(4), manifestFile);
 
-        // these four manifest files should be kept without modification
+        // these two manifest files should be kept without modification
         assertThat(actual.get(2)).isEqualTo(input.get(5));
         assertThat(actual.get(3)).isEqualTo(input.get(6));
-        assertThat(actual.get(5)).isEqualTo(input.get(10));
-        assertThat(actual.get(6)).isEqualTo(input.get(11));
 
-        // this manifest file should be created from entries
-        assertSameContent(expected.get(7), actual.get(7), manifestFile);
+        // check last bits
+        for (int i = 4; i < actual.size(); i++) {
+            assertSameContent(expected.get(i), actual.get(i), manifestFile);
+        }
     }
 
     private void assertSameContent(
@@ -112,14 +113,13 @@ public class ManifestFileMetaTest {
     public void testCleanUpForException() throws IOException {
         FailingAtomicRenameFileSystem.get().reset(1, 10);
         List<ManifestFileMeta> input = new ArrayList<>();
-        List<ManifestEntry> entries = new ArrayList<>();
-        createData(input, entries, null);
+        createData(ThreadLocalRandom.current().nextInt(5), input, null);
         ManifestFile failingManifestFile =
                 createManifestFile(
                         FailingAtomicRenameFileSystem.getFailingPath(tempDir.toString()));
 
         try {
-            ManifestFileMeta.merge(input, entries, failingManifestFile, 500, 30);
+            ManifestFileMeta.merge(input, failingManifestFile, 500, 3);
         } catch (Throwable e) {
             assertThat(e)
                     .hasRootCauseExactlyInstanceOf(
@@ -146,24 +146,20 @@ public class ManifestFileMetaTest {
                         KEY_TYPE,
                         ROW_TYPE,
                         avro,
-                        new FileStorePathFactory(new Path(path), PARTITION_TYPE, "default"))
+                        new FileStorePathFactory(new Path(path), PARTITION_TYPE, "default"),
+                        Long.MAX_VALUE)
                 .create();
     }
 
     private void createData(
-            List<ManifestFileMeta> input,
-            List<ManifestEntry> entries,
-            List<ManifestFileMeta> expected) {
+            int numLastBits, List<ManifestFileMeta> input, List<ManifestFileMeta> expected) {
         // suggested size 500 and suggested count 3
         // file sizes:
         // 200, 300, -- multiple files exactly the suggested size
         // 100, 200, 300, -- multiple files exceeding the suggested size
         // 500, -- single file exactly the suggested size
         // 600, -- single file exceeding the suggested size
-        // 100, 100, 100, -- multiple files exceeding the suggested count
-        // 100, -- the last bit, not enough size or count, won't merge
-        // 300, -- the last bit, not enough size or count, won't merge
-        // 200, -- file created from entries
+        // 100 * numLastBits -- the last bit
 
         input.add(makeManifest(makeEntry(true, "A"), makeEntry(true, "B")));
         input.add(makeManifest(makeEntry(true, "C"), makeEntry(false, "B"), makeEntry(true, "D")));
@@ -189,15 +185,9 @@ public class ManifestFileMetaTest {
                         makeEntry(false, "K"),
                         makeEntry(true, "L")));
 
-        input.add(makeManifest(makeEntry(true, "M")));
-        input.add(makeManifest(makeEntry(true, "N")));
-        input.add(makeManifest(makeEntry(true, "O")));
-
-        input.add(makeManifest(makeEntry(true, "P")));
-        input.add(makeManifest(makeEntry(false, "Q"), makeEntry(true, "R"), makeEntry(true, "S")));
-
-        entries.add(makeEntry(false, "S"));
-        entries.add(makeEntry(true, "T"));
+        for (int i = 0; i < numLastBits; i++) {
+            input.add(makeManifest(makeEntry(true, String.valueOf(i))));
+        }
 
         if (expected == null) {
             return;
@@ -208,15 +198,22 @@ public class ManifestFileMetaTest {
         expected.add(makeManifest(makeEntry(false, "A"), makeEntry(true, "F")));
         expected.add(input.get(5));
         expected.add(input.get(6));
-        expected.add(
-                makeManifest(makeEntry(true, "M"), makeEntry(true, "N"), makeEntry(true, "O")));
-        expected.add(input.get(10));
-        expected.add(input.get(11));
-        expected.add(makeManifest(makeEntry(false, "S"), makeEntry(true, "T")));
+
+        if (numLastBits < 3) {
+            for (int i = 0; i < numLastBits; i++) {
+                expected.add(input.get(7 + i));
+            }
+        } else {
+            expected.add(
+                    makeManifest(
+                            IntStream.range(0, numLastBits)
+                                    .mapToObj(i -> makeEntry(true, String.valueOf(i)))
+                                    .toArray(ManifestEntry[]::new)));
+        }
     }
 
     private ManifestFileMeta makeManifest(ManifestEntry... entries) {
-        ManifestFileMeta writtenMeta = manifestFile.write(Arrays.asList(entries));
+        ManifestFileMeta writtenMeta = manifestFile.write(Arrays.asList(entries)).get(0);
         return new ManifestFileMeta(
                 writtenMeta.fileName(),
                 entries.length * 100, // for testing purpose
