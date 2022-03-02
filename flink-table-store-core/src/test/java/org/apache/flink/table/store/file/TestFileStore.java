@@ -102,7 +102,11 @@ public class TestFileStore extends FileStoreImpl {
 
     public FileStoreExpireImpl newExpire(int numRetained, long millisRetained) {
         return new FileStoreExpireImpl(
-                numRetained, millisRetained, pathFactory(), manifestListFactory(), newScan());
+                numRetained,
+                millisRetained,
+                pathFactory(),
+                manifestFileFactory(),
+                manifestListFactory());
     }
 
     public List<Snapshot> commitData(

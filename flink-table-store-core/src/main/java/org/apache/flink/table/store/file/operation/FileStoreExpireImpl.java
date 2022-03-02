@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.operation;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
+import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.sst.SstPathFactory;
@@ -29,6 +30,7 @@ import org.apache.flink.table.store.file.utils.FileUtils;
 
 import java.io.IOException;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -45,20 +47,20 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     private final long millisRetained;
 
     private final FileStorePathFactory pathFactory;
+    private final ManifestFile manifestFile;
     private final ManifestList manifestList;
-    private final FileStoreScan scan;
 
     public FileStoreExpireImpl(
             int numRetained,
             long millisRetained,
             FileStorePathFactory pathFactory,
-            ManifestList.Factory manifestListFactory,
-            FileStoreScan scan) {
+            ManifestFile.Factory manifestFileFactory,
+            ManifestList.Factory manifestListFactory) {
         this.numRetained = numRetained;
         this.millisRetained = millisRetained;
         this.pathFactory = pathFactory;
+        this.manifestFile = manifestFileFactory.create();
         this.manifestList = manifestListFactory.create();
-        this.scan = scan;
     }
 
     @Override
@@ -103,23 +105,16 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
         Snapshot exclusiveSnapshot = Snapshot.fromPath(pathFactory.toSnapshotPath(exclusiveId));
 
-        // if sst file is only used in snapshots to expire but not in next snapshot we can delete it
-        // because each sst file will only be added and deleted once
-        Set<Path> sstInUse = new HashSet<>();
+        // manifests are only added and deleted once
+        Set<ManifestFileMeta> manifestsInUse = new HashSet<>();
+        manifestsInUse.addAll(manifestList.read(exclusiveSnapshot.previousChanges()));
+        manifestsInUse.addAll(manifestList.read(exclusiveSnapshot.newChanges()));
+
         FileStorePathFactory.SstPathFactoryCache sstPathFactoryCache =
                 new FileStorePathFactory.SstPathFactoryCache(pathFactory);
-        for (ManifestEntry entry : scan.withSnapshot(exclusiveId).plan().files()) {
-            SstPathFactory sstPathFactory =
-                    sstPathFactoryCache.getSstPathFactory(entry.partition(), entry.bucket());
-            sstInUse.add(sstPathFactory.toPath(entry.file().fileName()));
-        }
-
-        // the same with sst, manifests are only added and deleted once
-        Set<ManifestFileMeta> manifestsInUse =
-                new HashSet<>(manifestList.read(exclusiveSnapshot.manifestList()));
-
-        Set<Path> sstToDelete = new HashSet<>();
-        Set<String> manifestsToDelete = new HashSet<>();
+        // we cannot delete manifest file directly because other snapshots to be expired might
+        // be using this as well
+        Set<ManifestFileMeta> manifestsToDelete = new HashSet<>();
 
         for (long id = exclusiveId - 1; id >= Snapshot.FIRST_SNAPSHOT_ID; id--) {
             Path snapshotPath = pathFactory.toSnapshotPath(id);
@@ -129,38 +124,64 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                     // assume that all snapshots preceding it have been removed
                     break;
                 }
-
-                Snapshot toExpire = Snapshot.fromPath(pathFactory.toSnapshotPath(id));
-
-                for (ManifestEntry entry : scan.withSnapshot(toExpire.id()).plan().files()) {
-                    SstPathFactory sstPathFactory =
-                            sstPathFactoryCache.getSstPathFactory(
-                                    entry.partition(), entry.bucket());
-                    Path sstPath = sstPathFactory.toPath(entry.file().fileName());
-                    if (!sstInUse.contains(sstPath)) {
-                        sstToDelete.add(sstPath);
-                    }
-                }
-
-                for (ManifestFileMeta manifest : manifestList.read(toExpire.manifestList())) {
-                    if (!manifestsInUse.contains(manifest)) {
-                        manifestsToDelete.add(manifest.fileName());
-                    }
-                }
-
-                manifestList.delete(toExpire.manifestList());
-                FileUtils.deleteOrWarn(pathFactory.toSnapshotPath(id));
             } catch (IOException e) {
                 throw new RuntimeException(
                         "Failed to determine if snapshot #" + id + " still exists", e);
             }
+
+            Snapshot toExpire = Snapshot.fromPath(pathFactory.toSnapshotPath(id));
+            List<ManifestFileMeta> previousChanges = manifestList.read(toExpire.previousChanges());
+            List<ManifestFileMeta> newChanges = manifestList.read(toExpire.newChanges());
+
+            // we cannot delete an sst file directly when we meet a DELETE entry, because that
+            // file might be upgraded
+            Set<Path> sstToDelete = new HashSet<>();
+            for (ManifestFileMeta meta : newChanges) {
+                for (ManifestEntry entry : manifestFile.read(meta.fileName())) {
+                    SstPathFactory sstPathFactory =
+                            sstPathFactoryCache.getSstPathFactory(
+                                    entry.partition(), entry.bucket());
+                    Path sstPath = sstPathFactory.toPath(entry.file().fileName());
+                    switch (entry.kind()) {
+                        case ADD:
+                            sstToDelete.remove(sstPath);
+                            break;
+                        case DELETE:
+                            sstToDelete.add(sstPath);
+                            break;
+                        default:
+                            throw new UnsupportedOperationException(
+                                    "Unknown value kind " + entry.kind().name());
+                    }
+                }
+            }
+            for (Path sst : sstToDelete) {
+                FileUtils.deleteOrWarn(sst);
+            }
+
+            // collect useless manifests
+            for (ManifestFileMeta manifest : previousChanges) {
+                if (!manifestsInUse.contains(manifest)) {
+                    manifestsToDelete.add(manifest);
+                }
+            }
+            for (ManifestFileMeta manifest : newChanges) {
+                if (!manifestsInUse.contains(manifest)) {
+                    manifestsToDelete.add(manifest);
+                }
+            }
+
+            // delete manifest lists
+            manifestList.delete(toExpire.previousChanges());
+            manifestList.delete(toExpire.newChanges());
+
+            // delete snapshot
+            FileUtils.deleteOrWarn(pathFactory.toSnapshotPath(id));
         }
 
-        for (Path sst : sstToDelete) {
-            FileUtils.deleteOrWarn(sst);
-        }
-        for (String manifestName : manifestsToDelete) {
-            FileUtils.deleteOrWarn(pathFactory.toManifestFilePath(manifestName));
+        // actual delete of manifest files
+        for (ManifestFileMeta manifest : manifestsToDelete) {
+            manifestFile.delete(manifest.fileName());
         }
     }
 }

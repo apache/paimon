@@ -78,7 +78,8 @@ public class FileStoreImpl implements FileStore {
                 options.path(), partitionType, options.partitionDefaultName());
     }
 
-    private ManifestFile.Factory manifestFileFactory() {
+    @VisibleForTesting
+    public ManifestFile.Factory manifestFileFactory() {
         return new ManifestFile.Factory(
                 partitionType,
                 keyType,
@@ -141,8 +142,8 @@ public class FileStoreImpl implements FileStore {
                 options.snapshotNumRetain(),
                 options.snapshotTimeRetain().toMillis(),
                 pathFactory(),
-                manifestListFactory(),
-                newScan());
+                manifestFileFactory(),
+                manifestListFactory());
     }
 
     @Override

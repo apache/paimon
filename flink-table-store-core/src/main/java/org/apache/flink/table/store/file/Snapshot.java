@@ -35,7 +35,8 @@ public class Snapshot {
     public static final long FIRST_SNAPSHOT_ID = 1;
 
     private static final String FIELD_ID = "id";
-    private static final String FIELD_MANIFEST_LIST = "manifestList";
+    private static final String FIELD_PREVIOUS_CHANGES = "previousChanges";
+    private static final String FIELD_NEW_CHANGES = "newChanges";
     private static final String FIELD_COMMIT_USER = "commitUser";
     private static final String FIELD_COMMIT_IDENTIFIER = "commitIdentifier";
     private static final String FIELD_COMMIT_KIND = "commitKind";
@@ -44,8 +45,14 @@ public class Snapshot {
     @JsonProperty(FIELD_ID)
     private final long id;
 
-    @JsonProperty(FIELD_MANIFEST_LIST)
-    private final String manifestList;
+    // a manifest list recording all changes from the previous snapshots
+    @JsonProperty(FIELD_PREVIOUS_CHANGES)
+    private final String previousChanges;
+
+    // a manifest list recording all new changes occurred in this snapshot
+    // for faster expire and streaming reads
+    @JsonProperty(FIELD_NEW_CHANGES)
+    private final String newChanges;
 
     @JsonProperty(FIELD_COMMIT_USER)
     private final String commitUser;
@@ -63,13 +70,15 @@ public class Snapshot {
     @JsonCreator
     public Snapshot(
             @JsonProperty(FIELD_ID) long id,
-            @JsonProperty(FIELD_MANIFEST_LIST) String manifestList,
+            @JsonProperty(FIELD_PREVIOUS_CHANGES) String previousChanges,
+            @JsonProperty(FIELD_NEW_CHANGES) String newChanges,
             @JsonProperty(FIELD_COMMIT_USER) String commitUser,
             @JsonProperty(FIELD_COMMIT_IDENTIFIER) String commitIdentifier,
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
             @JsonProperty(FIELD_TIME_MILLIS) long timeMillis) {
         this.id = id;
-        this.manifestList = manifestList;
+        this.previousChanges = previousChanges;
+        this.newChanges = newChanges;
         this.commitUser = commitUser;
         this.commitIdentifier = commitIdentifier;
         this.commitKind = commitKind;
@@ -81,9 +90,14 @@ public class Snapshot {
         return id;
     }
 
-    @JsonGetter(FIELD_MANIFEST_LIST)
-    public String manifestList() {
-        return manifestList;
+    @JsonGetter(FIELD_PREVIOUS_CHANGES)
+    public String previousChanges() {
+        return previousChanges;
+    }
+
+    @JsonGetter(FIELD_NEW_CHANGES)
+    public String newChanges() {
+        return newChanges;
     }
 
     @JsonGetter(FIELD_COMMIT_USER)
