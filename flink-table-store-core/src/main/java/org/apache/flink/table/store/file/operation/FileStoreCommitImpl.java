@@ -313,10 +313,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             newMetas.addAll(
                     ManifestFileMeta.merge(
                             oldMetas,
-                            changes,
                             manifestFile,
                             manifestTargetSize.getBytes(),
                             manifestMergeMinCount));
+            // write new changes into manifest files
+            if (!changes.isEmpty()) {
+                newMetas.addAll(manifestFile.write(changes));
+            }
             // prepare snapshot file
             manifestListName = manifestList.write(newMetas);
             newSnapshot =
