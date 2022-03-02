@@ -93,15 +93,11 @@ public class ManifestFile {
         Preconditions.checkArgument(
                 entries.size() > 0, "Manifest entries to write must not be empty.");
 
+        ManifestRollingFile rollingFile = new ManifestRollingFile();
         List<ManifestFileMeta> result = new ArrayList<>();
         List<Path> filesToCleanUp = new ArrayList<>();
         try {
-            RollingFile.write(
-                    entries.iterator(),
-                    suggestedFileSize,
-                    new RollingFileContext(),
-                    result,
-                    filesToCleanUp);
+            rollingFile.write(entries.iterator(), result, filesToCleanUp);
         } catch (Throwable e) {
             LOG.warn("Exception occurs when writing manifest files. Cleaning up.", e);
             for (Path path : filesToCleanUp) {
@@ -116,29 +112,29 @@ public class ManifestFile {
         FileUtils.deleteOrWarn(pathFactory.toManifestFilePath(fileName));
     }
 
-    private class RollingFileContext
-            implements RollingFile.Context<ManifestEntry, ManifestFileMeta> {
+    private class ManifestRollingFile extends RollingFile<ManifestEntry, ManifestFileMeta> {
 
         private long numAddedFiles;
         private long numDeletedFiles;
         private FieldStatsCollector statsCollector;
 
-        private RollingFileContext() {
+        private ManifestRollingFile() {
+            super(suggestedFileSize);
             resetMeta();
         }
 
         @Override
-        public Path newPath() {
+        protected Path newPath() {
             return pathFactory.newManifestFile();
         }
 
         @Override
-        public BulkWriter<RowData> newWriter(FSDataOutputStream out) throws IOException {
+        protected BulkWriter<RowData> newWriter(FSDataOutputStream out) throws IOException {
             return writerFactory.create(out);
         }
 
         @Override
-        public RowData serialize(ManifestEntry entry) {
+        protected RowData toRowData(ManifestEntry entry) {
             switch (entry.kind()) {
                 case ADD:
                     numAddedFiles++;
@@ -153,7 +149,7 @@ public class ManifestFile {
         }
 
         @Override
-        public ManifestFileMeta collectFile(Path path) throws IOException {
+        protected ManifestFileMeta collectFile(Path path) throws IOException {
             ManifestFileMeta result =
                     new ManifestFileMeta(
                             path.getName(),

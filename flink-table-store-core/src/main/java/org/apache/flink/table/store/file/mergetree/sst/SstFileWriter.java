@@ -91,15 +91,11 @@ public class SstFileWriter {
      */
     public List<SstFileMeta> write(CloseableIterator<KeyValue> iterator, int level)
             throws Exception {
+        SstRollingFile rollingFile = new StatsCollectingRollingFile(level);
         List<SstFileMeta> result = new ArrayList<>();
         List<Path> filesToCleanUp = new ArrayList<>();
         try {
-            RollingFile.write(
-                    iterator,
-                    suggestedFileSize,
-                    new StatsCollectingRollingFileContext(level),
-                    result,
-                    filesToCleanUp);
+            rollingFile.write(iterator, result, filesToCleanUp);
         } catch (Throwable e) {
             LOG.warn("Exception occurs when writing sst files. Cleaning up.", e);
             for (Path path : filesToCleanUp) {
@@ -116,8 +112,7 @@ public class SstFileWriter {
         FileUtils.deleteOrWarn(pathFactory.toPath(file.fileName()));
     }
 
-    private abstract class AbstractRollingFileContext
-            implements RollingFile.Context<KeyValue, SstFileMeta> {
+    private abstract class SstRollingFile extends RollingFile<KeyValue, SstFileMeta> {
 
         private final int level;
         private final KeyValueSerializer serializer;
@@ -129,7 +124,8 @@ public class SstFileWriter {
         private long minSequenceNumber;
         private long maxSequenceNumber;
 
-        private AbstractRollingFileContext(int level) {
+        private SstRollingFile(int level) {
+            super(suggestedFileSize);
             this.level = level;
             this.serializer = new KeyValueSerializer(keyType, valueType);
             this.keySerializer = new RowDataSerializer(keyType);
@@ -137,17 +133,17 @@ public class SstFileWriter {
         }
 
         @Override
-        public Path newPath() {
+        protected Path newPath() {
             return pathFactory.newPath();
         }
 
         @Override
-        public BulkWriter<RowData> newWriter(FSDataOutputStream out) throws IOException {
+        protected BulkWriter<RowData> newWriter(FSDataOutputStream out) throws IOException {
             return writerFactory.create(out);
         }
 
         @Override
-        public RowData serialize(KeyValue kv) {
+        protected RowData toRowData(KeyValue kv) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Writing key-value to sst file, kv: " + kv.toString(keyType, valueType));
             }
@@ -164,7 +160,7 @@ public class SstFileWriter {
         }
 
         @Override
-        public SstFileMeta collectFile(Path path) throws IOException {
+        protected SstFileMeta collectFile(Path path) throws IOException {
             SstFileMeta result =
                     new SstFileMeta(
                             path.getName(),
@@ -191,9 +187,9 @@ public class SstFileWriter {
         protected abstract FieldStats[] collectStats(Path path);
     }
 
-    private class StatsCollectingRollingFileContext extends AbstractRollingFileContext {
+    private class StatsCollectingRollingFile extends SstRollingFile {
 
-        private StatsCollectingRollingFileContext(int level) {
+        private StatsCollectingRollingFile(int level) {
             super(level);
         }
 

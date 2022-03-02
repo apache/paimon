@@ -31,99 +31,95 @@ import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
 
-/** A utility class to write a list of objects into several files, each with a size limit. */
-public class RollingFile {
-
-    /**
-     * Provide logic for serializing records and producing file metas.
-     *
-     * @param <R> record type
-     * @param <F> file meta type
-     */
-    public interface Context<R, F> {
-
-        /** Create the path for a new file. */
-        Path newPath();
-
-        /** Create a new object writer. */
-        BulkWriter<RowData> newWriter(FSDataOutputStream out) throws IOException;
-
-        /**
-         * Called before writing a record into file. Per-record calculation can be performed here.
-         *
-         * @param record record to write
-         * @return serialized record
-         */
-        RowData serialize(R record);
-
-        /** Called before closing the current file. Per-file calculation can be performed here. */
-        F collectFile(Path path) throws IOException;
-    }
-
-    public static <R, F> void write(
-            Iterator<R> iterator,
-            long suggestedFileSize,
-            Context<R, F> context,
-            List<F> result,
-            List<Path> filesToCleanUp)
-            throws IOException {
-        RollingFile rollingFile = null;
-        Path currentPath = null;
-
-        while (iterator.hasNext()) {
-            if (rollingFile == null) {
-                // create new rolling file
-                currentPath = context.newPath();
-                filesToCleanUp.add(currentPath);
-                rollingFile = new RollingFile(currentPath, suggestedFileSize, context);
-            }
-
-            RowData serialized = context.serialize(iterator.next());
-            rollingFile.write(serialized);
-
-            if (rollingFile.exceedsSuggestedFileSize()) {
-                // exceeds suggested size, close current file
-                rollingFile.finish();
-                result.add(context.collectFile(currentPath));
-                rollingFile = null;
-            }
-        }
-
-        // finish last file
-        if (rollingFile != null) {
-            rollingFile.finish();
-            result.add(context.collectFile(currentPath));
-        }
-    }
+/**
+ * A utility class to write a list of objects into several files, each with a size limit.
+ *
+ * @param <R> record type
+ * @param <F> file meta type
+ */
+public abstract class RollingFile<R, F> {
 
     private static final Logger LOG = LoggerFactory.getLogger(RollingFile.class);
 
     private final long suggestedFileSize;
-    private final FSDataOutputStream out;
-    private final BulkWriter<RowData> writer;
 
-    private RollingFile(Path path, long suggestedFileSize, Context<?, ?> context)
-            throws IOException {
+    public RollingFile(long suggestedFileSize) {
         this.suggestedFileSize = suggestedFileSize;
-        this.out = path.getFileSystem().create(path, FileSystem.WriteMode.NO_OVERWRITE);
-        this.writer = context.newWriter(out);
+    }
 
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("Create new rolling file " + path.toString());
+    /** Create the path for a new file. */
+    protected abstract Path newPath();
+
+    /** Create a new object writer. Called per file. */
+    protected abstract BulkWriter<RowData> newWriter(FSDataOutputStream out) throws IOException;
+
+    /**
+     * Called before writing a record into file. Per-record calculation can be performed here.
+     *
+     * @param record record to write
+     * @return serialized record
+     */
+    protected abstract RowData toRowData(R record);
+
+    /** Called before closing the current file. Per-file calculation can be performed here. */
+    protected abstract F collectFile(Path path) throws IOException;
+
+    public void write(Iterator<R> iterator, List<F> result, List<Path> filesToCleanUp)
+            throws IOException {
+        Writer writer = null;
+        Path currentPath = null;
+
+        while (iterator.hasNext()) {
+            if (writer == null) {
+                // create new rolling file
+                currentPath = newPath();
+                filesToCleanUp.add(currentPath);
+                writer = new Writer(currentPath);
+            }
+
+            RowData serialized = toRowData(iterator.next());
+            writer.write(serialized);
+
+            if (writer.exceedsSuggestedFileSize()) {
+                // exceeds suggested size, close current file
+                writer.finish();
+                result.add(collectFile(currentPath));
+                writer = null;
+            }
+        }
+
+        // finish last file
+        if (writer != null) {
+            writer.finish();
+            result.add(collectFile(currentPath));
         }
     }
 
-    private void write(RowData record) throws IOException {
-        writer.addElement(record);
-    }
+    private class Writer {
+        private final FSDataOutputStream out;
+        private final BulkWriter<RowData> writer;
 
-    private boolean exceedsSuggestedFileSize() throws IOException {
-        // NOTE: this method is inaccurate for formats buffering changes in memory
-        return out.getPos() >= suggestedFileSize;
-    }
+        private Writer(Path path) throws IOException {
+            this.out = path.getFileSystem().create(path, FileSystem.WriteMode.NO_OVERWRITE);
+            this.writer = newWriter(out);
 
-    private void finish() throws IOException {
-        writer.finish();
-        out.close();
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Create new rolling file " + path.toString());
+            }
+        }
+
+        private void write(RowData record) throws IOException {
+            writer.addElement(record);
+        }
+
+        private boolean exceedsSuggestedFileSize() throws IOException {
+            // NOTE: this method is inaccurate for formats buffering changes in memory
+            return out.getPos() >= suggestedFileSize;
+        }
+
+        private void finish() throws IOException {
+            writer.finish();
+            out.close();
+        }
     }
 }
