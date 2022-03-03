@@ -29,7 +29,11 @@ import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 
-import org.junit.jupiter.api.Test;
+import org.junit.Assume;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -42,21 +46,38 @@ import static org.apache.flink.table.store.file.mergetree.compact.CompactManager
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link StoreSink}. */
+@RunWith(Parameterized.class)
 public class StoreSinkTest {
+
+    private final boolean hasPk;
 
     private final ObjectIdentifier identifier =
             ObjectIdentifier.of("my_catalog", "my_database", "my_table");
-
-    private final TestFileStore fileStore = new TestFileStore();
 
     private final TestLock lock = new TestLock();
 
     private final RowType rowType = RowType.of(new IntType(), new IntType(), new IntType());
 
+    private TestFileStore fileStore;
+
+    public StoreSinkTest(boolean hasPk) {
+        this.hasPk = hasPk;
+    }
+
+    @Before
+    public void before() {
+        fileStore = new TestFileStore(hasPk);
+    }
+
+    @Parameterized.Parameters(name = "hasPk-{0}")
+    public static List<Boolean> data() {
+        return Arrays.asList(true, false);
+    }
+
     @Test
     public void testChangelogs() throws Exception {
+        Assume.assumeTrue(hasPk);
         StoreSink<?, ?> sink = newSink(null);
-        fileStore.enablePk();
         writeAndCommit(
                 sink,
                 GenericRowData.ofKind(RowKind.INSERT, 0, 0, 1),
@@ -73,6 +94,7 @@ public class StoreSinkTest {
 
     @Test
     public void testNoKeyChangelogs() throws Exception {
+        Assume.assumeTrue(!hasPk);
         StoreSink<?, ?> sink =
                 new StoreSink<>(
                         identifier,
@@ -83,7 +105,6 @@ public class StoreSinkTest {
                         2,
                         () -> lock,
                         new HashMap<>());
-        fileStore.disablePk();
         writeAndCommit(
                 sink,
                 GenericRowData.ofKind(RowKind.INSERT, 0, 0, 1),
@@ -100,8 +121,8 @@ public class StoreSinkTest {
 
     @Test
     public void testAppend() throws Exception {
+        Assume.assumeTrue(hasPk);
         StoreSink<?, ?> sink = newSink(null);
-        fileStore.enablePk();
         writeAndAssert(sink);
 
         writeAndCommit(sink, GenericRowData.of(0, 8, 9), GenericRowData.of(1, 10, 11));
@@ -113,8 +134,8 @@ public class StoreSinkTest {
 
     @Test
     public void testOverwrite() throws Exception {
+        Assume.assumeTrue(hasPk);
         StoreSink<?, ?> sink = newSink(new HashMap<>());
-        fileStore.enablePk();
         writeAndAssert(sink);
 
         writeAndCommit(sink, GenericRowData.of(0, 8, 9), GenericRowData.of(1, 10, 11));
@@ -127,10 +148,10 @@ public class StoreSinkTest {
 
     @Test
     public void testOverwritePartition() throws Exception {
+        Assume.assumeTrue(hasPk);
         HashMap<String, String> partition = new HashMap<>();
         partition.put("part", "0");
         StoreSink<?, ?> sink = newSink(partition);
-        fileStore.enablePk();
         writeAndAssert(sink);
 
         writeAndCommit(sink, GenericRowData.of(0, 8, 9), GenericRowData.of(1, 10, 11));

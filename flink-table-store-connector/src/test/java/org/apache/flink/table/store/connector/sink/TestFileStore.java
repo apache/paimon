@@ -53,9 +53,13 @@ public class TestFileStore implements FileStore {
 
     public final Map<BinaryRowData, Map<Integer, List<String>>> committedFiles = new HashMap<>();
 
+    public final boolean hasPk;
+
     public boolean expired = false;
 
-    public boolean hasPk;
+    public TestFileStore(boolean hasPk) {
+        this.hasPk = hasPk;
+    }
 
     @Override
     public FileStoreWrite newWrite() {
@@ -98,14 +102,6 @@ public class TestFileStore implements FileStore {
     @Override
     public FileStoreScan newScan() {
         throw new UnsupportedOperationException();
-    }
-
-    public void enablePk() {
-        this.hasPk = true;
-    }
-
-    public void disablePk() {
-        this.hasPk = false;
     }
 
     static class TestRecordWriter implements RecordWriter {
