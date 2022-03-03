@@ -110,6 +110,10 @@ public class FileUtils {
     }
 
     public static void deleteOrWarn(Path file) {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Ready to delete " + file.toString());
+        }
+
         try {
             FileSystem fs = file.getFileSystem();
             if (!fs.delete(file, false) && fs.exists(file)) {

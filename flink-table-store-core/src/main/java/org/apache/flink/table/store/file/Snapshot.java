@@ -19,6 +19,8 @@
 package org.apache.flink.table.store.file;
 
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
+import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.utils.FileUtils;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -28,6 +30,8 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonProcessin
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 /** This file is the entrance to all data committed at some specific time point. */
 public class Snapshot {
@@ -35,7 +39,8 @@ public class Snapshot {
     public static final long FIRST_SNAPSHOT_ID = 1;
 
     private static final String FIELD_ID = "id";
-    private static final String FIELD_MANIFEST_LIST = "manifestList";
+    private static final String FIELD_BASE_MANIFEST_LIST = "baseManifestList";
+    private static final String FIELD_DELTA_MANIFEST_LIST = "deltaManifestList";
     private static final String FIELD_COMMIT_USER = "commitUser";
     private static final String FIELD_COMMIT_IDENTIFIER = "commitIdentifier";
     private static final String FIELD_COMMIT_KIND = "commitKind";
@@ -44,8 +49,14 @@ public class Snapshot {
     @JsonProperty(FIELD_ID)
     private final long id;
 
-    @JsonProperty(FIELD_MANIFEST_LIST)
-    private final String manifestList;
+    // a manifest list recording all changes from the previous snapshots
+    @JsonProperty(FIELD_BASE_MANIFEST_LIST)
+    private final String baseManifestList;
+
+    // a manifest list recording all new changes occurred in this snapshot
+    // for faster expire and streaming reads
+    @JsonProperty(FIELD_DELTA_MANIFEST_LIST)
+    private final String deltaManifestList;
 
     @JsonProperty(FIELD_COMMIT_USER)
     private final String commitUser;
@@ -63,13 +74,15 @@ public class Snapshot {
     @JsonCreator
     public Snapshot(
             @JsonProperty(FIELD_ID) long id,
-            @JsonProperty(FIELD_MANIFEST_LIST) String manifestList,
+            @JsonProperty(FIELD_BASE_MANIFEST_LIST) String baseManifestList,
+            @JsonProperty(FIELD_DELTA_MANIFEST_LIST) String deltaManifestList,
             @JsonProperty(FIELD_COMMIT_USER) String commitUser,
             @JsonProperty(FIELD_COMMIT_IDENTIFIER) String commitIdentifier,
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
             @JsonProperty(FIELD_TIME_MILLIS) long timeMillis) {
         this.id = id;
-        this.manifestList = manifestList;
+        this.baseManifestList = baseManifestList;
+        this.deltaManifestList = deltaManifestList;
         this.commitUser = commitUser;
         this.commitIdentifier = commitIdentifier;
         this.commitKind = commitKind;
@@ -81,9 +94,14 @@ public class Snapshot {
         return id;
     }
 
-    @JsonGetter(FIELD_MANIFEST_LIST)
-    public String manifestList() {
-        return manifestList;
+    @JsonGetter(FIELD_BASE_MANIFEST_LIST)
+    public String baseManifestList() {
+        return baseManifestList;
+    }
+
+    @JsonGetter(FIELD_DELTA_MANIFEST_LIST)
+    public String deltaManifestList() {
+        return deltaManifestList;
     }
 
     @JsonGetter(FIELD_COMMIT_USER)
@@ -112,6 +130,13 @@ public class Snapshot {
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    public List<ManifestFileMeta> readAllManifests(ManifestList manifestList) {
+        List<ManifestFileMeta> result = new ArrayList<>();
+        result.addAll(manifestList.read(baseManifestList));
+        result.addAll(manifestList.read(deltaManifestList));
+        return result;
     }
 
     public static Snapshot fromJson(String json) {

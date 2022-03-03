@@ -301,13 +301,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         Snapshot newSnapshot;
-        String manifestListName = null;
+        String previousChangesListName = null;
+        String newChangesListName = null;
         List<ManifestFileMeta> oldMetas = new ArrayList<>();
         List<ManifestFileMeta> newMetas = new ArrayList<>();
         try {
             if (latestSnapshot != null) {
                 // read all previous manifest files
-                oldMetas.addAll(manifestList.read(latestSnapshot.manifestList()));
+                oldMetas.addAll(latestSnapshot.readAllManifests(manifestList));
             }
             // merge manifest files with changes
             newMetas.addAll(
@@ -316,16 +317,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             manifestFile,
                             manifestTargetSize.getBytes(),
                             manifestMergeMinCount));
+            previousChangesListName = manifestList.write(newMetas);
+
             // write new changes into manifest files
-            if (!changes.isEmpty()) {
-                newMetas.addAll(manifestFile.write(changes));
-            }
+            List<ManifestFileMeta> newChangesManifests = manifestFile.write(changes);
+            newMetas.addAll(newChangesManifests);
+            newChangesListName = manifestList.write(newChangesManifests);
+
             // prepare snapshot file
-            manifestListName = manifestList.write(newMetas);
             newSnapshot =
                     new Snapshot(
                             newSnapshotId,
-                            manifestListName,
+                            previousChangesListName,
+                            newChangesListName,
                             commitUser,
                             identifier,
                             commitKind,
@@ -333,7 +337,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             FileUtils.writeFileUtf8(tmpSnapshotPath, newSnapshot.toJson());
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
-            cleanUpTmpSnapshot(tmpSnapshotPath, manifestListName, oldMetas, newMetas);
+            cleanUpTmpSnapshot(
+                    tmpSnapshotPath,
+                    previousChangesListName,
+                    newChangesListName,
+                    oldMetas,
+                    newMetas);
             throw new RuntimeException(
                     String.format(
                             "Exception occurs when preparing snapshot #%d (path %s) by user %s "
@@ -406,7 +415,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         commitUser,
                         identifier,
                         commitKind.name()));
-        cleanUpTmpSnapshot(tmpSnapshotPath, manifestListName, oldMetas, newMetas);
+        cleanUpTmpSnapshot(
+                tmpSnapshotPath, previousChangesListName, newChangesListName, oldMetas, newMetas);
         return false;
     }
 
@@ -457,14 +467,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private void cleanUpTmpSnapshot(
             Path tmpSnapshotPath,
-            String manifestListName,
+            String previousChangesListName,
+            String newChangesListName,
             List<ManifestFileMeta> oldMetas,
             List<ManifestFileMeta> newMetas) {
         // clean up tmp snapshot file
         FileUtils.deleteOrWarn(tmpSnapshotPath);
         // clean up newly created manifest list
-        if (manifestListName != null) {
-            manifestList.delete(manifestListName);
+        if (previousChangesListName != null) {
+            manifestList.delete(previousChangesListName);
+        }
+        if (newChangesListName != null) {
+            manifestList.delete(newChangesListName);
         }
         // clean up newly merged manifest files
         Set<ManifestFileMeta> oldMetaSet = new HashSet<>(oldMetas); // for faster searching

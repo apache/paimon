@@ -31,7 +31,6 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RollingFile;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.util.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -90,9 +89,6 @@ public class ManifestFile {
      * <p>NOTE: This method is atomic.
      */
     public List<ManifestFileMeta> write(List<ManifestEntry> entries) {
-        Preconditions.checkArgument(
-                entries.size() > 0, "Manifest entries to write must not be empty.");
-
         ManifestRollingFile rollingFile = new ManifestRollingFile();
         List<ManifestFileMeta> result = new ArrayList<>();
         List<Path> filesToCleanUp = new ArrayList<>();
