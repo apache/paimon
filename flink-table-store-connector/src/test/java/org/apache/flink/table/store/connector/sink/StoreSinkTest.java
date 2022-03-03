@@ -56,6 +56,7 @@ public class StoreSinkTest {
     @Test
     public void testChangelogs() throws Exception {
         StoreSink<?, ?> sink = newSink(null);
+        fileStore.enablePk();
         writeAndCommit(
                 sink,
                 GenericRowData.ofKind(RowKind.INSERT, 0, 0, 1),
@@ -82,6 +83,7 @@ public class StoreSinkTest {
                         2,
                         () -> lock,
                         new HashMap<>());
+        fileStore.disablePk();
         writeAndCommit(
                 sink,
                 GenericRowData.ofKind(RowKind.INSERT, 0, 0, 1),
@@ -99,6 +101,7 @@ public class StoreSinkTest {
     @Test
     public void testAppend() throws Exception {
         StoreSink<?, ?> sink = newSink(null);
+        fileStore.enablePk();
         writeAndAssert(sink);
 
         writeAndCommit(sink, GenericRowData.of(0, 8, 9), GenericRowData.of(1, 10, 11));
@@ -111,6 +114,7 @@ public class StoreSinkTest {
     @Test
     public void testOverwrite() throws Exception {
         StoreSink<?, ?> sink = newSink(new HashMap<>());
+        fileStore.enablePk();
         writeAndAssert(sink);
 
         writeAndCommit(sink, GenericRowData.of(0, 8, 9), GenericRowData.of(1, 10, 11));
@@ -126,6 +130,7 @@ public class StoreSinkTest {
         HashMap<String, String> partition = new HashMap<>();
         partition.put("part", "0");
         StoreSink<?, ?> sink = newSink(partition);
+        fileStore.enablePk();
         writeAndAssert(sink);
 
         writeAndCommit(sink, GenericRowData.of(0, 8, 9), GenericRowData.of(1, 10, 11));
