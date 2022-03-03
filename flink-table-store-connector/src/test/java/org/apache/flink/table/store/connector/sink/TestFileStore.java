@@ -33,6 +33,7 @@ import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.stats.FieldStats;
 import org.apache.flink.table.store.file.utils.RecordWriter;
+import org.apache.flink.table.types.logical.RowType;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -54,11 +55,17 @@ public class TestFileStore implements FileStore {
     public final Map<BinaryRowData, Map<Integer, List<String>>> committedFiles = new HashMap<>();
 
     public final boolean hasPk;
+    private final RowType keyType;
+    private final RowType valueType;
+    private final RowType partitionType;
 
     public boolean expired = false;
 
-    public TestFileStore(boolean hasPk) {
+    public TestFileStore(boolean hasPk, RowType keyType, RowType valueType, RowType partitionType) {
         this.hasPk = hasPk;
+        this.keyType = keyType;
+        this.valueType = valueType;
+        this.partitionType = partitionType;
     }
 
     @Override
@@ -97,6 +104,21 @@ public class TestFileStore implements FileStore {
     @Override
     public FileStoreExpire newExpire() {
         return () -> expired = true;
+    }
+
+    @Override
+    public RowType keyType() {
+        return keyType;
+    }
+
+    @Override
+    public RowType valueType() {
+        return valueType;
+    }
+
+    @Override
+    public RowType partitionType() {
+        return partitionType;
     }
 
     @Override
