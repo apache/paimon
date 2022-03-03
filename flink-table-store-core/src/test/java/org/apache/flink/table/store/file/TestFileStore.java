@@ -20,10 +20,13 @@ package org.apache.flink.table.store.file;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
+import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
+import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.mergetree.compact.Accumulator;
@@ -31,6 +34,7 @@ import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.FileStoreExpireImpl;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
+import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
@@ -42,24 +46,32 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+import java.util.stream.Collectors;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** {@link FileStore} for tests. */
 public class TestFileStore extends FileStoreImpl {
 
     private static final Logger LOG = LoggerFactory.getLogger(TestFileStore.class);
 
+    private final String root;
     private final RowDataSerializer keySerializer;
     private final RowDataSerializer valueSerializer;
 
@@ -96,13 +108,18 @@ public class TestFileStore extends FileStoreImpl {
             RowType valueType,
             Accumulator accumulator) {
         super(conf, UUID.randomUUID().toString(), partitionType, keyType, valueType, accumulator);
+        this.root = conf.getString(FileStoreOptions.FILE_PATH);
         this.keySerializer = new RowDataSerializer(keyType);
         this.valueSerializer = new RowDataSerializer(valueType);
     }
 
     public FileStoreExpireImpl newExpire(int numRetained, long millisRetained) {
         return new FileStoreExpireImpl(
-                numRetained, millisRetained, pathFactory(), manifestListFactory(), newScan());
+                numRetained,
+                millisRetained,
+                pathFactory(),
+                manifestFileFactory(),
+                manifestListFactory());
     }
 
     public List<Snapshot> commitData(
@@ -260,6 +277,74 @@ public class TestFileStore extends FileStoreImpl {
                 default:
                     throw new UnsupportedOperationException(
                             "Unknown value kind " + kv.valueKind().name());
+            }
+        }
+        return result;
+    }
+
+    public void assertCleaned() {
+        Set<Path> filesInUse = getFilesInUse();
+        Set<Path> actualFiles;
+        try {
+            actualFiles =
+                    Files.walk(Paths.get(root))
+                            .filter(p -> Files.isRegularFile(p))
+                            .map(p -> new Path(p.toString()))
+                            .collect(Collectors.toSet());
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        assertThat(actualFiles).isEqualTo(filesInUse);
+    }
+
+    private Set<Path> getFilesInUse() {
+        FileStorePathFactory pathFactory = pathFactory();
+        ManifestList manifestList = manifestListFactory().create();
+        FileStoreScan scan = newScan();
+        FileStorePathFactory.SstPathFactoryCache sstPathFactoryCache =
+                new FileStorePathFactory.SstPathFactoryCache(pathFactory);
+
+        Long latestSnapshotId = pathFactory.latestSnapshotId();
+        if (latestSnapshotId == null) {
+            return Collections.emptySet();
+        }
+
+        long firstInUseSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
+        for (long id = latestSnapshotId - 1; id >= Snapshot.FIRST_SNAPSHOT_ID; id--) {
+            Path snapshotPath = pathFactory.toSnapshotPath(id);
+            try {
+                if (!snapshotPath.getFileSystem().exists(snapshotPath)) {
+                    firstInUseSnapshotId = id + 1;
+                    break;
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        Set<Path> result = new HashSet<>();
+        for (long id = firstInUseSnapshotId; id <= latestSnapshotId; id++) {
+            Path snapshotPath = pathFactory.toSnapshotPath(id);
+            Snapshot snapshot = Snapshot.fromPath(snapshotPath);
+
+            // snapshot file
+            result.add(snapshotPath);
+
+            // manifest lists
+            result.add(pathFactory.toManifestListPath(snapshot.baseManifestList()));
+            result.add(pathFactory.toManifestListPath(snapshot.deltaManifestList()));
+
+            // manifests
+            List<ManifestFileMeta> manifests = snapshot.readAllManifests(manifestList);
+            manifests.forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
+
+            // sst
+            List<ManifestEntry> entries = scan.withManifestList(manifests).plan().files();
+            for (ManifestEntry entry : entries) {
+                result.add(
+                        sstPathFactoryCache
+                                .getSstPathFactory(entry.partition(), entry.bucket())
+                                .toPath(entry.file().fileName()));
             }
         }
         return result;

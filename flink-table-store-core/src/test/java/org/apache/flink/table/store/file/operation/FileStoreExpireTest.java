@@ -28,6 +28,7 @@ import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -63,6 +64,11 @@ public class FileStoreExpireTest {
                         TestKeyValueGenerator.ROW_TYPE,
                         new DeduplicateAccumulator());
         pathFactory = store.pathFactory();
+    }
+
+    @AfterEach
+    public void afterEach() {
+        store.assertCleaned();
     }
 
     @Test

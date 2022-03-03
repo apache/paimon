@@ -161,16 +161,14 @@ public class FileStoreScanTest {
         }
 
         ManifestList manifestList = store.manifestListFactory().create();
-        long wantedSnapshot = random.nextLong(pathFactory.latestSnapshotId()) + 1;
-        List<ManifestFileMeta> wantedManifests =
-                manifestList.read(
-                        Snapshot.fromPath(pathFactory.toSnapshotPath(wantedSnapshot))
-                                .manifestList());
+        long wantedSnapshotId = random.nextLong(pathFactory.latestSnapshotId()) + 1;
+        Snapshot wantedSnapshot = Snapshot.fromPath(pathFactory.toSnapshotPath(wantedSnapshotId));
+        List<ManifestFileMeta> wantedManifests = wantedSnapshot.readAllManifests(manifestList);
 
         FileStoreScan scan = store.newScan();
         scan.withManifestList(wantedManifests);
 
-        List<KeyValue> expectedKvs = store.readKvsFromSnapshot(wantedSnapshot);
+        List<KeyValue> expectedKvs = store.readKvsFromSnapshot(wantedSnapshotId);
         gen.sort(expectedKvs);
         Map<BinaryRowData, BinaryRowData> expected = store.toKvMap(expectedKvs);
         runTest(scan, null, expected);
