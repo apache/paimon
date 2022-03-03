@@ -172,7 +172,7 @@ public class ManifestFile {
 
         private final RowType partitionType;
         private final RowType keyType;
-        private final RowType rowType;
+        private final RowType valueType;
         private final BulkFormat<RowData, FileSourceSplit> readerFactory;
         private final BulkWriter.Factory<RowData> writerFactory;
         private final FileStorePathFactory pathFactory;
@@ -181,14 +181,14 @@ public class ManifestFile {
         public Factory(
                 RowType partitionType,
                 RowType keyType,
-                RowType rowType,
+                RowType valueType,
                 FileFormat fileFormat,
                 FileStorePathFactory pathFactory,
                 long suggestedFileSize) {
             this.partitionType = partitionType;
             this.keyType = keyType;
-            this.rowType = rowType;
-            RowType entryType = ManifestEntry.schema(partitionType, keyType, rowType);
+            this.valueType = valueType;
+            RowType entryType = ManifestEntry.schema(partitionType, keyType, valueType);
             this.readerFactory = fileFormat.createReaderFactory(entryType);
             this.writerFactory = fileFormat.createWriterFactory(entryType);
             this.pathFactory = pathFactory;
@@ -198,7 +198,7 @@ public class ManifestFile {
         public ManifestFile create() {
             return new ManifestFile(
                     partitionType,
-                    new ManifestEntrySerializer(partitionType, keyType, rowType),
+                    new ManifestEntrySerializer(partitionType, keyType, valueType),
                     readerFactory,
                     writerFactory,
                     pathFactory,

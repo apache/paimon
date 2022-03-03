@@ -170,14 +170,14 @@ public class SstFileMeta {
                 level);
     }
 
-    public static RowType schema(RowType keyType, RowType rowType) {
+    public static RowType schema(RowType keyType, RowType valueType) {
         List<RowType.RowField> fields = new ArrayList<>();
         fields.add(new RowType.RowField("_FILE_NAME", new VarCharType(false, Integer.MAX_VALUE)));
         fields.add(new RowType.RowField("_FILE_SIZE", new BigIntType(false)));
         fields.add(new RowType.RowField("_ROW_COUNT", new BigIntType(false)));
         fields.add(new RowType.RowField("_MIN_KEY", keyType));
         fields.add(new RowType.RowField("_MAX_KEY", keyType));
-        fields.add(new RowType.RowField("_STATS", FieldStatsArraySerializer.schema(rowType)));
+        fields.add(new RowType.RowField("_STATS", FieldStatsArraySerializer.schema(valueType)));
         fields.add(new RowType.RowField("_MIN_SEQUENCE_NUMBER", new BigIntType(false)));
         fields.add(new RowType.RowField("_MAX_SEQUENCE_NUMBER", new BigIntType(false)));
         fields.add(new RowType.RowField("_LEVEL", new IntType(false)));
