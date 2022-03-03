@@ -42,7 +42,7 @@ public class FileStoreSource
 
     private final FileStore fileStore;
 
-    private final int[] primaryKeys;
+    private final boolean keyAsRecord;
 
     @Nullable private final int[][] projectedFields;
 
@@ -52,12 +52,12 @@ public class FileStoreSource
 
     public FileStoreSource(
             FileStore fileStore,
-            int[] primaryKeys,
+            boolean keyAsRecord,
             @Nullable int[][] projectedFields,
             @Nullable Predicate partitionPredicate,
             @Nullable Predicate fieldsPredicate) {
         this.fileStore = fileStore;
-        this.primaryKeys = primaryKeys;
+        this.keyAsRecord = keyAsRecord;
         this.projectedFields = projectedFields;
         this.partitionPredicate = partitionPredicate;
         this.fieldsPredicate = fieldsPredicate;
@@ -73,13 +73,13 @@ public class FileStoreSource
     public SourceReader<RowData, FileStoreSourceSplit> createReader(SourceReaderContext context) {
         FileStoreRead read = fileStore.newRead();
         if (projectedFields != null) {
-            if (primaryKeys.length == 0) {
+            if (keyAsRecord) {
                 read.withKeyProjection(projectedFields);
             } else {
                 read.withValueProjection(projectedFields);
             }
         }
-        return new FileStoreSourceReader(context, read, primaryKeys.length == 0);
+        return new FileStoreSourceReader(context, read, keyAsRecord);
     }
 
     @Override
@@ -90,7 +90,7 @@ public class FileStoreSource
             scan.withPartitionFilter(partitionPredicate);
         }
         if (fieldsPredicate != null) {
-            if (primaryKeys.length == 0) {
+            if (keyAsRecord) {
                 scan.withKeyFilter(fieldsPredicate);
             } else {
                 scan.withValueFilter(fieldsPredicate);

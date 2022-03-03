@@ -263,8 +263,7 @@ public class FileStoreITCase extends AbstractTestBase {
 
     public static List<Row> read(StreamExecutionEnvironment env, FileStore fileStore)
             throws Exception {
-        int[] keys = new int[] {2};
-        FileStoreSource source = new FileStoreSource(fileStore, keys, null, null, null);
+        FileStoreSource source = new FileStoreSource(fileStore, false, null, null, null);
         CloseableIterator<RowData> iterator =
                 env.fromSource(
                                 source,
