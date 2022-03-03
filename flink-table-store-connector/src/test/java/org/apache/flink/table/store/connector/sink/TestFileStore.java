@@ -53,7 +53,13 @@ public class TestFileStore implements FileStore {
 
     public final Map<BinaryRowData, Map<Integer, List<String>>> committedFiles = new HashMap<>();
 
+    public final boolean hasPk;
+
     public boolean expired = false;
+
+    public TestFileStore(boolean hasPk) {
+        this.hasPk = hasPk;
+    }
 
     @Override
     public FileStoreWrite newWrite() {
@@ -61,7 +67,7 @@ public class TestFileStore implements FileStore {
             @Override
             public RecordWriter createWriter(
                     BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
-                TestRecordWriter writer = new TestRecordWriter();
+                TestRecordWriter writer = new TestRecordWriter(hasPk);
                 writer.records.addAll(
                         committedFiles
                                 .computeIfAbsent(partition, k -> new HashMap<>())
@@ -73,7 +79,7 @@ public class TestFileStore implements FileStore {
             @Override
             public RecordWriter createEmptyWriter(
                     BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
-                return new TestRecordWriter();
+                return new TestRecordWriter(hasPk);
             }
         };
     }
@@ -101,30 +107,47 @@ public class TestFileStore implements FileStore {
     static class TestRecordWriter implements RecordWriter {
 
         final List<String> records = new ArrayList<>();
+        final boolean hasPk;
 
         boolean synced = false;
 
         boolean closed = false;
 
-        private String rowToString(RowData row) {
+        TestRecordWriter(boolean hasPk) {
+            this.hasPk = hasPk;
+        }
+
+        private String rowToString(RowData row, boolean key) {
             StringBuilder builder = new StringBuilder();
             for (int i = 0; i < row.getArity(); i++) {
                 if (i != 0) {
                     builder.append("/");
                 }
-                builder.append(row.getInt(i));
+                if (key) {
+                    builder.append(row.getInt(i));
+                } else {
+                    if (i < row.getArity() - 1) {
+                        builder.append(row.getInt(i));
+                    } else {
+                        builder.append(hasPk ? row.getInt(i) : row.getLong(i));
+                    }
+                }
             }
             return builder.toString();
         }
 
         @Override
         public void write(ValueKind valueKind, RowData key, RowData value) {
+            if (!hasPk) {
+                assert value.getArity() == 1;
+                assert value.getLong(0) >= -1L;
+            }
             records.add(
                     valueKind.toString()
                             + "-key-"
-                            + rowToString(key)
+                            + rowToString(key, true)
                             + "-value-"
-                            + rowToString(value));
+                            + rowToString(value, false));
         }
 
         @Override
