@@ -56,7 +56,7 @@ public class StoreSink<WriterStateT, LogCommT>
 
     private final int[] partitions;
 
-    private final int[] keys;
+    private final int[] primaryKeys;
 
     private final int numBucket;
 
@@ -69,7 +69,7 @@ public class StoreSink<WriterStateT, LogCommT>
             FileStore fileStore,
             RowType rowType,
             int[] partitions,
-            int[] keys,
+            int[] primaryKeys,
             int numBucket,
             @Nullable CatalogLock.Factory lockFactory,
             @Nullable Map<String, String> overwritePartition) {
@@ -77,7 +77,7 @@ public class StoreSink<WriterStateT, LogCommT>
         this.fileStore = fileStore;
         this.rowType = rowType;
         this.partitions = partitions;
-        this.keys = keys;
+        this.primaryKeys = primaryKeys;
         this.numBucket = numBucket;
         this.lockFactory = lockFactory;
         this.overwritePartition = overwritePartition;
@@ -93,7 +93,7 @@ public class StoreSink<WriterStateT, LogCommT>
             InitContext initContext, Collection<WriterStateT> states) throws IOException {
         return new StoreSinkWriter<>(
                 fileStore.newWrite(),
-                new SinkRecordConverter(numBucket, rowType, partitions, keys),
+                new SinkRecordConverter(numBucket, rowType, partitions, primaryKeys),
                 fileCommitSerializer(),
                 overwritePartition != null);
     }
@@ -136,14 +136,14 @@ public class StoreSink<WriterStateT, LogCommT>
     public GlobalCommittableSerializer<LogCommT> getGlobalCommittableSerializer() {
         ManifestCommittableSerializer fileCommSerializer =
                 new ManifestCommittableSerializer(
-                        project(rowType, partitions), project(rowType, keys), rowType);
+                        project(rowType, partitions), project(rowType, primaryKeys), rowType);
         SimpleVersionedSerializer<LogCommT> logCommitSerializer = new NoOutputSerializer<>();
         return new GlobalCommittableSerializer<>(logCommitSerializer, fileCommSerializer);
     }
 
     private FileCommittableSerializer fileCommitSerializer() {
         return new FileCommittableSerializer(
-                project(rowType, partitions), project(rowType, keys), rowType);
+                project(rowType, partitions), project(rowType, primaryKeys), rowType);
     }
 
     private static class NoOutputSerializer<T> implements SimpleVersionedSerializer<T> {

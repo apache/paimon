@@ -41,9 +41,10 @@ public class ManifestCommittableSerializer
     private final BinaryRowDataSerializer partSerializer;
     private final SstFileMetaSerializer sstSerializer;
 
-    public ManifestCommittableSerializer(RowType partitionType, RowType keyType, RowType rowType) {
+    public ManifestCommittableSerializer(
+            RowType partitionType, RowType keyType, RowType valueType) {
         this.partSerializer = new BinaryRowDataSerializer(partitionType.getFieldCount());
-        this.sstSerializer = new SstFileMetaSerializer(keyType, rowType);
+        this.sstSerializer = new SstFileMetaSerializer(keyType, valueType);
     }
 
     @Override

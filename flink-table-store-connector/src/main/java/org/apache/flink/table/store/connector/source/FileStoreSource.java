@@ -48,7 +48,7 @@ public class FileStoreSource
 
     private final int[] partitions;
 
-    private final int[] keys;
+    private final int[] primaryKeys;
 
     @Nullable private final int[][] projectedFields;
 
@@ -60,14 +60,14 @@ public class FileStoreSource
             FileStore fileStore,
             RowType rowType,
             int[] partitions,
-            int[] keys,
+            int[] primaryKeys,
             @Nullable int[][] projectedFields,
             @Nullable Predicate partitionPredicate,
             @Nullable Predicate fieldsPredicate) {
         this.fileStore = fileStore;
         this.rowType = rowType;
         this.partitions = partitions;
-        this.keys = keys;
+        this.primaryKeys = primaryKeys;
         this.projectedFields = projectedFields;
         this.partitionPredicate = partitionPredicate;
         this.fieldsPredicate = fieldsPredicate;
@@ -83,13 +83,13 @@ public class FileStoreSource
     public SourceReader<RowData, FileStoreSourceSplit> createReader(SourceReaderContext context) {
         FileStoreRead read = fileStore.newRead();
         if (projectedFields != null) {
-            if (keys.length == 0) {
+            if (primaryKeys.length == 0) {
                 read.withKeyProjection(projectedFields);
             } else {
                 read.withValueProjection(projectedFields);
             }
         }
-        return new FileStoreSourceReader(context, read, keys.length == 0);
+        return new FileStoreSourceReader(context, read, primaryKeys.length == 0);
     }
 
     @Override
@@ -100,7 +100,7 @@ public class FileStoreSource
             scan.withPartitionFilter(partitionPredicate);
         }
         if (fieldsPredicate != null) {
-            if (keys.length == 0) {
+            if (primaryKeys.length == 0) {
                 scan.withKeyFilter(fieldsPredicate);
             } else {
                 scan.withValueFilter(fieldsPredicate);
@@ -120,7 +120,7 @@ public class FileStoreSource
     @Override
     public FileStoreSourceSplitSerializer getSplitSerializer() {
         return new FileStoreSourceSplitSerializer(
-                project(rowType, partitions), project(rowType, keys), rowType);
+                project(rowType, partitions), project(rowType, primaryKeys), rowType);
     }
 
     @Override

@@ -34,10 +34,10 @@ public class ManifestEntrySerializer extends ObjectSerializer<ManifestEntry> {
     private final RowDataSerializer partitionSerializer;
     private final SstFileMetaSerializer sstFileMetaSerializer;
 
-    public ManifestEntrySerializer(RowType partitionType, RowType keyType, RowType rowType) {
-        super(ManifestEntry.schema(partitionType, keyType, rowType));
+    public ManifestEntrySerializer(RowType partitionType, RowType keyType, RowType valueType) {
+        super(ManifestEntry.schema(partitionType, keyType, valueType));
         this.partitionSerializer = new RowDataSerializer(partitionType);
-        this.sstFileMetaSerializer = new SstFileMetaSerializer(keyType, rowType);
+        this.sstFileMetaSerializer = new SstFileMetaSerializer(keyType, valueType);
     }
 
     @Override
