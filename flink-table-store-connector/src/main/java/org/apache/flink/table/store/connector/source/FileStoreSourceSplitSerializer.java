@@ -35,7 +35,8 @@ public class FileStoreSourceSplitSerializer
     private final BinaryRowDataSerializer partSerializer;
     private final SstFileMetaSerializer sstSerializer;
 
-    public FileStoreSourceSplitSerializer(RowType partitionType, RowType keyType, RowType valueType) {
+    public FileStoreSourceSplitSerializer(
+            RowType partitionType, RowType keyType, RowType valueType) {
         this.partSerializer = new BinaryRowDataSerializer(partitionType.getFieldCount());
         this.sstSerializer = new SstFileMetaSerializer(keyType, valueType);
     }
