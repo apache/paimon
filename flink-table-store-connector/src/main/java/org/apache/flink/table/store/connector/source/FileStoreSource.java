@@ -29,11 +29,9 @@ import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
-import static org.apache.flink.table.store.utils.ProjectionUtils.project;
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 /** {@link Source} of file store. */
@@ -43,10 +41,6 @@ public class FileStoreSource
     private static final long serialVersionUID = 1L;
 
     private final FileStore fileStore;
-
-    private final RowType rowType;
-
-    private final int[] partitions;
 
     private final int[] primaryKeys;
 
@@ -58,15 +52,11 @@ public class FileStoreSource
 
     public FileStoreSource(
             FileStore fileStore,
-            RowType rowType,
-            int[] partitions,
             int[] primaryKeys,
             @Nullable int[][] projectedFields,
             @Nullable Predicate partitionPredicate,
             @Nullable Predicate fieldsPredicate) {
         this.fileStore = fileStore;
-        this.rowType = rowType;
-        this.partitions = partitions;
         this.primaryKeys = primaryKeys;
         this.projectedFields = projectedFields;
         this.partitionPredicate = partitionPredicate;
@@ -120,7 +110,7 @@ public class FileStoreSource
     @Override
     public FileStoreSourceSplitSerializer getSplitSerializer() {
         return new FileStoreSourceSplitSerializer(
-                project(rowType, partitions), project(rowType, primaryKeys), rowType);
+                fileStore.partitionType(), fileStore.keyType(), fileStore.valueType());
     }
 
     @Override

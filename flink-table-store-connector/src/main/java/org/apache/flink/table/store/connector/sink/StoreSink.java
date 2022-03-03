@@ -30,7 +30,6 @@ import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.sink.SinkRecordConverter;
-import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
@@ -38,8 +37,6 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.Callable;
-
-import static org.apache.flink.table.store.utils.ProjectionUtils.project;
 
 /** {@link Sink} of dynamic store. */
 public class StoreSink<WriterStateT, LogCommT>
@@ -51,8 +48,6 @@ public class StoreSink<WriterStateT, LogCommT>
     private final ObjectIdentifier tableIdentifier;
 
     private final FileStore fileStore;
-
-    private final RowType rowType;
 
     private final int[] partitions;
 
@@ -67,7 +62,6 @@ public class StoreSink<WriterStateT, LogCommT>
     public StoreSink(
             ObjectIdentifier tableIdentifier,
             FileStore fileStore,
-            RowType rowType,
             int[] partitions,
             int[] primaryKeys,
             int numBucket,
@@ -75,7 +69,6 @@ public class StoreSink<WriterStateT, LogCommT>
             @Nullable Map<String, String> overwritePartition) {
         this.tableIdentifier = tableIdentifier;
         this.fileStore = fileStore;
-        this.rowType = rowType;
         this.partitions = partitions;
         this.primaryKeys = primaryKeys;
         this.numBucket = numBucket;
@@ -93,7 +86,11 @@ public class StoreSink<WriterStateT, LogCommT>
             InitContext initContext, Collection<WriterStateT> states) throws IOException {
         return new StoreSinkWriter<>(
                 fileStore.newWrite(),
-                new SinkRecordConverter(numBucket, rowType, partitions, primaryKeys),
+                new SinkRecordConverter(
+                        numBucket,
+                        primaryKeys.length > 0 ? fileStore.valueType() : fileStore.keyType(),
+                        partitions,
+                        primaryKeys),
                 fileCommitSerializer(),
                 overwritePartition != null);
     }
@@ -136,14 +133,14 @@ public class StoreSink<WriterStateT, LogCommT>
     public GlobalCommittableSerializer<LogCommT> getGlobalCommittableSerializer() {
         ManifestCommittableSerializer fileCommSerializer =
                 new ManifestCommittableSerializer(
-                        project(rowType, partitions), project(rowType, primaryKeys), rowType);
+                        fileStore.partitionType(), fileStore.keyType(), fileStore.valueType());
         SimpleVersionedSerializer<LogCommT> logCommitSerializer = new NoOutputSerializer<>();
         return new GlobalCommittableSerializer<>(logCommitSerializer, fileCommSerializer);
     }
 
     private FileCommittableSerializer fileCommitSerializer() {
         return new FileCommittableSerializer(
-                project(rowType, partitions), project(rowType, primaryKeys), rowType);
+                fileStore.partitionType(), fileStore.keyType(), fileStore.valueType());
     }
 
     private static class NoOutputSerializer<T> implements SimpleVersionedSerializer<T> {

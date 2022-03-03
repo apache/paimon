@@ -151,4 +151,19 @@ public class FileStoreImpl implements FileStore {
         return new FileStoreScanImpl(
                 partitionType, pathFactory(), manifestFileFactory(), manifestListFactory());
     }
+
+    @Override
+    public RowType keyType() {
+        return keyType;
+    }
+
+    @Override
+    public RowType valueType() {
+        return valueType;
+    }
+
+    @Override
+    public RowType partitionType() {
+        return partitionType;
+    }
 }

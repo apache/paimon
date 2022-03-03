@@ -150,7 +150,7 @@ public class FileStoreITCase extends AbstractTestBase {
         write(finiteSource, fileStore, true, overwrite);
 
         // read
-        List<Row> results = read(env, fileStore, true);
+        List<Row> results = read(env, fileStore);
 
         Row[] expected = new Row[] {Row.of(9, "p2", 5), Row.of(5, "p1", 1), Row.of(0, "p1", 2)};
         assertThat(results).containsExactlyInAnyOrder(expected);
@@ -164,7 +164,7 @@ public class FileStoreITCase extends AbstractTestBase {
         write(finiteSource, fileStore, true, new HashMap<>());
 
         // read
-        results = read(env, fileStore, true);
+        results = read(env, fileStore);
         expected = new Row[] {Row.of(19, "p2", 6)};
         assertThat(results).containsExactlyInAnyOrder(expected);
     }
@@ -180,7 +180,7 @@ public class FileStoreITCase extends AbstractTestBase {
         write(finiteSource, fileStore, partitioned);
 
         // source
-        List<Row> results = read(env, fileStore, partitioned);
+        List<Row> results = read(env, fileStore);
 
         Row[] expected =
                 partitioned
@@ -255,26 +255,16 @@ public class FileStoreITCase extends AbstractTestBase {
         int[] keys = new int[] {2};
         StoreSink<?, ?> sink =
                 new StoreSink<>(
-                        null,
-                        fileStore,
-                        VALUE_TYPE,
-                        partitions,
-                        keys,
-                        NUM_BUCKET,
-                        null,
-                        overwritePartition);
+                        null, fileStore, partitions, keys, NUM_BUCKET, null, overwritePartition);
         input = input.keyBy(row -> row.getInt(2)); // key by
         GlobalCommittingSinkTranslator.translate(input, sink);
         input.getExecutionEnvironment().execute();
     }
 
-    public static List<Row> read(
-            StreamExecutionEnvironment env, FileStore fileStore, boolean partitioned)
+    public static List<Row> read(StreamExecutionEnvironment env, FileStore fileStore)
             throws Exception {
-        int[] partitions = partitioned ? new int[] {1} : new int[0];
         int[] keys = new int[] {2};
-        FileStoreSource source =
-                new FileStoreSource(fileStore, VALUE_TYPE, partitions, keys, null, null, null);
+        FileStoreSource source = new FileStoreSource(fileStore, keys, null, null, null);
         CloseableIterator<RowData> iterator =
                 env.fromSource(
                                 source,

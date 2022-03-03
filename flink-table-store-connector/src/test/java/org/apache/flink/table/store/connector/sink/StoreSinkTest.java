@@ -25,6 +25,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.connector.sink.TestFileStore.TestRecordWriter;
 import org.apache.flink.table.store.file.utils.RecordWriter;
+import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
@@ -51,6 +52,8 @@ public class StoreSinkTest {
 
     private final boolean hasPk;
 
+    private final boolean partitioned;
+
     private final ObjectIdentifier identifier =
             ObjectIdentifier.of("my_catalog", "my_database", "my_table");
 
@@ -59,24 +62,41 @@ public class StoreSinkTest {
     private final RowType rowType = RowType.of(new IntType(), new IntType(), new IntType());
 
     private TestFileStore fileStore;
+    private int[] primaryKeys;
+    private int[] partitions;
 
-    public StoreSinkTest(boolean hasPk) {
+    public StoreSinkTest(boolean hasPk, boolean partitioned) {
         this.hasPk = hasPk;
+        this.partitioned = partitioned;
     }
 
     @Before
     public void before() {
-        fileStore = new TestFileStore(hasPk);
+        primaryKeys = hasPk ? new int[] {1} : new int[0];
+        partitions = partitioned ? new int[] {0} : new int[0];
+        RowType keyType = hasPk ? RowType.of(new IntType()) : rowType;
+        RowType valueType =
+                hasPk
+                        ? rowType
+                        : new RowType(
+                                Collections.singletonList(
+                                        new RowType.RowField("COUNT", new BigIntType(false))));
+        RowType partitionType = partitioned ? RowType.of(new IntType()) : RowType.of();
+        fileStore = new TestFileStore(hasPk, keyType, valueType, partitionType);
     }
 
-    @Parameterized.Parameters(name = "hasPk-{0}")
-    public static List<Boolean> data() {
-        return Arrays.asList(true, false);
+    @Parameterized.Parameters(name = "hasPk-{0}, partitioned-{1}")
+    public static List<Boolean[]> data() {
+        return Arrays.asList(
+                new Boolean[] {true, true},
+                new Boolean[] {true, false},
+                new Boolean[] {false, false},
+                new Boolean[] {false, true});
     }
 
     @Test
     public void testChangelogs() throws Exception {
-        Assume.assumeTrue(hasPk);
+        Assume.assumeTrue(hasPk && partitioned);
         StoreSink<?, ?> sink = newSink(null);
         writeAndCommit(
                 sink,
@@ -94,14 +114,13 @@ public class StoreSinkTest {
 
     @Test
     public void testNoKeyChangelogs() throws Exception {
-        Assume.assumeTrue(!hasPk);
+        Assume.assumeTrue(!hasPk && partitioned);
         StoreSink<?, ?> sink =
                 new StoreSink<>(
                         identifier,
                         fileStore,
-                        rowType,
-                        new int[] {0},
-                        new int[] {},
+                        partitions,
+                        primaryKeys,
                         2,
                         () -> lock,
                         new HashMap<>());
@@ -121,7 +140,7 @@ public class StoreSinkTest {
 
     @Test
     public void testAppend() throws Exception {
-        Assume.assumeTrue(hasPk);
+        Assume.assumeTrue(hasPk && partitioned);
         StoreSink<?, ?> sink = newSink(null);
         writeAndAssert(sink);
 
@@ -134,7 +153,7 @@ public class StoreSinkTest {
 
     @Test
     public void testOverwrite() throws Exception {
-        Assume.assumeTrue(hasPk);
+        Assume.assumeTrue(hasPk && partitioned);
         StoreSink<?, ?> sink = newSink(new HashMap<>());
         writeAndAssert(sink);
 
@@ -148,7 +167,7 @@ public class StoreSinkTest {
 
     @Test
     public void testOverwritePartition() throws Exception {
-        Assume.assumeTrue(hasPk);
+        Assume.assumeTrue(hasPk && partitioned);
         HashMap<String, String> partition = new HashMap<>();
         partition.put("part", "0");
         StoreSink<?, ?> sink = newSink(partition);
@@ -227,14 +246,7 @@ public class StoreSinkTest {
 
     private StoreSink<?, ?> newSink(Map<String, String> overwritePartition) {
         return new StoreSink<>(
-                identifier,
-                fileStore,
-                rowType,
-                new int[] {0},
-                new int[] {1},
-                2,
-                () -> lock,
-                overwritePartition);
+                identifier, fileStore, partitions, primaryKeys, 2, () -> lock, overwritePartition);
     }
 
     private class TestLock implements CatalogLock {
