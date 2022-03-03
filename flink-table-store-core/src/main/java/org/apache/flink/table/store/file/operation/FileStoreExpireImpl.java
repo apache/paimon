@@ -28,6 +28,9 @@ import org.apache.flink.table.store.file.mergetree.sst.SstPathFactory;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.List;
@@ -41,6 +44,8 @@ import java.util.Set;
  * clear all snapshots.
  */
 public class FileStoreExpireImpl implements FileStoreExpire {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FileStoreExpireImpl.class);
 
     // snapshots exceeding any constraint will be expired
     private final int numRetained;
@@ -97,46 +102,50 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         expireUntil(latestSnapshotId);
     }
 
-    private void expireUntil(long exclusiveId) {
-        if (exclusiveId <= Snapshot.FIRST_SNAPSHOT_ID) {
+    private void expireUntil(long endExclusiveId) {
+        if (endExclusiveId <= Snapshot.FIRST_SNAPSHOT_ID) {
             // fast exit
             return;
         }
 
-        Snapshot exclusiveSnapshot = Snapshot.fromPath(pathFactory.toSnapshotPath(exclusiveId));
-
-        // manifests are only added and deleted once
-        Set<ManifestFileMeta> manifestsInUse = new HashSet<>();
-        manifestsInUse.addAll(manifestList.read(exclusiveSnapshot.previousChanges()));
-        manifestsInUse.addAll(manifestList.read(exclusiveSnapshot.newChanges()));
-
-        FileStorePathFactory.SstPathFactoryCache sstPathFactoryCache =
-                new FileStorePathFactory.SstPathFactoryCache(pathFactory);
-        // we cannot delete manifest file directly because other snapshots to be expired might
-        // be using this as well
-        Set<ManifestFileMeta> manifestsToDelete = new HashSet<>();
-
-        for (long id = exclusiveId - 1; id >= Snapshot.FIRST_SNAPSHOT_ID; id--) {
+        // find first snapshot to expire
+        long beginInclusiveId = Snapshot.FIRST_SNAPSHOT_ID;
+        for (long id = endExclusiveId - 1; id >= Snapshot.FIRST_SNAPSHOT_ID; id--) {
             Path snapshotPath = pathFactory.toSnapshotPath(id);
             try {
                 if (!snapshotPath.getFileSystem().exists(snapshotPath)) {
                     // only latest snapshots are retained, as we cannot find this snapshot, we can
                     // assume that all snapshots preceding it have been removed
+                    beginInclusiveId = id + 1;
                     break;
                 }
             } catch (IOException e) {
                 throw new RuntimeException(
                         "Failed to determine if snapshot #" + id + " still exists", e);
             }
+        }
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Snapshot expire range is [" + beginInclusiveId + ", " + endExclusiveId + ")");
+        }
+
+        // delete sst files
+        FileStorePathFactory.SstPathFactoryCache sstPathFactoryCache =
+                new FileStorePathFactory.SstPathFactoryCache(pathFactory);
+        // deleted sst files in a snapshot are not used by that snapshot, so the range of id should
+        // be (beginInclusiveId, endExclusiveId]
+        for (long id = beginInclusiveId + 1; id <= endExclusiveId; id++) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Ready to delete sst files in snapshot #" + id);
+            }
 
             Snapshot toExpire = Snapshot.fromPath(pathFactory.toSnapshotPath(id));
-            List<ManifestFileMeta> previousChanges = manifestList.read(toExpire.previousChanges());
-            List<ManifestFileMeta> newChanges = manifestList.read(toExpire.newChanges());
+            List<ManifestFileMeta> deltaManifests = manifestList.read(toExpire.deltaManifestList());
 
             // we cannot delete an sst file directly when we meet a DELETE entry, because that
             // file might be upgraded
             Set<Path> sstToDelete = new HashSet<>();
-            for (ManifestFileMeta meta : newChanges) {
+            for (ManifestFileMeta meta : deltaManifests) {
                 for (ManifestEntry entry : manifestFile.read(meta.fileName())) {
                     SstPathFactory sstPathFactory =
                             sstPathFactoryCache.getSstPathFactory(
@@ -158,30 +167,34 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             for (Path sst : sstToDelete) {
                 FileUtils.deleteOrWarn(sst);
             }
+        }
 
-            // collect useless manifests
-            for (ManifestFileMeta manifest : previousChanges) {
-                if (!manifestsInUse.contains(manifest)) {
-                    manifestsToDelete.add(manifest);
-                }
+        // delete manifests
+        Snapshot exclusiveSnapshot = Snapshot.fromPath(pathFactory.toSnapshotPath(endExclusiveId));
+        Set<ManifestFileMeta> manifestsInUse =
+                new HashSet<>(exclusiveSnapshot.readAllManifests(manifestList));
+        // to avoid deleting twice
+        Set<ManifestFileMeta> deletedManifests = new HashSet<>();
+        for (long id = beginInclusiveId; id < endExclusiveId; id++) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Ready to delete manifests in snapshot #" + id);
             }
-            for (ManifestFileMeta manifest : newChanges) {
-                if (!manifestsInUse.contains(manifest)) {
-                    manifestsToDelete.add(manifest);
+
+            Snapshot toExpire = Snapshot.fromPath(pathFactory.toSnapshotPath(id));
+
+            for (ManifestFileMeta manifest : toExpire.readAllManifests(manifestList)) {
+                if (!manifestsInUse.contains(manifest) && !deletedManifests.contains(manifest)) {
+                    manifestFile.delete(manifest.fileName());
+                    deletedManifests.add(manifest);
                 }
             }
 
             // delete manifest lists
-            manifestList.delete(toExpire.previousChanges());
-            manifestList.delete(toExpire.newChanges());
+            manifestList.delete(toExpire.baseManifestList());
+            manifestList.delete(toExpire.deltaManifestList());
 
             // delete snapshot
             FileUtils.deleteOrWarn(pathFactory.toSnapshotPath(id));
-        }
-
-        // actual delete of manifest files
-        for (ManifestFileMeta manifest : manifestsToDelete) {
-            manifestFile.delete(manifest.fileName());
         }
     }
 }

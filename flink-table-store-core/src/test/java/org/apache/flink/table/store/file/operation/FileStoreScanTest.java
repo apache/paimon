@@ -163,9 +163,7 @@ public class FileStoreScanTest {
         ManifestList manifestList = store.manifestListFactory().create();
         long wantedSnapshotId = random.nextLong(pathFactory.latestSnapshotId()) + 1;
         Snapshot wantedSnapshot = Snapshot.fromPath(pathFactory.toSnapshotPath(wantedSnapshotId));
-        List<ManifestFileMeta> wantedManifests = new ArrayList<>();
-        wantedManifests.addAll(manifestList.read(wantedSnapshot.previousChanges()));
-        wantedManifests.addAll(manifestList.read(wantedSnapshot.newChanges()));
+        List<ManifestFileMeta> wantedManifests = wantedSnapshot.readAllManifests(manifestList);
 
         FileStoreScan scan = store.newScan();
         scan.withManifestList(wantedManifests);

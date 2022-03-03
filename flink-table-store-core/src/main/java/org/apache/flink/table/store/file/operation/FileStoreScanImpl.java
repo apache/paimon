@@ -155,9 +155,7 @@ public class FileStoreScanImpl implements FileStoreScan {
                 manifests = Collections.emptyList();
             } else {
                 Snapshot snapshot = Snapshot.fromPath(pathFactory.toSnapshotPath(snapshotId));
-                manifests = new ArrayList<>();
-                manifests.addAll(manifestList.read(snapshot.previousChanges()));
-                manifests.addAll(manifestList.read(snapshot.newChanges()));
+                manifests = snapshot.readAllManifests(manifestList);
             }
         }
 

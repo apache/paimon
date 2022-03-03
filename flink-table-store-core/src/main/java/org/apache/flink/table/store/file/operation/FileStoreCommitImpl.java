@@ -308,8 +308,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         try {
             if (latestSnapshot != null) {
                 // read all previous manifest files
-                oldMetas.addAll(manifestList.read(latestSnapshot.previousChanges()));
-                oldMetas.addAll(manifestList.read(latestSnapshot.newChanges()));
+                oldMetas.addAll(latestSnapshot.readAllManifests(manifestList));
             }
             // merge manifest files with changes
             newMetas.addAll(
@@ -321,10 +320,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             previousChangesListName = manifestList.write(newMetas);
 
             // write new changes into manifest files
-            List<ManifestFileMeta> newChangesManifests = new ArrayList<>();
-            if (!changes.isEmpty()) {
-                newChangesManifests.addAll(manifestFile.write(changes));
-            }
+            List<ManifestFileMeta> newChangesManifests = manifestFile.write(changes);
             newMetas.addAll(newChangesManifests);
             newChangesListName = manifestList.write(newChangesManifests);
 
