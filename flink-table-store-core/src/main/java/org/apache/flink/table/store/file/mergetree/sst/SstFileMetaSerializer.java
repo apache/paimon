@@ -34,10 +34,10 @@ public class SstFileMetaSerializer extends ObjectSerializer<SstFileMeta> {
     private final RowDataSerializer keySerializer;
     private final FieldStatsArraySerializer statsArraySerializer;
 
-    public SstFileMetaSerializer(RowType keyType, RowType rowType) {
-        super(SstFileMeta.schema(keyType, rowType));
+    public SstFileMetaSerializer(RowType keyType, RowType valueType) {
+        super(SstFileMeta.schema(keyType, valueType));
         this.keySerializer = new RowDataSerializer(keyType);
-        this.statsArraySerializer = new FieldStatsArraySerializer(rowType);
+        this.statsArraySerializer = new FieldStatsArraySerializer(valueType);
     }
 
     @Override

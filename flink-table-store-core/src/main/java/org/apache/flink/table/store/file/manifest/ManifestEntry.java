@@ -76,13 +76,13 @@ public class ManifestEntry {
         return new Identifier(partition, bucket, file.level(), file.fileName());
     }
 
-    public static RowType schema(RowType partitionType, RowType keyType, RowType rowType) {
+    public static RowType schema(RowType partitionType, RowType keyType, RowType valueType) {
         List<RowType.RowField> fields = new ArrayList<>();
         fields.add(new RowType.RowField("_KIND", new TinyIntType(false)));
         fields.add(new RowType.RowField("_PARTITION", partitionType));
         fields.add(new RowType.RowField("_BUCKET", new IntType(false)));
         fields.add(new RowType.RowField("_TOTAL_BUCKETS", new IntType(false)));
-        fields.add(new RowType.RowField("_FILE", SstFileMeta.schema(keyType, rowType)));
+        fields.add(new RowType.RowField("_FILE", SstFileMeta.schema(keyType, valueType)));
         return new RowType(fields);
     }
 
