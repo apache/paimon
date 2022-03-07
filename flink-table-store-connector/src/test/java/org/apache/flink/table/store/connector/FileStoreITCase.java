@@ -39,6 +39,7 @@ import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.table.types.utils.TypeConversions;
 import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.types.Row;
+import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
 
 import org.junit.Assume;
@@ -55,6 +56,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Stream;
 
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
@@ -210,6 +212,78 @@ public class FileStoreITCase extends AbstractTestBase {
         assertThat(results).containsExactlyInAnyOrder(expected);
     }
 
+    @Test
+    public void testContinuous() throws Exception {
+        store.withPrimaryKeys(new int[] {2});
+        innerTestContinuous();
+    }
+
+    @Test
+    public void testContinuousWithoutPK() throws Exception {
+        store.withPrimaryKeys(new int[0]);
+        innerTestContinuous();
+    }
+
+    private void innerTestContinuous() throws Exception {
+        Assume.assumeFalse(isBatch);
+
+        CloseableIterator<RowData> iterator =
+                store.sourceBuilder().withContinuousMode(true).build(env).executeAndCollect();
+        Thread.sleep(ThreadLocalRandom.current().nextInt(1000));
+
+        sinkAndValidate(
+                Arrays.asList(
+                        srcRow(RowKind.INSERT, 1, "p1", 1), srcRow(RowKind.INSERT, 2, "p2", 2)),
+                iterator,
+                Row.ofKind(RowKind.INSERT, 1, "p1", 1),
+                Row.ofKind(RowKind.INSERT, 2, "p2", 2));
+
+        sinkAndValidate(
+                Arrays.asList(
+                        srcRow(RowKind.DELETE, 1, "p1", 1), srcRow(RowKind.INSERT, 3, "p3", 3)),
+                iterator,
+                Row.ofKind(RowKind.DELETE, 1, "p1", 1),
+                Row.ofKind(RowKind.INSERT, 3, "p3", 3));
+    }
+
+    private void sinkAndValidate(
+            List<RowData> src, CloseableIterator<RowData> iterator, Row... expected)
+            throws Exception {
+        if (isBatch) {
+            throw new UnsupportedOperationException();
+        }
+        DataStreamSource<RowData> source =
+                env.addSource(new FiniteTestSource<>(src, true), InternalTypeInfo.of(TABLE_TYPE));
+        store.sinkBuilder().withInput(source).build();
+        env.execute();
+        assertThat(collectFromUnbounded(iterator, expected.length))
+                .containsExactlyInAnyOrder(expected);
+    }
+
+    private static RowData srcRow(RowKind kind, int v, String p, int k) {
+        return wrap(GenericRowData.ofKind(kind, v, StringData.fromString(p), k));
+    }
+
+    private List<Row> collectFromUnbounded(CloseableIterator<RowData> iterator, int numElements) {
+        if (numElements == 0) {
+            return Collections.emptyList();
+        }
+
+        List<Row> result = new ArrayList<>();
+        while (iterator.hasNext()) {
+            result.add(CONVERTER.toExternal(iterator.next()));
+
+            if (result.size() == numElements) {
+                return result;
+            }
+        }
+
+        throw new IllegalArgumentException(
+                String.format(
+                        "The stream ended before reaching the requested %d records. Only %d records were received.",
+                        numElements, result.size()));
+    }
+
     public static StreamExecutionEnvironment buildStreamEnv() {
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
@@ -251,7 +325,8 @@ public class FileStoreITCase extends AbstractTestBase {
         return isBatch
                 ? env.fromCollection(SOURCE_DATA, InternalTypeInfo.of(TABLE_TYPE))
                 : env.addSource(
-                        new FiniteTestSource<>(SOURCE_DATA), InternalTypeInfo.of(TABLE_TYPE));
+                        new FiniteTestSource<>(SOURCE_DATA, false),
+                        InternalTypeInfo.of(TABLE_TYPE));
     }
 
     public static List<Row> executeAndCollect(DataStreamSource<RowData> source) throws Exception {

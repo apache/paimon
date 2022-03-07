@@ -38,6 +38,8 @@ import static org.apache.flink.util.Preconditions.checkArgument;
 /** Scan operation which produces a plan. */
 public interface FileStoreScan {
 
+    boolean snapshotExists(long snapshotId);
+
     Snapshot snapshot(long snapshotId);
 
     FileStoreScan withPartitionFilter(Predicate predicate);
@@ -53,6 +55,8 @@ public interface FileStoreScan {
     FileStoreScan withSnapshot(long snapshotId);
 
     FileStoreScan withManifestList(List<ManifestFileMeta> manifests);
+
+    FileStoreScan withIncremental(boolean isIncremental);
 
     /** Produce a {@link Plan}. */
     Plan plan();
