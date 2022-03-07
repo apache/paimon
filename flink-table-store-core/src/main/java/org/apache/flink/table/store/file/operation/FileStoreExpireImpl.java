@@ -78,7 +78,9 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
         long currentMillis = System.currentTimeMillis();
 
-        // find earliest snapshot to retain
+        // find the earliest snapshot to retain
+        // TODO Here id will start from 1, we need to optimize the method of finding the minimum
+        // snapshot
         for (long id = Math.max(latestSnapshotId - numRetained + 1, Snapshot.FIRST_SNAPSHOT_ID);
                 id <= latestSnapshotId;
                 id++) {
