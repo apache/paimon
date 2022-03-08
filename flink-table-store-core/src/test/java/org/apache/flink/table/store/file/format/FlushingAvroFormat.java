@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.utils;
+package org.apache.flink.table.store.file.format;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
@@ -24,8 +24,6 @@ import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.expressions.ResolvedExpression;
-import org.apache.flink.table.store.file.FileFormat;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileTest;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.io.IOException;
@@ -36,7 +34,7 @@ public class FlushingAvroFormat implements FileFormat {
 
     private final FileFormat avro =
             FileFormat.fromIdentifier(
-                    SstFileTest.class.getClassLoader(), "avro", new Configuration());
+                    FlushingAvroFormat.class.getClassLoader(), "avro", new Configuration());
 
     @Override
     public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
