@@ -81,6 +81,7 @@ public class FileStoreSourceSplitSerializerTest {
                 row(0),
                 row(0),
                 new FieldStats[] {new FieldStats(null, null, 0)},
+                new FieldStats[] {new FieldStats(null, null, 0)},
                 0,
                 1,
                 level);

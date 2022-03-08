@@ -18,7 +18,9 @@
 
 package org.apache.flink.table.store.file.stats;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -26,7 +28,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class StatsTestUtils {
 
     @SuppressWarnings("unchecked")
-    public static void checkRollingFileStats(FieldStats expected, List<FieldStats> actual) {
+    public static <T> void checkRollingFileStats(
+            FieldStats expected, List<T> actualObjects, Function<T, FieldStats> mapToStats) {
+        List<FieldStats> actual = new ArrayList<>();
+        for (T object : actualObjects) {
+            actual.add(mapToStats.apply(object));
+        }
         if (expected.minValue() instanceof Comparable) {
             Object actualMin = null;
             Object actualMax = null;

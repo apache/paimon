@@ -24,17 +24,21 @@ import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.expressions.ResolvedExpression;
+import org.apache.flink.table.store.file.stats.FileStatsExtractor;
+import org.apache.flink.table.store.file.stats.TestFileStatsExtractor;
 import org.apache.flink.table.types.logical.RowType;
 
-import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 
-/** A special avro {@link FileFormat} which flushes for every added element. */
-public class FlushingAvroFormat implements FileFormat {
+/** An avro {@link FileFormat} for test. It provides a {@link FileStatsExtractor}. */
+public class FileStatsExtractingAvroFormat implements FileFormat {
 
     private final FileFormat avro =
             FileFormat.fromIdentifier(
-                    FlushingAvroFormat.class.getClassLoader(), "avro", new Configuration());
+                    FileStatsExtractingAvroFormat.class.getClassLoader(),
+                    "avro",
+                    new Configuration());
 
     @Override
     public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
@@ -44,25 +48,11 @@ public class FlushingAvroFormat implements FileFormat {
 
     @Override
     public BulkWriter.Factory<RowData> createWriterFactory(RowType type) {
-        return fsDataOutputStream -> {
-            BulkWriter<RowData> wrapped = avro.createWriterFactory(type).create(fsDataOutputStream);
-            return new BulkWriter<RowData>() {
-                @Override
-                public void addElement(RowData rowData) throws IOException {
-                    wrapped.addElement(rowData);
-                    wrapped.flush();
-                }
+        return avro.createWriterFactory(type);
+    }
 
-                @Override
-                public void flush() throws IOException {
-                    wrapped.flush();
-                }
-
-                @Override
-                public void finish() throws IOException {
-                    wrapped.finish();
-                }
-            };
-        };
+    @Override
+    public Optional<FileStatsExtractor> createStatsExtractor(RowType type) {
+        return Optional.of(new TestFileStatsExtractor(avro, type));
     }
 }

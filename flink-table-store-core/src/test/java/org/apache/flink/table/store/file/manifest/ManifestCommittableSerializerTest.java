@@ -90,6 +90,7 @@ public class ManifestCommittableSerializerTest {
 
     public static SstFileMeta newFile(int name, int level) {
         FieldStats[] stats = new FieldStats[] {new FieldStats(0, 1, 0)};
-        return new SstFileMeta(String.valueOf(name), 0, 1, row(0), row(0), stats, 0, 1, level);
+        return new SstFileMeta(
+                String.valueOf(name), 0, 1, row(0), row(0), stats, stats, 0, 1, level);
     }
 }

@@ -240,6 +240,7 @@ public class ManifestFileMetaTest {
                         binaryRowData, // not used
                         binaryRowData, // not used
                         new FieldStats[] {new FieldStats(null, null, 0)}, // not used
+                        new FieldStats[] {new FieldStats(null, null, 0)}, // not used
                         0, // not used
                         0, // not used
                         0 // not used

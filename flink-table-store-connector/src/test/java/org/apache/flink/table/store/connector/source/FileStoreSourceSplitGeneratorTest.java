@@ -111,6 +111,7 @@ public class FileStoreSourceSplitGeneratorTest {
                         null, // not used
                         null, // not used
                         new FieldStats[] {new FieldStats(null, null, 0)}, // not used
+                        new FieldStats[] {new FieldStats(null, null, 0)}, // not used
                         0, // not used
                         0, // not used
                         0 // not used

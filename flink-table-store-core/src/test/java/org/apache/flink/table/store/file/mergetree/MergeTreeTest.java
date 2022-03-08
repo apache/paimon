@@ -28,7 +28,7 @@ import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.format.FileFormat;
-import org.apache.flink.table.store.file.format.FlushingAvroFormat;
+import org.apache.flink.table.store.file.format.FlushingFileFormat;
 import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
@@ -99,7 +99,7 @@ public class MergeTreeTest {
         options = new MergeTreeOptions(configuration);
         RowType keyType = new RowType(singletonList(new RowType.RowField("k", new IntType())));
         RowType valueType = new RowType(singletonList(new RowType.RowField("v", new IntType())));
-        FileFormat flushingAvro = new FlushingAvroFormat();
+        FileFormat flushingAvro = new FlushingFileFormat("avro");
         sstFileReader =
                 new SstFileReader.Factory(keyType, valueType, flushingAvro, pathFactory)
                         .create(BinaryRowDataUtil.EMPTY_ROW, 0);
