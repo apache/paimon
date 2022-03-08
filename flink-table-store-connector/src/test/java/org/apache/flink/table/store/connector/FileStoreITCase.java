@@ -24,7 +24,6 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.util.FiniteTestSource;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
@@ -39,6 +38,7 @@ import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
+import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
@@ -77,7 +77,7 @@ public class FileStoreITCase extends AbstractTestBase {
     private static final RowType KEY_TYPE =
             new RowType(Collections.singletonList(new RowType.RowField("k", new IntType())));
 
-    private static final RowType VALUE_TYPE =
+    public static final RowType VALUE_TYPE =
             new RowType(
                     Arrays.asList(
                             new RowType.RowField("v", new IntType()),
@@ -86,7 +86,7 @@ public class FileStoreITCase extends AbstractTestBase {
                             new RowType.RowField("_k", new IntType())));
 
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private static final DataStructureConverter<RowData, Row> CONVERTER =
+    public static final DataStructureConverter<RowData, Row> CONVERTER =
             (DataStructureConverter)
                     DataStructureConverters.getConverter(
                             TypeConversions.fromLogicalToDataType(VALUE_TYPE));
@@ -209,10 +209,10 @@ public class FileStoreITCase extends AbstractTestBase {
         return env;
     }
 
-    public static Configuration buildConfiguration(boolean isBatch, File folder) {
+    public static Configuration buildConfiguration(boolean noFail, File folder) {
         Configuration options = new Configuration();
         options.set(BUCKET, NUM_BUCKET);
-        if (isBatch) {
+        if (noFail) {
             options.set(FILE_PATH, folder.toURI().toString());
         } else {
             FailingAtomicRenameFileSystem.get().reset(3, 100);
@@ -237,7 +237,7 @@ public class FileStoreITCase extends AbstractTestBase {
         return isBatch
                 ? env.fromCollection(SOURCE_DATA, InternalTypeInfo.of(VALUE_TYPE))
                 : env.addSource(
-                        new FiniteTestSource<>(null, SOURCE_DATA), InternalTypeInfo.of(VALUE_TYPE));
+                        new FiniteTestSource<>(SOURCE_DATA), InternalTypeInfo.of(VALUE_TYPE));
     }
 
     public static void write(DataStream<RowData> input, FileStore fileStore, boolean partitioned)
@@ -251,11 +251,28 @@ public class FileStoreITCase extends AbstractTestBase {
             boolean partitioned,
             @Nullable Map<String, String> overwritePartition)
             throws Exception {
+        write(input, fileStore, partitioned, overwritePartition, null);
+    }
+
+    public static void write(
+            DataStream<RowData> input,
+            FileStore fileStore,
+            boolean partitioned,
+            @Nullable Map<String, String> overwritePartition,
+            @Nullable LogSinkProvider logSinkProvider)
+            throws Exception {
         int[] partitions = partitioned ? new int[] {1} : new int[0];
         int[] keys = new int[] {2};
         StoreSink<?, ?> sink =
                 new StoreSink<>(
-                        null, fileStore, partitions, keys, NUM_BUCKET, null, overwritePartition);
+                        null,
+                        fileStore,
+                        partitions,
+                        keys,
+                        NUM_BUCKET,
+                        null,
+                        overwritePartition,
+                        logSinkProvider);
         input = input.keyBy(row -> row.getInt(2)); // key by
         GlobalCommittingSinkTranslator.translate(input, sink);
         input.getExecutionEnvironment().execute();

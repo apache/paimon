@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.connector.sink.global;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.streaming.api.connector.sink2.CommittableMessage;
 import org.apache.flink.streaming.api.connector.sink2.CommittableMessageTypeInfo;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -28,38 +27,47 @@ import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.streaming.runtime.operators.sink.SinkWriterOperatorFactory;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+
 /** A translator for the {@link GlobalCommittingSink}. */
 public class GlobalCommittingSinkTranslator {
 
-    private static final String GLOBAL_COMMITTER_NAME = "Global Committer";
-
     private static final String WRITER_NAME = "Writer";
+
+    private static final String LOCAL_COMMITTER_NAME = "Local Committer";
+
+    private static final String GLOBAL_COMMITTER_NAME = "Global Committer";
 
     public static <T, CommT, GlobalCommT> DataStreamSink<?> translate(
             DataStream<T> input, GlobalCommittingSink<T, CommT, GlobalCommT> sink) {
         TypeInformation<CommittableMessage<CommT>> commitType =
                 CommittableMessageTypeInfo.of(sink::getCommittableSerializer);
 
-        boolean checkpointingEnabled =
-                input.getExecutionEnvironment().getCheckpointConfig().isCheckpointingEnabled();
-
-        // We cannot determine the mode, when the execution mode is auto.
-        // We set isBatch to false and only use checkpointingEnabled to determine if we want to do
-        // the final commit.
-        // When isBatch is true, only the checkpointID is different, which has no effect on the
-        // commit operator.
-
         SingleOutputStreamOperator<CommittableMessage<CommT>> written =
-                input.transform(
-                        WRITER_NAME,
-                        commitType,
-                        new SinkWriterOperatorFactory<>(sink, false, checkpointingEnabled));
+                input.transform(WRITER_NAME, commitType, new SinkWriterOperatorFactory<>(sink))
+                        .setParallelism(input.getParallelism());
 
-        SingleOutputStreamOperator<Void> committed =
-                written.global()
+        SingleOutputStreamOperator<CommittableMessage<CommT>> local =
+                written.transform(
+                                LOCAL_COMMITTER_NAME,
+                                commitType,
+                                new LocalCommitterOperator<>(
+                                        () -> {
+                                            try {
+                                                return sink.createCommitter();
+                                            } catch (IOException e) {
+                                                throw new UncheckedIOException(e);
+                                            }
+                                        },
+                                        sink::getCommittableSerializer))
+                        .setParallelism(written.getParallelism());
+
+        SingleOutputStreamOperator<?> committed =
+                local.global()
                         .transform(
                                 GLOBAL_COMMITTER_NAME,
-                                Types.VOID,
+                                commitType,
                                 new GlobalCommitterOperator<>(
                                         sink::createGlobalCommitter,
                                         sink::getGlobalCommittableSerializer))

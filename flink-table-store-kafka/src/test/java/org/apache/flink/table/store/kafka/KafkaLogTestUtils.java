@@ -63,7 +63,7 @@ import static org.apache.flink.table.store.log.LogOptions.LogConsistency;
 /** Utils for the test of {@link KafkaLogStoreFactory}. */
 public class KafkaLogTestUtils {
 
-    static final LogStoreTableFactory.SourceContext SOURCE_CONTEXT =
+    public static final LogStoreTableFactory.SourceContext SOURCE_CONTEXT =
             new LogStoreTableFactory.SourceContext() {
                 @Override
                 public <T> TypeInformation<T> createTypeInformation(DataType producedDataType) {
@@ -85,7 +85,7 @@ public class KafkaLogTestUtils {
                 }
             };
 
-    static final LogStoreTableFactory.SinkContext SINK_CONTEXT =
+    public static final LogStoreTableFactory.SinkContext SINK_CONTEXT =
             new LogStoreTableFactory.SinkContext() {
 
                 @Override
@@ -113,7 +113,7 @@ public class KafkaLogTestUtils {
                 }
             };
 
-    static KafkaLogStoreFactory discoverKafkaLogFactory() {
+    public static KafkaLogStoreFactory discoverKafkaLogFactory() {
         return (KafkaLogStoreFactory)
                 LogStoreTableFactory.discoverLogStoreFactory(
                         Thread.currentThread().getContextClassLoader(),
@@ -169,15 +169,27 @@ public class KafkaLogTestUtils {
             LogChangelogMode changelogMode,
             LogConsistency consistency,
             boolean keyed) {
+        return testContext(
+                name,
+                servers,
+                changelogMode,
+                consistency,
+                RowType.of(new IntType(), new IntType()),
+                keyed ? new int[] {0} : new int[0]);
+    }
+
+    public static DynamicTableFactory.Context testContext(
+            String name,
+            String servers,
+            LogChangelogMode changelogMode,
+            LogConsistency consistency,
+            RowType type,
+            int[] keys) {
         Map<String, String> options = new HashMap<>();
         options.put(CHANGELOG_MODE.key(), changelogMode.toString());
         options.put(CONSISTENCY.key(), consistency.toString());
         options.put(BOOTSTRAP_SERVERS.key(), servers);
-        return createContext(
-                name,
-                RowType.of(new IntType(), new IntType()),
-                keyed ? new int[] {0} : new int[0],
-                options);
+        return createContext(name, type, keys, options);
     }
 
     static SinkRecord testRecord(boolean keyed, int bucket, int key, int value, RowKind rowKind) {

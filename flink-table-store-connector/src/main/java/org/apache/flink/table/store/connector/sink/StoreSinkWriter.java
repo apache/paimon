@@ -28,16 +28,21 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.utils.RecordWriter;
+import org.apache.flink.table.store.log.LogWriteCallback;
 import org.apache.flink.table.store.sink.SinkRecord;
 import org.apache.flink.table.store.sink.SinkRecordConverter;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -50,9 +55,11 @@ public class StoreSinkWriter<WriterStateT>
 
     private final SinkRecordConverter recordConverter;
 
-    private final FileCommittableSerializer fileCommitSerializer;
-
     private final boolean overwrite;
+
+    @Nullable private final SinkWriter<SinkRecord> logWriter;
+
+    @Nullable private final LogWriteCallback logCallback;
 
     private final ExecutorService compactExecutor;
 
@@ -61,12 +68,14 @@ public class StoreSinkWriter<WriterStateT>
     public StoreSinkWriter(
             FileStoreWrite fileStoreWrite,
             SinkRecordConverter recordConverter,
-            FileCommittableSerializer fileCommitSerializer,
-            boolean overwrite) {
+            boolean overwrite,
+            @Nullable SinkWriter<SinkRecord> logWriter,
+            @Nullable LogWriteCallback logCallback) {
         this.fileStoreWrite = fileStoreWrite;
         this.recordConverter = recordConverter;
-        this.fileCommitSerializer = fileCommitSerializer;
         this.overwrite = overwrite;
+        this.logWriter = logWriter;
+        this.logCallback = logCallback;
         this.compactExecutor = Executors.newSingleThreadScheduledExecutor();
         this.writers = new HashMap<>();
     }
@@ -95,6 +104,11 @@ public class StoreSinkWriter<WriterStateT>
         } catch (Exception e) {
             throw new IOException(e);
         }
+
+        // write to log store
+        if (logWriter != null) {
+            logWriter.write(record, context);
+        }
     }
 
     private void writeToFileStore(RecordWriter writer, SinkRecord record) throws Exception {
@@ -119,15 +133,22 @@ public class StoreSinkWriter<WriterStateT>
     }
 
     @Override
-    public void flush(boolean endOfInput) {}
+    public void flush(boolean endOfInput) throws IOException, InterruptedException {
+        if (logWriter != null) {
+            logWriter.flush(endOfInput);
+        }
+    }
 
     @Override
     public List<WriterStateT> snapshotState(long checkpointId) throws IOException {
+        if (logWriter != null && logWriter instanceof StatefulSinkWriter) {
+            return ((StatefulSinkWriter<?, WriterStateT>) logWriter).snapshotState(checkpointId);
+        }
         return Collections.emptyList();
     }
 
     @Override
-    public List<Committable> prepareCommit() throws IOException {
+    public List<Committable> prepareCommit() throws IOException, InterruptedException {
         List<Committable> committables = new ArrayList<>();
         Iterator<Map.Entry<BinaryRowData, Map<Integer, RecordWriter>>> partIter =
                 writers.entrySet().iterator();
@@ -146,11 +167,7 @@ public class StoreSinkWriter<WriterStateT>
                 } catch (Exception e) {
                     throw new IOException(e);
                 }
-                committables.add(
-                        new Committable(
-                                Committable.Kind.FILE,
-                                fileCommitSerializer.serialize(committable),
-                                fileCommitSerializer.getVersion()));
+                committables.add(new Committable(Committable.Kind.FILE, committable));
 
                 // clear if no update
                 // we need a mechanism to clear writers, otherwise there will be more and more
@@ -166,6 +183,25 @@ public class StoreSinkWriter<WriterStateT>
             }
         }
 
+        if (logWriter != null) {
+            if (logWriter instanceof PrecommittingSinkWriter) {
+                Collection<?> logCommittables =
+                        ((PrecommittingSinkWriter<?, ?>) logWriter).prepareCommit();
+                for (Object logCommittable : logCommittables) {
+                    committables.add(new Committable(Committable.Kind.LOG, logCommittable));
+                }
+            }
+
+            Objects.requireNonNull(logCallback, "logCallback should not be null.");
+            logCallback
+                    .offsets()
+                    .forEach(
+                            (k, v) ->
+                                    committables.add(
+                                            new Committable(
+                                                    Committable.Kind.LOG_OFFSET,
+                                                    new LogOffsetCommittable(k, v))));
+        }
         return committables;
     }
 
@@ -187,6 +223,10 @@ public class StoreSinkWriter<WriterStateT>
             }
         }
         writers.clear();
+
+        if (logWriter != null) {
+            logWriter.close();
+        }
     }
 
     @VisibleForTesting
