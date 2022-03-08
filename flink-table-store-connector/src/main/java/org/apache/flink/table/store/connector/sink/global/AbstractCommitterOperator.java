@@ -52,7 +52,7 @@ public abstract class AbstractCommitterOperator<IN, CommT>
 
     private static final long serialVersionUID = 1L;
 
-    private static final Logger LOG = LoggerFactory.getLogger(GlobalCommitterOperator.class);
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractCommitterOperator.class);
 
     /** Record all the inputs until commit. */
     private final Deque<IN> inputs = new ArrayDeque<>();

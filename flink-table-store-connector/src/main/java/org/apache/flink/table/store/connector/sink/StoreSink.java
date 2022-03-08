@@ -136,10 +136,8 @@ public class StoreSink<WriterStateT, LogCommT>
         if (logSinkProvider != null) {
             Sink<SinkRecord> sink = logSinkProvider.createSink();
             if (sink instanceof TwoPhaseCommittingSink) {
-                TwoPhaseCommittingSink<SinkRecord, LogCommT> twoPhaseSink =
-                        (TwoPhaseCommittingSink<SinkRecord, LogCommT>) logSinkProvider.createSink();
                 try {
-                    return twoPhaseSink.createCommitter();
+                    return ((TwoPhaseCommittingSink<SinkRecord, LogCommT>) sink).createCommitter();
                 } catch (IOException e) {
                     throw new UncheckedIOException(e);
                 }
@@ -154,9 +152,8 @@ public class StoreSink<WriterStateT, LogCommT>
         if (logSinkProvider != null) {
             Sink<SinkRecord> sink = logSinkProvider.createSink();
             if (sink instanceof TwoPhaseCommittingSink) {
-                TwoPhaseCommittingSink<SinkRecord, LogCommT> twoPhaseSink =
-                        (TwoPhaseCommittingSink<SinkRecord, LogCommT>) logSinkProvider.createSink();
-                return twoPhaseSink.getCommittableSerializer();
+                return ((TwoPhaseCommittingSink<SinkRecord, LogCommT>) sink)
+                        .getCommittableSerializer();
             }
         }
 

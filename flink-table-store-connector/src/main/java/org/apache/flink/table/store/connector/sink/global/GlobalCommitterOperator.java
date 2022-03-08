@@ -27,7 +27,7 @@ import java.util.List;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
-/** A {@link AbstractCommitterOperator} to process global committer. */
+/** An {@link AbstractCommitterOperator} to process global committer. */
 public class GlobalCommitterOperator<CommT, GlobalCommT>
         extends AbstractCommitterOperator<CommT, GlobalCommT> {
 
