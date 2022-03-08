@@ -24,6 +24,7 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.connector.sink.TestFileStore.TestRecordWriter;
+import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
@@ -123,7 +124,8 @@ public class StoreSinkTest {
                         primaryKeys,
                         2,
                         () -> lock,
-                        new HashMap<>());
+                        new HashMap<>(),
+                        null);
         writeAndCommit(
                 sink,
                 GenericRowData.ofKind(RowKind.INSERT, 0, 0, 1),
@@ -225,7 +227,7 @@ public class StoreSinkTest {
 
     private void commit(StoreSink<?, ?> sink, List<Committable> fileCommittables) throws Exception {
         StoreGlobalCommitter committer = sink.createGlobalCommitter();
-        GlobalCommittable<?> committable = committer.combine(0, fileCommittables);
+        ManifestCommittable committable = committer.combine(0, fileCommittables);
 
         fileStore.expired = false;
         lock.locked = false;
@@ -246,7 +248,14 @@ public class StoreSinkTest {
 
     private StoreSink<?, ?> newSink(Map<String, String> overwritePartition) {
         return new StoreSink<>(
-                identifier, fileStore, partitions, primaryKeys, 2, () -> lock, overwritePartition);
+                identifier,
+                fileStore,
+                partitions,
+                primaryKeys,
+                2,
+                () -> lock,
+                overwritePartition,
+                null);
     }
 
     private class TestLock implements CatalogLock {

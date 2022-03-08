@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.connector.sink.global;
 
-import org.apache.flink.api.connector.sink2.Committer;
 import org.apache.flink.api.connector.sink2.Sink;
 import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.api.connector.sink2.TwoPhaseCommittingSink;
@@ -35,11 +34,6 @@ import org.apache.flink.core.io.SimpleVersionedSerializer;
  */
 public interface GlobalCommittingSink<InputT, CommT, GlobalCommT>
         extends TwoPhaseCommittingSink<InputT, CommT> {
-
-    @Override
-    default Committer<CommT> createCommitter() {
-        throw new UnsupportedOperationException("Please create global committer.");
-    }
 
     /**
      * Creates a {@link GlobalCommitter} that permanently makes the previously written data visible
