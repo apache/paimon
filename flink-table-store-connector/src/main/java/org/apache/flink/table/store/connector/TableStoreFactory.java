@@ -28,6 +28,7 @@ import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.factories.ManagedTableFactory;
 import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.log.LogStoreTableFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -37,6 +38,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.CHANGE_TRACKING;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.FILE_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
@@ -63,8 +65,8 @@ public class TableStoreFactory implements ManagedTableFactory {
 
     @Override
     public void onCreateTable(Context context, boolean ignoreIfExists) {
-        Map<String, String> enrichedOptions = context.getCatalogTable().getOptions();
-        Path path = tablePath(enrichedOptions, context.getObjectIdentifier());
+        Map<String, String> options = context.getCatalogTable().getOptions();
+        Path path = tablePath(options, context.getObjectIdentifier());
         try {
             if (path.getFileSystem().exists(path) && !ignoreIfExists) {
                 throw new TableException(
@@ -86,22 +88,12 @@ public class TableStoreFactory implements ManagedTableFactory {
             throw new UncheckedIOException(e);
         }
 
-        if (enableChangeTracking(enrichedOptions)) {
-            Context logStoreContext =
-                    new FactoryUtil.DefaultDynamicTableContext(
-                            context.getObjectIdentifier(),
-                            context.getCatalogTable().copy(filterLogStoreOptions(enrichedOptions)),
-                            filterLogStoreOptions(context.getEnrichmentOptions()),
-                            context.getConfiguration(),
-                            context.getClassLoader(),
-                            context.isTemporary());
-            discoverLogStoreFactory(
-                            Thread.currentThread().getContextClassLoader(),
-                            TableStoreFactoryOptions.LOG_SYSTEM.defaultValue())
+        if (enableChangeTracking(options)) {
+            createLogStoreTableFactory(context)
                     .onCreateTable(
-                            logStoreContext,
+                            createLogContext(context),
                             Integer.parseInt(
-                                    enrichedOptions.getOrDefault(
+                                    options.getOrDefault(
                                             BUCKET.key(), BUCKET.defaultValue().toString())),
                             ignoreIfExists);
         }
@@ -109,8 +101,8 @@ public class TableStoreFactory implements ManagedTableFactory {
 
     @Override
     public void onDropTable(Context context, boolean ignoreIfNotExists) {
-        Map<String, String> enrichedOptions = context.getCatalogTable().getOptions();
-        Path path = tablePath(enrichedOptions, context.getObjectIdentifier());
+        Map<String, String> options = context.getCatalogTable().getOptions();
+        Path path = tablePath(options, context.getObjectIdentifier());
         try {
             if (path.getFileSystem().exists(path)) {
                 path.getFileSystem().delete(path, true);
@@ -125,19 +117,9 @@ public class TableStoreFactory implements ManagedTableFactory {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        if (enableChangeTracking(enrichedOptions)) {
-            Context logStoreContext =
-                    new FactoryUtil.DefaultDynamicTableContext(
-                            context.getObjectIdentifier(),
-                            context.getCatalogTable().copy(filterLogStoreOptions(enrichedOptions)),
-                            context.getEnrichmentOptions(),
-                            context.getConfiguration(),
-                            context.getClassLoader(),
-                            context.isTemporary());
-            discoverLogStoreFactory(
-                            Thread.currentThread().getContextClassLoader(),
-                            TableStoreFactoryOptions.LOG_SYSTEM.defaultValue())
-                    .onDropTable(logStoreContext, ignoreIfNotExists);
+        if (enableChangeTracking(options)) {
+            createLogStoreTableFactory(context)
+                    .onDropTable(createLogContext(context), ignoreIfNotExists);
         }
     }
 
@@ -160,6 +142,25 @@ public class TableStoreFactory implements ManagedTableFactory {
     }
 
     // ~ Tools ------------------------------------------------------------------
+
+    private LogStoreTableFactory createLogStoreTableFactory(Context context) {
+        return discoverLogStoreFactory(
+                context.getClassLoader(),
+                context.getCatalogTable()
+                        .getOptions()
+                        .getOrDefault(LOG_SYSTEM.key(), LOG_SYSTEM.defaultValue()));
+    }
+
+    private Context createLogContext(Context context) {
+        return new FactoryUtil.DefaultDynamicTableContext(
+                context.getObjectIdentifier(),
+                context.getCatalogTable()
+                        .copy(filterLogStoreOptions(context.getCatalogTable().getOptions())),
+                filterLogStoreOptions(context.getEnrichmentOptions()),
+                context.getConfiguration(),
+                context.getClassLoader(),
+                context.isTemporary());
+    }
 
     @VisibleForTesting
     Map<String, String> filterLogStoreOptions(Map<String, String> enrichedOptions) {
