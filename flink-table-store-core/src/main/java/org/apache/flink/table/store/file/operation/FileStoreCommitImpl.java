@@ -151,13 +151,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         List<ManifestEntry> appendChanges = collectChanges(committable.newFiles(), ValueKind.ADD);
-        tryCommit(appendChanges, committable.identifier(), Snapshot.CommitKind.APPEND, false);
+        tryCommit(
+                appendChanges,
+                committable.identifier(),
+                committable.logOffsets(),
+                Snapshot.CommitKind.APPEND,
+                false);
 
         List<ManifestEntry> compactChanges = new ArrayList<>();
         compactChanges.addAll(collectChanges(committable.compactBefore(), ValueKind.DELETE));
         compactChanges.addAll(collectChanges(committable.compactAfter(), ValueKind.ADD));
         if (!compactChanges.isEmpty()) {
-            tryCommit(compactChanges, committable.identifier(), Snapshot.CommitKind.COMPACT, true);
+            tryCommit(
+                    compactChanges,
+                    committable.identifier(),
+                    committable.logOffsets(),
+                    Snapshot.CommitKind.COMPACT,
+                    true);
         }
     }
 
@@ -190,31 +200,42 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
         // overwrite new files
-        tryOverwrite(partitionFilter, appendChanges, committable.identifier());
+        tryOverwrite(
+                partitionFilter, appendChanges, committable.identifier(), committable.logOffsets());
 
         List<ManifestEntry> compactChanges = new ArrayList<>();
         compactChanges.addAll(collectChanges(committable.compactBefore(), ValueKind.DELETE));
         compactChanges.addAll(collectChanges(committable.compactAfter(), ValueKind.ADD));
         if (!compactChanges.isEmpty()) {
-            tryCommit(compactChanges, committable.identifier(), Snapshot.CommitKind.COMPACT, true);
+            tryCommit(
+                    compactChanges,
+                    committable.identifier(),
+                    committable.logOffsets(),
+                    Snapshot.CommitKind.COMPACT,
+                    true);
         }
     }
 
     private void tryCommit(
             List<ManifestEntry> changes,
             String hash,
+            Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
             boolean checkDeletedFiles) {
         while (true) {
             Long latestSnapshotId = pathFactory.latestSnapshotId();
-            if (tryCommitOnce(changes, hash, commitKind, latestSnapshotId, checkDeletedFiles)) {
+            if (tryCommitOnce(
+                    changes, hash, logOffsets, commitKind, latestSnapshotId, checkDeletedFiles)) {
                 break;
             }
         }
     }
 
     private void tryOverwrite(
-            Predicate partitionFilter, List<ManifestEntry> changes, String identifier) {
+            Predicate partitionFilter,
+            List<ManifestEntry> changes,
+            String identifier,
+            Map<Integer, Long> logOffsets) {
         while (true) {
             Long latestSnapshotId = pathFactory.latestSnapshotId();
 
@@ -240,6 +261,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (tryCommitOnce(
                     changesWithOverwrite,
                     identifier,
+                    logOffsets,
                     Snapshot.CommitKind.OVERWRITE,
                     latestSnapshotId,
                     false)) {
@@ -274,6 +296,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private boolean tryCommitOnce(
             List<ManifestEntry> changes,
             String identifier,
+            Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
             Long latestSnapshotId,
             boolean checkDeletedFiles) {
@@ -306,6 +329,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (latestSnapshot != null) {
                 // read all previous manifest files
                 oldMetas.addAll(latestSnapshot.readAllManifests(manifestList));
+                // read the last snapshot to complete the bucket's offsets when logOffsets does not
+                // contain all buckets
+                latestSnapshot.getLogOffsets().forEach(logOffsets::putIfAbsent);
             }
             // merge manifest files with changes
             newMetas.addAll(
@@ -330,7 +356,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             commitUser,
                             identifier,
                             commitKind,
-                            System.currentTimeMillis());
+                            System.currentTimeMillis(),
+                            logOffsets);
             FileUtils.writeFileUtf8(tmpSnapshotPath, newSnapshot.toJson());
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up

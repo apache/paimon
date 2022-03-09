@@ -60,6 +60,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -74,6 +75,8 @@ public class TestFileStore extends FileStoreImpl {
     private final String root;
     private final RowDataSerializer keySerializer;
     private final RowDataSerializer valueSerializer;
+
+    private static final AtomicInteger ID = new AtomicInteger();
 
     public static TestFileStore create(
             String format,
@@ -188,6 +191,9 @@ public class TestFileStore extends FileStoreImpl {
                 Increment increment = entryWithBucket.getValue().prepareCommit();
                 committable.addFileCommittable(
                         entryWithPartition.getKey(), entryWithBucket.getKey(), increment);
+                if (!committable.logOffsets().containsKey(entryWithBucket.getKey())) {
+                    committable.addLogOffset(entryWithBucket.getKey(), ID.getAndIncrement());
+                }
             }
         }
 

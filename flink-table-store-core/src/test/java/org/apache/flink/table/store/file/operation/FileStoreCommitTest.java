@@ -208,6 +208,67 @@ public class FileStoreCommitTest {
         assertThat(actual).isEqualTo(expected);
     }
 
+    @Test
+    public void testSnapshotAddLogOffset() throws Exception {
+        Map<BinaryRowData, List<KeyValue>> data1 =
+                generateData(ThreadLocalRandom.current().nextInt(1000) + 1);
+        logData(
+                () ->
+                        data1.values().stream()
+                                .flatMap(Collection::stream)
+                                .collect(Collectors.toList()),
+                "data1");
+
+        TestFileStore store = createStore(false);
+        List<Snapshot> commitSnapshots =
+                store.commitData(
+                        data1.values().stream()
+                                .flatMap(Collection::stream)
+                                .collect(Collectors.toList()),
+                        gen::getPartition,
+                        kv -> Math.toIntExact(kv.sequenceNumber() % 10));
+
+        Map<Integer, Long> commitLogOffsets = commitSnapshots.get(0).getLogOffsets();
+        assertThat(commitLogOffsets.size()).isEqualTo(10);
+        commitLogOffsets.forEach((key, value) -> assertThat(key).isEqualTo(value.intValue()));
+
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        String dtToOverwrite =
+                new ArrayList<>(data1.keySet())
+                        .get(random.nextInt(data1.size()))
+                        .getString(0)
+                        .toString();
+        Map<String, String> partitionToOverwrite = new HashMap<>();
+        partitionToOverwrite.put("dt", dtToOverwrite);
+
+        // overwrite partial commit
+        int numRecords = ThreadLocalRandom.current().nextInt(5) + 1;
+        Map<BinaryRowData, List<KeyValue>> data2 = generateData(numRecords);
+        data2.entrySet().removeIf(e -> !dtToOverwrite.equals(e.getKey().getString(0).toString()));
+        logData(
+                () ->
+                        data2.values().stream()
+                                .flatMap(Collection::stream)
+                                .collect(Collectors.toList()),
+                "data2");
+        List<Snapshot> overwriteSnapshots =
+                store.overwriteData(
+                        data2.values().stream()
+                                .flatMap(Collection::stream)
+                                .collect(Collectors.toList()),
+                        gen::getPartition,
+                        kv -> Math.toIntExact(kv.sequenceNumber() % 10),
+                        partitionToOverwrite);
+
+        Map<Integer, Long> overwriteLogOffsets = overwriteSnapshots.get(0).getLogOffsets();
+        assertThat(overwriteLogOffsets.size()).isEqualTo(commitLogOffsets.size());
+        assertThat(
+                        overwriteLogOffsets.entrySet().stream()
+                                .filter(o -> !o.getKey().equals(o.getValue().intValue()))
+                                .count())
+                .isLessThanOrEqualTo(numRecords);
+    }
+
     private TestFileStore createStore(boolean failing) {
         String root =
                 failing
