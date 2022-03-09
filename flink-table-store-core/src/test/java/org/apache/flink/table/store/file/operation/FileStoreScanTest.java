@@ -27,7 +27,10 @@ import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
+import org.apache.flink.table.store.file.predicate.Equal;
+import org.apache.flink.table.store.file.predicate.Literal;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.types.logical.IntType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -102,7 +105,47 @@ public class FileStoreScanTest {
                                                         wantedPartitions.contains(
                                                                 gen.getPartition(kv)))
                                         .collect(Collectors.toList()));
-        runTest(scan, snapshot.id(), expected);
+        runTestExactMatch(scan, snapshot.id(), expected);
+    }
+
+    @Test
+    public void testWithKeyFilter() throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        List<KeyValue> data = generateData(random.nextInt(1000) + 1);
+        Snapshot snapshot = writeData(data);
+
+        int wantedShopId = data.get(random.nextInt(data.size())).key().getInt(0);
+
+        FileStoreScan scan = store.newScan();
+        scan.withSnapshot(snapshot.id());
+        scan.withKeyFilter(new Equal(0, new Literal(new IntType(false), wantedShopId)));
+
+        Map<BinaryRowData, BinaryRowData> expected =
+                store.toKvMap(
+                        data.stream()
+                                .filter(kv -> kv.key().getInt(0) == wantedShopId)
+                                .collect(Collectors.toList()));
+        runTestContainsAll(scan, snapshot.id(), expected);
+    }
+
+    @Test
+    public void testWithValueFilter() throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        List<KeyValue> data = generateData(random.nextInt(1000) + 1);
+        Snapshot snapshot = writeData(data);
+
+        int wantedShopId = data.get(random.nextInt(data.size())).value().getInt(2);
+
+        FileStoreScan scan = store.newScan();
+        scan.withSnapshot(snapshot.id());
+        scan.withValueFilter(new Equal(2, new Literal(new IntType(false), wantedShopId)));
+
+        Map<BinaryRowData, BinaryRowData> expected =
+                store.toKvMap(
+                        data.stream()
+                                .filter(kv -> kv.value().getInt(2) == wantedShopId)
+                                .collect(Collectors.toList()));
+        runTestContainsAll(scan, snapshot.id(), expected);
     }
 
     @Test
@@ -122,7 +165,7 @@ public class FileStoreScanTest {
                         data.stream()
                                 .filter(kv -> getBucket(kv) == wantedBucket)
                                 .collect(Collectors.toList()));
-        runTest(scan, snapshot.id(), expected);
+        runTestExactMatch(scan, snapshot.id(), expected);
     }
 
     @Test
@@ -148,7 +191,7 @@ public class FileStoreScanTest {
                         allData.subList(0, wantedCommit + 1).stream()
                                 .flatMap(Collection::stream)
                                 .collect(Collectors.toList()));
-        runTest(scan, wantedSnapshot, expected);
+        runTestExactMatch(scan, wantedSnapshot, expected);
     }
 
     @Test
@@ -171,19 +214,34 @@ public class FileStoreScanTest {
         List<KeyValue> expectedKvs = store.readKvsFromSnapshot(wantedSnapshotId);
         gen.sort(expectedKvs);
         Map<BinaryRowData, BinaryRowData> expected = store.toKvMap(expectedKvs);
-        runTest(scan, null, expected);
+        runTestExactMatch(scan, null, expected);
     }
 
-    private void runTest(
+    private void runTestExactMatch(
             FileStoreScan scan, Long expectedSnapshotId, Map<BinaryRowData, BinaryRowData> expected)
             throws Exception {
+        Map<BinaryRowData, BinaryRowData> actual = getActualKvMap(scan, expectedSnapshotId);
+        assertThat(actual).isEqualTo(expected);
+    }
+
+    private void runTestContainsAll(
+            FileStoreScan scan, Long expectedSnapshotId, Map<BinaryRowData, BinaryRowData> expected)
+            throws Exception {
+        Map<BinaryRowData, BinaryRowData> actual = getActualKvMap(scan, expectedSnapshotId);
+        for (Map.Entry<BinaryRowData, BinaryRowData> entry : expected.entrySet()) {
+            assertThat(actual).containsKey(entry.getKey());
+            assertThat(actual.get(entry.getKey())).isEqualTo(entry.getValue());
+        }
+    }
+
+    private Map<BinaryRowData, BinaryRowData> getActualKvMap(
+            FileStoreScan scan, Long expectedSnapshotId) throws Exception {
         FileStoreScan.Plan plan = scan.plan();
         assertThat(plan.snapshotId()).isEqualTo(expectedSnapshotId);
 
         List<KeyValue> actualKvs = store.readKvsFromManifestEntries(plan.files());
         gen.sort(actualKvs);
-        Map<BinaryRowData, BinaryRowData> actual = store.toKvMap(actualKvs);
-        assertThat(actual).isEqualTo(expected);
+        return store.toKvMap(actualKvs);
     }
 
     private List<KeyValue> generateData(int numRecords) {
