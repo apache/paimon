@@ -27,6 +27,7 @@ import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.utils.DateTimeUtils;
+import org.apache.flink.util.Preconditions;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.orc.BooleanColumnStatistics;
@@ -84,6 +85,13 @@ public class OrcFileStatsExtractor implements FileStatsExtractor {
             // all nulls
             return new FieldStats(null, null, nullCount);
         }
+        Preconditions.checkState(
+                (nullCount > 0) == stats.hasNull(),
+                "Bug in OrcFileStatsExtractor: nullCount is "
+                        + nullCount
+                        + " while stats.hasNull() is "
+                        + stats.hasNull()
+                        + "!");
 
         switch (field.getType().getTypeRoot()) {
             case CHAR:
