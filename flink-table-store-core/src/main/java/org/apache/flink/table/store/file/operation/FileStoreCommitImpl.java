@@ -194,7 +194,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 partitionFilter,
                 appendChanges,
                 committable.identifier(),
-                Snapshot.CommitKind.APPEND);
+                Snapshot.CommitKind.OVERWRITE);
 
         List<ManifestEntry> compactChanges = new ArrayList<>();
         compactChanges.addAll(collectChanges(committable.compactBefore(), ValueKind.DELETE));
