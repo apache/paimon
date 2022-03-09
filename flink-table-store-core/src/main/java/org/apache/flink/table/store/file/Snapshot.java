@@ -163,6 +163,9 @@ public class Snapshot {
         APPEND,
 
         /** Changes by compacting existing sst files. */
-        COMPACT
+        COMPACT,
+
+        /** Changes that clear up the whole partition and then add new records. */
+        OVERWRITE
     }
 }
