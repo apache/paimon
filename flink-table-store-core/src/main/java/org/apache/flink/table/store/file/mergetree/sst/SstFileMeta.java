@@ -42,7 +42,8 @@ public class SstFileMeta {
 
     private final BinaryRowData minKey;
     private final BinaryRowData maxKey;
-    private final FieldStats[] stats;
+    private final FieldStats[] keyStats;
+    private final FieldStats[] valueStats;
 
     private final long minSequenceNumber;
     private final long maxSequenceNumber;
@@ -54,7 +55,8 @@ public class SstFileMeta {
             long rowCount,
             BinaryRowData minKey,
             BinaryRowData maxKey,
-            FieldStats[] stats,
+            FieldStats[] keyStats,
+            FieldStats[] valueStats,
             long minSequenceNumber,
             long maxSequenceNumber,
             int level) {
@@ -64,7 +66,8 @@ public class SstFileMeta {
 
         this.minKey = minKey;
         this.maxKey = maxKey;
-        this.stats = stats;
+        this.keyStats = keyStats;
+        this.valueStats = valueStats;
 
         this.minSequenceNumber = minSequenceNumber;
         this.maxSequenceNumber = maxSequenceNumber;
@@ -91,9 +94,12 @@ public class SstFileMeta {
         return maxKey;
     }
 
-    /** Element in the array may be null, indicating the statistics of this field is unknown. */
-    public FieldStats[] stats() {
-        return stats;
+    public FieldStats[] keyStats() {
+        return keyStats;
+    }
+
+    public FieldStats[] valueStats() {
+        return valueStats;
     }
 
     public long minSequenceNumber() {
@@ -116,7 +122,8 @@ public class SstFileMeta {
                 rowCount,
                 minKey,
                 maxKey,
-                stats,
+                keyStats,
+                valueStats,
                 minSequenceNumber,
                 maxSequenceNumber,
                 newLevel);
@@ -133,7 +140,8 @@ public class SstFileMeta {
                 && rowCount == that.rowCount
                 && Objects.equals(minKey, that.minKey)
                 && Objects.equals(maxKey, that.maxKey)
-                && Arrays.equals(stats, that.stats)
+                && Arrays.equals(keyStats, that.keyStats)
+                && Arrays.equals(valueStats, that.valueStats)
                 && minSequenceNumber == that.minSequenceNumber
                 && maxSequenceNumber == that.maxSequenceNumber
                 && level == that.level;
@@ -149,7 +157,8 @@ public class SstFileMeta {
                 maxKey,
                 // by default, hash code of arrays are computed by reference, not by content.
                 // so we must use Arrays.hashCode to hash by content.
-                Arrays.hashCode(stats),
+                Arrays.hashCode(keyStats),
+                Arrays.hashCode(valueStats),
                 minSequenceNumber,
                 maxSequenceNumber,
                 level);
@@ -158,13 +167,14 @@ public class SstFileMeta {
     @Override
     public String toString() {
         return String.format(
-                "{%s, %d, %d, %s, %s, %s, %d, %d, %d}",
+                "{%s, %d, %d, %s, %s, %s, %s, %d, %d, %d}",
                 fileName,
                 fileSize,
                 rowCount,
                 minKey,
                 maxKey,
-                Arrays.toString(stats),
+                Arrays.toString(keyStats),
+                Arrays.toString(valueStats),
                 minSequenceNumber,
                 maxSequenceNumber,
                 level);
@@ -177,7 +187,9 @@ public class SstFileMeta {
         fields.add(new RowType.RowField("_ROW_COUNT", new BigIntType(false)));
         fields.add(new RowType.RowField("_MIN_KEY", keyType));
         fields.add(new RowType.RowField("_MAX_KEY", keyType));
-        fields.add(new RowType.RowField("_STATS", FieldStatsArraySerializer.schema(valueType)));
+        fields.add(new RowType.RowField("_KEY_STATS", FieldStatsArraySerializer.schema(keyType)));
+        fields.add(
+                new RowType.RowField("_VALUE_STATS", FieldStatsArraySerializer.schema(valueType)));
         fields.add(new RowType.RowField("_MIN_SEQUENCE_NUMBER", new BigIntType(false)));
         fields.add(new RowType.RowField("_MAX_SEQUENCE_NUMBER", new BigIntType(false)));
         fields.add(new RowType.RowField("_LEVEL", new IntType(false)));

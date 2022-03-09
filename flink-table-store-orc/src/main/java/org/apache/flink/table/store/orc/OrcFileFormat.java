@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,55 +16,44 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.utils;
+package org.apache.flink.table.store.orc;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.expressions.ResolvedExpression;
-import org.apache.flink.table.store.file.FileFormat;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileTest;
+import org.apache.flink.table.store.file.format.FileFormat;
+import org.apache.flink.table.store.file.format.FileFormatImpl;
+import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.types.logical.RowType;
 
-import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 
-/** A special avro {@link FileFormat} which flushes for every added element. */
-public class FlushingAvroFormat implements FileFormat {
+/** Orc {@link FileFormat}. */
+public class OrcFileFormat implements FileFormat {
 
-    private final FileFormat avro =
-            FileFormat.fromIdentifier(
-                    SstFileTest.class.getClassLoader(), "avro", new Configuration());
+    private final FileFormatImpl format;
+
+    public OrcFileFormat(ClassLoader classLoader, ReadableConfig formatOptions) {
+        this.format = new FileFormatImpl(classLoader, "orc", formatOptions);
+    }
 
     @Override
     public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
             RowType type, int[][] projection, List<ResolvedExpression> filters) {
-        return avro.createReaderFactory(type, projection, filters);
+        return format.createReaderFactory(type, projection, filters);
     }
 
     @Override
     public BulkWriter.Factory<RowData> createWriterFactory(RowType type) {
-        return fsDataOutputStream -> {
-            BulkWriter<RowData> wrapped = avro.createWriterFactory(type).create(fsDataOutputStream);
-            return new BulkWriter<RowData>() {
-                @Override
-                public void addElement(RowData rowData) throws IOException {
-                    wrapped.addElement(rowData);
-                    wrapped.flush();
-                }
+        return format.createWriterFactory(type);
+    }
 
-                @Override
-                public void flush() throws IOException {
-                    wrapped.flush();
-                }
-
-                @Override
-                public void finish() throws IOException {
-                    wrapped.finish();
-                }
-            };
-        };
+    @Override
+    public Optional<FileStatsExtractor> createStatsExtractor(RowType type) {
+        return Optional.of(new OrcFileStatsExtractor(type));
     }
 }

@@ -23,8 +23,8 @@ import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
-import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.stats.FieldStats;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
@@ -239,6 +239,7 @@ public class ManifestFileMetaTest {
                         0, // not used
                         binaryRowData, // not used
                         binaryRowData, // not used
+                        new FieldStats[] {new FieldStats(null, null, 0)}, // not used
                         new FieldStats[] {new FieldStats(null, null, 0)}, // not used
                         0, // not used
                         0, // not used

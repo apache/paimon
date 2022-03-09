@@ -172,6 +172,7 @@ public class IntervalPartitionTest {
                 minKey,
                 maxKey,
                 new FieldStats[] {new FieldStats(left, right, 0)},
+                new FieldStats[] {new FieldStats(null, null, 0)}, // not used
                 0,
                 24,
                 0);

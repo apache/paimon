@@ -98,7 +98,10 @@ public class SstTestDataGenerator {
     }
 
     private Data createSstFile(List<KeyValue> kvs, int level, BinaryRowData partition, int bucket) {
-        FieldStatsCollector collector = new FieldStatsCollector(TestKeyValueGenerator.ROW_TYPE);
+        FieldStatsCollector keyStatsCollector =
+                new FieldStatsCollector(TestKeyValueGenerator.KEY_TYPE);
+        FieldStatsCollector valueStatsCollector =
+                new FieldStatsCollector(TestKeyValueGenerator.ROW_TYPE);
         long totalSize = 0;
         BinaryRowData minKey = null;
         BinaryRowData maxKey = null;
@@ -108,7 +111,8 @@ public class SstTestDataGenerator {
             BinaryRowData key = (BinaryRowData) kv.key();
             BinaryRowData value = (BinaryRowData) kv.value();
             totalSize += key.getSizeInBytes() + value.getSizeInBytes();
-            collector.collect(value);
+            keyStatsCollector.collect(key);
+            valueStatsCollector.collect(value);
             if (minKey == null || TestKeyValueGenerator.KEY_COMPARATOR.compare(key, minKey) < 0) {
                 minKey = key;
             }
@@ -128,7 +132,8 @@ public class SstTestDataGenerator {
                         kvs.size(),
                         minKey,
                         maxKey,
-                        collector.extract(),
+                        keyStatsCollector.extract(),
+                        valueStatsCollector.extract(),
                         minSequenceNumber,
                         maxSequenceNumber,
                         level),

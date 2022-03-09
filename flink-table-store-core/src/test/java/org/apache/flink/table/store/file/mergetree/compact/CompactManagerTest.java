@@ -205,7 +205,16 @@ public class CompactManagerTest {
 
     private static SstFileMeta newFile(int level, int minKey, int maxKey, long maxSequence) {
         return new SstFileMeta(
-                "", maxKey - minKey + 1, 1, row(minKey), row(maxKey), null, 0, maxSequence, level);
+                "",
+                maxKey - minKey + 1,
+                1,
+                row(minKey),
+                row(maxKey),
+                null,
+                null,
+                0,
+                maxSequence,
+                level);
     }
 
     public static BinaryRowData row(int i) {

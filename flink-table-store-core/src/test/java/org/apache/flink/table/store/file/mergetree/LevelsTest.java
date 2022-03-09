@@ -62,6 +62,6 @@ public class LevelsTest {
     }
 
     public static SstFileMeta newFile(int level) {
-        return new SstFileMeta("", 0, 1, row(0), row(0), null, 0, 1, level);
+        return new SstFileMeta("", 0, 1, row(0), row(0), null, null, 0, 1, level);
     }
 }

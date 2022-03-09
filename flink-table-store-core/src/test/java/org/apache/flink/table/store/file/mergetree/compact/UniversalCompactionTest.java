@@ -223,6 +223,6 @@ public class UniversalCompactionTest {
     }
 
     private SstFileMeta file(long size) {
-        return new SstFileMeta("", size, 1, null, null, null, 0, 0, 0);
+        return new SstFileMeta("", size, 1, null, null, null, null, 0, 0, 0);
     }
 }

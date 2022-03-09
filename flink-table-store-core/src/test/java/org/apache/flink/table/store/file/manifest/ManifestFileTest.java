@@ -21,9 +21,8 @@ package org.apache.flink.table.store.file.manifest;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
-import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -124,11 +123,9 @@ public class ManifestFileTest {
 
         // check stats
         for (int i = 0; i < expected.partitionStats().length; i++) {
-            List<FieldStats> actualStats = new ArrayList<>();
-            for (ManifestFileMeta meta : actual) {
-                actualStats.add(meta.partitionStats()[i]);
-            }
-            StatsTestUtils.checkRollingFileStats(expected.partitionStats()[i], actualStats);
+            int idx = i;
+            StatsTestUtils.checkRollingFileStats(
+                    expected.partitionStats()[i], actual, meta -> meta.partitionStats()[idx]);
         }
     }
 }
