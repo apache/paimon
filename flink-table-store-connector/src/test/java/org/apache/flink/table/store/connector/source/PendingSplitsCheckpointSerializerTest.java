@@ -38,7 +38,7 @@ public class PendingSplitsCheckpointSerializerTest {
     @Test
     public void serializeEmptyCheckpoint() throws Exception {
         final PendingSplitsCheckpoint checkpoint =
-                PendingSplitsCheckpoint.fromStatic(Collections.emptyList());
+                new PendingSplitsCheckpoint(Collections.emptyList(), 5);
 
         final PendingSplitsCheckpoint deSerialized = serializeAndDeserialize(checkpoint);
 
@@ -48,8 +48,8 @@ public class PendingSplitsCheckpointSerializerTest {
     @Test
     public void serializeSomeSplits() throws Exception {
         final PendingSplitsCheckpoint checkpoint =
-                PendingSplitsCheckpoint.fromStatic(
-                        Arrays.asList(testSplit1(), testSplit2(), testSplit3()));
+                new PendingSplitsCheckpoint(
+                        Arrays.asList(testSplit1(), testSplit2(), testSplit3()), 3);
 
         final PendingSplitsCheckpoint deSerialized = serializeAndDeserialize(checkpoint);
 
@@ -59,7 +59,7 @@ public class PendingSplitsCheckpointSerializerTest {
     @Test
     public void serializeSplitsAndContinuous() throws Exception {
         final PendingSplitsCheckpoint checkpoint =
-                PendingSplitsCheckpoint.fromContinuous(
+                new PendingSplitsCheckpoint(
                         Arrays.asList(testSplit1(), testSplit2(), testSplit3()), 20);
 
         final PendingSplitsCheckpoint deSerialized = serializeAndDeserialize(checkpoint);
@@ -70,7 +70,7 @@ public class PendingSplitsCheckpointSerializerTest {
     @Test
     public void repeatedSerialization() throws Exception {
         final PendingSplitsCheckpoint checkpoint =
-                PendingSplitsCheckpoint.fromStatic(Arrays.asList(testSplit3(), testSplit1()));
+                new PendingSplitsCheckpoint(Arrays.asList(testSplit3(), testSplit1()), 5);
 
         serializeAndDeserialize(checkpoint);
         serializeAndDeserialize(checkpoint);
@@ -112,6 +112,6 @@ public class PendingSplitsCheckpointSerializerTest {
     private static void assertCheckpointsEqual(
             final PendingSplitsCheckpoint expected, final PendingSplitsCheckpoint actual) {
         assertThat(actual.splits()).isEqualTo(expected.splits());
-        assertThat(actual.nextSnapshotId()).isEqualTo(expected.nextSnapshotId());
+        assertThat(actual.currentSnapshotId()).isEqualTo(expected.currentSnapshotId());
     }
 }

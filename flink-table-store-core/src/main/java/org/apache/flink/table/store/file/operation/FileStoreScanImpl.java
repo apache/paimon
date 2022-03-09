@@ -75,6 +75,11 @@ public class FileStoreScanImpl implements FileStoreScan {
     }
 
     @Override
+    public Snapshot snapshot(long snapshotId) {
+        return Snapshot.fromPath(pathFactory.toSnapshotPath(snapshotId));
+    }
+
+    @Override
     public FileStoreScan withPartitionFilter(Predicate predicate) {
         this.partitionFilter = predicate;
         return this;
@@ -154,8 +159,7 @@ public class FileStoreScanImpl implements FileStoreScan {
             if (snapshotId == null) {
                 manifests = Collections.emptyList();
             } else {
-                Snapshot snapshot = Snapshot.fromPath(pathFactory.toSnapshotPath(snapshotId));
-                manifests = snapshot.readAllManifests(manifestList);
+                manifests = snapshot(snapshotId).readAllManifests(manifestList);
             }
         }
 

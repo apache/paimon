@@ -35,10 +35,6 @@ public class FileStoreSourceSplitGenerator {
      */
     private final char[] currentId = "0000000000".toCharArray();
 
-    public List<FileStoreSourceSplit> createSplits(FileStoreScan scan) {
-        return createSplits(scan.plan());
-    }
-
     public List<FileStoreSourceSplit> createSplits(FileStoreScan.Plan plan) {
         return plan.groupByPartFiles().entrySet().stream()
                 .flatMap(

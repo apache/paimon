@@ -26,13 +26,14 @@ import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.FileStore;
+import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 
 import javax.annotation.Nullable;
 
-import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.table.store.connector.source.PendingSplitsCheckpoint.INVALID_SNAPSHOT;
 
 /** {@link Source} of file store. */
 public class FileStoreSource
@@ -46,21 +47,17 @@ public class FileStoreSource
 
     @Nullable private final int[][] projectedFields;
 
-    @Nullable private final Predicate partitionPredicate;
-
-    @Nullable private final Predicate fieldsPredicate;
+    @Nullable private final Predicate predicate;
 
     public FileStoreSource(
             FileStore fileStore,
             boolean valueCountMode,
             @Nullable int[][] projectedFields,
-            @Nullable Predicate partitionPredicate,
-            @Nullable Predicate fieldsPredicate) {
+            @Nullable Predicate predicate) {
         this.fileStore = fileStore;
         this.valueCountMode = valueCountMode;
         this.projectedFields = projectedFields;
-        this.partitionPredicate = partitionPredicate;
-        this.fieldsPredicate = fieldsPredicate;
+        this.predicate = predicate;
     }
 
     @Override
@@ -74,6 +71,7 @@ public class FileStoreSource
         FileStoreRead read = fileStore.newRead();
         if (projectedFields != null) {
             if (valueCountMode) {
+                // TODO don't project keys, and add key projection to split reader
                 read.withKeyProjection(projectedFields);
             } else {
                 read.withValueProjection(projectedFields);
@@ -86,15 +84,14 @@ public class FileStoreSource
     public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> createEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context) {
         FileStoreScan scan = fileStore.newScan();
-        if (partitionPredicate != null) {
-            scan.withPartitionFilter(partitionPredicate);
-        }
-        if (fieldsPredicate != null) {
-            if (valueCountMode) {
-                scan.withKeyFilter(fieldsPredicate);
-            } else {
-                scan.withValueFilter(fieldsPredicate);
-            }
+        if (predicate != null) {
+            // TODO split predicate into partitionPredicate and fieldsPredicate
+            //            scan.withPartitionFilter(partitionPredicate);
+            //            if (keyAsRecord) {
+            //                scan.withKeyFilter(fieldsPredicate);
+            //            } else {
+            //                scan.withValueFilter(fieldsPredicate);
+            //            }
         }
         return new StaticFileStoreSplitEnumerator(context, scan);
     }
@@ -103,8 +100,11 @@ public class FileStoreSource
     public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> restoreEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
-        checkArgument(checkpoint.nextSnapshotId() == -1);
-        return new StaticFileStoreSplitEnumerator(context, checkpoint.splits());
+        Snapshot snapshot = null;
+        if (checkpoint.currentSnapshotId() != INVALID_SNAPSHOT) {
+            snapshot = fileStore.newScan().snapshot(checkpoint.currentSnapshotId());
+        }
+        return new StaticFileStoreSplitEnumerator(context, snapshot, checkpoint.splits());
     }
 
     @Override
