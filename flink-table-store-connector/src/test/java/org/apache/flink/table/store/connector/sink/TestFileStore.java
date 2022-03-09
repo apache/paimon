@@ -185,6 +185,9 @@ public class TestFileStore implements FileStore {
                                                     null,
                                                     null,
                                                     new FieldStats[] {
+                                                        new FieldStats(null, null, 0)
+                                                    },
+                                                    new FieldStats[] {
                                                         new FieldStats(null, null, 0),
                                                         new FieldStats(null, null, 0),
                                                         new FieldStats(null, null, 0)

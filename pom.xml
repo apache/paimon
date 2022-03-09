@@ -55,10 +55,12 @@ under the License.
         <module>flink-table-store-core</module>
         <module>flink-table-store-connector</module>
         <module>flink-table-store-kafka</module>
+        <module>flink-table-store-orc</module>
     </modules>
 
     <properties>
         <flink.version>1.15-SNAPSHOT</flink.version>
+        <hadoop.version>2.8.5</hadoop.version>
         <scala.binary.version>2.12</scala.binary.version>
         <slf4j.version>1.7.15</slf4j.version>
         <log4j.version>2.17.1</log4j.version>

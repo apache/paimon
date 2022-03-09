@@ -18,7 +18,9 @@
 
 package org.apache.flink.table.store.file.stats;
 
+import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.runtime.typeutils.InternalSerializers;
 import org.apache.flink.table.store.file.utils.RowDataToObjectArrayConverter;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -29,6 +31,7 @@ public class FieldStatsCollector {
     private final Object[] maxValues;
     private final long[] nullCounts;
     private final RowDataToObjectArrayConverter converter;
+    private final TypeSerializer<Object>[] fieldSerializers;
 
     public FieldStatsCollector(RowType rowType) {
         int numFields = rowType.getFieldCount();
@@ -36,6 +39,10 @@ public class FieldStatsCollector {
         this.maxValues = new Object[numFields];
         this.nullCounts = new long[numFields];
         this.converter = new RowDataToObjectArrayConverter(rowType);
+        this.fieldSerializers = new TypeSerializer[numFields];
+        for (int i = 0; i < numFields; i++) {
+            fieldSerializers[i] = InternalSerializers.create(rowType.getTypeAt(i));
+        }
     }
 
     /**
@@ -59,10 +66,10 @@ public class FieldStatsCollector {
             }
             Comparable<Object> c = (Comparable<Object>) obj;
             if (minValues[i] == null || c.compareTo(minValues[i]) < 0) {
-                minValues[i] = c;
+                minValues[i] = fieldSerializers[i].copy(c);
             }
             if (maxValues[i] == null || c.compareTo(maxValues[i]) > 0) {
-                maxValues[i] = c;
+                maxValues[i] = fieldSerializers[i].copy(c);
             }
         }
     }

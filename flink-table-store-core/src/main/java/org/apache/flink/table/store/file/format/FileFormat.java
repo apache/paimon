@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file;
+package org.apache.flink.table.store.file.format;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.ConfigOption;
@@ -28,10 +28,13 @@ import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.factories.FactoryUtil;
+import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.ServiceLoader;
 
 /** Factory class which creates reader and writer factories for specific file format. */
 public interface FileFormat {
@@ -62,14 +65,12 @@ public interface FileFormat {
         return createReaderFactory(rowType, projection, new ArrayList<>());
     }
 
-    /** Create a {@link FileFormatImpl} from format identifier and format options. */
-    static FileFormatImpl fromIdentifier(
-            ClassLoader classLoader, String formatIdentifier, ReadableConfig formatOptions) {
-        return new FileFormatImpl(classLoader, formatIdentifier, formatOptions);
+    default Optional<FileStatsExtractor> createStatsExtractor(RowType type) {
+        return Optional.empty();
     }
 
     /** Create a {@link FileFormatImpl} from table options. */
-    static FileFormatImpl fromTableOptions(
+    static FileFormat fromTableOptions(
             ClassLoader classLoader,
             Configuration tableOptions,
             ConfigOption<String> formatOption) {
@@ -77,5 +78,18 @@ public interface FileFormat {
         String formatPrefix = FactoryUtil.getFormatPrefix(formatOption, formatIdentifier);
         ReadableConfig formatOptions = new DelegatingConfiguration(tableOptions, formatPrefix);
         return fromIdentifier(classLoader, formatIdentifier, formatOptions);
+    }
+
+    /** Create a {@link FileFormatImpl} from format identifier and format options. */
+    static FileFormat fromIdentifier(
+            ClassLoader classLoader, String formatIdentifier, ReadableConfig formatOptions) {
+        ServiceLoader<FileFormatFactory> serviceLoader =
+                ServiceLoader.load(FileFormatFactory.class);
+        for (FileFormatFactory factory : serviceLoader) {
+            if (factory.identifier().equals(formatIdentifier.toLowerCase())) {
+                return factory.create(classLoader, formatOptions);
+            }
+        }
+        return new FileFormatImpl(classLoader, formatIdentifier, formatOptions);
     }
 }

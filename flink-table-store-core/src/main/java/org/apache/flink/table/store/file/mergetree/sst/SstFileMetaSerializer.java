@@ -32,12 +32,14 @@ public class SstFileMetaSerializer extends ObjectSerializer<SstFileMeta> {
     private static final long serialVersionUID = 1L;
 
     private final RowDataSerializer keySerializer;
-    private final FieldStatsArraySerializer statsArraySerializer;
+    private final FieldStatsArraySerializer keyStatsArraySerializer;
+    private final FieldStatsArraySerializer valueStatsArraySerializer;
 
     public SstFileMetaSerializer(RowType keyType, RowType valueType) {
         super(SstFileMeta.schema(keyType, valueType));
         this.keySerializer = new RowDataSerializer(keyType);
-        this.statsArraySerializer = new FieldStatsArraySerializer(valueType);
+        this.keyStatsArraySerializer = new FieldStatsArraySerializer(keyType);
+        this.valueStatsArraySerializer = new FieldStatsArraySerializer(valueType);
     }
 
     @Override
@@ -48,7 +50,8 @@ public class SstFileMetaSerializer extends ObjectSerializer<SstFileMeta> {
                 meta.rowCount(),
                 meta.minKey(),
                 meta.maxKey(),
-                statsArraySerializer.toRow(meta.stats()),
+                keyStatsArraySerializer.toRow(meta.keyStats()),
+                valueStatsArraySerializer.toRow(meta.valueStats()),
                 meta.minSequenceNumber(),
                 meta.maxSequenceNumber(),
                 meta.level());
@@ -63,9 +66,11 @@ public class SstFileMetaSerializer extends ObjectSerializer<SstFileMeta> {
                 row.getLong(2),
                 keySerializer.toBinaryRow(row.getRow(3, keyFieldCount)).copy(),
                 keySerializer.toBinaryRow(row.getRow(4, keyFieldCount)).copy(),
-                statsArraySerializer.fromRow(row.getRow(5, statsArraySerializer.numFields())),
-                row.getLong(6),
+                keyStatsArraySerializer.fromRow(row.getRow(5, keyStatsArraySerializer.numFields())),
+                valueStatsArraySerializer.fromRow(
+                        row.getRow(6, valueStatsArraySerializer.numFields())),
                 row.getLong(7),
-                row.getInt(8));
+                row.getLong(8),
+                row.getInt(9));
     }
 }

@@ -24,13 +24,13 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
-import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializerTest;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
+import org.apache.flink.table.store.file.format.FlushingFileFormat;
+import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.file.utils.FlushingAvroFormat;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
@@ -56,14 +56,22 @@ public class SstFileTest {
 
     private final SstTestDataGenerator gen =
             SstTestDataGenerator.builder().memTableCapacity(20).build();
-    private final FileFormat flushingAvro = new FlushingAvroFormat();
 
     @TempDir java.nio.file.Path tempDir;
 
     @RepeatedTest(10)
-    public void testWriteAndReadSstFile() throws Exception {
+    public void testWriteAndReadSstFileWithStatsCollectingRollingFile() throws Exception {
+        testWriteAndReadSstFileImpl("avro");
+    }
+
+    @RepeatedTest(10)
+    public void testWriteAndReadSstFileWithFileExtractingRollingFile() throws Exception {
+        testWriteAndReadSstFileImpl("avro-extract");
+    }
+
+    private void testWriteAndReadSstFileImpl(String format) throws Exception {
         SstTestDataGenerator.Data data = gen.next();
-        SstFileWriter writer = createSstFileWriter(tempDir.toString());
+        SstFileWriter writer = createSstFileWriter(tempDir.toString(), format);
         SstFileMetaSerializer serializer =
                 new SstFileMetaSerializer(
                         TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.ROW_TYPE);
@@ -73,7 +81,7 @@ public class SstFileTest {
 
         checkRollingFiles(data.meta, actualMetas, writer.suggestedFileSize());
 
-        SstFileReader reader = createSstFileReader(tempDir.toString(), null, null);
+        SstFileReader reader = createSstFileReader(tempDir.toString(), format, null, null);
         assertData(
                 data,
                 actualMetas,
@@ -90,7 +98,7 @@ public class SstFileTest {
         SstTestDataGenerator.Data data = gen.next();
         SstFileWriter writer =
                 createSstFileWriter(
-                        FailingAtomicRenameFileSystem.getFailingPath(tempDir.toString()));
+                        FailingAtomicRenameFileSystem.getFailingPath(tempDir.toString()), "avro");
 
         try {
             writer.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
@@ -109,7 +117,7 @@ public class SstFileTest {
     @Test
     public void testKeyProjection() throws Exception {
         SstTestDataGenerator.Data data = gen.next();
-        SstFileWriter sstFileWriter = createSstFileWriter(tempDir.toString());
+        SstFileWriter sstFileWriter = createSstFileWriter(tempDir.toString(), "avro");
         SstFileMetaSerializer serializer =
                 new SstFileMetaSerializer(
                         TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.ROW_TYPE);
@@ -118,7 +126,7 @@ public class SstFileTest {
 
         // projection: (shopId, orderId) -> (orderId)
         SstFileReader sstFileReader =
-                createSstFileReader(tempDir.toString(), new int[][] {new int[] {1}}, null);
+                createSstFileReader(tempDir.toString(), "avro", new int[][] {new int[] {1}}, null);
         RowType projectedKeyType =
                 RowType.of(new LogicalType[] {new BigIntType(false)}, new String[] {"key_orderId"});
         RowDataSerializer projectedKeySerializer = new RowDataSerializer(projectedKeyType);
@@ -141,7 +149,7 @@ public class SstFileTest {
     @Test
     public void testValueProjection() throws Exception {
         SstTestDataGenerator.Data data = gen.next();
-        SstFileWriter sstFileWriter = createSstFileWriter(tempDir.toString());
+        SstFileWriter sstFileWriter = createSstFileWriter(tempDir.toString(), "avro");
         SstFileMetaSerializer serializer =
                 new SstFileMetaSerializer(
                         TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.ROW_TYPE);
@@ -154,6 +162,7 @@ public class SstFileTest {
         SstFileReader sstFileReader =
                 createSstFileReader(
                         tempDir.toString(),
+                        "avro",
                         null,
                         new int[][] {new int[] {2}, new int[] {4}, new int[] {0}, new int[] {1}});
         RowType projectedValueType =
@@ -188,29 +197,29 @@ public class SstFileTest {
                                                 kv.value().getInt(1))));
     }
 
-    private SstFileWriter createSstFileWriter(String path) {
+    private SstFileWriter createSstFileWriter(String path, String format) {
         FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(path));
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         return new SstFileWriter.Factory(
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.ROW_TYPE,
-                        // normal avro format will buffer changes in memory and we can't determine
+                        // normal format will buffer changes in memory and we can't determine
                         // if the written file size is really larger than suggested, so we use a
-                        // special avro format which flushes for every added element
-                        flushingAvro,
+                        // special format which flushes for every added element
+                        new FlushingFileFormat(format),
                         pathFactory,
                         suggestedFileSize)
                 .create(BinaryRowDataUtil.EMPTY_ROW, 0);
     }
 
     private SstFileReader createSstFileReader(
-            String path, int[][] keyProjection, int[][] valueProjection) {
+            String path, String format, int[][] keyProjection, int[][] valueProjection) {
         FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(path));
         SstFileReader.Factory factory =
                 new SstFileReader.Factory(
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.ROW_TYPE,
-                        flushingAvro,
+                        new FlushingFileFormat(format),
                         pathFactory);
         if (keyProjection != null) {
             factory.withKeyProjection(keyProjection);
@@ -272,16 +281,17 @@ public class SstFileTest {
         // expected.maxKey == lastFile.maxKey
         assertThat(actual.get(actual.size() - 1).maxKey()).isEqualTo(expected.maxKey());
 
-        // TODO check stats after they're collected
-        /*
-        for (int i = 0; i < expected.stats().length; i++) {
-            List<FieldStats> actualStats = new ArrayList<>();
-            for (SstFileMeta meta : actual) {
-                actualStats.add(meta.stats()[i]);
-            }
-            checkRollingFileStats(expected.stats()[i], actualStats);
+        // check stats
+        for (int i = 0; i < expected.keyStats().length; i++) {
+            int idx = i;
+            StatsTestUtils.checkRollingFileStats(
+                    expected.keyStats()[i], actual, m -> m.keyStats()[idx]);
         }
-        */
+        for (int i = 0; i < expected.valueStats().length; i++) {
+            int idx = i;
+            StatsTestUtils.checkRollingFileStats(
+                    expected.valueStats()[i], actual, m -> m.valueStats()[idx]);
+        }
 
         // expected.minSequenceNumber == min(minSequenceNumber)
         assertThat(actual.stream().mapToLong(SstFileMeta::minSequenceNumber).min().orElse(-1))

@@ -25,10 +25,12 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
-import org.apache.flink.table.store.file.FileFormat;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
+import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.file.stats.FieldStatsCollector;
+import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RollingFile;
@@ -40,6 +42,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /** Writes {@link KeyValue}s into sst files. */
@@ -50,6 +53,7 @@ public class SstFileWriter {
     private final RowType keyType;
     private final RowType valueType;
     private final BulkWriter.Factory<RowData> writerFactory;
+    private final FileStatsExtractor fileStatsExtractor;
     private final SstPathFactory pathFactory;
     private final long suggestedFileSize;
 
@@ -57,11 +61,13 @@ public class SstFileWriter {
             RowType keyType,
             RowType valueType,
             BulkWriter.Factory<RowData> writerFactory,
+            FileStatsExtractor fileStatsExtractor,
             SstPathFactory pathFactory,
             long suggestedFileSize) {
         this.keyType = keyType;
         this.valueType = valueType;
         this.writerFactory = writerFactory;
+        this.fileStatsExtractor = fileStatsExtractor;
         this.pathFactory = pathFactory;
         this.suggestedFileSize = suggestedFileSize;
     }
@@ -91,7 +97,10 @@ public class SstFileWriter {
      */
     public List<SstFileMeta> write(CloseableIterator<KeyValue> iterator, int level)
             throws Exception {
-        SstRollingFile rollingFile = new StatsCollectingRollingFile(level);
+        SstRollingFile rollingFile =
+                fileStatsExtractor == null
+                        ? new StatsCollectingRollingFile(level)
+                        : new FileExtractingRollingFile(level);
         List<SstFileMeta> result = new ArrayList<>();
         List<Path> filesToCleanUp = new ArrayList<>();
         try {
@@ -161,6 +170,7 @@ public class SstFileWriter {
 
         @Override
         protected SstFileMeta collectFile(Path path) throws IOException {
+            KeyAndValueStats stats = extractStats(path);
             SstFileMeta result =
                     new SstFileMeta(
                             path.getName(),
@@ -168,7 +178,8 @@ public class SstFileWriter {
                             rowCount,
                             minKey,
                             keySerializer.toBinaryRow(maxKey).copy(),
-                            collectStats(path),
+                            stats.keyStats,
+                            stats.valueStats,
                             minSequenceNumber,
                             maxSequenceNumber,
                             level);
@@ -176,7 +187,7 @@ public class SstFileWriter {
             return result;
         }
 
-        private void resetMeta() {
+        protected void resetMeta() {
             rowCount = 0;
             minKey = null;
             maxKey = null;
@@ -184,26 +195,68 @@ public class SstFileWriter {
             maxSequenceNumber = Long.MIN_VALUE;
         }
 
-        protected abstract FieldStats[] collectStats(Path path);
+        protected abstract KeyAndValueStats extractStats(Path path);
+    }
+
+    private class FileExtractingRollingFile extends SstRollingFile {
+
+        private FileExtractingRollingFile(int level) {
+            super(level);
+        }
+
+        @Override
+        protected KeyAndValueStats extractStats(Path path) {
+            FieldStats[] rawStats;
+            try {
+                rawStats = fileStatsExtractor.extract(path);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+
+            int numKeyFields = keyType.getFieldCount();
+            return new KeyAndValueStats(
+                    Arrays.copyOfRange(rawStats, 0, numKeyFields),
+                    Arrays.copyOfRange(rawStats, numKeyFields + 2, rawStats.length));
+        }
     }
 
     private class StatsCollectingRollingFile extends SstRollingFile {
+
+        private FieldStatsCollector keyStatsCollector;
+        private FieldStatsCollector valueStatsCollector;
 
         private StatsCollectingRollingFile(int level) {
             super(level);
         }
 
         @Override
-        protected FieldStats[] collectStats(Path path) {
-            // TODO
-            //  1. Read statistics directly from the written orc/parquet files.
-            //  2. For other file formats use StatsCollector. Make sure fields are not reused
-            //     otherwise we need copying.
-            FieldStats[] stats = new FieldStats[valueType.getFieldCount()];
-            for (int i = 0; i < stats.length; i++) {
-                stats[i] = new FieldStats(null, null, 0);
-            }
-            return stats;
+        protected RowData toRowData(KeyValue kv) {
+            keyStatsCollector.collect(kv.key());
+            valueStatsCollector.collect(kv.value());
+            return super.toRowData(kv);
+        }
+
+        @Override
+        protected KeyAndValueStats extractStats(Path path) {
+            return new KeyAndValueStats(keyStatsCollector.extract(), valueStatsCollector.extract());
+        }
+
+        @Override
+        protected void resetMeta() {
+            super.resetMeta();
+            keyStatsCollector = new FieldStatsCollector(keyType);
+            valueStatsCollector = new FieldStatsCollector(valueType);
+        }
+    }
+
+    private static class KeyAndValueStats {
+
+        private final FieldStats[] keyStats;
+        private final FieldStats[] valueStats;
+
+        private KeyAndValueStats(FieldStats[] keyStats, FieldStats[] valueStats) {
+            this.keyStats = keyStats;
+            this.valueStats = valueStats;
         }
     }
 
@@ -213,6 +266,7 @@ public class SstFileWriter {
         private final RowType keyType;
         private final RowType valueType;
         private final BulkWriter.Factory<RowData> writerFactory;
+        private final FileStatsExtractor fileStatsExtractor;
         private final FileStorePathFactory pathFactory;
         private final long suggestedFileSize;
 
@@ -226,6 +280,7 @@ public class SstFileWriter {
             this.valueType = valueType;
             RowType recordType = KeyValue.schema(keyType, valueType);
             this.writerFactory = fileFormat.createWriterFactory(recordType);
+            this.fileStatsExtractor = fileFormat.createStatsExtractor(recordType).orElse(null);
             this.pathFactory = pathFactory;
             this.suggestedFileSize = suggestedFileSize;
         }
@@ -235,6 +290,7 @@ public class SstFileWriter {
                     keyType,
                     valueType,
                     writerFactory,
+                    fileStatsExtractor,
                     pathFactory.createSstPathFactory(partition, bucket),
                     suggestedFileSize);
         }
