@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.operation;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.ValueKind;
@@ -176,11 +177,15 @@ public class FileStoreCommitTest {
                                 .flatMap(Collection::stream)
                                 .collect(Collectors.toList()),
                 "data2");
-        store.overwriteData(
-                data2.values().stream().flatMap(Collection::stream).collect(Collectors.toList()),
-                gen::getPartition,
-                kv -> 0,
-                partitionToOverwrite);
+        List<Snapshot> overwriteSnapshots =
+                store.overwriteData(
+                        data2.values().stream()
+                                .flatMap(Collection::stream)
+                                .collect(Collectors.toList()),
+                        gen::getPartition,
+                        kv -> 0,
+                        partitionToOverwrite);
+        assertThat(overwriteSnapshots.get(0).commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
 
         List<KeyValue> expectedKvs = new ArrayList<>();
         for (Map.Entry<BinaryRowData, List<KeyValue>> entry : data1.entrySet()) {
