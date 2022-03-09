@@ -190,11 +190,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
         // overwrite new files
-        tryOverwrite(
-                partitionFilter,
-                appendChanges,
-                committable.identifier(),
-                Snapshot.CommitKind.APPEND);
+        tryOverwrite(partitionFilter, appendChanges, committable.identifier());
 
         List<ManifestEntry> compactChanges = new ArrayList<>();
         compactChanges.addAll(collectChanges(committable.compactBefore(), ValueKind.DELETE));
@@ -218,10 +214,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private void tryOverwrite(
-            Predicate partitionFilter,
-            List<ManifestEntry> changes,
-            String identifier,
-            Snapshot.CommitKind commitKind) {
+            Predicate partitionFilter, List<ManifestEntry> changes, String identifier) {
         while (true) {
             Long latestSnapshotId = pathFactory.latestSnapshotId();
 
@@ -245,7 +238,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             changesWithOverwrite.addAll(changes);
 
             if (tryCommitOnce(
-                    changesWithOverwrite, identifier, commitKind, latestSnapshotId, false)) {
+                    changesWithOverwrite,
+                    identifier,
+                    Snapshot.CommitKind.OVERWRITE,
+                    latestSnapshotId,
+                    false)) {
                 break;
             }
         }
