@@ -23,8 +23,11 @@ import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
+import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.types.RowKind;
 
 import org.junit.jupiter.api.AfterAll;
@@ -117,6 +120,39 @@ public class FileStoreSourceSplitReaderTest {
 
         List<Tuple2<RowKind, Long>> result = readRecords(records, "id1", skip);
         assertThat(result).isEqualTo(expected.subList(skip, expected.size()));
+
+        records = reader.fetch();
+        assertRecords(records, "id1", "id1", 0, null);
+
+        reader.close();
+    }
+
+    @Test
+    public void testPrimaryKeyWithDelete() throws Exception {
+        TestDataReadWrite rw = new TestDataReadWrite(tempDir.toString(), service);
+        FileStoreSourceSplitReader reader =
+                new FileStoreSourceSplitReader(rw.createRead().withDropDelete(false), false);
+
+        List<Tuple2<Long, Long>> input = kvs();
+        RecordWriter writer = rw.createMergeTreeWriter(row(1), 0);
+        for (Tuple2<Long, Long> tuple2 : input) {
+            writer.write(ValueKind.ADD, GenericRowData.of(tuple2.f0), GenericRowData.of(tuple2.f1));
+        }
+        writer.write(ValueKind.DELETE, GenericRowData.of(222L), GenericRowData.of(333L));
+        List<SstFileMeta> files = writer.prepareCommit().newFiles();
+        writer.close();
+
+        assignSplit(reader, new FileStoreSourceSplit("id1", row(1), 0, files));
+        RecordsWithSplitIds<RecordAndPosition<RowData>> records = reader.fetch();
+
+        List<Tuple2<RowKind, Long>> expected =
+                input.stream()
+                        .map(t -> new Tuple2<>(RowKind.INSERT, t.f1))
+                        .collect(Collectors.toList());
+        expected.add(new Tuple2<>(RowKind.DELETE, 333L));
+
+        List<Tuple2<RowKind, Long>> result = readRecords(records, "id1", 0);
+        assertThat(result).isEqualTo(expected);
 
         records = reader.fetch();
         assertRecords(records, "id1", "id1", 0, null);

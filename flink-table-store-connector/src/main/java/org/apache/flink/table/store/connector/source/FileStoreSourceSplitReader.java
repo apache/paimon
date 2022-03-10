@@ -29,6 +29,7 @@ import org.apache.flink.connector.file.src.util.Pool;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.types.RowKind;
@@ -202,7 +203,11 @@ public class FileStoreSourceSplitReader
                 if (kv == null) {
                     return null;
                 }
-                recordAndPosition.setNext(kv.value());
+                RowData row = kv.value();
+                if (kv.valueKind() == ValueKind.DELETE) {
+                    row.setRowKind(RowKind.DELETE);
+                }
+                recordAndPosition.setNext(row);
                 currentNumRead++;
                 return recordAndPosition;
             } catch (IOException e) {

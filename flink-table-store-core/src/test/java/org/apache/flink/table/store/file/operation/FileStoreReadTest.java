@@ -196,6 +196,7 @@ public class FileStoreReadTest {
         FileStoreRead read = store.newRead();
         if (keyProjection != null) {
             read.withKeyProjection(keyProjection);
+            read.withDropDelete(false);
         }
         if (valueProjection != null) {
             read.withValueProjection(valueProjection);

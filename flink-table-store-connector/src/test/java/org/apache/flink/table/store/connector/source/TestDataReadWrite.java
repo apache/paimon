@@ -89,7 +89,7 @@ public class TestDataReadWrite {
         return new ArrayList<>(files);
     }
 
-    private RecordWriter createMergeTreeWriter(BinaryRowData partition, int bucket) {
+    public RecordWriter createMergeTreeWriter(BinaryRowData partition, int bucket) {
         MergeTreeOptions options = new MergeTreeOptions(new Configuration());
         return new FileStoreWriteImpl(
                         KEY_TYPE,
