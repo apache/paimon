@@ -31,6 +31,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
 
@@ -43,7 +44,7 @@ public class FileStoreSourceSplitReader
         implements SplitReader<RecordAndPosition<RowData>, FileStoreSourceSplit> {
 
     private final FileStoreRead fileStoreRead;
-    private final boolean keyAsRecord;
+    private final boolean valueCountMode;
 
     private final Queue<FileStoreSourceSplit> splits;
 
@@ -54,12 +55,13 @@ public class FileStoreSourceSplitReader
     private long currentNumRead;
     private RecordReader.RecordIterator currentFirstBatch;
 
-    public FileStoreSourceSplitReader(FileStoreRead fileStoreRead, boolean keyAsRecord) {
+    public FileStoreSourceSplitReader(FileStoreRead fileStoreRead, boolean valueCountMode) {
         this.fileStoreRead = fileStoreRead;
-        this.keyAsRecord = keyAsRecord;
+        this.valueCountMode = valueCountMode;
         this.splits = new LinkedList<>();
         this.pool = new Pool<>(1);
-        this.pool.add(new FileStoreRecordIterator());
+        this.pool.add(
+                valueCountMode ? new ValueCountRecordIterator() : new PrimaryKeyRecordIterator());
     }
 
     @Override
@@ -143,8 +145,13 @@ public class FileStoreSourceSplitReader
                         String.format(
                                 "skip(%s) more than the number of remaining elements.", toSkip));
             }
-            while (toSkip > 0 && nextBatch.next() != null) {
-                toSkip--;
+            KeyValue keyValue;
+            while (toSkip > 0 && (keyValue = nextBatch.next()) != null) {
+                if (valueCountMode) {
+                    toSkip -= Math.abs(keyValue.value().getLong(0));
+                } else {
+                    toSkip--;
+                }
             }
             if (toSkip == 0) {
                 currentFirstBatch = nextBatch;
@@ -165,11 +172,11 @@ public class FileStoreSourceSplitReader
         return finishRecords;
     }
 
-    private class FileStoreRecordIterator implements BulkFormat.RecordIterator<RowData> {
+    private abstract class FileStoreRecordIterator implements BulkFormat.RecordIterator<RowData> {
 
-        private RecordReader.RecordIterator iterator;
+        protected RecordReader.RecordIterator iterator;
 
-        private final MutableRecordAndPosition<RowData> recordAndPosition =
+        protected final MutableRecordAndPosition<RowData> recordAndPosition =
                 new MutableRecordAndPosition<>();
 
         public FileStoreRecordIterator replace(RecordReader.RecordIterator iterator) {
@@ -177,6 +184,15 @@ public class FileStoreSourceSplitReader
             this.recordAndPosition.set(null, RecordAndPosition.NO_OFFSET, currentNumRead);
             return this;
         }
+
+        @Override
+        public void releaseBatch() {
+            this.iterator.releaseBatch();
+            pool.recycler().recycle(this);
+        }
+    }
+
+    private class PrimaryKeyRecordIterator extends FileStoreRecordIterator {
 
         @Nullable
         @Override
@@ -186,18 +202,49 @@ public class FileStoreSourceSplitReader
                 if (kv == null) {
                     return null;
                 }
-                recordAndPosition.setNext(keyAsRecord ? kv.key() : kv.value());
+                recordAndPosition.setNext(kv.value());
                 currentNumRead++;
                 return recordAndPosition;
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
         }
+    }
 
+    private class ValueCountRecordIterator extends FileStoreRecordIterator {
+
+        private long count = 0;
+
+        @Nullable
         @Override
-        public void releaseBatch() {
-            this.iterator.releaseBatch();
-            pool.recycler().recycle(this);
+        public RecordAndPosition<RowData> next() {
+            try {
+                if (count == 0) {
+                    KeyValue kv = iterator.next();
+                    if (kv == null) {
+                        return null;
+                    }
+
+                    long value = kv.value().getLong(0);
+                    count = Math.abs(value);
+                    if (count == 0) {
+                        throw new IllegalStateException("count can not be zero.");
+                    }
+
+                    RowData row = kv.key();
+                    if (value < 0) {
+                        row.setRowKind(RowKind.DELETE);
+                    }
+                    recordAndPosition.setNext(row);
+                } else {
+                    recordAndPosition.setNext(recordAndPosition.getRecord());
+                }
+                count--;
+                currentNumRead++;
+                return recordAndPosition;
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 }

@@ -25,6 +25,7 @@ import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.types.RowKind;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -32,12 +33,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -49,8 +51,6 @@ public class FileStoreSourceSplitReaderTest {
     private static ExecutorService service;
 
     @TempDir java.nio.file.Path tempDir;
-
-    private final AtomicInteger v = new AtomicInteger(0);
 
     @BeforeAll
     public static void before() {
@@ -64,32 +64,59 @@ public class FileStoreSourceSplitReaderTest {
     }
 
     @Test
-    public void testKeyAsRecord() throws Exception {
-        innerTestOnce(true);
+    public void testPrimaryKey() throws Exception {
+        innerTestOnce(false, 0);
     }
 
     @Test
-    public void testNonKeyAsRecord() throws Exception {
-        innerTestOnce(false);
+    public void testValueCount() throws Exception {
+        innerTestOnce(true, 0);
     }
 
-    private void innerTestOnce(boolean keyAsRecord) throws Exception {
+    @Test
+    public void testPrimaryKeySkip() throws Exception {
+        innerTestOnce(false, 4);
+    }
+
+    @Test
+    public void testValueCountSkip() throws Exception {
+        innerTestOnce(true, 7);
+    }
+
+    private void innerTestOnce(boolean valueCountMode, int skip) throws Exception {
         TestDataReadWrite rw = new TestDataReadWrite(tempDir.toString(), service);
         FileStoreSourceSplitReader reader =
-                new FileStoreSourceSplitReader(rw.createRead(), keyAsRecord);
+                new FileStoreSourceSplitReader(rw.createRead(), valueCountMode);
 
-        List<Tuple2<Integer, Integer>> input = kvs();
+        List<Tuple2<Long, Long>> input = kvs();
         List<SstFileMeta> files = rw.writeFiles(row(1), 0, input);
 
-        assignSplit(reader, new FileStoreSourceSplit("id1", row(1), 0, files));
+        assignSplit(reader, new FileStoreSourceSplit("id1", row(1), 0, files, skip));
 
         RecordsWithSplitIds<RecordAndPosition<RowData>> records = reader.fetch();
-        assertRecords(
-                records,
-                null,
-                "id1",
-                0,
-                input.stream().map(t -> keyAsRecord ? t.f0 : t.f1).collect(Collectors.toList()));
+
+        List<Tuple2<RowKind, Long>> expected;
+        if (valueCountMode) {
+            expected =
+                    Arrays.asList(
+                            new Tuple2<>(RowKind.INSERT, 1L),
+                            new Tuple2<>(RowKind.INSERT, 2L),
+                            new Tuple2<>(RowKind.INSERT, 2L),
+                            new Tuple2<>(RowKind.INSERT, 3L),
+                            new Tuple2<>(RowKind.INSERT, 3L),
+                            new Tuple2<>(RowKind.DELETE, 4L),
+                            new Tuple2<>(RowKind.INSERT, 5L),
+                            new Tuple2<>(RowKind.DELETE, 6L),
+                            new Tuple2<>(RowKind.DELETE, 6L));
+        } else {
+            expected =
+                    input.stream()
+                            .map(t -> new Tuple2<>(RowKind.INSERT, t.f1))
+                            .collect(Collectors.toList());
+        }
+
+        List<Tuple2<RowKind, Long>> result = readRecords(records, "id1", skip);
+        assertThat(result).isEqualTo(expected.subList(skip, expected.size()));
 
         records = reader.fetch();
         assertRecords(records, "id1", "id1", 0, null);
@@ -102,10 +129,10 @@ public class FileStoreSourceSplitReaderTest {
         TestDataReadWrite rw = new TestDataReadWrite(tempDir.toString(), service);
         FileStoreSourceSplitReader reader = new FileStoreSourceSplitReader(rw.createRead(), false);
 
-        List<Tuple2<Integer, Integer>> input1 = kvs();
+        List<Tuple2<Long, Long>> input1 = kvs();
         List<SstFileMeta> files = rw.writeFiles(row(1), 0, input1);
 
-        List<Tuple2<Integer, Integer>> input2 = kvs();
+        List<Tuple2<Long, Long>> input2 = kvs(6);
         List<SstFileMeta> files2 = rw.writeFiles(row(1), 0, input2);
         files.addAll(files2);
 
@@ -124,7 +151,7 @@ public class FileStoreSourceSplitReaderTest {
                 records,
                 null,
                 "id1",
-                5,
+                6,
                 input2.stream().map(t -> t.f1).collect(Collectors.toList()));
 
         records = reader.fetch();
@@ -138,7 +165,7 @@ public class FileStoreSourceSplitReaderTest {
         TestDataReadWrite rw = new TestDataReadWrite(tempDir.toString(), service);
         FileStoreSourceSplitReader reader = new FileStoreSourceSplitReader(rw.createRead(), false);
 
-        List<Tuple2<Integer, Integer>> input = kvs();
+        List<Tuple2<Long, Long>> input = kvs();
         List<SstFileMeta> files = rw.writeFiles(row(1), 0, input);
 
         assignSplit(reader, new FileStoreSourceSplit("id1", row(1), 0, files, 3));
@@ -164,10 +191,10 @@ public class FileStoreSourceSplitReaderTest {
         TestDataReadWrite rw = new TestDataReadWrite(tempDir.toString(), service);
         FileStoreSourceSplitReader reader = new FileStoreSourceSplitReader(rw.createRead(), false);
 
-        List<Tuple2<Integer, Integer>> input1 = kvs();
+        List<Tuple2<Long, Long>> input1 = kvs();
         List<SstFileMeta> files = rw.writeFiles(row(1), 0, input1);
 
-        List<Tuple2<Integer, Integer>> input2 = kvs();
+        List<Tuple2<Long, Long>> input2 = kvs(6);
         List<SstFileMeta> files2 = rw.writeFiles(row(1), 0, input2);
         files.addAll(files2);
 
@@ -179,7 +206,8 @@ public class FileStoreSourceSplitReaderTest {
                 null,
                 "id1",
                 7,
-                input2.subList(2, input2.size()).stream()
+                Stream.concat(input1.stream(), input2.stream())
+                        .skip(7)
                         .map(t -> t.f1)
                         .collect(Collectors.toList()));
 
@@ -194,11 +222,11 @@ public class FileStoreSourceSplitReaderTest {
         TestDataReadWrite rw = new TestDataReadWrite(tempDir.toString(), service);
         FileStoreSourceSplitReader reader = new FileStoreSourceSplitReader(rw.createRead(), false);
 
-        List<Tuple2<Integer, Integer>> input1 = kvs();
+        List<Tuple2<Long, Long>> input1 = kvs();
         List<SstFileMeta> files1 = rw.writeFiles(row(1), 0, input1);
         assignSplit(reader, new FileStoreSourceSplit("id1", row(1), 0, files1));
 
-        List<Tuple2<Integer, Integer>> input2 = kvs();
+        List<Tuple2<Long, Long>> input2 = kvs();
         List<SstFileMeta> files2 = rw.writeFiles(row(2), 1, input2);
         assignSplit(reader, new FileStoreSourceSplit("id2", row(2), 1, files2));
 
@@ -240,37 +268,46 @@ public class FileStoreSourceSplitReaderTest {
             String finishedSplit,
             String nextSplit,
             long startRecordSkipCount,
-            List<Integer> expected) {
+            List<Long> expected) {
         if (finishedSplit != null) {
             assertThat(records.finishedSplits()).isEqualTo(Collections.singleton(finishedSplit));
             return;
-        } else {
-            assertThat(records.finishedSplits()).isEmpty();
         }
 
-        assertThat(records.nextSplit()).isEqualTo(nextSplit);
+        List<Tuple2<RowKind, Long>> result = readRecords(records, nextSplit, startRecordSkipCount);
+        assertThat(result.stream().map(t -> t.f1).collect(Collectors.toList())).isEqualTo(expected);
+    }
 
-        List<Integer> result = new ArrayList<>();
+    private List<Tuple2<RowKind, Long>> readRecords(
+            RecordsWithSplitIds<RecordAndPosition<RowData>> records,
+            String nextSplit,
+            long startRecordSkipCount) {
+        assertThat(records.finishedSplits()).isEmpty();
+        assertThat(records.nextSplit()).isEqualTo(nextSplit);
+        List<Tuple2<RowKind, Long>> result = new ArrayList<>();
         RecordAndPosition<RowData> record;
         while ((record = records.nextRecordFromSplit()) != null) {
-            result.add(record.getRecord().getInt(0));
+            result.add(
+                    new Tuple2<>(record.getRecord().getRowKind(), record.getRecord().getLong(0)));
             assertThat(record.getRecordSkipCount()).isEqualTo(++startRecordSkipCount);
         }
         records.recycle();
-
-        assertThat(result).isEqualTo(expected);
+        return result;
     }
 
-    private List<Tuple2<Integer, Integer>> kvs() {
-        List<Tuple2<Integer, Integer>> kvs = new ArrayList<>();
-        for (int i = 0; i < 5; i++) {
-            kvs.add(new Tuple2<>(next(), next()));
-        }
+    private List<Tuple2<Long, Long>> kvs() {
+        return kvs(0);
+    }
+
+    private List<Tuple2<Long, Long>> kvs(long keyBase) {
+        List<Tuple2<Long, Long>> kvs = new ArrayList<>();
+        kvs.add(new Tuple2<>(keyBase + 1L, 1L));
+        kvs.add(new Tuple2<>(keyBase + 2L, 2L));
+        kvs.add(new Tuple2<>(keyBase + 3L, 2L));
+        kvs.add(new Tuple2<>(keyBase + 4L, -1L));
+        kvs.add(new Tuple2<>(keyBase + 5L, 1L));
+        kvs.add(new Tuple2<>(keyBase + 6L, -2L));
         return kvs;
-    }
-
-    private int next() {
-        return v.incrementAndGet();
     }
 
     private void assignSplit(FileStoreSourceSplitReader reader, FileStoreSourceSplit split) {
