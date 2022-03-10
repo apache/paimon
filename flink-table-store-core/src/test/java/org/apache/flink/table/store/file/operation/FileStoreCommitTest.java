@@ -210,66 +210,32 @@ public class FileStoreCommitTest {
 
     @Test
     public void testSnapshotAddLogOffset() throws Exception {
-        Map<BinaryRowData, List<KeyValue>> data1 =
-                generateData(ThreadLocalRandom.current().nextInt(1000) + 1);
-        logData(
-                () ->
-                        data1.values().stream()
-                                .flatMap(Collection::stream)
-                                .collect(Collectors.toList()),
-                "data1");
+        TestFileStore store = createStore(false, 2);
 
-        TestFileStore store = createStore(false);
-        List<Snapshot> commitSnapshots =
-                store.commitData(
-                        data1.values().stream()
-                                .flatMap(Collection::stream)
-                                .collect(Collectors.toList()),
-                        gen::getPartition,
-                        kv -> Math.toIntExact(kv.sequenceNumber() % 10));
+        // commit 1
+        Map<Integer, Long> offsets = new HashMap<>();
+        offsets.put(0, 1L);
+        offsets.put(1, 3L);
+        Snapshot snapshot =
+                store.commitData(generateDataList(10), gen::getPartition, kv -> 0, offsets).get(0);
+        assertThat(snapshot.getLogOffsets()).isEqualTo(offsets);
 
-        Map<Integer, Long> commitLogOffsets = commitSnapshots.get(0).getLogOffsets();
-        assertThat(commitLogOffsets.size()).isEqualTo(10);
-        commitLogOffsets.forEach((key, value) -> assertThat(key).isEqualTo(value.intValue()));
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        String dtToOverwrite =
-                new ArrayList<>(data1.keySet())
-                        .get(random.nextInt(data1.size()))
-                        .getString(0)
-                        .toString();
-        Map<String, String> partitionToOverwrite = new HashMap<>();
-        partitionToOverwrite.put("dt", dtToOverwrite);
-
-        // overwrite partial commit
-        int numRecords = ThreadLocalRandom.current().nextInt(5) + 1;
-        Map<BinaryRowData, List<KeyValue>> data2 = generateData(numRecords);
-        data2.entrySet().removeIf(e -> !dtToOverwrite.equals(e.getKey().getString(0).toString()));
-        logData(
-                () ->
-                        data2.values().stream()
-                                .flatMap(Collection::stream)
-                                .collect(Collectors.toList()),
-                "data2");
-        List<Snapshot> overwriteSnapshots =
-                store.overwriteData(
-                        data2.values().stream()
-                                .flatMap(Collection::stream)
-                                .collect(Collectors.toList()),
-                        gen::getPartition,
-                        kv -> Math.toIntExact(kv.sequenceNumber() % 10),
-                        partitionToOverwrite);
-
-        Map<Integer, Long> overwriteLogOffsets = overwriteSnapshots.get(0).getLogOffsets();
-        assertThat(overwriteLogOffsets.size()).isEqualTo(commitLogOffsets.size());
-        assertThat(
-                        overwriteLogOffsets.entrySet().stream()
-                                .filter(o -> !o.getKey().equals(o.getValue().intValue()))
-                                .count())
-                .isLessThanOrEqualTo(numRecords);
+        // commit 2
+        offsets = new HashMap<>();
+        offsets.put(1, 8L);
+        snapshot =
+                store.commitData(generateDataList(10), gen::getPartition, kv -> 0, offsets).get(0);
+        Map<Integer, Long> expected = new HashMap<>();
+        expected.put(0, 1L);
+        expected.put(1, 8L);
+        assertThat(snapshot.getLogOffsets()).isEqualTo(expected);
     }
 
     private TestFileStore createStore(boolean failing) {
+        return createStore(failing, 1);
+    }
+
+    private TestFileStore createStore(boolean failing, int numBucket) {
         String root =
                 failing
                         ? FailingAtomicRenameFileSystem.getFailingPath(tempDir.toString())
@@ -277,11 +243,17 @@ public class FileStoreCommitTest {
         return TestFileStore.create(
                 "avro",
                 root,
-                1,
+                numBucket,
                 TestKeyValueGenerator.PARTITION_TYPE,
                 TestKeyValueGenerator.KEY_TYPE,
                 TestKeyValueGenerator.ROW_TYPE,
                 new DeduplicateAccumulator());
+    }
+
+    private List<KeyValue> generateDataList(int numRecords) {
+        return generateData(numRecords).values().stream()
+                .flatMap(Collection::stream)
+                .collect(Collectors.toList());
     }
 
     private Map<BinaryRowData, List<KeyValue>> generateData(int numRecords) {
