@@ -44,6 +44,7 @@ public class FileStoreReadImpl implements FileStoreRead {
     private final Accumulator accumulator;
 
     private boolean keyProjected;
+    private boolean dropDelete = true;
 
     public FileStoreReadImpl(
             RowType keyType,
@@ -61,14 +62,22 @@ public class FileStoreReadImpl implements FileStoreRead {
     }
 
     @Override
-    public void withKeyProjection(int[][] projectedFields) {
-        sstFileReaderFactory.withKeyProjection(projectedFields);
-        keyProjected = true;
+    public FileStoreRead withDropDelete(boolean dropDelete) {
+        this.dropDelete = dropDelete;
+        return this;
     }
 
     @Override
-    public void withValueProjection(int[][] projectedFields) {
+    public FileStoreRead withKeyProjection(int[][] projectedFields) {
+        sstFileReaderFactory.withKeyProjection(projectedFields);
+        keyProjected = true;
+        return this;
+    }
+
+    @Override
+    public FileStoreRead withValueProjection(int[][] projectedFields) {
         sstFileReaderFactory.withValueProjection(projectedFields);
+        return this;
     }
 
     @Override
@@ -82,13 +91,18 @@ public class FileStoreReadImpl implements FileStoreRead {
             for (SstFileMeta file : files) {
                 suppliers.add(() -> sstFileReader.read(file.fileName()));
             }
+
+            if (dropDelete) {
+                throw new UnsupportedOperationException(
+                        "The key is projected, there is no ability to merge records, so the deleted message cannot be dropped.");
+            }
             return ConcatRecordReader.create(suppliers);
         } else {
             // key projection is not applied, so sst readers will return key-values in order,
             // in this case merge tree can merge records with same key for us
             return new MergeTreeReader(
                     new IntervalPartition(files, keyComparator).partition(),
-                    true,
+                    dropDelete,
                     sstFileReader,
                     keyComparator,
                     accumulator.copy());

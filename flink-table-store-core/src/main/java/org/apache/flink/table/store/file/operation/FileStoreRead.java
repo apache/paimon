@@ -28,11 +28,14 @@ import java.util.List;
 /** Read operation which provides {@link RecordReader} creation. */
 public interface FileStoreRead {
 
+    /** With drop delete records. */
+    FileStoreRead withDropDelete(boolean dropDelete);
+
     /** With key nested projection. */
-    void withKeyProjection(int[][] projectedFields);
+    FileStoreRead withKeyProjection(int[][] projectedFields);
 
     /** With value nested projection. */
-    void withValueProjection(int[][] projectedFields);
+    FileStoreRead withValueProjection(int[][] projectedFields);
 
     /**
      * Create a {@link RecordReader} from partition and bucket and files.
