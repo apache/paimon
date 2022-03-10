@@ -55,6 +55,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.FILE_FORMAT;
@@ -200,7 +201,12 @@ public class FileStoreITCase extends AbstractTestBase {
         List<Row> results = executeAndCollect(store.sourceBuilder().build(env));
 
         // assert
-        Row[] expected = SOURCE_DATA.stream().map(CONVERTER::toExternal).toArray(Row[]::new);
+        // in streaming mode, expect origin data X 2 (FiniteTestSource)
+        Stream<RowData> expectedStream =
+                isBatch
+                        ? SOURCE_DATA.stream()
+                        : Stream.concat(SOURCE_DATA.stream(), SOURCE_DATA.stream());
+        Row[] expected = expectedStream.map(CONVERTER::toExternal).toArray(Row[]::new);
         assertThat(results).containsExactlyInAnyOrder(expected);
     }
 

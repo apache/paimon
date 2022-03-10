@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.store.connector.TableStore;
 import org.apache.flink.table.store.kafka.KafkaLogSinkProvider;
@@ -33,6 +34,7 @@ import org.junit.Test;
 
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.flink.table.store.connector.FileStoreITCase.CONVERTER;
 import static org.apache.flink.table.store.connector.FileStoreITCase.SOURCE_DATA;
@@ -73,6 +75,11 @@ public class LogStoreSinkITCase extends KafkaTableTestBase {
     @Test
     public void testStreamingPartitionedNonKey() throws Exception {
         innerTest("testStreamingPartitionedNonKey", false, true, true, false);
+    }
+
+    @Test
+    public void testBatchPartitionedNonKey() throws Exception {
+        innerTest("testBatchPartitionedNonKey", true, true, true, false);
     }
 
     private void innerTest(
@@ -134,7 +141,11 @@ public class LogStoreSinkITCase extends KafkaTableTestBase {
                                     Row.of(5, "p2", 1), Row.of(0, "p1", 2), Row.of(3, "p2", 5)
                                 };
             } else {
-                expected = SOURCE_DATA.stream().map(CONVERTER::toExternal).toArray(Row[]::new);
+                Stream<RowData> expectedStream =
+                        isBatch
+                                ? SOURCE_DATA.stream()
+                                : Stream.concat(SOURCE_DATA.stream(), SOURCE_DATA.stream());
+                expected = expectedStream.map(CONVERTER::toExternal).toArray(Row[]::new);
             }
 
             assertThat(results).containsExactlyInAnyOrder(expected);
