@@ -95,7 +95,7 @@ public class TestFileStore extends FileStoreImpl {
 
         conf.set(FileStoreOptions.FILE_FORMAT, format);
         conf.set(FileStoreOptions.MANIFEST_FORMAT, format);
-        conf.set(FileStoreOptions.FILE_PATH, root);
+        conf.set(FileStoreOptions.TABLE_PATH, root);
         conf.set(FileStoreOptions.BUCKET, numBuckets);
 
         return new TestFileStore(conf, partitionType, keyType, valueType, accumulator);
@@ -108,7 +108,7 @@ public class TestFileStore extends FileStoreImpl {
             RowType valueType,
             Accumulator accumulator) {
         super(conf, UUID.randomUUID().toString(), partitionType, keyType, valueType, accumulator);
-        this.root = conf.getString(FileStoreOptions.FILE_PATH);
+        this.root = conf.getString(FileStoreOptions.TABLE_PATH);
         this.keySerializer = new RowDataSerializer(keyType);
         this.valueSerializer = new RowDataSerializer(valueType);
     }
