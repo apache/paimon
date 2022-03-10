@@ -34,6 +34,7 @@ import org.apache.flink.table.store.file.operation.FileStoreReadImpl;
 import org.apache.flink.table.store.file.operation.FileStoreWriteImpl;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
+import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
@@ -49,10 +50,11 @@ import static java.util.Collections.singletonList;
 public class TestDataReadWrite {
 
     private static final RowType KEY_TYPE =
-            new RowType(singletonList(new RowType.RowField("k", new IntType())));
+            new RowType(singletonList(new RowType.RowField("k", new BigIntType())));
     private static final RowType VALUE_TYPE =
-            new RowType(singletonList(new RowType.RowField("v", new IntType())));
-    private static final Comparator<RowData> COMPARATOR = Comparator.comparingInt(o -> o.getInt(0));
+            new RowType(singletonList(new RowType.RowField("v", new BigIntType())));
+    private static final Comparator<RowData> COMPARATOR =
+            Comparator.comparingLong(o -> o.getLong(0));
 
     private final FileFormat avro;
     private final FileStorePathFactory pathFactory;
@@ -75,12 +77,11 @@ public class TestDataReadWrite {
     }
 
     public List<SstFileMeta> writeFiles(
-            BinaryRowData partition, int bucket, List<Tuple2<Integer, Integer>> kvs)
-            throws Exception {
+            BinaryRowData partition, int bucket, List<Tuple2<Long, Long>> kvs) throws Exception {
         Preconditions.checkNotNull(
                 service, "ExecutorService must be provided if writeFiles is needed");
         RecordWriter writer = createMergeTreeWriter(partition, bucket);
-        for (Tuple2<Integer, Integer> tuple2 : kvs) {
+        for (Tuple2<Long, Long> tuple2 : kvs) {
             writer.write(ValueKind.ADD, GenericRowData.of(tuple2.f0), GenericRowData.of(tuple2.f1));
         }
         List<SstFileMeta> files = writer.prepareCommit().newFiles();
@@ -88,7 +89,7 @@ public class TestDataReadWrite {
         return new ArrayList<>(files);
     }
 
-    private RecordWriter createMergeTreeWriter(BinaryRowData partition, int bucket) {
+    public RecordWriter createMergeTreeWriter(BinaryRowData partition, int bucket) {
         MergeTreeOptions options = new MergeTreeOptions(new Configuration());
         return new FileStoreWriteImpl(
                         KEY_TYPE,

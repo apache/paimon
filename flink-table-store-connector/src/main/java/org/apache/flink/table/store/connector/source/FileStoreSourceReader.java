@@ -36,9 +36,11 @@ public final class FileStoreSourceReader
                 FileStoreSourceSplitState> {
 
     public FileStoreSourceReader(
-            SourceReaderContext readerContext, FileStoreRead fileStoreRead, boolean keyAsRecord) {
+            SourceReaderContext readerContext,
+            FileStoreRead fileStoreRead,
+            boolean valueCountMode) {
         super(
-                () -> new FileStoreSourceSplitReader(fileStoreRead, keyAsRecord),
+                () -> new FileStoreSourceSplitReader(fileStoreRead, valueCountMode),
                 (element, output, splitState) -> {
                     output.collect(element.getRecord());
                     splitState.setPosition(element);

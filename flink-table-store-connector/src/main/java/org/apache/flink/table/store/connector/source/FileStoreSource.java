@@ -42,7 +42,7 @@ public class FileStoreSource
 
     private final FileStore fileStore;
 
-    private final boolean keyAsRecord;
+    private final boolean valueCountMode;
 
     @Nullable private final int[][] projectedFields;
 
@@ -52,12 +52,12 @@ public class FileStoreSource
 
     public FileStoreSource(
             FileStore fileStore,
-            boolean keyAsRecord,
+            boolean valueCountMode,
             @Nullable int[][] projectedFields,
             @Nullable Predicate partitionPredicate,
             @Nullable Predicate fieldsPredicate) {
         this.fileStore = fileStore;
-        this.keyAsRecord = keyAsRecord;
+        this.valueCountMode = valueCountMode;
         this.projectedFields = projectedFields;
         this.partitionPredicate = partitionPredicate;
         this.fieldsPredicate = fieldsPredicate;
@@ -73,13 +73,13 @@ public class FileStoreSource
     public SourceReader<RowData, FileStoreSourceSplit> createReader(SourceReaderContext context) {
         FileStoreRead read = fileStore.newRead();
         if (projectedFields != null) {
-            if (keyAsRecord) {
+            if (valueCountMode) {
                 read.withKeyProjection(projectedFields);
             } else {
                 read.withValueProjection(projectedFields);
             }
         }
-        return new FileStoreSourceReader(context, read, keyAsRecord);
+        return new FileStoreSourceReader(context, read, valueCountMode);
     }
 
     @Override
@@ -90,7 +90,7 @@ public class FileStoreSource
             scan.withPartitionFilter(partitionPredicate);
         }
         if (fieldsPredicate != null) {
-            if (keyAsRecord) {
+            if (valueCountMode) {
                 scan.withKeyFilter(fieldsPredicate);
             } else {
                 scan.withValueFilter(fieldsPredicate);
