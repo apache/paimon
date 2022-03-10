@@ -32,6 +32,7 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /** This file is the entrance to all data committed at some specific time point. */
 public class Snapshot {
@@ -45,6 +46,7 @@ public class Snapshot {
     private static final String FIELD_COMMIT_IDENTIFIER = "commitIdentifier";
     private static final String FIELD_COMMIT_KIND = "commitKind";
     private static final String FIELD_TIME_MILLIS = "timeMillis";
+    private static final String FIELD_LOG_OFFSETS = "logOffsets";
 
     @JsonProperty(FIELD_ID)
     private final long id;
@@ -71,6 +73,9 @@ public class Snapshot {
     @JsonProperty(FIELD_TIME_MILLIS)
     private final long timeMillis;
 
+    @JsonProperty(FIELD_LOG_OFFSETS)
+    private final Map<Integer, Long> logOffsets;
+
     @JsonCreator
     public Snapshot(
             @JsonProperty(FIELD_ID) long id,
@@ -79,7 +84,8 @@ public class Snapshot {
             @JsonProperty(FIELD_COMMIT_USER) String commitUser,
             @JsonProperty(FIELD_COMMIT_IDENTIFIER) String commitIdentifier,
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
-            @JsonProperty(FIELD_TIME_MILLIS) long timeMillis) {
+            @JsonProperty(FIELD_TIME_MILLIS) long timeMillis,
+            @JsonProperty(FIELD_LOG_OFFSETS) Map<Integer, Long> logOffsets) {
         this.id = id;
         this.baseManifestList = baseManifestList;
         this.deltaManifestList = deltaManifestList;
@@ -87,6 +93,7 @@ public class Snapshot {
         this.commitIdentifier = commitIdentifier;
         this.commitKind = commitKind;
         this.timeMillis = timeMillis;
+        this.logOffsets = logOffsets;
     }
 
     @JsonGetter(FIELD_ID)
@@ -122,6 +129,11 @@ public class Snapshot {
     @JsonGetter(FIELD_TIME_MILLIS)
     public long timeMillis() {
         return timeMillis;
+    }
+
+    @JsonGetter(FIELD_LOG_OFFSETS)
+    public Map<Integer, Long> getLogOffsets() {
+        return logOffsets;
     }
 
     public String toJson() {
