@@ -232,10 +232,12 @@ public class FileStoreScanImpl implements FileStoreScan {
     }
 
     private boolean filterManifestEntry(ManifestEntry entry) {
-        // TODO apply key & value filter after field stats are collected in
-        //  SstFile.RollingFile#finish
         return (partitionFilter == null
                         || partitionFilter.test(partitionConverter.convert(entry.partition())))
+                && (keyFilter == null
+                        || keyFilter.test(entry.file().rowCount(), entry.file().keyStats()))
+                && (valueFilter == null
+                        || valueFilter.test(entry.file().rowCount(), entry.file().valueStats()))
                 && (specifiedBucket == null || entry.bucket() == specifiedBucket);
     }
 
