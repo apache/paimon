@@ -26,30 +26,24 @@ import java.util.Collection;
  */
 public class PendingSplitsCheckpoint {
 
+    public static final long INVALID_SNAPSHOT = -1L;
+
     /** The splits in the checkpoint. */
     private final Collection<FileStoreSourceSplit> splits;
 
-    private final long nextSnapshotId;
+    private final long currentSnapshotId;
 
-    private PendingSplitsCheckpoint(Collection<FileStoreSourceSplit> splits, long nextSnapshotId) {
+    public PendingSplitsCheckpoint(
+            Collection<FileStoreSourceSplit> splits, long currentSnapshotId) {
         this.splits = splits;
-        this.nextSnapshotId = nextSnapshotId;
+        this.currentSnapshotId = currentSnapshotId;
     }
 
     public Collection<FileStoreSourceSplit> splits() {
         return splits;
     }
 
-    public long nextSnapshotId() {
-        return nextSnapshotId;
-    }
-
-    public static PendingSplitsCheckpoint fromStatic(Collection<FileStoreSourceSplit> splits) {
-        return new PendingSplitsCheckpoint(splits, -1);
-    }
-
-    public static PendingSplitsCheckpoint fromContinuous(
-            Collection<FileStoreSourceSplit> splits, long nextSnapshotId) {
-        return new PendingSplitsCheckpoint(splits, nextSnapshotId);
+    public long currentSnapshotId() {
+        return currentSnapshotId;
     }
 }

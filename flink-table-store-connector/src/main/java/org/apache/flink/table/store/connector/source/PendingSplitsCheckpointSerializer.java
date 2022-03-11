@@ -52,7 +52,7 @@ public class PendingSplitsCheckpointSerializer
             view.writeInt(bytes.length);
             view.write(bytes);
         }
-        view.writeLong(pendingSplitsCheckpoint.nextSnapshotId());
+        view.writeLong(pendingSplitsCheckpoint.currentSnapshotId());
         return out.toByteArray();
     }
 
@@ -67,7 +67,7 @@ public class PendingSplitsCheckpointSerializer
             view.readFully(bytes);
             splits.add(splitSerializer.deserialize(version, bytes));
         }
-        long nextSnapshotId = view.readLong();
-        return PendingSplitsCheckpoint.fromContinuous(splits, nextSnapshotId);
+        long currentSnapshotId = view.readLong();
+        return new PendingSplitsCheckpoint(splits, currentSnapshotId);
     }
 }

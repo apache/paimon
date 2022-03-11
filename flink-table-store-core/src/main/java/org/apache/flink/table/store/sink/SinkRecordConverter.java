@@ -49,10 +49,18 @@ public class SinkRecordConverter {
 
     public SinkRecord convert(RowData row) {
         BinaryRowData partition = partProjection.apply(row);
-        BinaryRowData key = keyProjection.apply(row);
-        int hash = key.getArity() == 0 ? hashRow(row) : key.hashCode();
-        int bucket = Math.abs(hash % numBucket);
+        BinaryRowData key = key(row);
+        int bucket = bucket(row, key);
         return new SinkRecord(partition, bucket, key, row);
+    }
+
+    public BinaryRowData key(RowData row) {
+        return keyProjection.apply(row);
+    }
+
+    public int bucket(RowData row, BinaryRowData key) {
+        int hash = key.getArity() == 0 ? hashRow(row) : key.hashCode();
+        return Math.abs(hash % numBucket);
     }
 
     private int hashRow(RowData row) {
