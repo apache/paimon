@@ -102,7 +102,6 @@ public class StaticFileStoreSplitEnumeratorTest {
     private static StaticFileStoreSplitEnumerator createEnumerator(
             final SplitEnumeratorContext<FileStoreSourceSplit> context,
             final FileStoreSourceSplit... splits) {
-
-        return new StaticFileStoreSplitEnumerator(context, Arrays.asList(splits));
+        return new StaticFileStoreSplitEnumerator(context, null, Arrays.asList(splits));
     }
 }

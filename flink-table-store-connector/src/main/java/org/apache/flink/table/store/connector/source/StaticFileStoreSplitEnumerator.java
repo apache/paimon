@@ -20,6 +20,7 @@ package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
+import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 
 import javax.annotation.Nullable;
@@ -30,25 +31,34 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
 
+import static org.apache.flink.table.store.connector.source.PendingSplitsCheckpoint.INVALID_SNAPSHOT;
+
 /** A SplitEnumerator implementation for bounded / batch {@link FileStoreSource} input. */
 public class StaticFileStoreSplitEnumerator
         implements SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> {
 
     private final SplitEnumeratorContext<FileStoreSourceSplit> context;
 
+    @Nullable private final Snapshot snapshot;
+
     private final Queue<FileStoreSourceSplit> splits;
 
     public StaticFileStoreSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
+            Snapshot snapshot,
             Collection<FileStoreSourceSplit> splits) {
         this.context = context;
+        this.snapshot = snapshot;
         this.splits = new LinkedList<>(splits);
     }
 
     public StaticFileStoreSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context, FileStoreScan scan) {
         this.context = context;
-        this.splits = new LinkedList<>(new FileStoreSourceSplitGenerator().createSplits(scan));
+        FileStoreScan.Plan plan = scan.plan();
+        Long snapshotId = plan.snapshotId();
+        this.snapshot = snapshotId == null ? null : scan.snapshot(snapshotId);
+        this.splits = new LinkedList<>(new FileStoreSourceSplitGenerator().createSplits(plan));
     }
 
     @Override
@@ -83,11 +93,17 @@ public class StaticFileStoreSplitEnumerator
 
     @Override
     public PendingSplitsCheckpoint snapshotState(long checkpointId) {
-        return PendingSplitsCheckpoint.fromStatic(new ArrayList<>(splits));
+        return new PendingSplitsCheckpoint(
+                new ArrayList<>(splits), snapshot == null ? INVALID_SNAPSHOT : snapshot.id());
     }
 
     @Override
     public void close() {
         // no resources to close
+    }
+
+    @Nullable
+    public Snapshot snapshot() {
+        return snapshot;
     }
 }
