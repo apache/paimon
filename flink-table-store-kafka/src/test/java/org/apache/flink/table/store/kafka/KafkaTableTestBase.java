@@ -92,7 +92,6 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
     @Before
     public void setup() {
         env = StreamExecutionEnvironment.getExecutionEnvironment();
-        tEnv = StreamTableEnvironment.create(env);
         env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
 
         // Probe Kafka broker status per 30 seconds

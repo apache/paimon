@@ -28,9 +28,7 @@ import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.factories.ManagedTableFactory;
-import org.apache.flink.table.store.log.LogOptions;
 
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -139,27 +137,6 @@ public class TableStoreFactoryTest {
                                             + "Suggestion: please try `DROP TABLE IF EXISTS` ddl instead.",
                                     expectedPath, TABLE_IDENTIFIER.asSerializableString()));
         }
-    }
-
-    @Test
-    public void testFilterLogStoreOptions() {
-        // mix invalid key and leave value to empty to emphasize the deferred validation
-        Map<String, String> expectedLogOptions =
-                of(
-                        LogOptions.SCAN.key(),
-                        "",
-                        LogOptions.RETENTION.key(),
-                        "",
-                        "dummy.key",
-                        "",
-                        LogOptions.CHANGELOG_MODE.key(),
-                        "");
-        Map<String, String> enrichedOptions =
-                addPrefix(expectedLogOptions, LOG_PREFIX, (key) -> true);
-        enrichedOptions.put("foo", "bar");
-
-        assertThat(((TableStoreFactory) tableStoreFactory).filterLogStoreOptions(enrichedOptions))
-                .containsExactlyInAnyOrderEntriesOf(expectedLogOptions);
     }
 
     // ~ Tools ------------------------------------------------------------------

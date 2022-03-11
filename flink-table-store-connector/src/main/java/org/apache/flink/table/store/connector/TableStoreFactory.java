@@ -18,17 +18,20 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
-import org.apache.flink.table.catalog.ObjectIdentifier;
-import org.apache.flink.table.factories.FactoryUtil;
+import org.apache.flink.table.connector.sink.DynamicTableSink;
+import org.apache.flink.table.connector.source.DynamicTableSource;
+import org.apache.flink.table.factories.DynamicTableSinkFactory;
+import org.apache.flink.table.factories.DynamicTableSourceFactory;
 import org.apache.flink.table.factories.ManagedTableFactory;
+import org.apache.flink.table.store.connector.sink.StoreTableSink;
+import org.apache.flink.table.store.connector.source.StoreTableSource;
 import org.apache.flink.table.store.file.FileStoreOptions;
-import org.apache.flink.table.store.log.LogStoreTableFactory;
+import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -38,15 +41,16 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.CHANGE_TRACKING;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
+import static org.apache.flink.table.store.connector.utils.TableStoreUtils.createLogStoreContext;
+import static org.apache.flink.table.store.connector.utils.TableStoreUtils.createLogStoreTableFactory;
+import static org.apache.flink.table.store.connector.utils.TableStoreUtils.enableChangeTracking;
+import static org.apache.flink.table.store.connector.utils.TableStoreUtils.tablePath;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
-import static org.apache.flink.table.store.file.FileStoreOptions.FILE_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
-import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
-import static org.apache.flink.table.store.log.LogStoreTableFactory.discoverLogStoreFactory;
 
 /** Default implementation of {@link ManagedTableFactory}. */
-public class TableStoreFactory implements ManagedTableFactory {
+public class TableStoreFactory
+        implements ManagedTableFactory, DynamicTableSourceFactory, DynamicTableSinkFactory {
 
     @Override
     public Map<String, String> enrichOptions(Context context) {
@@ -65,8 +69,8 @@ public class TableStoreFactory implements ManagedTableFactory {
 
     @Override
     public void onCreateTable(Context context, boolean ignoreIfExists) {
-        Map<String, String> options = context.getCatalogTable().getOptions();
-        Path path = tablePath(options, context.getObjectIdentifier());
+        Map<String, String> enrichedOptions = context.getCatalogTable().getOptions();
+        Path path = tablePath(enrichedOptions, context.getObjectIdentifier());
         try {
             if (path.getFileSystem().exists(path) && !ignoreIfExists) {
                 throw new TableException(
@@ -88,12 +92,12 @@ public class TableStoreFactory implements ManagedTableFactory {
             throw new UncheckedIOException(e);
         }
 
-        if (enableChangeTracking(options)) {
-            createLogStoreTableFactory(context)
+        if (enableChangeTracking(enrichedOptions)) {
+            createLogStoreTableFactory()
                     .onCreateTable(
-                            createLogContext(context),
+                            createLogStoreContext(context),
                             Integer.parseInt(
-                                    options.getOrDefault(
+                                    enrichedOptions.getOrDefault(
                                             BUCKET.key(), BUCKET.defaultValue().toString())),
                             ignoreIfExists);
         }
@@ -101,8 +105,8 @@ public class TableStoreFactory implements ManagedTableFactory {
 
     @Override
     public void onDropTable(Context context, boolean ignoreIfNotExists) {
-        Map<String, String> options = context.getCatalogTable().getOptions();
-        Path path = tablePath(options, context.getObjectIdentifier());
+        Map<String, String> enrichedOptions = context.getCatalogTable().getOptions();
+        Path path = tablePath(enrichedOptions, context.getObjectIdentifier());
         try {
             if (path.getFileSystem().exists(path)) {
                 path.getFileSystem().delete(path, true);
@@ -117,9 +121,9 @@ public class TableStoreFactory implements ManagedTableFactory {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        if (enableChangeTracking(options)) {
-            createLogStoreTableFactory(context)
-                    .onDropTable(createLogContext(context), ignoreIfNotExists);
+        if (enableChangeTracking(enrichedOptions)) {
+            createLogStoreTableFactory()
+                    .onDropTable(createLogStoreContext(context), ignoreIfNotExists);
         }
     }
 
@@ -130,6 +134,16 @@ public class TableStoreFactory implements ManagedTableFactory {
     }
 
     @Override
+    public DynamicTableSource createDynamicTableSource(Context context) {
+        return new StoreTableSource(new StoreTableContext(context));
+    }
+
+    @Override
+    public DynamicTableSink createDynamicTableSink(Context context) {
+        return new StoreTableSink(new StoreTableContext(context));
+    }
+
+    @Override
     public Set<ConfigOption<?>> requiredOptions() {
         return Collections.emptySet();
     }
@@ -137,56 +151,8 @@ public class TableStoreFactory implements ManagedTableFactory {
     @Override
     public Set<ConfigOption<?>> optionalOptions() {
         Set<ConfigOption<?>> options = FileStoreOptions.allOptions();
+        options.addAll(MergeTreeOptions.allOptions());
         options.add(CHANGE_TRACKING);
         return options;
-    }
-
-    // ~ Tools ------------------------------------------------------------------
-
-    private LogStoreTableFactory createLogStoreTableFactory(Context context) {
-        return discoverLogStoreFactory(
-                context.getClassLoader(),
-                context.getCatalogTable()
-                        .getOptions()
-                        .getOrDefault(LOG_SYSTEM.key(), LOG_SYSTEM.defaultValue()));
-    }
-
-    private Context createLogContext(Context context) {
-        return new FactoryUtil.DefaultDynamicTableContext(
-                context.getObjectIdentifier(),
-                context.getCatalogTable()
-                        .copy(filterLogStoreOptions(context.getCatalogTable().getOptions())),
-                filterLogStoreOptions(context.getEnrichmentOptions()),
-                context.getConfiguration(),
-                context.getClassLoader(),
-                context.isTemporary());
-    }
-
-    @VisibleForTesting
-    Map<String, String> filterLogStoreOptions(Map<String, String> enrichedOptions) {
-        Map<String, String> logStoreOptions = new HashMap<>();
-        enrichedOptions.forEach(
-                (k, v) -> {
-                    if (k.startsWith(LOG_PREFIX)) {
-                        logStoreOptions.put(k.substring(LOG_PREFIX.length()), v);
-                    }
-                });
-        return logStoreOptions;
-    }
-
-    private static Path tablePath(Map<String, String> options, ObjectIdentifier identifier) {
-        return new Path(
-                new Path(options.get(FILE_PATH.key())),
-                String.format(
-                        "root/%s.catalog/%s.db/%s",
-                        identifier.getCatalogName(),
-                        identifier.getDatabaseName(),
-                        identifier.getObjectName()));
-    }
-
-    private static boolean enableChangeTracking(Map<String, String> options) {
-        return Boolean.parseBoolean(
-                options.getOrDefault(
-                        CHANGE_TRACKING.key(), CHANGE_TRACKING.defaultValue().toString()));
     }
 }

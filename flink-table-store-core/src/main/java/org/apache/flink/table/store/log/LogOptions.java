@@ -129,6 +129,17 @@ public class LogOptions {
         public InlineElement getDescription() {
             return text(description);
         }
+
+        public static LogStartupMode fromValue(String value) {
+            if ("full".equals(value)) {
+                return FULL;
+            } else if ("latest".equals(value)) {
+                return LATEST;
+            } else if ("from-timestamp".equals(value)) {
+                return FROM_TIMESTAMP;
+            }
+            throw new IllegalArgumentException("Unknown value: " + value);
+        }
     }
 
     /** Specifies the log consistency mode for table. */
