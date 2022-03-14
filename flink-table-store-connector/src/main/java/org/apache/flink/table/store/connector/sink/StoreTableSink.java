@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.connector.sink;
 
-import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.catalog.CatalogLock;
 import org.apache.flink.table.connector.ChangelogMode;
@@ -28,60 +26,56 @@ import org.apache.flink.table.connector.sink.DataStreamSinkProvider;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.connector.sink.SinkRuntimeProviderContext;
-import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-import org.apache.flink.table.store.connector.StoreTableContext;
-import org.apache.flink.table.store.connector.sink.global.GlobalCommittingSinkTranslator;
+import org.apache.flink.table.store.connector.TableStore;
 import org.apache.flink.table.store.log.LogSinkProvider;
-import org.apache.flink.table.store.log.LogStoreTableFactory;
-import org.apache.flink.table.types.DataType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.utils.TypeConversions;
 
 import javax.annotation.Nullable;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import static org.apache.flink.table.store.connector.utils.TableStoreUtils.createLogStoreContext;
-import static org.apache.flink.table.store.connector.utils.TableStoreUtils.createLogStoreTableFactory;
-
 /** Table sink to create {@link StoreSink}. */
 public class StoreTableSink
         implements DynamicTableSink, SupportsOverwrite, SupportsPartitioning, RequireCatalogLock {
 
-    private final StoreTableContext storeTableContext;
+    private final TableStore tableStore;
+    @Nullable private final LogSinkProvider logSinkProvider;
 
     private LinkedHashMap<String, String> staticPartitions = new LinkedHashMap<>();
     private boolean overwrite;
     @Nullable private CatalogLock.Factory lockFactory;
 
-    public StoreTableSink(StoreTableContext storeTableContext) {
-        this.storeTableContext = storeTableContext;
+    public StoreTableSink(TableStore tableStore, @Nullable LogSinkProvider logSinkProvider) {
+        this.tableStore = tableStore;
+        this.logSinkProvider = logSinkProvider;
     }
 
     @Override
     public ChangelogMode getChangelogMode(ChangelogMode changelogMode) {
-        return storeTableContext.getChangelogMode();
+        return ChangelogMode.all();
     }
 
     @Override
     public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
         return (DataStreamSinkProvider)
-                (providerContext, dataStream) -> {
-                    Transformation<RowData> transformation = dataStream.getTransformation();
-                    return GlobalCommittingSinkTranslator.translate(
-                            new DataStream<>(dataStream.getExecutionEnvironment(), transformation),
-                            createStoreSink());
-                };
+                (providerContext, dataStream) ->
+                        tableStore
+                                .sinkBuilder()
+                                .withInput(
+                                        new DataStream<>(
+                                                dataStream.getExecutionEnvironment(),
+                                                dataStream.getTransformation()))
+                                .withLockFactory(lockFactory)
+                                .withLogSinkProvider(logSinkProvider)
+                                .withOverwritePartition(staticPartitions)
+                                .build();
     }
 
     @Override
     public DynamicTableSink copy() {
-        StoreTableSink copied = new StoreTableSink(this.storeTableContext);
-        copied.staticPartitions = new LinkedHashMap<>(this.staticPartitions);
-        copied.overwrite = this.overwrite;
+        StoreTableSink copied = new StoreTableSink(tableStore, logSinkProvider);
+        copied.staticPartitions = new LinkedHashMap<>(staticPartitions);
+        copied.overwrite = overwrite;
         return copied;
     }
 
@@ -92,8 +86,8 @@ public class StoreTableSink
 
     @Override
     public void applyStaticPartition(Map<String, String> partition) {
-        this.storeTableContext
-                .getPartitionKeys()
+        tableStore
+                .partitionKeys()
                 .forEach(
                         partitionKey -> {
                             if (partition.containsKey(partitionKey)) {
@@ -111,53 +105,5 @@ public class StoreTableSink
     @Override
     public void setLockFactory(@Nullable CatalogLock.Factory lockFactory) {
         this.lockFactory = lockFactory;
-    }
-
-    // ~ Tools ------------------------------------------------------------------
-
-    private StoreSink<?, ?> createStoreSink() {
-        return new StoreSink<>(
-                storeTableContext.tableIdentifier(),
-                storeTableContext.fileStore(),
-                storeTableContext.partitionIndex(),
-                storeTableContext.primaryKeyIndex(),
-                storeTableContext.numBucket(),
-                lockFactory,
-                overwrite ? staticPartitions : null,
-                !storeTableContext.batchMode() && storeTableContext.enableChangeTracking()
-                        ? createLogSinkProvider()
-                        : null);
-    }
-
-    private LogSinkProvider createLogSinkProvider() {
-        return createLogStoreTableFactory()
-                .createSinkProvider(
-                        createLogStoreContext(storeTableContext.getContext()),
-                        new LogStoreTableFactory.SinkContext() {
-                            @Override
-                            public boolean isBounded() {
-                                return false;
-                            }
-
-                            @Override
-                            public <T> TypeInformation<T> createTypeInformation(
-                                    DataType consumedDataType) {
-                                return createTypeInformation(
-                                        TypeConversions.fromDataToLogicalType(consumedDataType));
-                            }
-
-                            @Override
-                            public <T> TypeInformation<T> createTypeInformation(
-                                    LogicalType consumedLogicalType) {
-                                return InternalTypeInfo.of(consumedLogicalType);
-                            }
-
-                            @Override
-                            public DataStructureConverter createDataStructureConverter(
-                                    DataType consumedDataType) {
-                                return new SinkRuntimeProviderContext(isBounded())
-                                        .createDataStructureConverter(consumedDataType);
-                            }
-                        });
     }
 }

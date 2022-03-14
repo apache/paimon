@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.table.api.TableException;
+import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.planner.runtime.utils.TestData;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
@@ -73,16 +73,17 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
 
     @Test
     public void testReadWriteNonPartitioned() throws Exception {
-        tEnv.executeSql("SHOW CREATE TABLE " + tableIdentifier.asSerializableString()).print();
         String statement =
                 String.format("INSERT INTO %s \nSELECT * FROM `source_table`", tableIdentifier);
         if (expectedResult.success) {
             tEnv.executeSql(statement).await();
-            CloseableIterator<Row> iterator =
-                    tEnv.executeSql(String.format("SELECT * FROM %s", tableIdentifier)).collect();
+            TableResult result =
+                    tEnv.executeSql(String.format("SELECT * FROM %s", tableIdentifier));
             List<Row> actual = new ArrayList<>();
-            while (iterator.hasNext()) {
-                actual.add(iterator.next());
+            try (CloseableIterator<Row> iterator = result.collect()) {
+                while (iterator.hasNext()) {
+                    actual.add(iterator.next());
+                }
             }
             assertThat(actual).containsExactlyInAnyOrderElementsOf(expectedResult.expectedRecords);
             String relativeFilePath = getRelativeFileStoreTablePath(tableIdentifier);
@@ -92,16 +93,15 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
             assertThat(Paths.get(rootPath, relativeFilePath, "manifest")).exists();
 
             if (enableChangeTracking) {
-                tEnv.executeSql(
-                                String.format(
-                                        "SELECT * FROM %s /*+ OPTIONS('scan' = 'latest') */",
-                                        tableIdentifier))
-                        .print();
                 assertThat(topicExists(tableIdentifier.asSummaryString())).isTrue();
             }
         } else {
-            assertThatThrownBy(() -> tEnv.executeSql(statement))
-                    .getCause()
+            assertThatThrownBy(
+                            () -> {
+                                tEnv.executeSql(statement).await();
+                                tEnv.executeSql(String.format("SELECT * FROM %s", tableIdentifier))
+                                        .collect();
+                            })
                     .isInstanceOf(expectedResult.expectedType)
                     .hasMessageContaining(expectedResult.expectedMessage);
         }
@@ -133,31 +133,31 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
                     true, //  with duplicate
                     new ExpectedResult().success(true).expectedRecords(insertOnlyCities(true))
                 });
-        // streaming cases
+        List<Row> expected = new ArrayList<>(rates());
+        expected.remove(1);
+        specs.add(
+                new Object[] {
+                    RuntimeExecutionMode.BATCH,
+                    "table_" + UUID.randomUUID(),
+                    false, // enable change-tracking
+                    true, // has pk
+                    null, // without delete
+                    new ExpectedResult().success(true).expectedRecords(expected)
+                });
+        // TODO: streaming with change-tracking
+
+        // exception case
         specs.add(
                 new Object[] {
                     RuntimeExecutionMode.STREAMING,
                     "table_" + UUID.randomUUID(),
                     false, // enable change-tracking
                     false, // has pk
-                    null, //  with delete,
-                    new ExpectedResult().success(true).expectedRecords(userChangelog())
-                });
-
-        // TODO: change-tracking cases
-
-        // exception case
-        specs.add(
-                new Object[] {
-                    RuntimeExecutionMode.BATCH,
-                    "table_" + UUID.randomUUID(),
-                    true,
-                    false,
-                    false,
+                    null, //  with duplicate
                     new ExpectedResult()
                             .success(false)
-                            .expectedType(TableException.class)
-                            .expectedMessage("Change tracking is not supported under batch mode.")
+                            .expectedType(UnsupportedOperationException.class)
+                            .expectedMessage("File store continuous mode is not supported yet.")
                 });
 
         return specs;
@@ -166,7 +166,11 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
     @Override
     protected void prepareEnv() {
         if (hasPk) {
-            registerUpsertRecordsWithPk();
+            if (executionMode == RuntimeExecutionMode.STREAMING) {
+                registerUpsertRecordsWithPk();
+            } else {
+                registerInsertOnlyRecordsWithPk();
+            }
         } else {
             if (duplicate != null) {
                 registerInsertOnlyRecordsWithoutPk(duplicate);
@@ -214,6 +218,24 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
         registerTableStoreSink();
     }
 
+    private void registerInsertOnlyRecordsWithPk() {
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE source_table (\n"
+                                + "  currency STRING,\n"
+                                + "  rate BIGINT,\n"
+                                + "  PRIMARY KEY (currency) NOT ENFORCED\n"
+                                + ") WITH (\n"
+                                + "  'connector' = 'values',\n"
+                                + " 'bounded' = '%s',\n"
+                                + "  'data-id' = '%s',\n"
+                                + "  'changelog-mode' = 'I',\n"
+                                + "  'disable-lookup' = 'true'\n"
+                                + ")",
+                        executionMode == RuntimeExecutionMode.BATCH, registerData(rates())));
+        registerTableStoreSink();
+    }
+
     private void registerUpsertRecordsWithPk() {
         tEnv.executeSql(
                 String.format(
@@ -231,6 +253,14 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
                         executionMode == RuntimeExecutionMode.BATCH,
                         registerData(ratesChangelog())));
         registerTableStoreSink();
+    }
+
+    private static List<Row> rates() {
+        return Arrays.asList(
+                changelogRow("+I", "US Dollar", 102L),
+                changelogRow("+I", "Euro", 114L),
+                changelogRow("+I", "Yen", 1L),
+                changelogRow("+I", "Euro", 119L));
     }
 
     private static List<Row> ratesChangelog() {

@@ -141,12 +141,8 @@ public abstract class TableStoreTestBase extends KafkaTableTestBase {
     }
 
     protected void deleteTablePath() {
-        try {
-            FileUtils.deleteDirectory(
-                    Paths.get(rootPath, getRelativeFileStoreTablePath(tableIdentifier)).toFile());
-        } catch (IOException ignored) {
-            // ignored
-        }
+        FileUtils.deleteQuietly(
+                Paths.get(rootPath, getRelativeFileStoreTablePath(tableIdentifier)).toFile());
     }
 
     protected static String getRelativeFileStoreTablePath(ObjectIdentifier tableIdentifier) {
