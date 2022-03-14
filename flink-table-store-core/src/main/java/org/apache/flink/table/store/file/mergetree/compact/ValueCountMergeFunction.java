@@ -26,10 +26,10 @@ import javax.annotation.Nullable;
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 /**
- * A {@link Accumulator} where key is the full record and value is a count which represents number
+ * A {@link MergeFunction} where key is the full record and value is a count which represents number
  * of records of the exact same fields.
  */
-public class ValueCountAccumulator implements Accumulator {
+public class ValueCountMergeFunction implements MergeFunction {
 
     private long total;
 
@@ -50,8 +50,8 @@ public class ValueCountAccumulator implements Accumulator {
     }
 
     @Override
-    public Accumulator copy() {
-        return new ValueCountAccumulator();
+    public MergeFunction copy() {
+        return new ValueCountMergeFunction();
     }
 
     private long count(RowData value) {

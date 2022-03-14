@@ -32,7 +32,7 @@ import org.apache.flink.table.runtime.typeutils.InternalSerializers;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.mergetree.compact.Accumulator;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.utils.HeapMemorySegmentPool;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -106,10 +106,11 @@ public class SortBufferMemTable implements MemTable {
     }
 
     @Override
-    public Iterator<KeyValue> iterator(Comparator<RowData> keyComparator, Accumulator accumulator) {
+    public Iterator<KeyValue> iterator(
+            Comparator<RowData> keyComparator, MergeFunction mergeFunction) {
         new QuickSort().sort(buffer);
         MutableObjectIterator<BinaryRowData> kvIter = buffer.getIterator();
-        return new MemTableIterator(kvIter, keyComparator, accumulator);
+        return new MemTableIterator(kvIter, keyComparator, mergeFunction);
     }
 
     @Override
@@ -120,9 +121,9 @@ public class SortBufferMemTable implements MemTable {
     private class MemTableIterator implements Iterator<KeyValue> {
         private final MutableObjectIterator<BinaryRowData> kvIter;
         private final Comparator<RowData> keyComparator;
-        private final Accumulator accumulator;
+        private final MergeFunction mergeFunction;
 
-        // holds the accumulated value
+        // holds the merged value
         private KeyValueSerializer previous;
         private BinaryRowData previousRow;
         // reads the next kv
@@ -133,10 +134,10 @@ public class SortBufferMemTable implements MemTable {
         private MemTableIterator(
                 MutableObjectIterator<BinaryRowData> kvIter,
                 Comparator<RowData> keyComparator,
-                Accumulator accumulator) {
+                MergeFunction mergeFunction) {
             this.kvIter = kvIter;
             this.keyComparator = keyComparator;
-            this.accumulator = accumulator;
+            this.mergeFunction = mergeFunction;
 
             int totalFieldCount = keyType.getFieldCount() + 2 + valueType.getFieldCount();
             this.previous = new KeyValueSerializer(keyType, valueType);
@@ -175,8 +176,8 @@ public class SortBufferMemTable implements MemTable {
                 if (previousRow == null) {
                     return;
                 }
-                accumulator.reset();
-                accumulator.add(previous.getReusedKv().value());
+                mergeFunction.reset();
+                mergeFunction.add(previous.getReusedKv().value());
 
                 while (readOnce()) {
                     if (keyComparator.compare(
@@ -184,10 +185,10 @@ public class SortBufferMemTable implements MemTable {
                             != 0) {
                         break;
                     }
-                    accumulator.add(current.getReusedKv().value());
+                    mergeFunction.add(current.getReusedKv().value());
                     swapSerializers();
                 }
-                result = accumulator.getValue();
+                result = mergeFunction.getValue();
             } while (result == null);
             previous.getReusedKv().setValue(result);
         }

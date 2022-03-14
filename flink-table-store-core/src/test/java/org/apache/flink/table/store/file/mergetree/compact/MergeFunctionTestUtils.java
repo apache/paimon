@@ -26,8 +26,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/** Test utils for {@link Accumulator}s. */
-public class AccumulatorTestUtils {
+/** Test utils for {@link MergeFunction}s. */
+public class MergeFunctionTestUtils {
 
     public static List<ReusingTestData> getExpectedForValueCount(List<ReusingTestData> input) {
         input = new ArrayList<>(input);
@@ -39,7 +39,7 @@ public class AccumulatorTestUtils {
             ReusingTestData data = input.get(i);
             Preconditions.checkArgument(
                     data.valueKind == ValueKind.ADD,
-                    "Only ADD value kind is supported for value count accumulator.");
+                    "Only ADD value kind is supported for value count merge function.");
             c += data.value;
             if (i + 1 >= input.size() || data.key != input.get(i + 1).key) {
                 if (c != 0) {

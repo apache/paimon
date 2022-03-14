@@ -27,9 +27,9 @@ import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
-import org.apache.flink.table.store.file.mergetree.compact.Accumulator;
-import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
-import org.apache.flink.table.store.file.mergetree.compact.ValueCountAccumulator;
+import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.types.logical.BigIntType;
@@ -103,7 +103,7 @@ public class FileStoreReadTest {
         RowDataSerializer valueSerializer = new RowDataSerializer(valueType);
 
         TestFileStore store =
-                createStore(partitionType, keyType, valueType, new ValueCountAccumulator());
+                createStore(partitionType, keyType, valueType, new ValueCountMergeFunction());
         List<KeyValue> readData =
                 writeThenRead(
                         data,
@@ -141,7 +141,7 @@ public class FileStoreReadTest {
                         TestKeyValueGenerator.PARTITION_TYPE,
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.ROW_TYPE,
-                        new DeduplicateAccumulator());
+                        new DeduplicateMergeFunction());
 
         RowDataSerializer projectedValueSerializer =
                 new RowDataSerializer(
@@ -224,8 +224,11 @@ public class FileStoreReadTest {
     }
 
     private TestFileStore createStore(
-            RowType partitionType, RowType keyType, RowType valueType, Accumulator accumulator) {
+            RowType partitionType,
+            RowType keyType,
+            RowType valueType,
+            MergeFunction mergeFunction) {
         return TestFileStore.create(
-                "avro", tempDir.toString(), 1, partitionType, keyType, valueType, accumulator);
+                "avro", tempDir.toString(), 1, partitionType, keyType, valueType, mergeFunction);
     }
 }

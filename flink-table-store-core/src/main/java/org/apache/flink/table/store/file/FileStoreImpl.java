@@ -27,7 +27,7 @@ import org.apache.flink.table.runtime.generated.GeneratedRecordComparator;
 import org.apache.flink.table.runtime.generated.RecordComparator;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
-import org.apache.flink.table.store.file.mergetree.compact.Accumulator;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.operation.FileStoreCommitImpl;
 import org.apache.flink.table.store.file.operation.FileStoreExpireImpl;
 import org.apache.flink.table.store.file.operation.FileStoreReadImpl;
@@ -47,7 +47,7 @@ public class FileStoreImpl implements FileStore {
     private final RowType partitionType;
     private final RowType keyType;
     private final RowType valueType;
-    private final Accumulator accumulator;
+    private final MergeFunction mergeFunction;
     private final GeneratedRecordComparator genRecordComparator;
 
     public FileStoreImpl(
@@ -56,13 +56,13 @@ public class FileStoreImpl implements FileStore {
             RowType partitionType,
             RowType keyType,
             RowType valueType,
-            Accumulator accumulator) {
+            MergeFunction mergeFunction) {
         this.options = new FileStoreOptions(options);
         this.user = user;
         this.partitionType = partitionType;
         this.keyType = keyType;
         this.valueType = valueType;
-        this.accumulator = accumulator;
+        this.mergeFunction = mergeFunction;
         this.genRecordComparator =
                 new SortCodeGenerator(
                                 new TableConfig(),
@@ -104,7 +104,7 @@ public class FileStoreImpl implements FileStore {
                 keyType,
                 valueType,
                 newKeyComparator(),
-                accumulator,
+                mergeFunction,
                 options.fileFormat(),
                 pathFactory(),
                 newScan(),
@@ -117,7 +117,7 @@ public class FileStoreImpl implements FileStore {
                 keyType,
                 valueType,
                 newKeyComparator(),
-                accumulator,
+                mergeFunction,
                 options.fileFormat(),
                 pathFactory());
     }
