@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.mergetree;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.mergetree.compact.Accumulator;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 
 import java.io.IOException;
 import java.util.Comparator;
@@ -47,9 +47,9 @@ public interface MemTable {
     /**
      * Returns an iterator over the records in this table. The elements are returned in the order of
      * key and sequence number and elements with the same key will be merged by the given {@link
-     * Accumulator}.
+     * MergeFunction}.
      */
-    Iterator<KeyValue> iterator(Comparator<RowData> keyComparator, Accumulator accumulator);
+    Iterator<KeyValue> iterator(Comparator<RowData> keyComparator, MergeFunction mergeFunction);
 
     /** Removes all records from this table. The table will be empty after this call returns. */
     void clear();

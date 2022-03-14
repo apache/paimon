@@ -22,8 +22,8 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.mergetree.compact.Accumulator;
 import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileWriter;
 import org.apache.flink.table.store.file.utils.RecordWriter;
@@ -51,7 +51,7 @@ public class MergeTreeWriter implements RecordWriter {
 
     private final Comparator<RowData> keyComparator;
 
-    private final Accumulator accumulator;
+    private final MergeFunction mergeFunction;
 
     private final SstFileWriter sstFileWriter;
 
@@ -71,7 +71,7 @@ public class MergeTreeWriter implements RecordWriter {
             Levels levels,
             long maxSequenceNumber,
             Comparator<RowData> keyComparator,
-            Accumulator accumulator,
+            MergeFunction mergeFunction,
             SstFileWriter sstFileWriter,
             boolean commitForceCompact) {
         this.memTable = memTable;
@@ -79,7 +79,7 @@ public class MergeTreeWriter implements RecordWriter {
         this.levels = levels;
         this.newSequenceNumber = maxSequenceNumber + 1;
         this.keyComparator = keyComparator;
-        this.accumulator = accumulator;
+        this.mergeFunction = mergeFunction;
         this.sstFileWriter = sstFileWriter;
         this.commitForceCompact = commitForceCompact;
         this.newFiles = new LinkedHashSet<>();
@@ -112,7 +112,7 @@ public class MergeTreeWriter implements RecordWriter {
     private void flush() throws Exception {
         if (memTable.size() > 0) {
             finishCompaction();
-            Iterator<KeyValue> iterator = memTable.iterator(keyComparator, accumulator);
+            Iterator<KeyValue> iterator = memTable.iterator(keyComparator, mergeFunction);
             List<SstFileMeta> files =
                     sstFileWriter.write(CloseableIterator.adapterForIterator(iterator), 0);
             newFiles.addAll(files);

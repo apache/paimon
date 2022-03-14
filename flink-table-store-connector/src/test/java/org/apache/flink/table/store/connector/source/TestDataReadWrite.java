@@ -27,7 +27,7 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
-import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
+import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreReadImpl;
@@ -73,7 +73,12 @@ public class TestDataReadWrite {
 
     public FileStoreRead createRead() {
         return new FileStoreReadImpl(
-                KEY_TYPE, VALUE_TYPE, COMPARATOR, new DeduplicateAccumulator(), avro, pathFactory);
+                KEY_TYPE,
+                VALUE_TYPE,
+                COMPARATOR,
+                new DeduplicateMergeFunction(),
+                avro,
+                pathFactory);
     }
 
     public List<SstFileMeta> writeFiles(
@@ -95,7 +100,7 @@ public class TestDataReadWrite {
                         KEY_TYPE,
                         VALUE_TYPE,
                         COMPARATOR,
-                        new DeduplicateAccumulator(),
+                        new DeduplicateMergeFunction(),
                         avro,
                         pathFactory,
                         null, // not used, we only create an empty writer

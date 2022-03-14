@@ -20,10 +20,10 @@ package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.table.runtime.generated.RecordComparator;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.mergetree.compact.Accumulator;
-import org.apache.flink.table.store.file.mergetree.compact.AccumulatorTestUtils;
-import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
-import org.apache.flink.table.store.file.mergetree.compact.ValueCountAccumulator;
+import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionTestUtils;
+import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.utils.ReusingKeyValue;
 import org.apache.flink.table.store.file.utils.ReusingTestData;
 import org.apache.flink.table.types.logical.BigIntType;
@@ -61,7 +61,7 @@ public abstract class SortBufferMemTableTestBase {
 
     protected abstract List<ReusingTestData> getExpected(List<ReusingTestData> input);
 
-    protected abstract Accumulator createAccumulator();
+    protected abstract MergeFunction createMergeFunction();
 
     @Test
     public void testAndClear() throws IOException {
@@ -95,7 +95,7 @@ public abstract class SortBufferMemTableTestBase {
     protected void runTest(List<ReusingTestData> input) throws IOException {
         List<ReusingTestData> expected = getExpected(input);
         prepareTable(input);
-        Iterator<KeyValue> actual = table.iterator(KEY_COMPARATOR, createAccumulator());
+        Iterator<KeyValue> actual = table.iterator(KEY_COMPARATOR, createMergeFunction());
 
         Random rnd = new Random();
         for (ReusingTestData data : expected) {
@@ -132,8 +132,8 @@ public abstract class SortBufferMemTableTestBase {
         assertThat(table.size()).isEqualTo(input.size());
     }
 
-    /** Test for {@link SortBufferMemTable} with {@link DeduplicateAccumulator}. */
-    public static class WithDeduplicateAccumulatorTest extends SortBufferMemTableTestBase {
+    /** Test for {@link SortBufferMemTable} with {@link DeduplicateMergeFunction}. */
+    public static class WithDeduplicateMergeFunctionTest extends SortBufferMemTableTestBase {
 
         @Override
         protected boolean addOnly() {
@@ -142,17 +142,17 @@ public abstract class SortBufferMemTableTestBase {
 
         @Override
         protected List<ReusingTestData> getExpected(List<ReusingTestData> input) {
-            return AccumulatorTestUtils.getExpectedForDeduplicate(input);
+            return MergeFunctionTestUtils.getExpectedForDeduplicate(input);
         }
 
         @Override
-        protected Accumulator createAccumulator() {
-            return new DeduplicateAccumulator();
+        protected MergeFunction createMergeFunction() {
+            return new DeduplicateMergeFunction();
         }
     }
 
-    /** Test for {@link SortBufferMemTable} with {@link ValueCountAccumulator}. */
-    public static class WithValueCountAccumulatorTest extends SortBufferMemTableTestBase {
+    /** Test for {@link SortBufferMemTable} with {@link ValueCountMergeFunction}. */
+    public static class WithValueCountMergeFunctionTest extends SortBufferMemTableTestBase {
 
         @Override
         protected boolean addOnly() {
@@ -161,12 +161,12 @@ public abstract class SortBufferMemTableTestBase {
 
         @Override
         protected List<ReusingTestData> getExpected(List<ReusingTestData> input) {
-            return AccumulatorTestUtils.getExpectedForValueCount(input);
+            return MergeFunctionTestUtils.getExpectedForValueCount(input);
         }
 
         @Override
-        protected Accumulator createAccumulator() {
-            return new ValueCountAccumulator();
+        protected MergeFunction createMergeFunction() {
+            return new ValueCountMergeFunction();
         }
 
         @Test

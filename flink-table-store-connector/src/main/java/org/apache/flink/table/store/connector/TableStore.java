@@ -41,9 +41,9 @@ import org.apache.flink.table.store.connector.source.LogHybridSourceFactory;
 import org.apache.flink.table.store.connector.source.StaticFileStoreSplitEnumerator;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreImpl;
-import org.apache.flink.table.store.file.mergetree.compact.Accumulator;
-import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
-import org.apache.flink.table.store.file.mergetree.compact.ValueCountAccumulator;
+import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.log.LogSourceProvider;
@@ -120,11 +120,11 @@ public class TableStore {
         RowType partitionType = ProjectionUtils.project(type, partitions);
         RowType keyType;
         RowType valueType;
-        Accumulator accumulator;
+        MergeFunction mergeFunction;
         if (primaryKeys.length == 0) {
             keyType = type;
             valueType = RowType.of(new BigIntType(false));
-            accumulator = new ValueCountAccumulator();
+            mergeFunction = new ValueCountMergeFunction();
         } else {
             List<RowType.RowField> fields = ProjectionUtils.project(type, primaryKeys).getFields();
             // add _KEY_ prefix to avoid conflict with value
@@ -139,9 +139,9 @@ public class TableStore {
                                                             f.getDescription().orElse(null)))
                                     .collect(Collectors.toList()));
             valueType = type;
-            accumulator = new DeduplicateAccumulator();
+            mergeFunction = new DeduplicateMergeFunction();
         }
-        return new FileStoreImpl(options, user, partitionType, keyType, valueType, accumulator);
+        return new FileStoreImpl(options, user, partitionType, keyType, valueType, mergeFunction);
     }
 
     /** Source builder to build a flink {@link Source}. */

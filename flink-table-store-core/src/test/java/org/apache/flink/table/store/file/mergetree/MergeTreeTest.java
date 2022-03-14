@@ -31,7 +31,7 @@ import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.format.FlushingFileFormat;
 import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
-import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
+import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
@@ -263,7 +263,7 @@ public class MergeTreeTest {
                 new Levels(comparator, files, options.numLevels),
                 maxSequenceNumber,
                 comparator,
-                new DeduplicateAccumulator(),
+                new DeduplicateMergeFunction(),
                 sstFileWriter,
                 options.commitForceCompact);
     }
@@ -284,7 +284,7 @@ public class MergeTreeTest {
                                                 dropDelete,
                                                 sstFileReader,
                                                 comparator,
-                                                new DeduplicateAccumulator())),
+                                                new DeduplicateMergeFunction())),
                                 outputLevel);
         return new CompactManager(
                 compactExecutor, compactStrategy, comparator, options.targetFileSize, rewriter);
@@ -357,7 +357,7 @@ public class MergeTreeTest {
                         dropDelete,
                         sstFileReader,
                         comparator,
-                        new DeduplicateAccumulator());
+                        new DeduplicateMergeFunction());
         List<TestRecord> records = new ArrayList<>();
         try (RecordReaderIterator iterator = new RecordReaderIterator(reader)) {
             while (iterator.hasNext()) {

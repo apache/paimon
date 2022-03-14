@@ -27,9 +27,9 @@ import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
 import org.apache.flink.table.store.file.mergetree.SortBufferMemTable;
-import org.apache.flink.table.store.file.mergetree.compact.Accumulator;
 import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileReader;
@@ -51,7 +51,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
     private final SstFileReader.Factory sstFileReaderFactory;
     private final SstFileWriter.Factory sstFileWriterFactory;
     private final Comparator<RowData> keyComparator;
-    private final Accumulator accumulator;
+    private final MergeFunction mergeFunction;
     private final FileStorePathFactory pathFactory;
     private final FileStoreScan scan;
     private final MergeTreeOptions options;
@@ -60,7 +60,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
             RowType keyType,
             RowType valueType,
             Comparator<RowData> keyComparator,
-            Accumulator accumulator,
+            MergeFunction mergeFunction,
             FileFormat fileFormat,
             FileStorePathFactory pathFactory,
             FileStoreScan scan,
@@ -71,7 +71,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                 new SstFileWriter.Factory(
                         keyType, valueType, fileFormat, pathFactory, options.targetFileSize);
         this.keyComparator = keyComparator;
-        this.accumulator = accumulator;
+        this.mergeFunction = mergeFunction;
         this.pathFactory = pathFactory;
         this.scan = scan;
         this.options = options;
@@ -123,7 +123,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                 new Levels(keyComparator, restoreFiles, options.numLevels),
                 maxSequenceNumber,
                 keyComparator,
-                accumulator.copy(),
+                mergeFunction.copy(),
                 sstFileWriter,
                 options.commitForceCompact);
     }
@@ -147,7 +147,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                                                 dropDelete,
                                                 sstFileReaderFactory.create(partition, bucket),
                                                 keyComparator,
-                                                accumulator.copy())),
+                                                mergeFunction.copy())),
                                 outputLevel);
         return new CompactManager(
                 compactExecutor, compactStrategy, keyComparator, options.targetFileSize, rewriter);
