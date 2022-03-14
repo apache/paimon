@@ -22,9 +22,9 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
-import org.apache.flink.table.store.file.mergetree.compact.Accumulator;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileReader;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -41,7 +41,7 @@ public class FileStoreReadImpl implements FileStoreRead {
 
     private final SstFileReader.Factory sstFileReaderFactory;
     private final Comparator<RowData> keyComparator;
-    private final Accumulator accumulator;
+    private final MergeFunction mergeFunction;
 
     private boolean keyProjected;
     private boolean dropDelete = true;
@@ -50,13 +50,13 @@ public class FileStoreReadImpl implements FileStoreRead {
             RowType keyType,
             RowType valueType,
             Comparator<RowData> keyComparator,
-            Accumulator accumulator,
+            MergeFunction mergeFunction,
             FileFormat fileFormat,
             FileStorePathFactory pathFactory) {
         this.sstFileReaderFactory =
                 new SstFileReader.Factory(keyType, valueType, fileFormat, pathFactory);
         this.keyComparator = keyComparator;
-        this.accumulator = accumulator;
+        this.mergeFunction = mergeFunction;
 
         this.keyProjected = false;
     }
@@ -105,7 +105,7 @@ public class FileStoreReadImpl implements FileStoreRead {
                     dropDelete,
                     sstFileReader,
                     keyComparator,
-                    accumulator.copy());
+                    mergeFunction.copy());
         }
     }
 }

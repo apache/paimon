@@ -26,7 +26,7 @@ import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
-import org.apache.flink.table.store.file.mergetree.compact.DeduplicateAccumulator;
+import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.predicate.Equal;
 import org.apache.flink.table.store.file.predicate.Literal;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -71,7 +71,7 @@ public class FileStoreScanTest {
                         TestKeyValueGenerator.PARTITION_TYPE,
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.ROW_TYPE,
-                        new DeduplicateAccumulator());
+                        new DeduplicateMergeFunction());
         pathFactory = store.pathFactory();
     }
 

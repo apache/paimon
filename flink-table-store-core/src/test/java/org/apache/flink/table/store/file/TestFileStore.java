@@ -29,7 +29,7 @@ import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
-import org.apache.flink.table.store.file.mergetree.compact.Accumulator;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.FileStoreExpireImpl;
@@ -82,7 +82,7 @@ public class TestFileStore extends FileStoreImpl {
             RowType partitionType,
             RowType keyType,
             RowType valueType,
-            Accumulator accumulator) {
+            MergeFunction mergeFunction) {
         Configuration conf = new Configuration();
 
         conf.set(MergeTreeOptions.WRITE_BUFFER_SIZE, MemorySize.parse("16 kb"));
@@ -98,7 +98,7 @@ public class TestFileStore extends FileStoreImpl {
         conf.set(FileStoreOptions.TABLE_PATH, root);
         conf.set(FileStoreOptions.BUCKET, numBuckets);
 
-        return new TestFileStore(conf, partitionType, keyType, valueType, accumulator);
+        return new TestFileStore(conf, partitionType, keyType, valueType, mergeFunction);
     }
 
     public TestFileStore(
@@ -106,8 +106,8 @@ public class TestFileStore extends FileStoreImpl {
             RowType partitionType,
             RowType keyType,
             RowType valueType,
-            Accumulator accumulator) {
-        super(conf, UUID.randomUUID().toString(), partitionType, keyType, valueType, accumulator);
+            MergeFunction mergeFunction) {
+        super(conf, UUID.randomUUID().toString(), partitionType, keyType, valueType, mergeFunction);
         this.root = conf.getString(FileStoreOptions.TABLE_PATH);
         this.keySerializer = new RowDataSerializer(keyType);
         this.valueSerializer = new RowDataSerializer(valueType);

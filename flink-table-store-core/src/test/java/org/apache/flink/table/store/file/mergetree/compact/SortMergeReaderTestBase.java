@@ -31,11 +31,11 @@ import java.util.List;
 /** Tests for {@link SortMergeReader}. */
 public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestBase {
 
-    protected abstract Accumulator createAccumulator();
+    protected abstract MergeFunction createMergeFunction();
 
     @Override
     protected RecordReader createRecordReader(List<TestReusingRecordReader> readers) {
-        return new SortMergeReader(new ArrayList<>(readers), KEY_COMPARATOR, createAccumulator());
+        return new SortMergeReader(new ArrayList<>(readers), KEY_COMPARATOR, createMergeFunction());
     }
 
     @Test
@@ -70,8 +70,8 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
                                 + "11, 507, +, 1100 | 12, 508, +, 1200 | 13, 509, +, 1300"));
     }
 
-    /** Tests for {@link SortMergeReader} with {@link DeduplicateAccumulator}. */
-    public static class WithDeduplicateAccumulator extends SortMergeReaderTestBase {
+    /** Tests for {@link SortMergeReader} with {@link DeduplicateMergeFunction}. */
+    public static class WithDeduplicateMergeFunction extends SortMergeReaderTestBase {
 
         @Override
         protected boolean addOnly() {
@@ -80,17 +80,17 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
 
         @Override
         protected List<ReusingTestData> getExpected(List<ReusingTestData> input) {
-            return AccumulatorTestUtils.getExpectedForDeduplicate(input);
+            return MergeFunctionTestUtils.getExpectedForDeduplicate(input);
         }
 
         @Override
-        protected Accumulator createAccumulator() {
-            return new DeduplicateAccumulator();
+        protected MergeFunction createMergeFunction() {
+            return new DeduplicateMergeFunction();
         }
     }
 
-    /** Tests for {@link SortMergeReader} with {@link ValueCountAccumulator}. */
-    public static class WithValueRecordAccumulatorTest extends SortMergeReaderTestBase {
+    /** Tests for {@link SortMergeReader} with {@link ValueCountMergeFunction}. */
+    public static class WithValueRecordMergeFunctionTest extends SortMergeReaderTestBase {
 
         @Override
         protected boolean addOnly() {
@@ -99,12 +99,12 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
 
         @Override
         protected List<ReusingTestData> getExpected(List<ReusingTestData> input) {
-            return AccumulatorTestUtils.getExpectedForValueCount(input);
+            return MergeFunctionTestUtils.getExpectedForValueCount(input);
         }
 
         @Override
-        protected Accumulator createAccumulator() {
-            return new ValueCountAccumulator();
+        protected MergeFunction createMergeFunction() {
+            return new ValueCountMergeFunction();
         }
 
         @Test

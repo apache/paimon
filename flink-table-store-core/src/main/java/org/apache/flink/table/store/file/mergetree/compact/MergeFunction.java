@@ -19,35 +19,25 @@
 package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.KeyValue;
 
 import javax.annotation.Nullable;
 
-/**
- * A {@link Accumulator} where key is primary key (unique) and value is the full record, only keep
- * the latest one.
- */
-public class DeduplicateAccumulator implements Accumulator {
+import java.io.Serializable;
 
-    private RowData latestValue;
+/** Merge function to merge multiple {@link KeyValue}s. */
+public interface MergeFunction extends Serializable {
 
-    @Override
-    public void reset() {
-        latestValue = null;
-    }
+    /** Reset the merge function to its default state. */
+    void reset();
 
-    @Override
-    public void add(RowData value) {
-        latestValue = value;
-    }
+    /** Add the given {@link RowData} to the merge function. */
+    void add(RowData value);
 
-    @Override
+    /** Get current merged value. Return null if this merged result should be skipped. */
     @Nullable
-    public RowData getValue() {
-        return latestValue;
-    }
+    RowData getValue();
 
-    @Override
-    public Accumulator copy() {
-        return new DeduplicateAccumulator();
-    }
+    /** Create a new merge function object with the same functionality as this one. */
+    MergeFunction copy();
 }
