@@ -33,6 +33,8 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 
 import javax.annotation.Nullable;
 
+import java.util.Collection;
+
 import static org.apache.flink.table.store.connector.source.PendingSplitsCheckpoint.INVALID_SNAPSHOT;
 
 /** {@link Source} of file store. */
@@ -45,6 +47,10 @@ public class FileStoreSource
 
     private final boolean valueCountMode;
 
+    private final boolean isContinuous;
+
+    private final long discoveryInterval;
+
     @Nullable private final int[][] projectedFields;
 
     @Nullable private final Predicate partitionPredicate;
@@ -54,11 +60,15 @@ public class FileStoreSource
     public FileStoreSource(
             FileStore fileStore,
             boolean valueCountMode,
+            boolean isContinuous,
+            long discoveryInterval,
             @Nullable int[][] projectedFields,
             @Nullable Predicate partitionPredicate,
             final Predicate fieldPredicate) {
         this.fileStore = fileStore;
         this.valueCountMode = valueCountMode;
+        this.isContinuous = isContinuous;
+        this.discoveryInterval = discoveryInterval;
         this.projectedFields = projectedFields;
         this.partitionPredicate = partitionPredicate;
         this.fieldPredicate = fieldPredicate;
@@ -73,20 +83,34 @@ public class FileStoreSource
     @Override
     public SourceReader<RowData, FileStoreSourceSplit> createReader(SourceReaderContext context) {
         FileStoreRead read = fileStore.newRead();
+
+        if (isContinuous) {
+            read.withDropDelete(false);
+        }
+
         if (projectedFields != null) {
             if (valueCountMode) {
-                // TODO don't project keys, and add key projection to split reader
+                // TODO when isContinuous is false, don't project keys, and add key projection to
+                // split reader
                 read.withKeyProjection(projectedFields);
             } else {
                 read.withValueProjection(projectedFields);
             }
         }
+
         return new FileStoreSourceReader(context, read, valueCountMode);
     }
 
     @Override
     public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> createEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context) {
+        return restoreEnumerator(context, null);
+    }
+
+    @Override
+    public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> restoreEnumerator(
+            SplitEnumeratorContext<FileStoreSourceSplit> context,
+            PendingSplitsCheckpoint checkpoint) {
         FileStoreScan scan = fileStore.newScan();
         if (partitionPredicate != null) {
             scan.withPartitionFilter(partitionPredicate);
@@ -98,18 +122,33 @@ public class FileStoreSource
                 scan.withValueFilter(fieldPredicate);
             }
         }
-        return new StaticFileStoreSplitEnumerator(context, scan);
-    }
 
-    @Override
-    public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> restoreEnumerator(
-            SplitEnumeratorContext<FileStoreSourceSplit> context,
-            PendingSplitsCheckpoint checkpoint) {
-        Snapshot snapshot = null;
-        if (checkpoint.currentSnapshotId() != INVALID_SNAPSHOT) {
-            snapshot = fileStore.newScan().snapshot(checkpoint.currentSnapshotId());
+        Long snapshotId;
+        Collection<FileStoreSourceSplit> splits;
+        if (checkpoint == null) {
+            FileStoreScan.Plan plan = scan.plan();
+            snapshotId = plan.snapshotId();
+            splits = new FileStoreSourceSplitGenerator().createSplits(plan);
+        } else {
+            snapshotId = checkpoint.currentSnapshotId();
+            if (snapshotId == INVALID_SNAPSHOT) {
+                snapshotId = null;
+            }
+            splits = checkpoint.splits();
         }
-        return new StaticFileStoreSplitEnumerator(context, snapshot, checkpoint.splits());
+
+        if (isContinuous) {
+            long currentSnapshot = snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId;
+            return new ContinuousFileSplitEnumerator(
+                    context,
+                    scan.withIncremental(true),
+                    splits,
+                    currentSnapshot,
+                    discoveryInterval);
+        } else {
+            Snapshot snapshot = snapshotId == null ? null : scan.snapshot(snapshotId);
+            return new StaticFileStoreSplitEnumerator(context, snapshot, splits);
+        }
     }
 
     @Override
