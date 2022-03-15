@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
@@ -95,7 +96,7 @@ public class TestFileStore extends FileStoreImpl {
 
         conf.set(FileStoreOptions.FILE_FORMAT, format);
         conf.set(FileStoreOptions.MANIFEST_FORMAT, format);
-        conf.set(FileStoreOptions.TABLE_PATH, root);
+        conf.set(FileStoreOptions.FILE_PATH, root);
         conf.set(FileStoreOptions.BUCKET, numBuckets);
 
         return new TestFileStore(conf, partitionType, keyType, valueType, mergeFunction);
@@ -107,8 +108,15 @@ public class TestFileStore extends FileStoreImpl {
             RowType keyType,
             RowType valueType,
             MergeFunction mergeFunction) {
-        super(conf, UUID.randomUUID().toString(), partitionType, keyType, valueType, mergeFunction);
-        this.root = conf.getString(FileStoreOptions.TABLE_PATH);
+        super(
+                ObjectIdentifier.of("catalog", "database", "table"),
+                conf,
+                UUID.randomUUID().toString(),
+                partitionType,
+                keyType,
+                valueType,
+                mergeFunction);
+        this.root = conf.getString(FileStoreOptions.FILE_PATH);
         this.keySerializer = new RowDataSerializer(keyType);
         this.valueSerializer = new RowDataSerializer(valueType);
     }

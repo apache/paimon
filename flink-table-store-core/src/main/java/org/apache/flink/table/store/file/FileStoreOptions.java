@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.file;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 
@@ -50,13 +50,6 @@ public class FileStoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("The root file path of the table store in the filesystem.");
-
-    @Internal
-    public static final ConfigOption<String> TABLE_PATH =
-            ConfigOptions.key("table.path")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("The table file path of the table store in the filesystem.");
 
     public static final ConfigOption<String> FILE_FORMAT =
             ConfigOptions.key("file.format")
@@ -129,8 +122,14 @@ public class FileStoreOptions implements Serializable {
         return options.get(BUCKET);
     }
 
-    public Path path() {
-        return new Path(options.get(TABLE_PATH));
+    public Path path(ObjectIdentifier tableIdentifier) {
+        return new Path(
+                options.get(FILE_PATH),
+                String.format(
+                        "root/%s.catalog/%s.db/%s",
+                        tableIdentifier.getCatalogName(),
+                        tableIdentifier.getDatabaseName(),
+                        tableIdentifier.getObjectName()));
     }
 
     public FileFormat fileFormat() {

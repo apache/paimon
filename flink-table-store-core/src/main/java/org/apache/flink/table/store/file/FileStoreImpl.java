@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.TableConfig;
+import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.planner.codegen.sort.SortCodeGenerator;
 import org.apache.flink.table.planner.plan.utils.SortUtil;
 import org.apache.flink.table.runtime.generated.GeneratedRecordComparator;
@@ -42,6 +43,7 @@ import java.util.stream.IntStream;
 /** File store implementation. */
 public class FileStoreImpl implements FileStore {
 
+    private final ObjectIdentifier tableIdentifier;
     private final FileStoreOptions options;
     private final String user;
     private final RowType partitionType;
@@ -51,12 +53,14 @@ public class FileStoreImpl implements FileStore {
     private final GeneratedRecordComparator genRecordComparator;
 
     public FileStoreImpl(
+            ObjectIdentifier tableIdentifier,
             Configuration options,
             String user,
             RowType partitionType,
             RowType keyType,
             RowType valueType,
             MergeFunction mergeFunction) {
+        this.tableIdentifier = tableIdentifier;
         this.options = new FileStoreOptions(options);
         this.user = user;
         this.partitionType = partitionType;
@@ -75,7 +79,7 @@ public class FileStoreImpl implements FileStore {
     @VisibleForTesting
     public FileStorePathFactory pathFactory() {
         return new FileStorePathFactory(
-                options.path(), partitionType, options.partitionDefaultName());
+                options.path(tableIdentifier), partitionType, options.partitionDefaultName());
     }
 
     @VisibleForTesting
