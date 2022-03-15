@@ -108,6 +108,23 @@ public class TableStore {
         return this;
     }
 
+    public boolean partitioned() {
+        return partitions.length > 0;
+    }
+
+    public boolean valueCountMode() {
+        return primaryKeys.length == 0;
+    }
+
+    public List<String> fieldNames() {
+        return type.getFieldNames();
+    }
+
+    public List<String> partitionKeys() {
+        RowType partitionType = ProjectionUtils.project(type, partitions);
+        return partitionType.getFieldNames();
+    }
+
     public SourceBuilder sourceBuilder() {
         return new SourceBuilder();
     }
@@ -154,7 +171,9 @@ public class TableStore {
 
         @Nullable private int[][] projectedFields;
 
-        @Nullable private Predicate predicate;
+        @Nullable private Predicate partitionPredicate;
+
+        @Nullable private Predicate fieldPredicate;
 
         @Nullable private LogSourceProvider logSourceProvider;
 
@@ -163,8 +182,13 @@ public class TableStore {
             return this;
         }
 
-        public SourceBuilder withPredicate(Predicate predicate) {
-            this.predicate = predicate;
+        public SourceBuilder withPartitionPredicate(Predicate partitionPredicate) {
+            this.partitionPredicate = partitionPredicate;
+            return this;
+        }
+
+        public SourceBuilder withFieldPredicate(Predicate fieldPredicate) {
+            this.fieldPredicate = fieldPredicate;
             return this;
         }
 
@@ -186,7 +210,11 @@ public class TableStore {
         private FileStoreSource buildFileStoreSource() {
             FileStore fileStore = buildFileStore();
             return new FileStoreSource(
-                    fileStore, primaryKeys.length == 0, projectedFields, predicate);
+                    fileStore,
+                    primaryKeys.length == 0,
+                    projectedFields,
+                    partitionPredicate,
+                    fieldPredicate);
         }
 
         public Source<RowData, ?, ?> build() {

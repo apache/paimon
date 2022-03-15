@@ -23,6 +23,9 @@ import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.configuration.ReadableConfig;
 
+import java.util.HashSet;
+import java.util.Set;
+
 /** Options for merge tree. */
 public class MergeTreeOptions {
 
@@ -128,5 +131,18 @@ public class MergeTreeOptions {
                 config.get(COMMIT_FORCE_COMPACT),
                 config.get(COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT),
                 config.get(COMPACTION_SIZE_RATIO));
+    }
+
+    public static Set<ConfigOption<?>> allOptions() {
+        Set<ConfigOption<?>> allOptions = new HashSet<>();
+        allOptions.add(WRITE_BUFFER_SIZE);
+        allOptions.add(PAGE_SIZE);
+        allOptions.add(TARGET_FILE_SIZE);
+        allOptions.add(NUM_SORTED_RUNS_MAX);
+        allOptions.add(NUM_LEVELS);
+        allOptions.add(COMMIT_FORCE_COMPACT);
+        allOptions.add(COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT);
+        allOptions.add(COMPACTION_SIZE_RATIO);
+        return allOptions;
     }
 }

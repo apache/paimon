@@ -22,12 +22,15 @@ import org.apache.flink.table.expressions.CallExpression;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.expressions.ExpressionVisitor;
 import org.apache.flink.table.expressions.FieldReferenceExpression;
+import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.expressions.TypeLiteralExpression;
 import org.apache.flink.table.expressions.ValueLiteralExpression;
 import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
 import org.apache.flink.table.functions.FunctionDefinition;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
+
+import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.Optional;
@@ -172,6 +175,16 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
     @Override
     public Predicate visit(Expression expression) {
         throw new RuntimeException("Unsupported expression: " + expression.asSummaryString());
+    }
+
+    @Nullable
+    public static Predicate convert(List<ResolvedExpression> filters) {
+        return filters != null
+                ? filters.stream()
+                        .map(filter -> filter.accept(PredicateConverter.CONVERTER))
+                        .reduce(And::new)
+                        .orElse(null)
+                : null;
     }
 
     /** Encounter an unsupported expression, the caller can choose to ignore this filter branch. */

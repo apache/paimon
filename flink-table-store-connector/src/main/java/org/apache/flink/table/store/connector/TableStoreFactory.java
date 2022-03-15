@@ -19,16 +19,30 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.ObjectIdentifier;
+import org.apache.flink.table.catalog.ResolvedCatalogTable;
+import org.apache.flink.table.catalog.ResolvedSchema;
+import org.apache.flink.table.connector.sink.DynamicTableSink;
+import org.apache.flink.table.connector.source.DynamicTableSource;
+import org.apache.flink.table.factories.DynamicTableSinkFactory;
+import org.apache.flink.table.factories.DynamicTableSourceFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.factories.ManagedTableFactory;
+import org.apache.flink.table.store.connector.sink.TableStoreSink;
+import org.apache.flink.table.store.connector.source.TableStoreSource;
 import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
+import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
+import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -36,17 +50,20 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.CHANGE_TRACKING;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.FILE_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
+import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
 import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 import static org.apache.flink.table.store.log.LogStoreTableFactory.discoverLogStoreFactory;
 
 /** Default implementation of {@link ManagedTableFactory}. */
-public class TableStoreFactory implements ManagedTableFactory {
+public class TableStoreFactory
+        implements ManagedTableFactory, DynamicTableSourceFactory, DynamicTableSinkFactory {
 
     @Override
     public Map<String, String> enrichOptions(Context context) {
@@ -130,6 +147,41 @@ public class TableStoreFactory implements ManagedTableFactory {
     }
 
     @Override
+    public DynamicTableSource createDynamicTableSource(Context context) {
+        boolean streaming =
+                context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
+                        == RuntimeExecutionMode.STREAMING;
+        Context logStoreContext = null;
+        LogStoreTableFactory logStoreTableFactory = null;
+
+        if (enableChangeTracking(context.getCatalogTable().getOptions())) {
+            logStoreContext = createLogContext(context);
+            logStoreTableFactory = createLogStoreTableFactory(context);
+        }
+        return new TableStoreSource(
+                buildTableStore(context), streaming, logStoreContext, logStoreTableFactory);
+    }
+
+    @Override
+    public DynamicTableSink createDynamicTableSink(Context context) {
+        Map<String, String> options = context.getCatalogTable().getOptions();
+        Context logStoreContext = null;
+        LogStoreTableFactory logStoreTableFactory = null;
+        if (enableChangeTracking(options)) {
+            logStoreContext = createLogContext(context);
+            logStoreTableFactory = createLogStoreTableFactory(context);
+        }
+        return new TableStoreSink(
+                buildTableStore(context),
+                LogOptions.LogChangelogMode.valueOf(
+                        options.getOrDefault(
+                                LOG_PREFIX + CHANGELOG_MODE.key(),
+                                CHANGELOG_MODE.defaultValue().toString().toUpperCase())),
+                logStoreContext,
+                logStoreTableFactory);
+    }
+
+    @Override
     public Set<ConfigOption<?>> requiredOptions() {
         return Collections.emptySet();
     }
@@ -137,13 +189,14 @@ public class TableStoreFactory implements ManagedTableFactory {
     @Override
     public Set<ConfigOption<?>> optionalOptions() {
         Set<ConfigOption<?>> options = FileStoreOptions.allOptions();
+        options.addAll(MergeTreeOptions.allOptions());
         options.add(CHANGE_TRACKING);
         return options;
     }
 
     // ~ Tools ------------------------------------------------------------------
 
-    private LogStoreTableFactory createLogStoreTableFactory(Context context) {
+    private static LogStoreTableFactory createLogStoreTableFactory(Context context) {
         return discoverLogStoreFactory(
                 context.getClassLoader(),
                 context.getCatalogTable()
@@ -151,7 +204,7 @@ public class TableStoreFactory implements ManagedTableFactory {
                         .getOrDefault(LOG_SYSTEM.key(), LOG_SYSTEM.defaultValue()));
     }
 
-    private Context createLogContext(Context context) {
+    private static Context createLogContext(Context context) {
         return new FactoryUtil.DefaultDynamicTableContext(
                 context.getObjectIdentifier(),
                 context.getCatalogTable()
@@ -163,20 +216,35 @@ public class TableStoreFactory implements ManagedTableFactory {
     }
 
     @VisibleForTesting
-    Map<String, String> filterLogStoreOptions(Map<String, String> enrichedOptions) {
-        Map<String, String> logStoreOptions = new HashMap<>();
-        enrichedOptions.forEach(
-                (k, v) -> {
-                    if (k.startsWith(LOG_PREFIX)) {
-                        logStoreOptions.put(k.substring(LOG_PREFIX.length()), v);
-                    }
-                });
-        return logStoreOptions;
+    static Map<String, String> filterLogStoreOptions(Map<String, String> options) {
+        return options.entrySet().stream()
+                .filter(entry -> entry.getKey().startsWith(LOG_PREFIX))
+                .collect(
+                        Collectors.toMap(
+                                entry -> entry.getKey().substring(LOG_PREFIX.length()),
+                                Map.Entry::getValue));
     }
 
-    private static Path tablePath(Map<String, String> options, ObjectIdentifier identifier) {
+    @VisibleForTesting
+    static Map<String, String> filterFileStoreOptions(Map<String, String> options) {
+        return options.entrySet().stream()
+                .filter(entry -> !entry.getKey().startsWith(LOG_PREFIX))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+    }
+
+    @VisibleForTesting
+    static Path tablePath(Map<String, String> options, ObjectIdentifier identifier) {
+        Preconditions.checkArgument(
+                options.containsKey(FILE_PATH.key()),
+                String.format(
+                        "Failed to create file store path. "
+                                + "Please specify a root dir by setting session level configuration "
+                                + "as `SET 'table-store.%s' = '...'`. "
+                                + "Alternatively, you can use a per-table root dir "
+                                + "as `CREATE TABLE ${table} (...) WITH ('%s' = '...')`",
+                        FILE_PATH.key(), FILE_PATH.key()));
         return new Path(
-                new Path(options.get(FILE_PATH.key())),
+                options.get(FILE_PATH.key()),
                 String.format(
                         "root/%s.catalog/%s.db/%s",
                         identifier.getCatalogName(),
@@ -184,9 +252,32 @@ public class TableStoreFactory implements ManagedTableFactory {
                         identifier.getObjectName()));
     }
 
-    private static boolean enableChangeTracking(Map<String, String> options) {
+    @VisibleForTesting
+    static boolean enableChangeTracking(Map<String, String> options) {
         return Boolean.parseBoolean(
                 options.getOrDefault(
                         CHANGE_TRACKING.key(), CHANGE_TRACKING.defaultValue().toString()));
+    }
+
+    private TableStore buildTableStore(Context context) {
+        ResolvedCatalogTable catalogTable = context.getCatalogTable();
+        ResolvedSchema schema = catalogTable.getResolvedSchema();
+        RowType rowType = (RowType) schema.toPhysicalRowDataType().getLogicalType();
+        int[] primaryKeys = new int[0];
+        if (schema.getPrimaryKey().isPresent()) {
+            primaryKeys =
+                    schema.getPrimaryKey().get().getColumns().stream()
+                            .mapToInt(rowType.getFieldNames()::indexOf)
+                            .toArray();
+        }
+        return new TableStore(
+                        Configuration.fromMap(filterFileStoreOptions(catalogTable.getOptions())))
+                .withTableIdentifier(context.getObjectIdentifier())
+                .withSchema(rowType)
+                .withPrimaryKeys(primaryKeys)
+                .withPartitions(
+                        catalogTable.getPartitionKeys().stream()
+                                .mapToInt(rowType.getFieldNames()::indexOf)
+                                .toArray());
     }
 }
