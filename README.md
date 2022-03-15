@@ -4,9 +4,9 @@ Flink Table Store is a unified streaming and batch store for building dynamic ta
 
 Flink Table Store is developed under the umbrella of [Apache Flink](https://flink.apache.org/).
 
-## Building the Project
+## Building
 
-Run the `mvn clean package` command.
+Run the `mvn clean package` command to build the project.
 
 Then you will find a JAR file that contains your application, plus any libraries that you may have added as dependencies to the application: `target/<artifact-id>-<version>.jar`.
 
@@ -16,4 +16,4 @@ You can learn more about how to contribute on the [Apache Flink website](https:/
 
 ## License
 
-The code in this repository is licensed under the [Apache License Version 2.0](LICENSE).
+The code in this repository is licensed under the [Apache Software License 2](LICENSE).
