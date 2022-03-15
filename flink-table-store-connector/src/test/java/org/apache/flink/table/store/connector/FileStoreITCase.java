@@ -59,7 +59,7 @@ import java.util.stream.Stream;
 
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.FILE_FORMAT;
-import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_PATH;
+import static org.apache.flink.table.store.file.FileStoreOptions.FILE_PATH;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for {@link FileStoreSource} and {@link StoreSink}. */
@@ -237,10 +237,10 @@ public class FileStoreITCase extends AbstractTestBase {
         Configuration options = new Configuration();
         options.set(BUCKET, NUM_BUCKET);
         if (noFail) {
-            options.set(TABLE_PATH, folder.toURI().toString());
+            options.set(FILE_PATH, folder.toURI().toString());
         } else {
             FailingAtomicRenameFileSystem.get().reset(3, 100);
-            options.set(TABLE_PATH, FailingAtomicRenameFileSystem.getFailingPath(folder.getPath()));
+            options.set(FILE_PATH, FailingAtomicRenameFileSystem.getFailingPath(folder.getPath()));
         }
         options.set(FILE_FORMAT, "avro");
         return options;
