@@ -38,14 +38,14 @@ import java.util.List;
  *
  * <p>The reason this class is rewritten is to support {@link CheckpointedFunction}.
  */
-@SuppressWarnings("SynchronizationOnLocalVariableOrMethodParameter")
 public class FiniteTestSource<T>
         implements SourceFunction<T>, CheckpointedFunction, CheckpointListener {
 
     private static final long serialVersionUID = 1L;
 
-    @SuppressWarnings("NonSerializableFieldInSerializableClass")
-    private final Iterable<T> elements;
+    private final List<T> elements;
+
+    private final boolean emitOnce;
 
     private volatile boolean running = true;
 
@@ -55,8 +55,9 @@ public class FiniteTestSource<T>
 
     private volatile int numTimesEmitted;
 
-    public FiniteTestSource(Iterable<T> elements) {
+    public FiniteTestSource(List<T> elements, boolean emitOnce) {
         this.elements = elements;
+        this.emitOnce = emitOnce;
     }
 
     @Override
@@ -92,11 +93,11 @@ public class FiniteTestSource<T>
     public void run(SourceContext<T> ctx) throws Exception {
         switch (numTimesEmitted) {
             case 0:
-                emitElementsAndWaitForCheckpoints(ctx);
-                emitElementsAndWaitForCheckpoints(ctx);
+                emitElementsAndWaitForCheckpoints(ctx, false);
+                emitElementsAndWaitForCheckpoints(ctx, true);
                 break;
             case 1:
-                emitElementsAndWaitForCheckpoints(ctx);
+                emitElementsAndWaitForCheckpoints(ctx, true);
                 break;
             case 2:
                 // Maybe missed notifyCheckpointComplete, wait next notifyCheckpointComplete
@@ -111,15 +112,17 @@ public class FiniteTestSource<T>
         }
     }
 
-    private void emitElementsAndWaitForCheckpoints(SourceContext<T> ctx)
+    private void emitElementsAndWaitForCheckpoints(SourceContext<T> ctx, boolean isSecond)
             throws InterruptedException {
         final Object lock = ctx.getCheckpointLock();
 
         final int checkpointToAwait;
         synchronized (lock) {
             checkpointToAwait = numCheckpointsComplete + 2;
-            for (T t : elements) {
-                ctx.collect(t);
+            if (!isSecond || !emitOnce) {
+                for (T t : elements) {
+                    ctx.collect(t);
+                }
             }
             numTimesEmitted++;
         }

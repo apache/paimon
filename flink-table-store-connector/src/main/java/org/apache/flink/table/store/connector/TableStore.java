@@ -59,6 +59,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
+import static org.apache.flink.table.store.file.FileStoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
 
 /** A table store api to create source and sink. */
 @Experimental
@@ -207,11 +208,17 @@ public class TableStore {
             return this;
         }
 
-        private FileStoreSource buildFileStoreSource() {
+        private long discoveryIntervalMills() {
+            return options.get(CONTINUOUS_DISCOVERY_INTERVAL).toMillis();
+        }
+
+        private FileStoreSource buildFileSource(boolean isContinuous) {
             FileStore fileStore = buildFileStore();
             return new FileStoreSource(
                     fileStore,
                     primaryKeys.length == 0,
+                    isContinuous,
+                    discoveryIntervalMills(),
                     projectedFields,
                     partitionPredicate,
                     fieldPredicate);
@@ -220,15 +227,14 @@ public class TableStore {
         public Source<RowData, ?, ?> build() {
             if (isContinuous) {
                 if (logSourceProvider == null) {
-                    throw new UnsupportedOperationException(
-                            "File store continuous mode is not supported yet.");
+                    return buildFileSource(true);
                 }
 
                 // TODO project log source
 
                 if (isHybrid) {
                     return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
-                                    buildFileStoreSource())
+                                    buildFileSource(false))
                             .addSource(
                                     new LogHybridSourceFactory(logSourceProvider),
                                     Boundedness.CONTINUOUS_UNBOUNDED)
@@ -237,7 +243,7 @@ public class TableStore {
                     return logSourceProvider.createSource(null);
                 }
             } else {
-                return buildFileStoreSource();
+                return buildFileSource(false);
             }
         }
 

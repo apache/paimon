@@ -21,7 +21,6 @@ package org.apache.flink.table.store.connector.source;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.operation.FileStoreScan;
 
 import javax.annotation.Nullable;
 
@@ -50,15 +49,6 @@ public class StaticFileStoreSplitEnumerator
         this.context = context;
         this.snapshot = snapshot;
         this.splits = new LinkedList<>(splits);
-    }
-
-    public StaticFileStoreSplitEnumerator(
-            SplitEnumeratorContext<FileStoreSourceSplit> context, FileStoreScan scan) {
-        this.context = context;
-        FileStoreScan.Plan plan = scan.plan();
-        Long snapshotId = plan.snapshotId();
-        this.snapshot = snapshotId == null ? null : scan.snapshot(snapshotId);
-        this.splits = new LinkedList<>(new FileStoreSourceSplitGenerator().createSplits(plan));
     }
 
     @Override

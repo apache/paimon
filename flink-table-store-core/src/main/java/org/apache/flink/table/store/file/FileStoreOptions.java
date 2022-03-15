@@ -97,6 +97,12 @@ public class FileStoreOptions implements Serializable {
                     .defaultValue(Duration.ofDays(1))
                     .withDescription("The maximum time of completed snapshots to retain.");
 
+    public static final ConfigOption<Duration> CONTINUOUS_DISCOVERY_INTERVAL =
+            ConfigOptions.key("continuous.discovery-interval")
+                    .durationType()
+                    .defaultValue(Duration.ofSeconds(1))
+                    .withDescription("The discovery interval of continuous reading.");
+
     private final Configuration options;
 
     public static Set<ConfigOption<?>> allOptions() {

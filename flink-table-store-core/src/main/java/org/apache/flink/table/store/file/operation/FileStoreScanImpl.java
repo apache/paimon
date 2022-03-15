@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
@@ -37,6 +38,8 @@ import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -62,6 +65,7 @@ public class FileStoreScanImpl implements FileStoreScan {
     private Long specifiedSnapshotId = null;
     private Integer specifiedBucket = null;
     private List<ManifestFileMeta> specifiedManifests = null;
+    private boolean isIncremental = false;
 
     public FileStoreScanImpl(
             RowType partitionType,
@@ -72,6 +76,16 @@ public class FileStoreScanImpl implements FileStoreScan {
         this.pathFactory = pathFactory;
         this.manifestFileFactory = manifestFileFactory;
         this.manifestList = manifestListFactory.create();
+    }
+
+    @Override
+    public boolean snapshotExists(long snapshotId) {
+        Path path = pathFactory.toSnapshotPath(snapshotId);
+        try {
+            return path.getFileSystem().exists(path);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     @Override
@@ -149,6 +163,12 @@ public class FileStoreScanImpl implements FileStoreScan {
     }
 
     @Override
+    public FileStoreScan withIncremental(boolean isIncremental) {
+        this.isIncremental = isIncremental;
+        return this;
+    }
+
+    @Override
     public Plan plan() {
         List<ManifestFileMeta> manifests = specifiedManifests;
         Long snapshotId = specifiedSnapshotId;
@@ -159,7 +179,11 @@ public class FileStoreScanImpl implements FileStoreScan {
             if (snapshotId == null) {
                 manifests = Collections.emptyList();
             } else {
-                manifests = snapshot(snapshotId).readAllManifests(manifestList);
+                Snapshot snapshot = snapshot(snapshotId);
+                manifests =
+                        isIncremental
+                                ? manifestList.read(snapshot.deltaManifestList())
+                                : snapshot.readAllManifests(manifestList);
             }
         }
 

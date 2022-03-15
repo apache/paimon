@@ -146,19 +146,7 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
                 });
         // TODO: streaming with change-tracking
 
-        // exception case
-        specs.add(
-                new Object[] {
-                    RuntimeExecutionMode.STREAMING,
-                    "table_" + UUID.randomUUID(),
-                    false, // enable change-tracking
-                    false, // has pk
-                    null, //  with duplicate
-                    new ExpectedResult()
-                            .success(false)
-                            .expectedType(UnsupportedOperationException.class)
-                            .expectedMessage("File store continuous mode is not supported yet.")
-                });
+        // TODO: streaming without log system
 
         // TODO: add overwrite case
 
