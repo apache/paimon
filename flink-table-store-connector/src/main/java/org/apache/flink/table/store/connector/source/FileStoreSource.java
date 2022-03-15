@@ -47,17 +47,21 @@ public class FileStoreSource
 
     @Nullable private final int[][] projectedFields;
 
-    @Nullable private final Predicate predicate;
+    @Nullable private final Predicate partitionPredicate;
+
+    @Nullable private final Predicate fieldPredicate;
 
     public FileStoreSource(
             FileStore fileStore,
             boolean valueCountMode,
             @Nullable int[][] projectedFields,
-            @Nullable Predicate predicate) {
+            @Nullable Predicate partitionPredicate,
+            final Predicate fieldPredicate) {
         this.fileStore = fileStore;
         this.valueCountMode = valueCountMode;
         this.projectedFields = projectedFields;
-        this.predicate = predicate;
+        this.partitionPredicate = partitionPredicate;
+        this.fieldPredicate = fieldPredicate;
     }
 
     @Override
@@ -84,14 +88,15 @@ public class FileStoreSource
     public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> createEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context) {
         FileStoreScan scan = fileStore.newScan();
-        if (predicate != null) {
-            // TODO split predicate into partitionPredicate and fieldsPredicate
-            //            scan.withPartitionFilter(partitionPredicate);
-            //            if (keyAsRecord) {
-            //                scan.withKeyFilter(fieldsPredicate);
-            //            } else {
-            //                scan.withValueFilter(fieldsPredicate);
-            //            }
+        if (partitionPredicate != null) {
+            scan.withPartitionFilter(partitionPredicate);
+        }
+        if (fieldPredicate != null) {
+            if (valueCountMode) {
+                scan.withKeyFilter(fieldPredicate);
+            } else {
+                scan.withValueFilter(fieldPredicate);
+            }
         }
         return new StaticFileStoreSplitEnumerator(context, scan);
     }

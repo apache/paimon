@@ -158,8 +158,46 @@ public class TableStoreFactoryTest {
                 addPrefix(expectedLogOptions, LOG_PREFIX, (key) -> true);
         enrichedOptions.put("foo", "bar");
 
-        assertThat(((TableStoreFactory) tableStoreFactory).filterLogStoreOptions(enrichedOptions))
+        assertThat(TableStoreFactory.filterLogStoreOptions(enrichedOptions))
                 .containsExactlyInAnyOrderEntriesOf(expectedLogOptions);
+    }
+
+    @Test
+    public void testFilterFileStoreOptions() {
+        // mix invalid key and leave value to empty to emphasize the deferred validation
+        Map<String, String> expectedFileStoreOptions =
+                of("dummy.key", "", FILE_PATH.key(), "dummy:/foo/bar");
+        Map<String, String> enrichedOptions = new HashMap<>(expectedFileStoreOptions);
+        enrichedOptions.put("log.foo", "bar");
+        enrichedOptions.put("log.bar", "foo");
+
+        assertThat(TableStoreFactory.filterFileStoreOptions(enrichedOptions))
+                .containsExactlyInAnyOrderEntriesOf(expectedFileStoreOptions);
+    }
+
+    @Test
+    public void testTablePath() {
+        Map<String, String> options = of(FILE_PATH.key(), "dummy:/foo/bar");
+        assertThat(TableStoreFactory.tablePath(options, TABLE_IDENTIFIER))
+                .isEqualTo(
+                        new org.apache.flink.core.fs.Path(
+                                "dummy:/foo/bar/root/catalog.catalog/database.db/table"));
+
+        assertThatThrownBy(
+                        () -> TableStoreFactory.tablePath(Collections.emptyMap(), TABLE_IDENTIFIER))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Failed to create file store path. "
+                                + "Please specify a root dir by setting session level configuration "
+                                + "as `SET 'table-store.file.path' = '...'`. "
+                                + "Alternatively, you can use a per-table root dir "
+                                + "as `CREATE TABLE ${table} (...) WITH ('file.path' = '...')`");
+    }
+
+    @ParameterizedTest
+    @MethodSource("providingEnrichedOptionsForChangeTracking")
+    public void testEnableChangeTracking(Map<String, String> options, boolean expected) {
+        assertThat(TableStoreFactory.enableChangeTracking(options)).isEqualTo(expected);
     }
 
     // ~ Tools ------------------------------------------------------------------
@@ -238,6 +276,14 @@ public class TableStoreFactoryTest {
                 Arguments.of(enrichedOptions, false),
                 Arguments.of(enrichedOptions, true),
                 Arguments.of(enrichedOptions, false));
+    }
+
+    private static Stream<Arguments> providingEnrichedOptionsForChangeTracking() {
+        return Stream.of(
+                Arguments.of(Collections.emptyMap(), true),
+                Arguments.of(of(CHANGE_TRACKING.key(), "true"), true),
+                Arguments.of(of(CHANGE_TRACKING.key(), "false"), false),
+                Arguments.of(of(TABLE_STORE_PREFIX + CHANGE_TRACKING.key(), "false"), true));
     }
 
     private static Map<String, String> addPrefix(
