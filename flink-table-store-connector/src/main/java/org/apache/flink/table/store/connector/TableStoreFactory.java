@@ -164,9 +164,6 @@ public class TableStoreFactory
 
     @Override
     public DynamicTableSink createDynamicTableSink(Context context) {
-        boolean streaming =
-                context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
-                        == RuntimeExecutionMode.STREAMING;
         Map<String, String> options = context.getCatalogTable().getOptions();
         Context logStoreContext = null;
         LogStoreTableFactory logStoreTableFactory = null;
@@ -176,7 +173,6 @@ public class TableStoreFactory
         }
         return new TableStoreSink(
                 buildTableStore(context),
-                streaming,
                 LogOptions.LogChangelogMode.valueOf(
                         options.getOrDefault(
                                 LOG_PREFIX + CHANGELOG_MODE.key(),

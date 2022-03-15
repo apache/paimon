@@ -160,6 +160,8 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
                             .expectedMessage("File store continuous mode is not supported yet.")
                 });
 
+        // TODO: add overwrite case
+
         return specs;
     }
 

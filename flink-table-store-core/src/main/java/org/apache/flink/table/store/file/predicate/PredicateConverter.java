@@ -178,7 +178,7 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
     }
 
     @Nullable
-    public static Predicate convert(@Nullable List<ResolvedExpression> filters) {
+    public static Predicate convert(List<ResolvedExpression> filters) {
         return filters != null
                 ? filters.stream()
                         .map(filter -> filter.accept(PredicateConverter.CONVERTER))

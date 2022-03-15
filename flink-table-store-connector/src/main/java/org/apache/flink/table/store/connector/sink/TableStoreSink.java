@@ -46,23 +46,20 @@ public class TableStoreSink
         implements DynamicTableSink, SupportsOverwrite, SupportsPartitioning, RequireCatalogLock {
 
     private final TableStore tableStore;
-    private final boolean streaming;
     private final LogOptions.LogChangelogMode logChangelogMode;
     @Nullable private final DynamicTableFactory.Context logStoreContext;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
     private Map<String, String> staticPartitions = new HashMap<>();
-    private boolean overwrite;
+    private boolean overwrite = false;
     @Nullable private CatalogLock.Factory lockFactory;
 
     public TableStoreSink(
             TableStore tableStore,
-            boolean streaming,
             LogOptions.LogChangelogMode logChangelogMode,
             @Nullable DynamicTableFactory.Context logStoreContext,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
         this.tableStore = tableStore;
-        this.streaming = streaming;
         this.logChangelogMode = logChangelogMode;
         this.logStoreContext = logStoreContext;
         this.logStoreTableFactory = logStoreTableFactory;
@@ -93,7 +90,7 @@ public class TableStoreSink
                             new LogStoreTableFactory.SinkContext() {
                                 @Override
                                 public boolean isBounded() {
-                                    return !streaming;
+                                    return context.isBounded();
                                 }
 
                                 @Override
@@ -126,7 +123,7 @@ public class TableStoreSink
                                                 dataStream.getTransformation()))
                                 .withLockFactory(lockFactory)
                                 .withLogSinkProvider(finalLogSinkProvider)
-                                .withOverwritePartition(staticPartitions)
+                                .withOverwritePartition(overwrite ? staticPartitions : null)
                                 .build();
     }
 
@@ -134,11 +131,7 @@ public class TableStoreSink
     public DynamicTableSink copy() {
         TableStoreSink copied =
                 new TableStoreSink(
-                        tableStore,
-                        streaming,
-                        logChangelogMode,
-                        logStoreContext,
-                        logStoreTableFactory);
+                        tableStore, logChangelogMode, logStoreContext, logStoreTableFactory);
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
         copied.lockFactory = lockFactory;

@@ -61,8 +61,8 @@ public class TableStoreSource
     @Nullable private final DynamicTableFactory.Context logStoreContext;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
-    @Nullable private List<ResolvedExpression> partitionFilters;
-    @Nullable private List<ResolvedExpression> fieldFilters;
+    private List<ResolvedExpression> partitionFilters = new ArrayList<>();
+    private List<ResolvedExpression> fieldFilters = new ArrayList<>();
     @Nullable private int[][] projectFields;
 
     public TableStoreSource(
@@ -131,8 +131,9 @@ public class TableStoreSource
     public DynamicTableSource copy() {
         TableStoreSource copied =
                 new TableStoreSource(tableStore, streaming, logStoreContext, logStoreTableFactory);
-        copied.partitionFilters = partitionFilters;
-        copied.fieldFilters = fieldFilters;
+        copied.partitionFilters = new ArrayList<>(partitionFilters);
+        copied.fieldFilters = new ArrayList<>(fieldFilters);
+        copied.projectFields = projectFields;
         return copied;
     }
 
@@ -172,14 +173,8 @@ public class TableStoreSource
         filters.forEach(
                 filter -> {
                     try {
-                        if (partitionFilters == null) {
-                            partitionFilters = new ArrayList<>();
-                        }
                         partitionFilters.add(filter.accept(visitor));
                     } catch (FoundFieldReference e) {
-                        if (fieldFilters == null) {
-                            fieldFilters = new ArrayList<>();
-                        }
                         fieldFilters.add(filter);
                     }
                 });
