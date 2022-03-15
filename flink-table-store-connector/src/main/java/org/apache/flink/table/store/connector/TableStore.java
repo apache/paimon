@@ -141,7 +141,8 @@ public class TableStore {
             valueType = type;
             mergeFunction = new DeduplicateMergeFunction();
         }
-        return new FileStoreImpl(options, user, partitionType, keyType, valueType, mergeFunction);
+        return new FileStoreImpl(
+                tableIdentifier, options, user, partitionType, keyType, valueType, mergeFunction);
     }
 
     /** Source builder to build a flink {@link Source}. */
