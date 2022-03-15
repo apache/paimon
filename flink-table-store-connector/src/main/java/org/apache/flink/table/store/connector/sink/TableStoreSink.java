@@ -27,32 +27,49 @@ import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.store.connector.TableStore;
+import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.table.store.log.LogSinkProvider;
+import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
 
-import java.util.LinkedHashMap;
+import java.util.HashMap;
 import java.util.Map;
 
 /** Table sink to create {@link StoreSink}. */
-public class StoreTableSink
+public class TableStoreSink
         implements DynamicTableSink, SupportsOverwrite, SupportsPartitioning, RequireCatalogLock {
 
     private final TableStore tableStore;
+    private final LogOptions.LogChangelogMode logChangelogMode;
     @Nullable private final LogSinkProvider logSinkProvider;
 
-    private LinkedHashMap<String, String> staticPartitions = new LinkedHashMap<>();
+    private Map<String, String> staticPartitions = new HashMap<>();
     private boolean overwrite;
     @Nullable private CatalogLock.Factory lockFactory;
 
-    public StoreTableSink(TableStore tableStore, @Nullable LogSinkProvider logSinkProvider) {
+    public TableStoreSink(
+            TableStore tableStore,
+            LogOptions.LogChangelogMode logChangelogMode,
+            @Nullable LogSinkProvider logSinkProvider) {
         this.tableStore = tableStore;
+        this.logChangelogMode = logChangelogMode;
         this.logSinkProvider = logSinkProvider;
     }
 
     @Override
-    public ChangelogMode getChangelogMode(ChangelogMode changelogMode) {
-        return ChangelogMode.all();
+    public ChangelogMode getChangelogMode(ChangelogMode requestedMode) {
+        if (!tableStore.valueCountMode()
+                && logChangelogMode == LogOptions.LogChangelogMode.UPSERT) {
+            ChangelogMode.Builder builder = ChangelogMode.newBuilder();
+            for (RowKind kind : requestedMode.getContainedKinds()) {
+                if (kind != RowKind.UPDATE_BEFORE) {
+                    builder.addContainedKind(kind);
+                }
+            }
+            return builder.build();
+        }
+        return requestedMode;
     }
 
     @Override
@@ -73,15 +90,16 @@ public class StoreTableSink
 
     @Override
     public DynamicTableSink copy() {
-        StoreTableSink copied = new StoreTableSink(tableStore, logSinkProvider);
-        copied.staticPartitions = new LinkedHashMap<>(staticPartitions);
+        TableStoreSink copied = new TableStoreSink(tableStore, logChangelogMode, logSinkProvider);
+        copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
+        copied.lockFactory = lockFactory;
         return copied;
     }
 
     @Override
     public String asSummaryString() {
-        return "StoreTableSink";
+        return "TableStoreSink";
     }
 
     @Override

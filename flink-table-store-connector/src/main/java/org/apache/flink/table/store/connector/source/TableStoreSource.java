@@ -32,17 +32,15 @@ import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.expressions.TypeLiteralExpression;
 import org.apache.flink.table.expressions.ValueLiteralExpression;
 import org.apache.flink.table.store.connector.TableStore;
-import org.apache.flink.table.store.file.predicate.And;
 import org.apache.flink.table.store.file.predicate.PredicateConverter;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.types.DataType;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * Table source to create {@link FileStoreSource} under batch mode or change-tracking is disabled.
@@ -50,7 +48,7 @@ import java.util.stream.Stream;
  * org.apache.flink.connector.base.source.hybrid.HybridSource} of {@link FileStoreSource} and kafka
  * log source created by {@link LogSourceProvider}.
  */
-public class StoreTableSource
+public class TableStoreSource
         implements ScanTableSource, SupportsFilterPushDown, SupportsProjectionPushDown {
 
     private final TableStore tableStore;
@@ -61,7 +59,7 @@ public class StoreTableSource
     @Nullable private List<ResolvedExpression> fieldFilters;
     @Nullable private int[][] projectFields;
 
-    public StoreTableSource(
+    public TableStoreSource(
             TableStore tableStore,
             boolean streaming,
             @Nullable LogSourceProvider logSourceProvider) {
@@ -73,7 +71,10 @@ public class StoreTableSource
     @Override
     public ChangelogMode getChangelogMode() {
         return streaming
-                ? tableStore.valueCountMode() ? ChangelogMode.all() : ChangelogMode.upsert()
+                ? tableStore.valueCountMode()
+                        ? ChangelogMode.all()
+                        // TODO: optimize upsert
+                        : ChangelogMode.upsert()
                 : ChangelogMode.insertOnly();
     }
 
@@ -86,34 +87,14 @@ public class StoreTableSource
                         .withHybridMode(streaming && logSourceProvider != null)
                         .withLogSourceProvider(logSourceProvider)
                         .withProjection(projectFields)
-                        .withPartitionPredicate(
-                                partitionFilters != null
-                                        ? partitionFilters.stream()
-                                                .map(
-                                                        filter ->
-                                                                filter.accept(
-                                                                        PredicateConverter
-                                                                                .CONVERTER))
-                                                .reduce(And::new)
-                                                .orElse(null)
-                                        : null)
-                        .withFieldPredicate(
-                                fieldFilters != null
-                                        ? fieldFilters.stream()
-                                                .map(
-                                                        filter ->
-                                                                filter.accept(
-                                                                        PredicateConverter
-                                                                                .CONVERTER))
-                                                .reduce(And::new)
-                                                .orElse(null)
-                                        : null);
+                        .withPartitionPredicate(PredicateConverter.convert(partitionFilters))
+                        .withFieldPredicate(PredicateConverter.convert(fieldFilters));
         return SourceProvider.of(builder.build());
     }
 
     @Override
     public DynamicTableSource copy() {
-        StoreTableSource copied = new StoreTableSource(tableStore, streaming, logSourceProvider);
+        TableStoreSource copied = new TableStoreSource(tableStore, streaming, logSourceProvider);
         copied.partitionFilters = partitionFilters;
         copied.fieldFilters = fieldFilters;
         return copied;
@@ -121,7 +102,7 @@ public class StoreTableSource
 
     @Override
     public String asSummaryString() {
-        return "StoreTableSource";
+        return "TableStoreSource";
     }
 
     @Override
@@ -131,10 +112,7 @@ public class StoreTableSource
         } else {
             fieldFilters = filters;
         }
-        return Result.of(
-                Stream.concat(partitionFilters.stream(), fieldFilters.stream())
-                        .collect(Collectors.toList()),
-                Collections.emptyList());
+        return Result.of(new ArrayList<>(filters), new ArrayList<>(filters));
     }
 
     @Override
@@ -156,8 +134,14 @@ public class StoreTableSource
         filters.forEach(
                 filter -> {
                     try {
+                        if (partitionFilters == null) {
+                            partitionFilters = new ArrayList<>();
+                        }
                         partitionFilters.add(filter.accept(visitor));
                     } catch (FoundFieldReference e) {
+                        if (fieldFilters == null) {
+                            fieldFilters = new ArrayList<>();
+                        }
                         fieldFilters.add(filter);
                     }
                 });

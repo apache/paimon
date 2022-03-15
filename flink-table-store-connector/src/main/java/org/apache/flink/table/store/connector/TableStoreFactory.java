@@ -40,10 +40,11 @@ import org.apache.flink.table.factories.ManagedTableFactory;
 import org.apache.flink.table.runtime.connector.sink.SinkRuntimeProviderContext;
 import org.apache.flink.table.runtime.connector.source.ScanRuntimeProviderContext;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-import org.apache.flink.table.store.connector.sink.StoreTableSink;
-import org.apache.flink.table.store.connector.source.StoreTableSource;
+import org.apache.flink.table.store.connector.sink.TableStoreSink;
+import org.apache.flink.table.store.connector.source.TableStoreSource;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
+import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
@@ -66,6 +67,7 @@ import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.FILE_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
+import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
 import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 import static org.apache.flink.table.store.log.LogStoreTableFactory.discoverLogStoreFactory;
 
@@ -190,14 +192,14 @@ public class TableStoreFactory
                                         }
                                     });
         }
-        return new StoreTableSource(buildTableStore(context), streaming, logSourceProvider);
+        return new TableStoreSource(buildTableStore(context), streaming, logSourceProvider);
     }
 
     @Override
     public DynamicTableSink createDynamicTableSink(Context context) {
         LogSinkProvider logSinkProvider = null;
-        if (enableChangeTracking(context.getCatalogTable().getOptions())) {
-            filterLogStoreOptions(context.getCatalogTable().getOptions());
+        Map<String, String> options = context.getCatalogTable().getOptions();
+        if (enableChangeTracking(options)) {
             logSinkProvider =
                     createLogStoreTableFactory()
                             .createSinkProvider(
@@ -231,7 +233,13 @@ public class TableStoreFactory
                                         }
                                     });
         }
-        return new StoreTableSink(buildTableStore(context), logSinkProvider);
+        return new TableStoreSink(
+                buildTableStore(context),
+                LogOptions.LogChangelogMode.valueOf(
+                        options.getOrDefault(
+                                LOG_PREFIX + CHANGELOG_MODE.key(),
+                                CHANGELOG_MODE.defaultValue().toString().toUpperCase())),
+                logSinkProvider);
     }
 
     @Override
