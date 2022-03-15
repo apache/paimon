@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector.source;
 
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
@@ -31,14 +32,18 @@ import org.apache.flink.table.expressions.FieldReferenceExpression;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.expressions.TypeLiteralExpression;
 import org.apache.flink.table.expressions.ValueLiteralExpression;
+import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.store.connector.TableStore;
 import org.apache.flink.table.store.file.predicate.PredicateConverter;
 import org.apache.flink.table.store.log.LogSourceProvider;
+import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.logical.LogicalType;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -53,7 +58,8 @@ public class TableStoreSource
 
     private final TableStore tableStore;
     private final boolean streaming;
-    @Nullable private final LogSourceProvider logSourceProvider;
+    @Nullable private final DynamicTableFactory.Context logStoreContext;
+    @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
     @Nullable private List<ResolvedExpression> partitionFilters;
     @Nullable private List<ResolvedExpression> fieldFilters;
@@ -62,10 +68,12 @@ public class TableStoreSource
     public TableStoreSource(
             TableStore tableStore,
             boolean streaming,
-            @Nullable LogSourceProvider logSourceProvider) {
+            @Nullable DynamicTableFactory.Context logStoreContext,
+            @Nullable LogStoreTableFactory logStoreTableFactory) {
         this.tableStore = tableStore;
         this.streaming = streaming;
-        this.logSourceProvider = logSourceProvider;
+        this.logStoreContext = logStoreContext;
+        this.logStoreTableFactory = logStoreTableFactory;
     }
 
     @Override
@@ -73,13 +81,40 @@ public class TableStoreSource
         return streaming
                 ? tableStore.valueCountMode()
                         ? ChangelogMode.all()
-                        // TODO: optimize upsert
+                        // TODO: optimize upsert when consistency mode is transactional and
+                        // log.changelog-mode is all
                         : ChangelogMode.upsert()
                 : ChangelogMode.insertOnly();
     }
 
     @Override
     public ScanRuntimeProvider getScanRuntimeProvider(ScanContext scanContext) {
+        LogSourceProvider logSourceProvider = null;
+        if (logStoreTableFactory != null) {
+            logSourceProvider =
+                    logStoreTableFactory.createSourceProvider(
+                            logStoreContext,
+                            new LogStoreTableFactory.SourceContext() {
+                                @Override
+                                public <T> TypeInformation<T> createTypeInformation(
+                                        DataType producedDataType) {
+                                    return scanContext.createTypeInformation(producedDataType);
+                                }
+
+                                @Override
+                                public <T> TypeInformation<T> createTypeInformation(
+                                        LogicalType producedLogicalType) {
+                                    return scanContext.createTypeInformation(producedLogicalType);
+                                }
+
+                                @Override
+                                public DataStructureConverter createDataStructureConverter(
+                                        DataType producedDataType) {
+                                    return scanContext.createDataStructureConverter(
+                                            producedDataType);
+                                }
+                            });
+        }
         TableStore.SourceBuilder builder =
                 tableStore
                         .sourceBuilder()
@@ -94,7 +129,8 @@ public class TableStoreSource
 
     @Override
     public DynamicTableSource copy() {
-        TableStoreSource copied = new TableStoreSource(tableStore, streaming, logSourceProvider);
+        TableStoreSource copied =
+                new TableStoreSource(tableStore, streaming, logStoreContext, logStoreTableFactory);
         copied.partitionFilters = partitionFilters;
         copied.fieldFilters = fieldFilters;
         return copied;
@@ -112,7 +148,9 @@ public class TableStoreSource
         } else {
             fieldFilters = filters;
         }
-        return Result.of(new ArrayList<>(filters), new ArrayList<>(filters));
+        return Result.of(
+                new ArrayList<>(filters),
+                fieldFilters == null ? Collections.emptyList() : fieldFilters);
     }
 
     @Override

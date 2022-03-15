@@ -20,7 +20,6 @@ package org.apache.flink.table.store.connector;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ExecutionOptions;
@@ -32,26 +31,17 @@ import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.source.DynamicTableSource;
-import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.DynamicTableSourceFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.factories.ManagedTableFactory;
-import org.apache.flink.table.runtime.connector.sink.SinkRuntimeProviderContext;
-import org.apache.flink.table.runtime.connector.source.ScanRuntimeProviderContext;
-import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.connector.source.TableStoreSource;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.log.LogOptions;
-import org.apache.flink.table.store.log.LogSinkProvider;
-import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
-import org.apache.flink.table.types.DataType;
-import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.utils.TypeConversions;
 import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
@@ -63,9 +53,9 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.CHANGE_TRACKING;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.FILE_PATH;
-import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
 import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
 import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
@@ -111,15 +101,14 @@ public class TableStoreFactory
                                 context.getObjectIdentifier().asSerializableString()));
             }
             path.getFileSystem().mkdirs(path);
-            options.put(TABLE_PATH.key(), path.getPath());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
 
         if (enableChangeTracking(options)) {
-            createLogStoreTableFactory()
+            createLogStoreTableFactory(context)
                     .onCreateTable(
-                            createLogStoreContext(context),
+                            createLogContext(context),
                             Integer.parseInt(
                                     options.getOrDefault(
                                             BUCKET.key(), BUCKET.defaultValue().toString())),
@@ -146,8 +135,8 @@ public class TableStoreFactory
             throw new UncheckedIOException(e);
         }
         if (enableChangeTracking(options)) {
-            createLogStoreTableFactory()
-                    .onDropTable(createLogStoreContext(context), ignoreIfNotExists);
+            createLogStoreTableFactory(context)
+                    .onDropTable(createLogContext(context), ignoreIfNotExists);
         }
     }
 
@@ -162,84 +151,38 @@ public class TableStoreFactory
         boolean streaming =
                 context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                         == RuntimeExecutionMode.STREAMING;
-        LogSourceProvider logSourceProvider = null;
+        Context logStoreContext = null;
+        LogStoreTableFactory logStoreTableFactory = null;
+
         if (enableChangeTracking(context.getCatalogTable().getOptions())) {
-            logSourceProvider =
-                    createLogStoreTableFactory()
-                            .createSourceProvider(
-                                    createLogStoreContext(context),
-                                    new LogStoreTableFactory.SourceContext() {
-                                        @Override
-                                        public <T> TypeInformation<T> createTypeInformation(
-                                                DataType producedDataType) {
-                                            return createTypeInformation(
-                                                    TypeConversions.fromDataToLogicalType(
-                                                            producedDataType));
-                                        }
-
-                                        @Override
-                                        public <T> TypeInformation<T> createTypeInformation(
-                                                LogicalType producedLogicalType) {
-                                            return InternalTypeInfo.of(producedLogicalType);
-                                        }
-
-                                        @Override
-                                        public DynamicTableSource.DataStructureConverter
-                                                createDataStructureConverter(
-                                                        DataType producedDataType) {
-                                            return ScanRuntimeProviderContext.INSTANCE
-                                                    .createDataStructureConverter(producedDataType);
-                                        }
-                                    });
+            logStoreContext = createLogContext(context);
+            logStoreTableFactory = createLogStoreTableFactory(context);
         }
-        return new TableStoreSource(buildTableStore(context), streaming, logSourceProvider);
+        return new TableStoreSource(
+                buildTableStore(context), streaming, logStoreContext, logStoreTableFactory);
     }
 
     @Override
     public DynamicTableSink createDynamicTableSink(Context context) {
-        LogSinkProvider logSinkProvider = null;
+        boolean streaming =
+                context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
+                        == RuntimeExecutionMode.STREAMING;
         Map<String, String> options = context.getCatalogTable().getOptions();
+        Context logStoreContext = null;
+        LogStoreTableFactory logStoreTableFactory = null;
         if (enableChangeTracking(options)) {
-            logSinkProvider =
-                    createLogStoreTableFactory()
-                            .createSinkProvider(
-                                    createLogStoreContext(context),
-                                    new LogStoreTableFactory.SinkContext() {
-                                        @Override
-                                        public boolean isBounded() {
-                                            return false;
-                                        }
-
-                                        @Override
-                                        public <T> TypeInformation<T> createTypeInformation(
-                                                DataType consumedDataType) {
-                                            return createTypeInformation(
-                                                    TypeConversions.fromDataToLogicalType(
-                                                            consumedDataType));
-                                        }
-
-                                        @Override
-                                        public <T> TypeInformation<T> createTypeInformation(
-                                                LogicalType consumedLogicalType) {
-                                            return InternalTypeInfo.of(consumedLogicalType);
-                                        }
-
-                                        @Override
-                                        public DynamicTableSink.DataStructureConverter
-                                                createDataStructureConverter(
-                                                        DataType consumedDataType) {
-                                            return new SinkRuntimeProviderContext(isBounded())
-                                                    .createDataStructureConverter(consumedDataType);
-                                        }
-                                    });
+            logStoreContext = createLogContext(context);
+            logStoreTableFactory = createLogStoreTableFactory(context);
         }
         return new TableStoreSink(
                 buildTableStore(context),
+                streaming,
                 LogOptions.LogChangelogMode.valueOf(
                         options.getOrDefault(
                                 LOG_PREFIX + CHANGELOG_MODE.key(),
                                 CHANGELOG_MODE.defaultValue().toString().toUpperCase())),
-                logSinkProvider);
+                logStoreContext,
+                logStoreTableFactory);
     }
 
     @Override
@@ -256,6 +199,25 @@ public class TableStoreFactory
     }
 
     // ~ Tools ------------------------------------------------------------------
+
+    private static LogStoreTableFactory createLogStoreTableFactory(Context context) {
+        return discoverLogStoreFactory(
+                context.getClassLoader(),
+                context.getCatalogTable()
+                        .getOptions()
+                        .getOrDefault(LOG_SYSTEM.key(), LOG_SYSTEM.defaultValue()));
+    }
+
+    private static Context createLogContext(Context context) {
+        return new FactoryUtil.DefaultDynamicTableContext(
+                context.getObjectIdentifier(),
+                context.getCatalogTable()
+                        .copy(filterLogStoreOptions(context.getCatalogTable().getOptions())),
+                filterLogStoreOptions(context.getEnrichmentOptions()),
+                context.getConfiguration(),
+                context.getClassLoader(),
+                context.isTemporary());
+    }
 
     @VisibleForTesting
     static Map<String, String> filterLogStoreOptions(Map<String, String> options) {
@@ -286,7 +248,7 @@ public class TableStoreFactory
                                 + "as `CREATE TABLE ${table} (...) WITH ('%s' = '...')`",
                         FILE_PATH.key(), FILE_PATH.key()));
         return new Path(
-                new Path(options.get(FILE_PATH.key())),
+                options.get(FILE_PATH.key()),
                 String.format(
                         "root/%s.catalog/%s.db/%s",
                         identifier.getCatalogName(),
@@ -301,35 +263,25 @@ public class TableStoreFactory
                         CHANGE_TRACKING.key(), CHANGE_TRACKING.defaultValue().toString()));
     }
 
-    private static DynamicTableFactory.Context createLogStoreContext(
-            DynamicTableFactory.Context context) {
-        return new FactoryUtil.DefaultDynamicTableContext(
-                context.getObjectIdentifier(),
-                context.getCatalogTable()
-                        .copy(filterLogStoreOptions(context.getCatalogTable().getOptions())),
-                filterLogStoreOptions(context.getEnrichmentOptions()),
-                context.getConfiguration(),
-                context.getClassLoader(),
-                context.isTemporary());
-    }
-
-    private static LogStoreTableFactory createLogStoreTableFactory() {
-        return discoverLogStoreFactory(
-                Thread.currentThread().getContextClassLoader(),
-                TableStoreFactoryOptions.LOG_SYSTEM.defaultValue());
-    }
-
     private TableStore buildTableStore(Context context) {
         ResolvedCatalogTable catalogTable = context.getCatalogTable();
         ResolvedSchema schema = catalogTable.getResolvedSchema();
+        RowType rowType = (RowType) schema.toPhysicalRowDataType().getLogicalType();
+        int[] primaryKeys = new int[0];
+        if (schema.getPrimaryKey().isPresent()) {
+            primaryKeys =
+                    schema.getPrimaryKey().get().getColumns().stream()
+                            .mapToInt(rowType.getFieldNames()::indexOf)
+                            .toArray();
+        }
         return new TableStore(
                         Configuration.fromMap(filterFileStoreOptions(catalogTable.getOptions())))
                 .withTableIdentifier(context.getObjectIdentifier())
-                .withPrimaryKeys(context.getPrimaryKeyIndexes())
+                .withSchema(rowType)
+                .withPrimaryKeys(primaryKeys)
                 .withPartitions(
                         catalogTable.getPartitionKeys().stream()
-                                .mapToInt(schema.getColumnNames()::indexOf)
-                                .toArray())
-                .withSchema((RowType) schema.toPhysicalRowDataType().getLogicalType());
+                                .mapToInt(rowType.getFieldNames()::indexOf)
+                                .toArray());
     }
 }

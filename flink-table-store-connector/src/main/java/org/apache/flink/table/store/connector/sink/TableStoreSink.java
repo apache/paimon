@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector.sink;
 
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.catalog.CatalogLock;
 import org.apache.flink.table.connector.ChangelogMode;
@@ -26,9 +27,13 @@ import org.apache.flink.table.connector.sink.DataStreamSinkProvider;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
+import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.store.connector.TableStore;
 import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.table.store.log.LogSinkProvider;
+import org.apache.flink.table.store.log.LogStoreTableFactory;
+import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
@@ -41,8 +46,10 @@ public class TableStoreSink
         implements DynamicTableSink, SupportsOverwrite, SupportsPartitioning, RequireCatalogLock {
 
     private final TableStore tableStore;
+    private final boolean streaming;
     private final LogOptions.LogChangelogMode logChangelogMode;
-    @Nullable private final LogSinkProvider logSinkProvider;
+    @Nullable private final DynamicTableFactory.Context logStoreContext;
+    @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
     private Map<String, String> staticPartitions = new HashMap<>();
     private boolean overwrite;
@@ -50,11 +57,15 @@ public class TableStoreSink
 
     public TableStoreSink(
             TableStore tableStore,
+            boolean streaming,
             LogOptions.LogChangelogMode logChangelogMode,
-            @Nullable LogSinkProvider logSinkProvider) {
+            @Nullable DynamicTableFactory.Context logStoreContext,
+            @Nullable LogStoreTableFactory logStoreTableFactory) {
         this.tableStore = tableStore;
+        this.streaming = streaming;
         this.logChangelogMode = logChangelogMode;
-        this.logSinkProvider = logSinkProvider;
+        this.logStoreContext = logStoreContext;
+        this.logStoreTableFactory = logStoreTableFactory;
     }
 
     @Override
@@ -74,6 +85,37 @@ public class TableStoreSink
 
     @Override
     public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
+        LogSinkProvider logSinkProvider = null;
+        if (logStoreTableFactory != null) {
+            logSinkProvider =
+                    logStoreTableFactory.createSinkProvider(
+                            logStoreContext,
+                            new LogStoreTableFactory.SinkContext() {
+                                @Override
+                                public boolean isBounded() {
+                                    return !streaming;
+                                }
+
+                                @Override
+                                public <T> TypeInformation<T> createTypeInformation(
+                                        DataType consumedDataType) {
+                                    return context.createTypeInformation(consumedDataType);
+                                }
+
+                                @Override
+                                public <T> TypeInformation<T> createTypeInformation(
+                                        LogicalType consumedLogicalType) {
+                                    return context.createTypeInformation(consumedLogicalType);
+                                }
+
+                                @Override
+                                public DynamicTableSink.DataStructureConverter
+                                        createDataStructureConverter(DataType consumedDataType) {
+                                    return context.createDataStructureConverter(consumedDataType);
+                                }
+                            });
+        }
+        final LogSinkProvider finalLogSinkProvider = logSinkProvider;
         return (DataStreamSinkProvider)
                 (providerContext, dataStream) ->
                         tableStore
@@ -83,14 +125,20 @@ public class TableStoreSink
                                                 dataStream.getExecutionEnvironment(),
                                                 dataStream.getTransformation()))
                                 .withLockFactory(lockFactory)
-                                .withLogSinkProvider(logSinkProvider)
+                                .withLogSinkProvider(finalLogSinkProvider)
                                 .withOverwritePartition(staticPartitions)
                                 .build();
     }
 
     @Override
     public DynamicTableSink copy() {
-        TableStoreSink copied = new TableStoreSink(tableStore, logChangelogMode, logSinkProvider);
+        TableStoreSink copied =
+                new TableStoreSink(
+                        tableStore,
+                        streaming,
+                        logChangelogMode,
+                        logStoreContext,
+                        logStoreTableFactory);
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
         copied.lockFactory = lockFactory;

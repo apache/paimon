@@ -48,7 +48,6 @@ import java.util.stream.Stream;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.CHANGE_TRACKING;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.FILE_PATH;
-import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.flink.table.store.log.LogOptions.CONSISTENCY;
@@ -167,7 +166,7 @@ public class TableStoreFactoryTest {
     public void testFilterFileStoreOptions() {
         // mix invalid key and leave value to empty to emphasize the deferred validation
         Map<String, String> expectedFileStoreOptions =
-                of("dummy.key", "", TABLE_PATH.key(), "/foo/bar");
+                of("dummy.key", "", FILE_PATH.key(), "dummy:/foo/bar");
         Map<String, String> enrichedOptions = new HashMap<>(expectedFileStoreOptions);
         enrichedOptions.put("log.foo", "bar");
         enrichedOptions.put("log.bar", "foo");
@@ -178,11 +177,11 @@ public class TableStoreFactoryTest {
 
     @Test
     public void testTablePath() {
-        Map<String, String> options = of(FILE_PATH.key(), "/foo/bar");
+        Map<String, String> options = of(FILE_PATH.key(), "dummy:/foo/bar");
         assertThat(TableStoreFactory.tablePath(options, TABLE_IDENTIFIER))
                 .isEqualTo(
                         new org.apache.flink.core.fs.Path(
-                                "/foo/bar/root/catalog.catalog/database.db/table"));
+                                "dummy:/foo/bar/root/catalog.catalog/database.db/table"));
 
         assertThatThrownBy(
                         () -> TableStoreFactory.tablePath(Collections.emptyMap(), TABLE_IDENTIFIER))
