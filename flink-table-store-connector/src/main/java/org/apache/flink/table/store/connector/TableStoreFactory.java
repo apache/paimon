@@ -23,7 +23,9 @@ import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ExecutionOptions;
+import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -68,7 +70,16 @@ public class TableStoreFactory
     @Override
     public Map<String, String> enrichOptions(Context context) {
         Map<String, String> enrichedOptions = new HashMap<>(context.getCatalogTable().getOptions());
-        ((Configuration) context.getConfiguration())
+        Configuration sessionConfig;
+        ReadableConfig readableConfig = context.getConfiguration();
+        if (readableConfig instanceof Configuration) {
+            sessionConfig = (Configuration) readableConfig;
+        } else if (readableConfig instanceof TableConfig) {
+            sessionConfig = ((TableConfig) readableConfig).getConfiguration();
+        } else {
+            throw new RuntimeException("Unknown readableConfig type: " + readableConfig.getClass());
+        }
+        sessionConfig
                 .toMap()
                 .forEach(
                         (k, v) -> {
