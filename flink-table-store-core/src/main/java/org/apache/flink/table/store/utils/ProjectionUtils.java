@@ -22,9 +22,9 @@ import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.binary.BinaryRowDataUtil;
-import org.apache.flink.table.planner.codegen.CodeGeneratorContext;
-import org.apache.flink.table.planner.codegen.ProjectionCodeGenerator;
 import org.apache.flink.table.runtime.generated.Projection;
+import org.apache.flink.table.store.delegate.DelegateProjectionCodeGenerator;
+import org.apache.flink.table.store.delegate.PlannerDelegate;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.Arrays;
@@ -51,8 +51,10 @@ public class ProjectionUtils {
 
         @SuppressWarnings("unchecked")
         Projection<RowData, BinaryRowData> projection =
-                ProjectionCodeGenerator.generateProjection(
-                                CodeGeneratorContext.apply(new TableConfig()),
+                PlannerDelegate.getInstance()
+                        .discover(DelegateProjectionCodeGenerator.class)
+                        .generateProjection(
+                                new TableConfig(),
                                 "Projection",
                                 inputType,
                                 project(inputType, mapping),

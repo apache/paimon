@@ -56,6 +56,7 @@ under the License.
         <module>flink-table-store-connector</module>
         <module>flink-table-store-kafka</module>
         <module>flink-table-store-orc</module>
+        <module>flink-table-store-delegate</module>
     </modules>
 
     <properties>
@@ -463,6 +464,28 @@ under the License.
                                         <exclude>log4j:log4j</exclude>
                                         <exclude>org.slf4j:slf4j-log4j12</exclude>
                                     </excludes>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>forbid-direct-table-planner-dependencies</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <exclude>org.apache.flink:flink-table-planner_${scala.binary.version}</exclude>
+                                    </excludes>
+                                    <includes>
+                                        <include>org.apache.flink:flink-table-planner_${scala.binary.version}:*:*:test</include>
+                                    </includes>
+                                    <message>
+                                        Direct dependencies on flink-table-planner are not allowed.
+                                        You should depend on either Table API modules, flink-table-planner-loader or flink-table-store-delegate-loader.
+                                    </message>
                                 </bannedDependencies>
                             </rules>
                         </configuration>
