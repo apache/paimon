@@ -20,7 +20,7 @@ package org.apache.flink.table.store.kafka;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.SerializationSchema;
-import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.kafka.shaded.org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.sink.KafkaSinkBuilder;
 import org.apache.flink.table.data.RowData;

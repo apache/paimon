@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.log;
 
 import org.apache.flink.api.connector.source.Source;
-import org.apache.flink.connector.base.source.hybrid.HybridSource;
+import org.apache.flink.connector.files.shaded.org.apache.flink.connector.base.source.hybrid.HybridSource;
 import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
