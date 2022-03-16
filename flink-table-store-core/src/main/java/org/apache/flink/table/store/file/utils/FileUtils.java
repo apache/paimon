@@ -19,10 +19,10 @@
 package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.connector.base.source.reader.SourceReaderOptions;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.util.Utils;
+import org.apache.flink.connector.files.shaded.org.apache.flink.connector.base.source.reader.SourceReaderOptions;
 import org.apache.flink.core.fs.FSDataInputStream;
 import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileSystem;
