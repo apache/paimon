@@ -18,10 +18,7 @@
 
 package org.apache.flink.table.store.connector;
 
-<<<<<<< HEAD
-=======
 import org.apache.flink.configuration.Configuration;
->>>>>>> efdbe03 (fix)
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
@@ -67,9 +64,6 @@ public class ContinuousITCase extends AbstractTestBase {
     }
 
     @Test
-<<<<<<< HEAD
-    public void test() {}
-=======
     public void testWithoutPrimaryKey() throws ExecutionException, InterruptedException {
         testSimple("T1");
     }
@@ -92,7 +86,10 @@ public class ContinuousITCase extends AbstractTestBase {
     private void testSimple(String table) throws ExecutionException, InterruptedException {
         CloseableIterator<Row> iterator = sEnv.executeSql("SELECT * FROM " + table).collect();
 
-        bEnv.executeSql(String.format("INSERT INTO %s VALUES ('1', '2', '3'), ('4', '5', '6')", table)).await();
+        bEnv.executeSql(
+                        String.format(
+                                "INSERT INTO %s VALUES ('1', '2', '3'), ('4', '5', '6')", table))
+                .await();
         assertThat(collectFromUnbounded(iterator, 2))
                 .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
 
@@ -104,13 +101,15 @@ public class ContinuousITCase extends AbstractTestBase {
     private void testProjection(String table) throws ExecutionException, InterruptedException {
         CloseableIterator<Row> iterator = sEnv.executeSql("SELECT b, c FROM " + table).collect();
 
-        bEnv.executeSql(String.format("INSERT INTO %s VALUES ('1', '2', '3'), ('4', '5', '6')", table)).await();
+        bEnv.executeSql(
+                        String.format(
+                                "INSERT INTO %s VALUES ('1', '2', '3'), ('4', '5', '6')", table))
+                .await();
         assertThat(collectFromUnbounded(iterator, 2))
                 .containsExactlyInAnyOrder(Row.of("2", "3"), Row.of("5", "6"));
 
         bEnv.executeSql(String.format("INSERT INTO %s VALUES ('7', '8', '9')", table)).await();
-        assertThat(collectFromUnbounded(iterator, 1))
-                .containsExactlyInAnyOrder(Row.of("8", "9"));
+        assertThat(collectFromUnbounded(iterator, 1)).containsExactlyInAnyOrder(Row.of("8", "9"));
     }
 
     private List<Row> collectFromUnbounded(CloseableIterator<Row> iterator, int numElements) {
@@ -132,5 +131,4 @@ public class ContinuousITCase extends AbstractTestBase {
                         "The stream ended before reaching the requested %d records. Only %d records were received.",
                         numElements, result.size()));
     }
->>>>>>> efdbe03 (fix)
 }
