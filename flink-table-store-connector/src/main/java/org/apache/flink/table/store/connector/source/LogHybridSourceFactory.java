@@ -19,17 +19,17 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.api.connector.source.Source;
-import org.apache.flink.connector.base.source.hybrid.HybridSource;
-import org.apache.flink.connector.base.source.hybrid.HybridSource.SourceFactory;
+import org.apache.flink.connector.files.shaded.org.apache.flink.connector.base.source.hybrid.HybridSource;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.log.LogSourceProvider;
 
 import java.util.Map;
 
-/** Log {@link SourceFactory} from {@link StaticFileStoreSplitEnumerator}. */
+/** Log {@link HybridSource.SourceFactory} from {@link StaticFileStoreSplitEnumerator}. */
 public class LogHybridSourceFactory
-        implements SourceFactory<RowData, Source<RowData, ?, ?>, StaticFileStoreSplitEnumerator> {
+        implements HybridSource.SourceFactory<
+                RowData, Source<RowData, ?, ?>, StaticFileStoreSplitEnumerator> {
 
     private final LogSourceProvider provider;
 
