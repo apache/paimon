@@ -51,6 +51,8 @@ public class FileStoreSource
 
     private final long discoveryInterval;
 
+    private final boolean isFirstIncremental;
+
     @Nullable private final int[][] projectedFields;
 
     @Nullable private final Predicate partitionPredicate;
@@ -62,13 +64,15 @@ public class FileStoreSource
             boolean valueCountMode,
             boolean isContinuous,
             long discoveryInterval,
+            boolean isFirstIncremental,
             @Nullable int[][] projectedFields,
             @Nullable Predicate partitionPredicate,
-            final Predicate fieldPredicate) {
+            @Nullable Predicate fieldPredicate) {
         this.fileStore = fileStore;
         this.valueCountMode = valueCountMode;
         this.isContinuous = isContinuous;
         this.discoveryInterval = discoveryInterval;
+        this.isFirstIncremental = isFirstIncremental;
         this.projectedFields = projectedFields;
         this.partitionPredicate = partitionPredicate;
         this.fieldPredicate = fieldPredicate;
@@ -126,10 +130,15 @@ public class FileStoreSource
         Long snapshotId;
         Collection<FileStoreSourceSplit> splits;
         if (checkpoint == null) {
+            // first, create new enumerator, plan splits
+            if (isFirstIncremental) {
+                scan = scan.withIncremental(true);
+            }
             FileStoreScan.Plan plan = scan.plan();
             snapshotId = plan.snapshotId();
             splits = new FileStoreSourceSplitGenerator().createSplits(plan);
         } else {
+            // restore from checkpoint
             snapshotId = checkpoint.currentSnapshotId();
             if (snapshotId == INVALID_SNAPSHOT) {
                 snapshotId = null;
@@ -137,11 +146,12 @@ public class FileStoreSource
             splits = checkpoint.splits();
         }
 
+        // create enumerator from snapshotId and splits
         if (isContinuous) {
             long currentSnapshot = snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId;
             return new ContinuousFileSplitEnumerator(
                     context,
-                    scan.withIncremental(true),
+                    scan.withIncremental(true), // the subsequent planning is all incremental
                     splits,
                     currentSnapshot,
                     discoveryInterval);

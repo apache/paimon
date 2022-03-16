@@ -58,7 +58,7 @@ public class TableStoreSource
 
     private final TableStore tableStore;
     private final boolean streaming;
-    @Nullable private final DynamicTableFactory.Context logStoreContext;
+    private final DynamicTableFactory.Context logStoreContext;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
     private List<ResolvedExpression> partitionFilters = new ArrayList<>();
@@ -68,7 +68,7 @@ public class TableStoreSource
     public TableStoreSource(
             TableStore tableStore,
             boolean streaming,
-            @Nullable DynamicTableFactory.Context logStoreContext,
+            DynamicTableFactory.Context logStoreContext,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
         this.tableStore = tableStore;
         this.streaming = streaming;
