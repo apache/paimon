@@ -20,6 +20,7 @@ package org.apache.flink.table.store.connector;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
@@ -85,11 +86,12 @@ public abstract class TableStoreTestBase extends KafkaTableTestBase {
     @Before
     public void setup() {
         super.setup();
-        env.setRuntimeMode(executionMode);
+        EnvironmentSettings.Builder builder = EnvironmentSettings.newInstance().inBatchMode();
         if (executionMode == RuntimeExecutionMode.STREAMING) {
             env.enableCheckpointing(100);
+            builder.inStreamingMode();
         }
-        tEnv = StreamTableEnvironment.create(env);
+        tEnv = StreamTableEnvironment.create(env, builder.build());
         ((TableEnvironmentImpl) tEnv)
                 .getCatalogManager()
                 .registerCatalog(

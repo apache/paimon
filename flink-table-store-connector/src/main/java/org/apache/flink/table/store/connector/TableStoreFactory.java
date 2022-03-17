@@ -23,9 +23,7 @@ import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ExecutionOptions;
-import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -39,6 +37,7 @@ import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.factories.ManagedTableFactory;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.connector.source.TableStoreSource;
+import org.apache.flink.table.store.connector.utils.TableConfigUtils;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.log.LogOptions;
@@ -70,16 +69,7 @@ public class TableStoreFactory
     @Override
     public Map<String, String> enrichOptions(Context context) {
         Map<String, String> enrichedOptions = new HashMap<>(context.getCatalogTable().getOptions());
-        Configuration sessionConfig;
-        ReadableConfig readableConfig = context.getConfiguration();
-        if (readableConfig instanceof Configuration) {
-            sessionConfig = (Configuration) readableConfig;
-        } else if (readableConfig instanceof TableConfig) {
-            sessionConfig = ((TableConfig) readableConfig).getConfiguration();
-        } else {
-            throw new RuntimeException("Unknown readableConfig type: " + readableConfig.getClass());
-        }
-        sessionConfig
+        TableConfigUtils.extractConfiguration(context.getConfiguration())
                 .toMap()
                 .forEach(
                         (k, v) -> {
