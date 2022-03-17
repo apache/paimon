@@ -47,7 +47,7 @@ import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFuncti
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.log.LogSourceProvider;
-import org.apache.flink.table.store.utils.ProjectionUtils;
+import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -122,7 +122,7 @@ public class TableStore {
     }
 
     public List<String> partitionKeys() {
-        RowType partitionType = ProjectionUtils.project(type, partitions);
+        RowType partitionType = TypeUtils.project(type, partitions);
         return partitionType.getFieldNames();
     }
 
@@ -135,7 +135,7 @@ public class TableStore {
     }
 
     private FileStore buildFileStore() {
-        RowType partitionType = ProjectionUtils.project(type, partitions);
+        RowType partitionType = TypeUtils.project(type, partitions);
         RowType keyType;
         RowType valueType;
         MergeFunction mergeFunction;
@@ -144,7 +144,7 @@ public class TableStore {
             valueType = RowType.of(new BigIntType(false));
             mergeFunction = new ValueCountMergeFunction();
         } else {
-            List<RowType.RowField> fields = ProjectionUtils.project(type, primaryKeys).getFields();
+            List<RowType.RowField> fields = TypeUtils.project(type, primaryKeys).getFields();
             // add _KEY_ prefix to avoid conflict with value
             keyType =
                     new RowType(

@@ -21,7 +21,7 @@ package org.apache.flink.table.store.sink;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.generated.Projection;
-import org.apache.flink.table.store.utils.ProjectionUtils;
+import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 
@@ -41,10 +41,10 @@ public class SinkRecordConverter {
     public SinkRecordConverter(int numBucket, RowType inputType, int[] partitions, int[] keys) {
         this.numBucket = numBucket;
         this.allProjection =
-                ProjectionUtils.newProjection(
+                CodeGenUtils.newProjection(
                         inputType, IntStream.range(0, inputType.getFieldCount()).toArray());
-        this.partProjection = ProjectionUtils.newProjection(inputType, partitions);
-        this.keyProjection = ProjectionUtils.newProjection(inputType, keys);
+        this.partProjection = CodeGenUtils.newProjection(inputType, partitions);
+        this.keyProjection = CodeGenUtils.newProjection(inputType, keys);
     }
 
     public SinkRecord convert(RowData row) {

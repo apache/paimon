@@ -22,10 +22,9 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.catalog.ObjectIdentifier;
-import org.apache.flink.table.planner.codegen.sort.SortCodeGenerator;
-import org.apache.flink.table.planner.plan.utils.SortUtil;
 import org.apache.flink.table.runtime.generated.GeneratedRecordComparator;
 import org.apache.flink.table.runtime.generated.RecordComparator;
+import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
@@ -35,10 +34,7 @@ import org.apache.flink.table.store.file.operation.FileStoreReadImpl;
 import org.apache.flink.table.store.file.operation.FileStoreScanImpl;
 import org.apache.flink.table.store.file.operation.FileStoreWriteImpl;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
-
-import java.util.stream.IntStream;
 
 /** File store implementation. */
 public class FileStoreImpl implements FileStore {
@@ -68,12 +64,8 @@ public class FileStoreImpl implements FileStore {
         this.valueType = valueType;
         this.mergeFunction = mergeFunction;
         this.genRecordComparator =
-                new SortCodeGenerator(
-                                new TableConfig(),
-                                RowType.of(keyType.getChildren().toArray(new LogicalType[0])),
-                                SortUtil.getAscendingSortSpec(
-                                        IntStream.range(0, keyType.getFieldCount()).toArray()))
-                        .generateRecordComparator("KeyComparator");
+                CodeGenUtils.generateRecordComparator(
+                        new TableConfig(), keyType.getChildren(), "KeyComparator");
     }
 
     @VisibleForTesting

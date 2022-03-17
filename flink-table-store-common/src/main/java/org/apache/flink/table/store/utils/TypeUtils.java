@@ -16,46 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.utils;
+package org.apache.flink.table.store.utils;
 
 import org.apache.flink.table.data.binary.BinaryStringData;
 import org.apache.flink.table.data.binary.BinaryStringDataUtil;
-import org.apache.flink.table.store.file.predicate.And;
-import org.apache.flink.table.store.file.predicate.Equal;
-import org.apache.flink.table.store.file.predicate.Literal;
-import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.TimestampType;
 
-import javax.annotation.Nullable;
-
+import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
+import java.util.stream.Collectors;
 
-/** Utils for parsing among different types. */
+/** Type related helper functions. */
 public class TypeUtils {
 
-    @Nullable
-    public static Predicate partitionMapToPredicate(
-            Map<String, String> partition, RowType partitionType) {
-        List<String> fieldNames = partitionType.getFieldNames();
-        Predicate predicate = null;
-        for (Map.Entry<String, String> entry : partition.entrySet()) {
-            int idx = fieldNames.indexOf(entry.getKey());
-            LogicalType type = partitionType.getTypeAt(idx);
-            Literal literal = new Literal(type, castFromString(entry.getValue(), type));
-            if (predicate == null) {
-                predicate = new Equal(idx, literal);
-            } else {
-                predicate = new And(predicate, new Equal(idx, literal));
-            }
-        }
-        return predicate;
+    public static RowType project(RowType inputType, int[] mapping) {
+        List<RowType.RowField> fields = inputType.getFields();
+        return new RowType(
+                Arrays.stream(mapping).mapToObj(fields::get).collect(Collectors.toList()));
     }
 
-    private static Object castFromString(String s, LogicalType type) {
+    public static Object castFromString(String s, LogicalType type) {
         BinaryStringData str = BinaryStringData.fromString(s);
         switch (type.getTypeRoot()) {
             case CHAR:
