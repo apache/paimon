@@ -37,6 +37,7 @@ import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.factories.ManagedTableFactory;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.connector.source.TableStoreSource;
+import org.apache.flink.table.store.connector.utils.TableConfigUtils;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.log.LogOptions;
@@ -68,7 +69,7 @@ public class TableStoreFactory
     @Override
     public Map<String, String> enrichOptions(Context context) {
         Map<String, String> enrichedOptions = new HashMap<>(context.getCatalogTable().getOptions());
-        ((Configuration) context.getConfiguration())
+        TableConfigUtils.extractConfiguration(context.getConfiguration())
                 .toMap()
                 .forEach(
                         (k, v) -> {
