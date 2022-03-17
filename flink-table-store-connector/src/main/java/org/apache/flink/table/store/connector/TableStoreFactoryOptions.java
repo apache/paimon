@@ -24,6 +24,7 @@ import org.apache.flink.configuration.ConfigOptions;
 /** Options for {@link TableStoreFactory}. */
 public class TableStoreFactoryOptions {
 
+    // TODO remove CHANGE_TRACKING, just ignore changes for overwrite
     public static final ConfigOption<Boolean> CHANGE_TRACKING =
             ConfigOptions.key("change-tracking")
                     .booleanType()
@@ -34,6 +35,6 @@ public class TableStoreFactoryOptions {
     public static final ConfigOption<String> LOG_SYSTEM =
             ConfigOptions.key("log.system")
                     .stringType()
-                    .defaultValue("kafka")
+                    .noDefaultValue()
                     .withDescription("The log system used to keep changes of the table.");
 }

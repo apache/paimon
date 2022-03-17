@@ -23,6 +23,7 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.DelegatingConfiguration;
 import org.apache.flink.connector.files.shaded.org.apache.flink.connector.base.source.hybrid.HybridSource;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
@@ -45,6 +46,7 @@ import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunct
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.log.LogOptions.LogStartupMode;
 import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.utils.TypeUtils;
@@ -60,6 +62,8 @@ import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
+import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
+import static org.apache.flink.table.store.log.LogOptions.SCAN;
 
 /** A table store api to create source and sink. */
 @Experimental
@@ -214,11 +218,19 @@ public class TableStore {
 
         private FileStoreSource buildFileSource(boolean isContinuous) {
             FileStore fileStore = buildFileStore();
+
+            boolean latestContinuous = false;
+            if (isContinuous) {
+                LogStartupMode startupMode =
+                        new DelegatingConfiguration(options, LOG_PREFIX).get(SCAN);
+                latestContinuous = startupMode == LogStartupMode.LATEST;
+            }
             return new FileStoreSource(
                     fileStore,
                     primaryKeys.length == 0,
                     isContinuous,
                     discoveryIntervalMills(),
+                    latestContinuous,
                     projectedFields,
                     partitionPredicate,
                     fieldPredicate);

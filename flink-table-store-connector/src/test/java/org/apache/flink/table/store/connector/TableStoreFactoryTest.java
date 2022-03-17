@@ -163,19 +163,6 @@ public class TableStoreFactoryTest {
     }
 
     @Test
-    public void testFilterFileStoreOptions() {
-        // mix invalid key and leave value to empty to emphasize the deferred validation
-        Map<String, String> expectedFileStoreOptions =
-                of("dummy.key", "", FILE_PATH.key(), "dummy:/foo/bar");
-        Map<String, String> enrichedOptions = new HashMap<>(expectedFileStoreOptions);
-        enrichedOptions.put("log.foo", "bar");
-        enrichedOptions.put("log.bar", "foo");
-
-        assertThat(TableStoreFactory.filterFileStoreOptions(enrichedOptions))
-                .containsExactlyInAnyOrderEntriesOf(expectedFileStoreOptions);
-    }
-
-    @Test
     public void testTablePath() {
         Map<String, String> options = of(FILE_PATH.key(), "dummy:/foo/bar");
         assertThat(TableStoreFactory.tablePath(options, TABLE_IDENTIFIER))

@@ -172,8 +172,8 @@ public class ContinuousFileSplitEnumerator
                             if (!context.registeredReaders().containsKey(task)) {
                                 return;
                             }
+                            context.assignSplit(splits.poll(), task);
                         }
-                        context.assignSplit(splits.poll(), task);
                     }
                 });
     }

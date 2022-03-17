@@ -22,9 +22,11 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.DelegatingConfiguration;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.TableException;
+import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
@@ -40,7 +42,9 @@ import org.apache.flink.table.store.connector.source.TableStoreSource;
 import org.apache.flink.table.store.connector.utils.TableConfigUtils;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
-import org.apache.flink.table.store.log.LogOptions;
+import org.apache.flink.table.store.log.LogOptions.LogChangelogMode;
+import org.apache.flink.table.store.log.LogOptions.LogConsistency;
+import org.apache.flink.table.store.log.LogOptions.LogStartupMode;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
@@ -50,6 +54,7 @@ import java.io.UncheckedIOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -59,7 +64,9 @@ import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.FILE_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
 import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
+import static org.apache.flink.table.store.log.LogOptions.CONSISTENCY;
 import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
+import static org.apache.flink.table.store.log.LogOptions.SCAN;
 import static org.apache.flink.table.store.log.LogStoreTableFactory.discoverLogStoreFactory;
 
 /** Default implementation of {@link ManagedTableFactory}. */
@@ -107,13 +114,16 @@ public class TableStoreFactory
         }
 
         if (enableChangeTracking(options)) {
-            createLogStoreTableFactory(context)
-                    .onCreateTable(
-                            createLogContext(context),
-                            Integer.parseInt(
-                                    options.getOrDefault(
-                                            BUCKET.key(), BUCKET.defaultValue().toString())),
-                            ignoreIfExists);
+            createOptionalLogStoreFactory(context)
+                    .ifPresent(
+                            factory ->
+                                    factory.onCreateTable(
+                                            createLogContext(context),
+                                            Integer.parseInt(
+                                                    options.getOrDefault(
+                                                            BUCKET.key(),
+                                                            BUCKET.defaultValue().toString())),
+                                            ignoreIfExists));
         }
     }
 
@@ -136,8 +146,11 @@ public class TableStoreFactory
             throw new UncheckedIOException(e);
         }
         if (enableChangeTracking(options)) {
-            createLogStoreTableFactory(context)
-                    .onDropTable(createLogContext(context), ignoreIfNotExists);
+            createOptionalLogStoreFactory(context)
+                    .ifPresent(
+                            factory ->
+                                    factory.onDropTable(
+                                            createLogContext(context), ignoreIfNotExists));
         }
     }
 
@@ -149,37 +162,26 @@ public class TableStoreFactory
 
     @Override
     public DynamicTableSource createDynamicTableSource(Context context) {
-        boolean streaming =
-                context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
-                        == RuntimeExecutionMode.STREAMING;
-        Context logStoreContext = null;
-        LogStoreTableFactory logStoreTableFactory = null;
-
-        if (enableChangeTracking(context.getCatalogTable().getOptions())) {
-            logStoreContext = createLogContext(context);
-            logStoreTableFactory = createLogStoreTableFactory(context);
-        }
         return new TableStoreSource(
-                buildTableStore(context), streaming, logStoreContext, logStoreTableFactory);
+                buildTableStore(context),
+                context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
+                        == RuntimeExecutionMode.STREAMING,
+                createLogContext(context),
+                createOptionalLogStoreFactory(context).orElse(null));
     }
 
     @Override
     public DynamicTableSink createDynamicTableSink(Context context) {
-        Map<String, String> options = context.getCatalogTable().getOptions();
-        Context logStoreContext = null;
-        LogStoreTableFactory logStoreTableFactory = null;
-        if (enableChangeTracking(options)) {
-            logStoreContext = createLogContext(context);
-            logStoreTableFactory = createLogStoreTableFactory(context);
-        }
         return new TableStoreSink(
                 buildTableStore(context),
-                LogOptions.LogChangelogMode.valueOf(
-                        options.getOrDefault(
-                                LOG_PREFIX + CHANGELOG_MODE.key(),
-                                CHANGELOG_MODE.defaultValue().toString().toUpperCase())),
-                logStoreContext,
-                logStoreTableFactory);
+                LogChangelogMode.valueOf(
+                        context.getCatalogTable()
+                                .getOptions()
+                                .getOrDefault(
+                                        LOG_PREFIX + CHANGELOG_MODE.key(),
+                                        CHANGELOG_MODE.defaultValue().toString().toUpperCase())),
+                createLogContext(context),
+                createOptionalLogStoreFactory(context).orElse(null));
     }
 
     @Override
@@ -197,12 +199,42 @@ public class TableStoreFactory
 
     // ~ Tools ------------------------------------------------------------------
 
-    private static LogStoreTableFactory createLogStoreTableFactory(Context context) {
-        return discoverLogStoreFactory(
-                context.getClassLoader(),
-                context.getCatalogTable()
-                        .getOptions()
-                        .getOrDefault(LOG_SYSTEM.key(), LOG_SYSTEM.defaultValue()));
+    private static Optional<LogStoreTableFactory> createOptionalLogStoreFactory(Context context) {
+        Configuration options = new Configuration();
+        context.getCatalogTable().getOptions().forEach(options::setString);
+
+        if (!options.get(CHANGE_TRACKING)) {
+            return Optional.empty();
+        }
+
+        if (options.get(LOG_SYSTEM) == null) {
+            // Use file store continuous reading
+            validateFileStoreContinuous(options);
+            return Optional.empty();
+        }
+
+        return Optional.of(
+                discoverLogStoreFactory(context.getClassLoader(), options.get(LOG_SYSTEM)));
+    }
+
+    private static void validateFileStoreContinuous(Configuration options) {
+        Configuration logOptions = new DelegatingConfiguration(options, LOG_PREFIX);
+        LogChangelogMode changelogMode = logOptions.get(CHANGELOG_MODE);
+        if (changelogMode == LogChangelogMode.UPSERT) {
+            throw new ValidationException(
+                    "File store continuous reading dose not support upsert changelog mode.");
+        }
+        LogConsistency consistency = logOptions.get(CONSISTENCY);
+        if (consistency == LogConsistency.EVENTUAL) {
+            throw new ValidationException(
+                    "File store continuous reading dose not support eventual consistency mode.");
+        }
+        LogStartupMode startupMode = logOptions.get(SCAN);
+        if (startupMode == LogStartupMode.FROM_TIMESTAMP) {
+            throw new ValidationException(
+                    "File store continuous reading dose not support from_timestamp scan mode, "
+                            + "you can add timestamp filters instead.");
+        }
     }
 
     private static Context createLogContext(Context context) {
@@ -219,18 +251,12 @@ public class TableStoreFactory
     @VisibleForTesting
     static Map<String, String> filterLogStoreOptions(Map<String, String> options) {
         return options.entrySet().stream()
+                .filter(entry -> !entry.getKey().equals(LOG_SYSTEM.key())) // exclude log.system
                 .filter(entry -> entry.getKey().startsWith(LOG_PREFIX))
                 .collect(
                         Collectors.toMap(
                                 entry -> entry.getKey().substring(LOG_PREFIX.length()),
                                 Map.Entry::getValue));
-    }
-
-    @VisibleForTesting
-    static Map<String, String> filterFileStoreOptions(Map<String, String> options) {
-        return options.entrySet().stream()
-                .filter(entry -> !entry.getKey().startsWith(LOG_PREFIX))
-                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
     @VisibleForTesting
@@ -271,8 +297,7 @@ public class TableStoreFactory
                             .mapToInt(rowType.getFieldNames()::indexOf)
                             .toArray();
         }
-        return new TableStore(
-                        Configuration.fromMap(filterFileStoreOptions(catalogTable.getOptions())))
+        return new TableStore(Configuration.fromMap(catalogTable.getOptions()))
                 .withTableIdentifier(context.getObjectIdentifier())
                 .withSchema(rowType)
                 .withPrimaryKeys(primaryKeys)
