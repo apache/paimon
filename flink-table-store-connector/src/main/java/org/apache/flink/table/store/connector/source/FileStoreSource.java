@@ -33,9 +33,11 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Collection;
 
 import static org.apache.flink.table.store.connector.source.PendingSplitsCheckpoint.INVALID_SNAPSHOT;
+import static org.apache.flink.util.Preconditions.checkArgument;
 
 /** {@link Source} of file store. */
 public class FileStoreSource
@@ -51,6 +53,8 @@ public class FileStoreSource
 
     private final long discoveryInterval;
 
+    private final boolean latestContinuous;
+
     @Nullable private final int[][] projectedFields;
 
     @Nullable private final Predicate partitionPredicate;
@@ -62,13 +66,15 @@ public class FileStoreSource
             boolean valueCountMode,
             boolean isContinuous,
             long discoveryInterval,
+            boolean latestContinuous,
             @Nullable int[][] projectedFields,
             @Nullable Predicate partitionPredicate,
-            final Predicate fieldPredicate) {
+            @Nullable Predicate fieldPredicate) {
         this.fileStore = fileStore;
         this.valueCountMode = valueCountMode;
         this.isContinuous = isContinuous;
         this.discoveryInterval = discoveryInterval;
+        this.latestContinuous = latestContinuous;
         this.projectedFields = projectedFields;
         this.partitionPredicate = partitionPredicate;
         this.fieldPredicate = fieldPredicate;
@@ -76,8 +82,7 @@ public class FileStoreSource
 
     @Override
     public Boundedness getBoundedness() {
-        // TODO supports streaming reading for file store
-        return Boundedness.BOUNDED;
+        return isContinuous ? Boundedness.CONTINUOUS_UNBOUNDED : Boundedness.BOUNDED;
     }
 
     @Override
@@ -126,10 +131,20 @@ public class FileStoreSource
         Long snapshotId;
         Collection<FileStoreSourceSplit> splits;
         if (checkpoint == null) {
-            FileStoreScan.Plan plan = scan.plan();
-            snapshotId = plan.snapshotId();
-            splits = new FileStoreSourceSplitGenerator().createSplits(plan);
+            // first, create new enumerator, plan splits
+            if (latestContinuous) {
+                checkArgument(
+                        isContinuous,
+                        "The latest continuous can only be true when isContinuous is true.");
+                snapshotId = scan.latestSnapshot();
+                splits = new ArrayList<>();
+            } else {
+                FileStoreScan.Plan plan = scan.plan();
+                snapshotId = plan.snapshotId();
+                splits = new FileStoreSourceSplitGenerator().createSplits(plan);
+            }
         } else {
+            // restore from checkpoint
             snapshotId = checkpoint.currentSnapshotId();
             if (snapshotId == INVALID_SNAPSHOT) {
                 snapshotId = null;
@@ -137,11 +152,12 @@ public class FileStoreSource
             splits = checkpoint.splits();
         }
 
+        // create enumerator from snapshotId and splits
         if (isContinuous) {
             long currentSnapshot = snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId;
             return new ContinuousFileSplitEnumerator(
                     context,
-                    scan.withIncremental(true),
+                    scan.withIncremental(true), // the subsequent planning is all incremental
                     splits,
                     currentSnapshot,
                     discoveryInterval);

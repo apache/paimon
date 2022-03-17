@@ -38,6 +38,8 @@ import static org.apache.flink.util.Preconditions.checkArgument;
 /** Scan operation which produces a plan. */
 public interface FileStoreScan {
 
+    Long latestSnapshot();
+
     boolean snapshotExists(long snapshotId);
 
     Snapshot snapshot(long snapshotId);

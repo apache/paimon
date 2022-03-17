@@ -47,7 +47,7 @@ public class TableStoreSink
 
     private final TableStore tableStore;
     private final LogOptions.LogChangelogMode logChangelogMode;
-    @Nullable private final DynamicTableFactory.Context logStoreContext;
+    private final DynamicTableFactory.Context logStoreContext;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
     private Map<String, String> staticPartitions = new HashMap<>();
@@ -57,7 +57,7 @@ public class TableStoreSink
     public TableStoreSink(
             TableStore tableStore,
             LogOptions.LogChangelogMode logChangelogMode,
-            @Nullable DynamicTableFactory.Context logStoreContext,
+            DynamicTableFactory.Context logStoreContext,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
         this.tableStore = tableStore;
         this.logChangelogMode = logChangelogMode;
