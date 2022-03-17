@@ -192,11 +192,11 @@ public class KafkaLogTestUtils {
         return createContext(name, type, keys, options);
     }
 
-    static SinkRecord testRecord(boolean keyed, int bucket, int key, int value, RowKind rowKind) {
+    static SinkRecord testRecord(boolean hasPk, int bucket, int pk, int value, RowKind rowKind) {
         return new SinkRecord(
                 EMPTY_ROW,
                 bucket,
-                keyed ? row(key) : EMPTY_ROW,
-                GenericRowData.ofKind(rowKind, key, value));
+                hasPk ? row(pk) : EMPTY_ROW,
+                GenericRowData.ofKind(rowKind, pk, value));
     }
 }
