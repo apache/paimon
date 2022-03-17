@@ -27,12 +27,15 @@ import org.apache.flink.table.expressions.TypeLiteralExpression;
 import org.apache.flink.table.expressions.ValueLiteralExpression;
 import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
 import org.apache.flink.table.functions.FunctionDefinition;
+import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiFunction;
 
@@ -42,6 +45,23 @@ import static org.apache.flink.table.data.conversion.DataStructureConverters.get
 public class PredicateConverter implements ExpressionVisitor<Predicate> {
 
     public static final PredicateConverter CONVERTER = new PredicateConverter();
+
+    @Nullable
+    public Predicate fromMap(Map<String, String> map, RowType rowType) {
+        List<String> fieldNames = rowType.getFieldNames();
+        Predicate predicate = null;
+        for (Map.Entry<String, String> entry : map.entrySet()) {
+            int idx = fieldNames.indexOf(entry.getKey());
+            LogicalType type = rowType.getTypeAt(idx);
+            Literal literal = new Literal(type, TypeUtils.castFromString(entry.getValue(), type));
+            if (predicate == null) {
+                predicate = new Equal(idx, literal);
+            } else {
+                predicate = new And(predicate, new Equal(idx, literal));
+            }
+        }
+        return predicate;
+    }
 
     @Override
     public Predicate visit(CallExpression call) {

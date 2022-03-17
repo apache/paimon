@@ -52,11 +52,13 @@ under the License.
     </scm>
 
     <modules>
-        <module>flink-table-store-core</module>
+        <module>flink-table-store-codegen</module>
+        <module>flink-table-store-codegen-loader</module>
+        <module>flink-table-store-common</module>
         <module>flink-table-store-connector</module>
+        <module>flink-table-store-core</module>
         <module>flink-table-store-kafka</module>
         <module>flink-table-store-orc</module>
-        <module>flink-table-store-delegate</module>
     </modules>
 
     <properties>

@@ -31,10 +31,10 @@ import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.predicate.PredicateConverter;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RowDataToObjectArrayConverter;
-import org.apache.flink.table.store.file.utils.TypeUtils;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.slf4j.Logger;
@@ -186,7 +186,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         List<ManifestEntry> appendChanges = collectChanges(committable.newFiles(), ValueKind.ADD);
         // sanity check, all changes must be done within the given partition
-        Predicate partitionFilter = TypeUtils.partitionMapToPredicate(partition, partitionType);
+        Predicate partitionFilter = PredicateConverter.CONVERTER.fromMap(partition, partitionType);
         if (partitionFilter != null) {
             for (ManifestEntry entry : appendChanges) {
                 if (!partitionFilter.test(partitionObjectConverter.convert(entry.partition()))) {

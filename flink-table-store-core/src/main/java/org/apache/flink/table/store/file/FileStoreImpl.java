@@ -24,8 +24,7 @@ import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.runtime.generated.GeneratedRecordComparator;
 import org.apache.flink.table.runtime.generated.RecordComparator;
-import org.apache.flink.table.store.delegate.DelegateSortCodeGenerator;
-import org.apache.flink.table.store.delegate.PlannerDelegate;
+import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
@@ -65,10 +64,8 @@ public class FileStoreImpl implements FileStore {
         this.valueType = valueType;
         this.mergeFunction = mergeFunction;
         this.genRecordComparator =
-                PlannerDelegate.getInstance()
-                        .discover(DelegateSortCodeGenerator.Factory.class)
-                        .allFieldsAscending(new TableConfig(), keyType.getChildren())
-                        .generateRecordComparator("KeyComparator");
+                CodeGenUtils.generateRecordComparator(
+                        new TableConfig(), keyType.getChildren(), "KeyComparator");
     }
 
     @VisibleForTesting

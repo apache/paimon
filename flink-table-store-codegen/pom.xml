@@ -28,8 +28,8 @@ under the License.
         <version>0.1-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-core</artifactId>
-    <name>Flink Table Store : Core</name>
+    <artifactId>flink-table-store-codegen</artifactId>
+    <name>Flink Table Store : Code Gen</name>
 
     <dependencies>
         <dependency>
@@ -40,61 +40,9 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-codegen-loader</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <!-- flink dependencies -->
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-core</artifactId>
-            <version>${flink.version}</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-connector-files</artifactId>
-            <version>${flink.version}</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-common</artifactId>
-            <version>${flink.version}</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-runtime</artifactId>
-            <version>${flink.version}</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <!-- test dependencies -->
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
             <artifactId>flink-table-planner_${scala.binary.version}</artifactId>
             <version>${flink.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-planner-loader</artifactId>
-            <version>${flink.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-avro</artifactId>
-            <version>${flink.version}</version>
-            <scope>test</scope>
+            <scope>provided</scope>
         </dependency>
     </dependencies>
 
@@ -102,12 +50,16 @@ under the License.
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
+                <artifactId>maven-enforcer-plugin</artifactId>
                 <executions>
                     <execution>
+                        <id>forbid-direct-table-planner-dependencies</id>
                         <goals>
-                            <goal>test-jar</goal>
+                            <goal>enforce</goal>
                         </goals>
+                        <configuration>
+                            <skip>true</skip>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>

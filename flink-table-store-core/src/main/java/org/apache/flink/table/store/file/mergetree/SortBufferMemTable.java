@@ -27,8 +27,7 @@ import org.apache.flink.table.runtime.generated.RecordComparator;
 import org.apache.flink.table.runtime.operators.sort.BinaryInMemorySortBuffer;
 import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.runtime.typeutils.InternalSerializers;
-import org.apache.flink.table.store.delegate.DelegateSortCodeGenerator;
-import org.apache.flink.table.store.delegate.PlannerDelegate;
+import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.ValueKind;
@@ -63,18 +62,12 @@ public class SortBufferMemTable implements MemTable {
         sortKeyTypes.add(new BigIntType(false));
 
         // for sort binary buffer
-        DelegateSortCodeGenerator sortCodeGenerator =
-                PlannerDelegate.getInstance()
-                        .discover(DelegateSortCodeGenerator.Factory.class)
-                        .allFieldsAscending(new TableConfig(), sortKeyTypes);
         NormalizedKeyComputer normalizedKeyComputer =
-                sortCodeGenerator
-                        .generateNormalizedKeyComputer("MemTableKeyComputer")
-                        .newInstance(Thread.currentThread().getContextClassLoader());
+                CodeGenUtils.newNormalizedKeyComputer(
+                        new TableConfig(), sortKeyTypes, "MemTableKeyComputer");
         RecordComparator keyComparator =
-                sortCodeGenerator
-                        .generateRecordComparator("MemTableComparator")
-                        .newInstance(Thread.currentThread().getContextClassLoader());
+                CodeGenUtils.newRecordComparator(
+                        new TableConfig(), sortKeyTypes, "MemTableComparator");
 
         HeapMemorySegmentPool memoryPool =
                 new HeapMemorySegmentPool((int) (maxMemSize / pageSize), (int) pageSize);
