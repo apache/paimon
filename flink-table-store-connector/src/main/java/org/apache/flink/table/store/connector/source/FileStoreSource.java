@@ -82,8 +82,7 @@ public class FileStoreSource
 
     @Override
     public Boundedness getBoundedness() {
-        // TODO supports streaming reading for file store
-        return Boundedness.BOUNDED;
+        return isContinuous ? Boundedness.CONTINUOUS_UNBOUNDED : Boundedness.BOUNDED;
     }
 
     @Override
@@ -134,7 +133,9 @@ public class FileStoreSource
         if (checkpoint == null) {
             // first, create new enumerator, plan splits
             if (latestContinuous) {
-                checkArgument(isContinuous);
+                checkArgument(
+                        isContinuous,
+                        "The latest continuous can only be true when isContinuous is true.");
                 snapshotId = scan.latestSnapshot();
                 splits = new ArrayList<>();
             } else {

@@ -43,7 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** SQL ITCase for continuous file store. */
-public class ContinuousITCase extends AbstractTestBase {
+public class ContinuousFileStoreITCase extends AbstractTestBase {
 
     private TableEnvironment bEnv;
     private TableEnvironment sEnv;
