@@ -22,13 +22,12 @@ import org.apache.flink.runtime.operators.sort.QuickSort;
 import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.planner.codegen.sort.SortCodeGenerator;
-import org.apache.flink.table.planner.plan.utils.SortUtil;
 import org.apache.flink.table.runtime.generated.NormalizedKeyComputer;
 import org.apache.flink.table.runtime.generated.RecordComparator;
 import org.apache.flink.table.runtime.operators.sort.BinaryInMemorySortBuffer;
 import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.runtime.typeutils.InternalSerializers;
+import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.ValueKind;
@@ -44,7 +43,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
-import java.util.stream.IntStream;
 
 /** A {@link MemTable} which stores records in {@link BinaryInMemorySortBuffer}. */
 public class SortBufferMemTable implements MemTable {
@@ -64,20 +62,12 @@ public class SortBufferMemTable implements MemTable {
         sortKeyTypes.add(new BigIntType(false));
 
         // for sort binary buffer
-        SortCodeGenerator sortCodeGenerator =
-                new SortCodeGenerator(
-                        new TableConfig(),
-                        RowType.of(sortKeyTypes.toArray(new LogicalType[0])),
-                        SortUtil.getAscendingSortSpec(
-                                IntStream.range(0, sortKeyTypes.size()).toArray()));
         NormalizedKeyComputer normalizedKeyComputer =
-                sortCodeGenerator
-                        .generateNormalizedKeyComputer("MemTableKeyComputer")
-                        .newInstance(Thread.currentThread().getContextClassLoader());
+                CodeGenUtils.newNormalizedKeyComputer(
+                        new TableConfig(), sortKeyTypes, "MemTableKeyComputer");
         RecordComparator keyComparator =
-                sortCodeGenerator
-                        .generateRecordComparator("MemTableComparator")
-                        .newInstance(Thread.currentThread().getContextClassLoader());
+                CodeGenUtils.newRecordComparator(
+                        new TableConfig(), sortKeyTypes, "MemTableComparator");
 
         HeapMemorySegmentPool memoryPool =
                 new HeapMemorySegmentPool((int) (maxMemSize / pageSize), (int) pageSize);

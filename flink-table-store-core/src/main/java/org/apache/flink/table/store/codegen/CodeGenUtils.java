@@ -16,32 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.utils;
+package org.apache.flink.table.store.codegen;
 
 import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.binary.BinaryRowDataUtil;
-import org.apache.flink.table.planner.codegen.CodeGeneratorContext;
-import org.apache.flink.table.planner.codegen.ProjectionCodeGenerator;
+import org.apache.flink.table.runtime.generated.GeneratedRecordComparator;
+import org.apache.flink.table.runtime.generated.NormalizedKeyComputer;
 import org.apache.flink.table.runtime.generated.Projection;
+import org.apache.flink.table.runtime.generated.RecordComparator;
+import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
-import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Collectors;
 
-/** Utils for {@link Projection}. */
-public class ProjectionUtils {
+/** Utils for code generations. */
+public class CodeGenUtils {
 
     public static final Projection<RowData, BinaryRowData> EMPTY_PROJECTION =
             input -> BinaryRowDataUtil.EMPTY_ROW;
-
-    public static RowType project(RowType inputType, int[] mapping) {
-        List<RowType.RowField> fields = inputType.getFields();
-        return new RowType(
-                Arrays.stream(mapping).mapToObj(fields::get).collect(Collectors.toList()));
-    }
 
     public static Projection<RowData, BinaryRowData> newProjection(
             RowType inputType, int[] mapping) {
@@ -51,13 +45,31 @@ public class ProjectionUtils {
 
         @SuppressWarnings("unchecked")
         Projection<RowData, BinaryRowData> projection =
-                ProjectionCodeGenerator.generateProjection(
-                                CodeGeneratorContext.apply(new TableConfig()),
-                                "Projection",
-                                inputType,
-                                project(inputType, mapping),
-                                mapping)
+                CodeGenLoader.getInstance()
+                        .discover(CodeGenerator.class)
+                        .generateProjection(new TableConfig(), "Projection", inputType, mapping)
                         .newInstance(Thread.currentThread().getContextClassLoader());
         return projection;
+    }
+
+    public static NormalizedKeyComputer newNormalizedKeyComputer(
+            TableConfig tableConfig, List<LogicalType> fieldTypes, String name) {
+        return CodeGenLoader.getInstance()
+                .discover(CodeGenerator.class)
+                .generateNormalizedKeyComputer(tableConfig, fieldTypes, name)
+                .newInstance(Thread.currentThread().getContextClassLoader());
+    }
+
+    public static GeneratedRecordComparator generateRecordComparator(
+            TableConfig tableConfig, List<LogicalType> fieldTypes, String name) {
+        return CodeGenLoader.getInstance()
+                .discover(CodeGenerator.class)
+                .generateRecordComparator(tableConfig, fieldTypes, name);
+    }
+
+    public static RecordComparator newRecordComparator(
+            TableConfig tableConfig, List<LogicalType> fieldTypes, String name) {
+        return generateRecordComparator(tableConfig, fieldTypes, name)
+                .newInstance(Thread.currentThread().getContextClassLoader());
     }
 }
