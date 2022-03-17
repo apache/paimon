@@ -56,11 +56,11 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
     public ReadWriteTableITCase(
             RuntimeExecutionMode executionMode,
             String tableName,
-            boolean enableChangeTracking,
+            boolean enableLogStore,
             boolean hasPk,
             @Nullable Boolean duplicate,
             ExpectedResult expectedResult) {
-        super(executionMode, tableName, enableChangeTracking, expectedResult);
+        super(executionMode, tableName, enableLogStore, expectedResult);
         this.hasPk = hasPk;
         this.duplicate = duplicate;
     }
@@ -92,7 +92,7 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
             // check manifest file path
             assertThat(Paths.get(rootPath, relativeFilePath, "manifest")).exists();
 
-            if (enableChangeTracking) {
+            if (enableLogStore) {
                 assertThat(topicExists(tableIdentifier.asSummaryString())).isTrue();
             }
         } else {
@@ -110,7 +110,7 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
     @Parameterized.Parameters(
             name =
                     "executionMode-{0}, tableName-{1}, "
-                            + "enableChangeTracking-{2}, hasPk-{3},"
+                            + "enableLogStore-{2}, hasPk-{3},"
                             + " duplicate-{4}, expectedResult-{5}")
     public static List<Object[]> data() {
         List<Object[]> specs = new ArrayList<>();
@@ -119,8 +119,8 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
                 new Object[] {
                     RuntimeExecutionMode.BATCH,
                     "table_" + UUID.randomUUID(),
-                    false, // enable change-tracking
-                    false, // has pk
+                    false, // disable log store
+                    false, // no pk
                     false, // without duplicate
                     new ExpectedResult().success(true).expectedRecords(insertOnlyCities(false))
                 });
@@ -128,8 +128,8 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
                 new Object[] {
                     RuntimeExecutionMode.BATCH,
                     "table_" + UUID.randomUUID(),
-                    false, // enable change-tracking
-                    false, // has pk
+                    false, // disable log store
+                    false, // no pk
                     true, //  with duplicate
                     new ExpectedResult().success(true).expectedRecords(insertOnlyCities(true))
                 });
@@ -139,14 +139,12 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
                 new Object[] {
                     RuntimeExecutionMode.BATCH,
                     "table_" + UUID.randomUUID(),
-                    false, // enable change-tracking
+                    false, // disable log store
                     true, // has pk
-                    null, // without delete
+                    null, // without duplicate
                     new ExpectedResult().success(true).expectedRecords(expected)
                 });
-        // TODO: streaming with change-tracking
-
-        // TODO: streaming without log system
+        // TODO: streaming with log system
 
         // TODO: add overwrite case
 

@@ -58,7 +58,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.CHANGE_TRACKING;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.FILE_PATH;
@@ -113,18 +112,16 @@ public class TableStoreFactory
             throw new UncheckedIOException(e);
         }
 
-        if (enableChangeTracking(options)) {
-            createOptionalLogStoreFactory(context)
-                    .ifPresent(
-                            factory ->
-                                    factory.onCreateTable(
-                                            createLogContext(context),
-                                            Integer.parseInt(
-                                                    options.getOrDefault(
-                                                            BUCKET.key(),
-                                                            BUCKET.defaultValue().toString())),
-                                            ignoreIfExists));
-        }
+        createOptionalLogStoreFactory(context)
+                .ifPresent(
+                        factory ->
+                                factory.onCreateTable(
+                                        createLogContext(context),
+                                        Integer.parseInt(
+                                                options.getOrDefault(
+                                                        BUCKET.key(),
+                                                        BUCKET.defaultValue().toString())),
+                                        ignoreIfExists));
     }
 
     @Override
@@ -145,13 +142,10 @@ public class TableStoreFactory
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        if (enableChangeTracking(options)) {
-            createOptionalLogStoreFactory(context)
-                    .ifPresent(
-                            factory ->
-                                    factory.onDropTable(
-                                            createLogContext(context), ignoreIfNotExists));
-        }
+        createOptionalLogStoreFactory(context)
+                .ifPresent(
+                        factory ->
+                                factory.onDropTable(createLogContext(context), ignoreIfNotExists));
     }
 
     @Override
@@ -193,7 +187,6 @@ public class TableStoreFactory
     public Set<ConfigOption<?>> optionalOptions() {
         Set<ConfigOption<?>> options = FileStoreOptions.allOptions();
         options.addAll(MergeTreeOptions.allOptions());
-        options.add(CHANGE_TRACKING);
         return options;
     }
 
@@ -202,10 +195,6 @@ public class TableStoreFactory
     private static Optional<LogStoreTableFactory> createOptionalLogStoreFactory(Context context) {
         Configuration options = new Configuration();
         context.getCatalogTable().getOptions().forEach(options::setString);
-
-        if (!options.get(CHANGE_TRACKING)) {
-            return Optional.empty();
-        }
 
         if (options.get(LOG_SYSTEM) == null) {
             // Use file store continuous reading
@@ -277,13 +266,6 @@ public class TableStoreFactory
                         identifier.getCatalogName(),
                         identifier.getDatabaseName(),
                         identifier.getObjectName()));
-    }
-
-    @VisibleForTesting
-    static boolean enableChangeTracking(Map<String, String> options) {
-        return Boolean.parseBoolean(
-                options.getOrDefault(
-                        CHANGE_TRACKING.key(), CHANGE_TRACKING.defaultValue().toString()));
     }
 
     private TableStore buildTableStore(Context context) {

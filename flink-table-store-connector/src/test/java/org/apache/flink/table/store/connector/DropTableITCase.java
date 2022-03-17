@@ -58,10 +58,10 @@ public class DropTableITCase extends TableStoreTestBase {
     public DropTableITCase(
             RuntimeExecutionMode executionMode,
             String tableName,
-            boolean enableChangeTracking,
+            boolean enableLogStore,
             boolean ignoreException,
             ExpectedResult expectedResult) {
-        super(executionMode, tableName, enableChangeTracking, expectedResult);
+        super(executionMode, tableName, enableLogStore, expectedResult);
         this.ignoreException = ignoreException;
     }
 
@@ -132,7 +132,7 @@ public class DropTableITCase extends TableStoreTestBase {
                 // delete file store path does not affect dropping the table
                 deleteTablePath();
                 // delete log store topic does not affect dropping the table
-                if (enableChangeTracking) {
+                if (enableLogStore) {
                     deleteTopicIfExists(tableIdentifier.asSummaryString());
                 }
             }
@@ -158,7 +158,7 @@ public class DropTableITCase extends TableStoreTestBase {
 
     @Parameterized.Parameters(
             name =
-                    "executionMode-{0}, tableName-{1}, enableChangeTracking-{2}, ignoreException-{3}, expectedResult-{4}")
+                    "executionMode-{0}, tableName-{1}, enableLogStore-{2}, ignoreException-{3}, expectedResult-{4}")
     public static List<Object[]> data() {
         List<Object[]> specs = new ArrayList<>();
         // successful case specs

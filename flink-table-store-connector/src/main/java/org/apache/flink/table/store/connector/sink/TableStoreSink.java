@@ -112,7 +112,8 @@ public class TableStoreSink
                                 }
                             });
         }
-        final LogSinkProvider finalLogSinkProvider = logSinkProvider;
+        // Do not sink to log store when overwrite mode
+        final LogSinkProvider finalLogSinkProvider = overwrite ? null : logSinkProvider;
         return (DataStreamSinkProvider)
                 (providerContext, dataStream) ->
                         tableStore

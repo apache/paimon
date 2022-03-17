@@ -45,7 +45,6 @@ import java.util.Map;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.CHANGE_TRACKING;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.FILE_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
@@ -181,12 +180,6 @@ public class TableStoreFactoryTest {
                                 + "as `CREATE TABLE ${table} (...) WITH ('file.path' = '...')`");
     }
 
-    @ParameterizedTest
-    @MethodSource("providingEnrichedOptionsForChangeTracking")
-    public void testEnableChangeTracking(Map<String, String> options, boolean expected) {
-        assertThat(TableStoreFactory.enableChangeTracking(options)).isEqualTo(expected);
-    }
-
     // ~ Tools ------------------------------------------------------------------
 
     private static Stream<Arguments> providingOptions() {
@@ -240,7 +233,6 @@ public class TableStoreFactoryTest {
     private static Stream<Arguments> providingEnrichedOptionsForCreation() {
         Map<String, String> enrichedOptions = new HashMap<>();
         enrichedOptions.put(FILE_PATH.key(), sharedTempDir.toAbsolutePath().toString());
-        enrichedOptions.put(CHANGE_TRACKING.key(), String.valueOf(false));
         return Stream.of(
                 Arguments.of(enrichedOptions, false),
                 Arguments.of(enrichedOptions, true),
@@ -258,19 +250,10 @@ public class TableStoreFactoryTest {
         }
         Map<String, String> enrichedOptions = new HashMap<>();
         enrichedOptions.put(FILE_PATH.key(), sharedTempDir.toAbsolutePath().toString());
-        enrichedOptions.put(CHANGE_TRACKING.key(), String.valueOf(false));
         return Stream.of(
                 Arguments.of(enrichedOptions, false),
                 Arguments.of(enrichedOptions, true),
                 Arguments.of(enrichedOptions, false));
-    }
-
-    private static Stream<Arguments> providingEnrichedOptionsForChangeTracking() {
-        return Stream.of(
-                Arguments.of(Collections.emptyMap(), true),
-                Arguments.of(of(CHANGE_TRACKING.key(), "true"), true),
-                Arguments.of(of(CHANGE_TRACKING.key(), "false"), false),
-                Arguments.of(of(TABLE_STORE_PREFIX + CHANGE_TRACKING.key(), "false"), true));
     }
 
     private static Map<String, String> addPrefix(
