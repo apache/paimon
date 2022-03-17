@@ -487,7 +487,7 @@ under the License.
                                     </includes>
                                     <message>
                                         Direct dependencies on flink-table-planner are not allowed.
-                                        You should depend on either Table API modules, flink-table-planner-loader or flink-table-store-delegate-loader.
+                                        You should depend on either Table API modules, flink-table-planner-loader or flink-table-store-codegen-loader.
                                     </message>
                                 </bannedDependencies>
                             </rules>
