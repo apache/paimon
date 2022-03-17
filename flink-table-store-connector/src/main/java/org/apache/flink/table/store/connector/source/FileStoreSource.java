@@ -33,9 +33,11 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Collection;
 
 import static org.apache.flink.table.store.connector.source.PendingSplitsCheckpoint.INVALID_SNAPSHOT;
+import static org.apache.flink.util.Preconditions.checkArgument;
 
 /** {@link Source} of file store. */
 public class FileStoreSource
@@ -51,7 +53,7 @@ public class FileStoreSource
 
     private final long discoveryInterval;
 
-    private final boolean isFirstIncremental;
+    private final boolean latestContinuous;
 
     @Nullable private final int[][] projectedFields;
 
@@ -64,7 +66,7 @@ public class FileStoreSource
             boolean valueCountMode,
             boolean isContinuous,
             long discoveryInterval,
-            boolean isFirstIncremental,
+            boolean latestContinuous,
             @Nullable int[][] projectedFields,
             @Nullable Predicate partitionPredicate,
             @Nullable Predicate fieldPredicate) {
@@ -72,7 +74,7 @@ public class FileStoreSource
         this.valueCountMode = valueCountMode;
         this.isContinuous = isContinuous;
         this.discoveryInterval = discoveryInterval;
-        this.isFirstIncremental = isFirstIncremental;
+        this.latestContinuous = latestContinuous;
         this.projectedFields = projectedFields;
         this.partitionPredicate = partitionPredicate;
         this.fieldPredicate = fieldPredicate;
@@ -131,12 +133,15 @@ public class FileStoreSource
         Collection<FileStoreSourceSplit> splits;
         if (checkpoint == null) {
             // first, create new enumerator, plan splits
-            if (isFirstIncremental) {
-                scan = scan.withIncremental(true);
+            if (latestContinuous) {
+                checkArgument(isContinuous);
+                snapshotId = scan.latestSnapshot();
+                splits = new ArrayList<>();
+            } else {
+                FileStoreScan.Plan plan = scan.plan();
+                snapshotId = plan.snapshotId();
+                splits = new FileStoreSourceSplitGenerator().createSplits(plan);
             }
-            FileStoreScan.Plan plan = scan.plan();
-            snapshotId = plan.snapshotId();
-            splits = new FileStoreSourceSplitGenerator().createSplits(plan);
         } else {
             // restore from checkpoint
             snapshotId = checkpoint.currentSnapshotId();

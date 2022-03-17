@@ -219,18 +219,18 @@ public class TableStore {
         private FileStoreSource buildFileSource(boolean isContinuous) {
             FileStore fileStore = buildFileStore();
 
-            boolean isFirstIncremental = false;
+            boolean latestContinuous = false;
             if (isContinuous) {
                 LogStartupMode startupMode =
                         new DelegatingConfiguration(options, LOG_PREFIX).get(SCAN);
-                isFirstIncremental = startupMode == LogStartupMode.LATEST;
+                latestContinuous = startupMode == LogStartupMode.LATEST;
             }
             return new FileStoreSource(
                     fileStore,
                     primaryKeys.length == 0,
                     isContinuous,
                     discoveryIntervalMills(),
-                    isFirstIncremental,
+                    latestContinuous,
                     projectedFields,
                     partitionPredicate,
                     fieldPredicate);

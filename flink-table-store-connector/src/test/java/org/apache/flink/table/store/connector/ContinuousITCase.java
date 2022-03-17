@@ -30,14 +30,17 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
+import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
 import static org.apache.flink.table.store.file.FileStoreOptions.FILE_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** SQL ITCase for continuous file store. */
 public class ContinuousITCase extends AbstractTestBase {
@@ -49,6 +52,7 @@ public class ContinuousITCase extends AbstractTestBase {
     public void before() throws IOException {
         bEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
         sEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inStreamingMode().build());
+        sEnv.getConfig().getConfiguration().set(CHECKPOINTING_INTERVAL, Duration.ofMillis(100));
         String path = TEMPORARY_FOLDER.newFolder().toURI().toString();
         prepareEnv(bEnv, path);
         prepareEnv(sEnv, path);
@@ -110,6 +114,49 @@ public class ContinuousITCase extends AbstractTestBase {
 
         bEnv.executeSql(String.format("INSERT INTO %s VALUES ('7', '8', '9')", table)).await();
         assertThat(collectFromUnbounded(iterator, 1)).containsExactlyInAnyOrder(Row.of("8", "9"));
+    }
+
+    @Test
+    public void testContinuousLatest() throws ExecutionException, InterruptedException {
+        bEnv.executeSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')").await();
+
+        CloseableIterator<Row> iterator =
+                sEnv.executeSql("SELECT * FROM T1 /*+ OPTIONS('log.scan'='latest') */").collect();
+
+        bEnv.executeSql("INSERT INTO T1 VALUES ('7', '8', '9'), ('10', '11', '12')").await();
+        assertThat(collectFromUnbounded(iterator, 2))
+                .containsExactlyInAnyOrder(Row.of("7", "8", "9"), Row.of("10", "11", "12"));
+    }
+
+    @Test
+    public void testUnsupportedUpsert() {
+        assertThatThrownBy(
+                () ->
+                        sEnv.executeSql(
+                                        "SELECT * FROM T1 /*+ OPTIONS('log.changelog-mode'='upsert') */")
+                                .collect(),
+                "File store continuous reading dose not support upsert changelog mode");
+    }
+
+    @Test
+    public void testUnsupportedEventual() {
+        assertThatThrownBy(
+                () ->
+                        sEnv.executeSql(
+                                        "SELECT * FROM T1 /*+ OPTIONS('log.consistency'='eventual') */")
+                                .collect(),
+                "File store continuous reading dose not support eventual consistency mode");
+    }
+
+    @Test
+    public void testUnsupportedStartupTimestamp() {
+        assertThatThrownBy(
+                () ->
+                        sEnv.executeSql(
+                                        "SELECT * FROM T1 /*+ OPTIONS('log.scan'='from-timestamp') */")
+                                .collect(),
+                "File store continuous reading dose not support from_timestamp scan mode, "
+                        + "you can add timestamp filters instead.");
     }
 
     private List<Row> collectFromUnbounded(CloseableIterator<Row> iterator, int numElements) {

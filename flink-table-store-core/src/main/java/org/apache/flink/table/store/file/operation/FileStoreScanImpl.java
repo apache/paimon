@@ -79,6 +79,11 @@ public class FileStoreScanImpl implements FileStoreScan {
     }
 
     @Override
+    public Long latestSnapshot() {
+        return pathFactory.latestSnapshotId();
+    }
+
+    @Override
     public boolean snapshotExists(long snapshotId) {
         Path path = pathFactory.toSnapshotPath(snapshotId);
         try {

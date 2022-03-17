@@ -260,13 +260,6 @@ public class TableStoreFactory
     }
 
     @VisibleForTesting
-    static Map<String, String> filterFileStoreOptions(Map<String, String> options) {
-        return options.entrySet().stream()
-                .filter(entry -> !entry.getKey().startsWith(LOG_PREFIX))
-                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-    }
-
-    @VisibleForTesting
     static Path tablePath(Map<String, String> options, ObjectIdentifier identifier) {
         Preconditions.checkArgument(
                 options.containsKey(FILE_PATH.key()),
@@ -304,8 +297,7 @@ public class TableStoreFactory
                             .mapToInt(rowType.getFieldNames()::indexOf)
                             .toArray();
         }
-        return new TableStore(
-                        Configuration.fromMap(filterFileStoreOptions(catalogTable.getOptions())))
+        return new TableStore(Configuration.fromMap(catalogTable.getOptions()))
                 .withTableIdentifier(context.getObjectIdentifier())
                 .withSchema(rowType)
                 .withPrimaryKeys(primaryKeys)
