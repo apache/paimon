@@ -30,6 +30,7 @@ import org.apache.flink.table.store.kafka.KafkaTableTestBase;
 import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.types.Row;
 
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.List;
@@ -50,6 +51,7 @@ import static org.apache.flink.table.store.kafka.KafkaLogTestUtils.discoverKafka
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for table store with kafka. */
+@Ignore // TODO enable this
 public class LogStoreSinkITCase extends KafkaTableTestBase {
 
     @Test
