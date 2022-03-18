@@ -60,10 +60,10 @@ public class CreateTableITCase extends TableStoreTestBase {
     public CreateTableITCase(
             RuntimeExecutionMode executionMode,
             String tableName,
-            boolean enableChangeTracking,
+            boolean enableLogStore,
             boolean ignoreException,
             ExpectedResult expectedResult) {
-        super(executionMode, tableName, enableChangeTracking, expectedResult);
+        super(executionMode, tableName, enableLogStore, expectedResult);
         this.ignoreException = ignoreException;
     }
 
@@ -81,8 +81,7 @@ public class CreateTableITCase extends TableStoreTestBase {
             assertThat(Paths.get(rootPath, getRelativeFileStoreTablePath(tableIdentifier)).toFile())
                     .exists();
             // check log store
-            assertThat(topicExists(tableIdentifier.asSummaryString()))
-                    .isEqualTo(enableChangeTracking);
+            assertThat(topicExists(tableIdentifier.asSummaryString())).isEqualTo(enableLogStore);
         } else {
             // check inconsistency between catalog/file store/log store
             assertThat(ignoreException).isFalse();
@@ -124,7 +123,7 @@ public class CreateTableITCase extends TableStoreTestBase {
                                 }
                             });
             // ensure log store doesn't exist the topic
-            if (enableChangeTracking && !ignoreException) {
+            if (enableLogStore && !ignoreException) {
                 deleteTopicIfExists(tableIdentifier.asSummaryString());
             }
         } else if (expectedResult.expectedMessage.startsWith("Failed to create file store path.")) {
@@ -151,7 +150,7 @@ public class CreateTableITCase extends TableStoreTestBase {
 
     @Parameterized.Parameters(
             name =
-                    "executionMode-{0}, tableName-{1}, enableChangeTracking-{2}, ignoreException-{3}, expectedResult-{4}")
+                    "executionMode-{0}, tableName-{1}, enableLogStore-{2}, ignoreException-{3}, expectedResult-{4}")
     public static List<Object[]> data() {
         List<Object[]> specs = new ArrayList<>();
         // successful case specs

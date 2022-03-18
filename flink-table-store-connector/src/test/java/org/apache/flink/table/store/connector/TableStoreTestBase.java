@@ -50,7 +50,6 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.CHANGE_TRACKING;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
 import static org.apache.flink.table.store.file.FileStoreOptions.FILE_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
@@ -65,7 +64,7 @@ public abstract class TableStoreTestBase extends KafkaTableTestBase {
 
     protected final RuntimeExecutionMode executionMode;
     protected final ObjectIdentifier tableIdentifier;
-    protected final boolean enableChangeTracking;
+    protected final boolean enableLogStore;
     protected final ExpectedResult expectedResult;
 
     protected String rootPath;
@@ -73,11 +72,11 @@ public abstract class TableStoreTestBase extends KafkaTableTestBase {
     public TableStoreTestBase(
             RuntimeExecutionMode executionMode,
             String tableName,
-            boolean enableChangeTracking,
+            boolean enableLogStore,
             ExpectedResult expectedResult) {
         this.executionMode = executionMode;
         this.tableIdentifier = ObjectIdentifier.of(CURRENT_CATALOG, CURRENT_DATABASE, tableName);
-        this.enableChangeTracking = enableChangeTracking;
+        this.enableLogStore = enableLogStore;
         this.expectedResult = expectedResult;
     }
 
@@ -113,8 +112,9 @@ public abstract class TableStoreTestBase extends KafkaTableTestBase {
         configuration.setString(TABLE_STORE_PREFIX + FILE_PATH.key(), rootPath);
         configuration.setString(
                 TABLE_STORE_PREFIX + LOG_PREFIX + BOOTSTRAP_SERVERS.key(), getBootstrapServers());
-        configuration.setBoolean(TABLE_STORE_PREFIX + CHANGE_TRACKING.key(), enableChangeTracking);
-        configuration.setString(TABLE_STORE_PREFIX + LOG_SYSTEM.key(), "kafka");
+        if (enableLogStore) {
+            configuration.setString(TABLE_STORE_PREFIX + LOG_SYSTEM.key(), "kafka");
+        }
     }
 
     protected static ResolvedCatalogTable createResolvedTable(

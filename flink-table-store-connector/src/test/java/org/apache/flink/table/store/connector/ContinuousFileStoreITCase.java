@@ -129,6 +129,22 @@ public class ContinuousFileStoreITCase extends AbstractTestBase {
     }
 
     @Test
+    public void testIgnoreOverwrite() throws ExecutionException, InterruptedException {
+        CloseableIterator<Row> iterator = sEnv.executeSql("SELECT * FROM T1").collect();
+
+        bEnv.executeSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')").await();
+        assertThat(collectFromUnbounded(iterator, 2))
+                .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
+
+        // should ignore this overwrite
+        bEnv.executeSql("INSERT OVERWRITE T1 VALUES ('7', '8', '9')").await();
+
+        bEnv.executeSql("INSERT INTO T1 VALUES ('9', '10', '11')").await();
+        assertThat(collectFromUnbounded(iterator, 1))
+                .containsExactlyInAnyOrder(Row.of("9", "10", "11"));
+    }
+
+    @Test
     public void testUnsupportedUpsert() {
         assertThatThrownBy(
                 () ->
