@@ -202,8 +202,7 @@ public class ContinuousFileSplitEnumerator
                 Snapshot snapshot = scan.snapshot(nextSnapshotId);
                 if (snapshot.commitKind() != Snapshot.CommitKind.APPEND) {
                     if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE) {
-                        throw new UnsupportedOperationException(
-                                "Invalid overwrite snapshot id: " + nextSnapshotId);
+                        LOG.warn("Ignore overwrite snapshot id {}.", nextSnapshotId);
                     }
 
                     nextSnapshotId++;
