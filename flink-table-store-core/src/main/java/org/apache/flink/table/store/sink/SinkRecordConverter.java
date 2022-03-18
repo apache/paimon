@@ -36,30 +36,31 @@ public class SinkRecordConverter {
 
     private final Projection<RowData, BinaryRowData> partProjection;
 
-    private final Projection<RowData, BinaryRowData> keyProjection;
+    private final Projection<RowData, BinaryRowData> pkProjection;
 
-    public SinkRecordConverter(int numBucket, RowType inputType, int[] partitions, int[] keys) {
+    public SinkRecordConverter(
+            int numBucket, RowType inputType, int[] partitions, int[] primaryKeys) {
         this.numBucket = numBucket;
         this.allProjection =
                 CodeGenUtils.newProjection(
                         inputType, IntStream.range(0, inputType.getFieldCount()).toArray());
         this.partProjection = CodeGenUtils.newProjection(inputType, partitions);
-        this.keyProjection = CodeGenUtils.newProjection(inputType, keys);
+        this.pkProjection = CodeGenUtils.newProjection(inputType, primaryKeys);
     }
 
     public SinkRecord convert(RowData row) {
         BinaryRowData partition = partProjection.apply(row);
-        BinaryRowData key = key(row);
-        int bucket = bucket(row, key);
-        return new SinkRecord(partition, bucket, key, row);
+        BinaryRowData primaryKey = primaryKey(row);
+        int bucket = bucket(row, primaryKey);
+        return new SinkRecord(partition, bucket, primaryKey, row);
     }
 
-    public BinaryRowData key(RowData row) {
-        return keyProjection.apply(row);
+    public BinaryRowData primaryKey(RowData row) {
+        return pkProjection.apply(row);
     }
 
-    public int bucket(RowData row, BinaryRowData key) {
-        int hash = key.getArity() == 0 ? hashRow(row) : key.hashCode();
+    public int bucket(RowData row, BinaryRowData primaryKey) {
+        int hash = primaryKey.getArity() == 0 ? hashRow(row) : primaryKey.hashCode();
         return Math.abs(hash % numBucket);
     }
 
