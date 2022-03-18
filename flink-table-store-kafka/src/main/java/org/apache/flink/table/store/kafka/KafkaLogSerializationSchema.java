@@ -35,20 +35,20 @@ public class KafkaLogSerializationSchema implements KafkaRecordSerializationSche
     private static final long serialVersionUID = 1L;
 
     private final String topic;
-    @Nullable private final SerializationSchema<RowData> keySerializer;
+    @Nullable private final SerializationSchema<RowData> primaryKeySerializer;
     private final SerializationSchema<RowData> valueSerializer;
     private final LogChangelogMode changelogMode;
 
     public KafkaLogSerializationSchema(
             String topic,
-            @Nullable SerializationSchema<RowData> keySerializer,
+            @Nullable SerializationSchema<RowData> primaryKeySerializer,
             SerializationSchema<RowData> valueSerializer,
             LogChangelogMode changelogMode) {
         this.topic = topic;
-        this.keySerializer = keySerializer;
+        this.primaryKeySerializer = primaryKeySerializer;
         this.valueSerializer = valueSerializer;
         this.changelogMode = changelogMode;
-        if (changelogMode == LogChangelogMode.UPSERT && keySerializer == null) {
+        if (changelogMode == LogChangelogMode.UPSERT && primaryKeySerializer == null) {
             throw new IllegalArgumentException(
                     "Can not use upsert changelog mode for non-pk table.");
         }
@@ -58,8 +58,8 @@ public class KafkaLogSerializationSchema implements KafkaRecordSerializationSche
     public void open(
             SerializationSchema.InitializationContext context, KafkaSinkContext sinkContext)
             throws Exception {
-        if (keySerializer != null) {
-            keySerializer.open(context);
+        if (primaryKeySerializer != null) {
+            primaryKeySerializer.open(context);
         }
         valueSerializer.open(context);
     }
@@ -69,10 +69,10 @@ public class KafkaLogSerializationSchema implements KafkaRecordSerializationSche
             SinkRecord element, KafkaSinkContext context, Long timestamp) {
         RowKind kind = element.row().getRowKind();
 
-        byte[] keyBytes = null;
+        byte[] primaryKeyBytes = null;
         byte[] valueBytes = null;
-        if (keySerializer != null) {
-            keyBytes = keySerializer.serialize(element.key());
+        if (primaryKeySerializer != null) {
+            primaryKeyBytes = primaryKeySerializer.serialize(element.primaryKey());
             if (changelogMode == LogChangelogMode.ALL
                     || kind == RowKind.INSERT
                     || kind == RowKind.UPDATE_AFTER) {
@@ -81,6 +81,6 @@ public class KafkaLogSerializationSchema implements KafkaRecordSerializationSche
         } else {
             valueBytes = valueSerializer.serialize(element.row());
         }
-        return new ProducerRecord<>(topic, element.bucket(), keyBytes, valueBytes);
+        return new ProducerRecord<>(topic, element.bucket(), primaryKeyBytes, valueBytes);
     }
 }

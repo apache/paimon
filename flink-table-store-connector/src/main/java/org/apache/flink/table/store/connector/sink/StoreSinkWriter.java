@@ -115,18 +115,18 @@ public class StoreSinkWriter<WriterStateT>
         switch (record.row().getRowKind()) {
             case INSERT:
             case UPDATE_AFTER:
-                if (record.key().getArity() == 0) {
+                if (record.primaryKey().getArity() == 0) {
                     writer.write(ValueKind.ADD, record.row(), GenericRowData.of(1L));
                 } else {
-                    writer.write(ValueKind.ADD, record.key(), record.row());
+                    writer.write(ValueKind.ADD, record.primaryKey(), record.row());
                 }
                 break;
             case UPDATE_BEFORE:
             case DELETE:
-                if (record.key().getArity() == 0) {
+                if (record.primaryKey().getArity() == 0) {
                     writer.write(ValueKind.ADD, record.row(), GenericRowData.of(-1L));
                 } else {
-                    writer.write(ValueKind.DELETE, record.key(), record.row());
+                    writer.write(ValueKind.DELETE, record.primaryKey(), record.row());
                 }
                 break;
         }

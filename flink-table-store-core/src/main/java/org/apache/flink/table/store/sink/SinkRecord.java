@@ -31,16 +31,16 @@ public class SinkRecord {
 
     private final int bucket;
 
-    private final BinaryRowData key;
+    private final BinaryRowData primaryKey;
 
     private final RowData row;
 
-    public SinkRecord(BinaryRowData partition, int bucket, BinaryRowData key, RowData row) {
+    public SinkRecord(BinaryRowData partition, int bucket, BinaryRowData primaryKey, RowData row) {
         checkArgument(partition.getRowKind() == RowKind.INSERT);
-        checkArgument(key.getRowKind() == RowKind.INSERT);
+        checkArgument(primaryKey.getRowKind() == RowKind.INSERT);
         this.partition = partition;
         this.bucket = bucket;
-        this.key = key;
+        this.primaryKey = primaryKey;
         this.row = row;
     }
 
@@ -52,8 +52,8 @@ public class SinkRecord {
         return bucket;
     }
 
-    public BinaryRowData key() {
-        return key;
+    public BinaryRowData primaryKey() {
+        return primaryKey;
     }
 
     public RowData row() {
