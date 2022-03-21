@@ -20,6 +20,7 @@ package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.CatalogLock;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.RequireCatalogLock;
@@ -41,12 +42,13 @@ import javax.annotation.Nullable;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
+
 /** Table sink to create {@link StoreSink}. */
 public class TableStoreSink
         implements DynamicTableSink, SupportsOverwrite, SupportsPartitioning, RequireCatalogLock {
 
     private final TableStore tableStore;
-    private final LogOptions.LogChangelogMode logChangelogMode;
     private final DynamicTableFactory.Context logStoreContext;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
@@ -56,19 +58,22 @@ public class TableStoreSink
 
     public TableStoreSink(
             TableStore tableStore,
-            LogOptions.LogChangelogMode logChangelogMode,
             DynamicTableFactory.Context logStoreContext,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
         this.tableStore = tableStore;
-        this.logChangelogMode = logChangelogMode;
         this.logStoreContext = logStoreContext;
         this.logStoreTableFactory = logStoreTableFactory;
     }
 
     @Override
     public ChangelogMode getChangelogMode(ChangelogMode requestedMode) {
-        if (!tableStore.valueCountMode()
-                && logChangelogMode == LogOptions.LogChangelogMode.UPSERT) {
+        if (tableStore.valueCountMode()) {
+            // no primary key, sink all changelogs
+            return requestedMode;
+        }
+
+        if (tableStore.logOptions().get(CHANGELOG_MODE) != LogOptions.LogChangelogMode.ALL) {
+            // with primary key, default sink upsert
             ChangelogMode.Builder builder = ChangelogMode.newBuilder();
             for (RowKind kind : requestedMode.getContainedKinds()) {
                 if (kind != RowKind.UPDATE_BEFORE) {
@@ -76,6 +81,14 @@ public class TableStoreSink
                 }
             }
             return builder.build();
+        }
+
+        // all changelog mode configured
+        if (!requestedMode.contains(RowKind.UPDATE_BEFORE)
+                || !requestedMode.contains(RowKind.UPDATE_AFTER)) {
+            throw new ValidationException(
+                    "You cannot insert incomplete data into a table that "
+                            + "has primary key and declares all changelog mode.");
         }
         return requestedMode;
     }
@@ -131,8 +144,7 @@ public class TableStoreSink
     @Override
     public DynamicTableSink copy() {
         TableStoreSink copied =
-                new TableStoreSink(
-                        tableStore, logChangelogMode, logStoreContext, logStoreTableFactory);
+                new TableStoreSink(tableStore, logStoreContext, logStoreTableFactory);
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
         copied.lockFactory = lockFactory;
