@@ -51,7 +51,7 @@ import java.util.stream.Collectors;
 import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
 import static org.apache.flink.table.store.log.LogOptions.CONSISTENCY;
 import static org.apache.flink.table.store.log.LogOptions.LogChangelogMode.ALL;
-import static org.apache.flink.table.store.log.LogOptions.LogConsistency.*;
+import static org.apache.flink.table.store.log.LogOptions.LogConsistency.TRANSACTIONAL;
 
 /**
  * Table source to create {@link FileStoreSource} under batch mode or change-tracking is disabled.
