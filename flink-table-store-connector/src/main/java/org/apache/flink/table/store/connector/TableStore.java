@@ -130,6 +130,10 @@ public class TableStore {
         return partitionType.getFieldNames();
     }
 
+    public Configuration logOptions() {
+        return new DelegatingConfiguration(options, LOG_PREFIX);
+    }
+
     public SourceBuilder sourceBuilder() {
         return new SourceBuilder();
     }
@@ -221,8 +225,7 @@ public class TableStore {
 
             boolean latestContinuous = false;
             if (isContinuous) {
-                LogStartupMode startupMode =
-                        new DelegatingConfiguration(options, LOG_PREFIX).get(SCAN);
+                LogStartupMode startupMode = logOptions().get(SCAN);
                 latestContinuous = startupMode == LogStartupMode.LATEST;
             }
             return new FileStoreSource(
