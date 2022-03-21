@@ -45,7 +45,7 @@ $ tar -xzf flink-*.tgz
 ## Step 2: Copy Table Store Bundle Jar
 
 {{< stable >}}
-[Download the latest binary release](https://flink.apache.org/downloads.html) of
+[Download the latest bundle jar](https://flink.apache.org/downloads.html) of
 Flink Table Store.
 {{< /stable >}}
 {{< unstable >}}
@@ -75,7 +75,23 @@ Copy table store bundle jar to flink/lib:
 cp flink-table-store-dist-*.jar FLINK_HOME/lib/
 ```
 
-## Step 3: Start Flink Local Cluster
+## Step 3: Copy Hadoop Bundle Jar
+
+[Download](https://flink.apache.org/downloads.html) Pre-bundled Hadoop.
+
+```bash
+cp flink-shaded-hadoop-2-uber-*.jar FLINK_HOME/lib/
+```
+
+## Step 4: Start Flink Local Cluster
+
+In order to run multiple jobs, you need to modify the cluster configuration:
+
+```bash
+$ vi ./conf/flink-conf.yaml
+
+taskmanager.numberOfTaskSlots: 2
+```
 
 To start a local cluster, run the bash script that comes with Flink:
 
@@ -92,7 +108,7 @@ Start the SQL Client CLI:
 ./bin/sql-client.sh embedded
 ```
 
-## Step 4: Create Dynamic Table
+## Step 5: Create Dynamic Table
 
 ```sql
 -- set root path to session config
@@ -105,11 +121,11 @@ CREATE TABLE word_count (
 );
 ```
 
-## Step 5: Write Data
+## Step 6: Write Data
 
 ```sql
 -- create a word data generator table
-CREATE TABLE word (
+CREATE TABLE word_table (
     word STRING
 ) WITH (
     'connector' = 'datagen',
@@ -120,10 +136,10 @@ CREATE TABLE word (
 SET 'execution.checkpointing.interval' = '10 s';
 
 -- write streaming data to dynamic table
-INSERT INTO word_count SELECT word, COUNT(*) FROM word;
+INSERT INTO word_count SELECT word, COUNT(*) FROM word_table GROUP BY word;
 ```
 
-## Step 6: OLAP Query
+## Step 7: OLAP Query
 
 ```sql
 -- use tableau result mode
@@ -139,20 +155,23 @@ SELECT * FROM word_count;
 
 You can execute the query multiple times and observe the changes in the results.
 
-## Step 7: Streaming Query
+## Step 8: Streaming Query
 
 ```sql
 -- switch to streaming mode
 SET 'execution.runtime-mode' = 'streaming';
 
 -- track the changes of table and calculate the count interval statistics
-SELECT cnt, COUNT(*) AS cnt_cnt FROM word_count GROUP BY cnt;
+SELECT `interval`, COUNT(*) AS interval_cnt FROM
+  (SELECT cnt / 10000 AS `interval` FROM word_count) GROUP BY `interval`;
 ```
 
 With the streaming mode, you can get the change log of the dynamic table,
 and perform new stream computations.
 
-## Step 8: Exit
+## Step 9: Exit
+
+Cancel streaming job in [localhost:8081](http://localhost:8081).
 
 ```sql
 -- drop the dynamic table, clear the files
