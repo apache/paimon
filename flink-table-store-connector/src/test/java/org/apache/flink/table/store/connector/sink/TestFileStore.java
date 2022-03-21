@@ -103,7 +103,17 @@ public class TestFileStore implements FileStore {
 
     @Override
     public FileStoreExpire newExpire() {
-        return () -> expired = true;
+        return new FileStoreExpire() {
+            @Override
+            public FileStoreExpire withLock(Lock lock) {
+                return this;
+            }
+
+            @Override
+            public void expire() {
+                expired = true;
+            }
+        };
     }
 
     @Override

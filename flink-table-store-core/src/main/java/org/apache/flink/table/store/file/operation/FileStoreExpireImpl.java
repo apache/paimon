@@ -33,6 +33,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -124,6 +125,16 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
     private void expireUntil(long earliestId, long endExclusiveId) {
         if (endExclusiveId <= earliestId) {
+            // write hint file if not exists
+            Path hint = new Path(pathFactory.snapshotDirectory(), SnapshotFinder.EARLIEST);
+            try {
+                if (!hint.getFileSystem().exists(hint)) {
+                    writeEarliestHint(endExclusiveId);
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+
             // fast exit
             return;
         }
@@ -217,12 +228,15 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             FileUtils.deleteOrWarn(pathFactory.toSnapshotPath(id));
         }
 
+        writeEarliestHint(endExclusiveId);
+    }
+
+    private void writeEarliestHint(long earliest) {
         // update earliest hint file
 
         Callable<Void> callable =
                 () -> {
-                    SnapshotFinder.commitEarliestHint(
-                            pathFactory.snapshotDirectory(), endExclusiveId);
+                    SnapshotFinder.commitEarliestHint(pathFactory.snapshotDirectory(), earliest);
                     return null;
                 };
 
