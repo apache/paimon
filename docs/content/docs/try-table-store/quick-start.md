@@ -50,8 +50,8 @@ Flink Table Store.
 {{< /stable >}}
 {{< unstable >}}
 
-In order to build Table Store bundle jar you need the source code.
-[clone the git repository]({{< github_repo >}}).
+You are using an unreleased version of Table Store, in order to build Table Store
+bundle jar you need the source code.
 
 To clone from git, enter:
 
@@ -154,9 +154,11 @@ and perform new stream computations.
 
 ## Step 8: Exit
 
-Exit sql-client:
-
 ```sql
+-- drop the dynamic table, clear the files
+DROP TABLE word_count;
+
+-- exit sql-client
 EXIT;
 ```
 
