@@ -26,10 +26,12 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
+import org.apache.flink.util.Preconditions;
 
 import java.io.Serializable;
 import java.time.Duration;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
@@ -129,13 +131,28 @@ public class FileStoreOptions implements Serializable {
     }
 
     public Path path(ObjectIdentifier tableIdentifier) {
-        return new Path(
-                options.get(FILE_PATH),
+        return path(options.toMap(), tableIdentifier);
+    }
+
+    public static Path path(Map<String, String> options, ObjectIdentifier tableIdentifier) {
+        Preconditions.checkArgument(
+                options.containsKey(FILE_PATH.key()),
                 String.format(
-                        "root/%s.catalog/%s.db/%s",
-                        tableIdentifier.getCatalogName(),
-                        tableIdentifier.getDatabaseName(),
-                        tableIdentifier.getObjectName()));
+                        "Failed to create file store path. "
+                                + "Please specify a root dir by setting session level configuration "
+                                + "as `SET 'table-store.%s' = '...'`. "
+                                + "Alternatively, you can use a per-table root dir "
+                                + "as `CREATE TABLE ${table} (...) WITH ('%s' = '...')`",
+                        FILE_PATH.key(), FILE_PATH.key()));
+        return new Path(options.get(FILE_PATH.key()), relativeTablePath(tableIdentifier));
+    }
+
+    public static String relativeTablePath(ObjectIdentifier tableIdentifier) {
+        return String.format(
+                "%s.catalog/%s.db/%s",
+                tableIdentifier.getCatalogName(),
+                tableIdentifier.getDatabaseName(),
+                tableIdentifier.getObjectName());
     }
 
     public FileFormat fileFormat() {

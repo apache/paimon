@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.annotation.Experimental;
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
@@ -128,6 +129,12 @@ public class TableStore {
     public List<String> partitionKeys() {
         RowType partitionType = TypeUtils.project(type, partitions);
         return partitionType.getFieldNames();
+    }
+
+    @VisibleForTesting
+    List<String> primaryKeys() {
+        RowType primaryKeyType = TypeUtils.project(type, primaryKeys);
+        return primaryKeyType.getFieldNames();
     }
 
     public Configuration logOptions() {
