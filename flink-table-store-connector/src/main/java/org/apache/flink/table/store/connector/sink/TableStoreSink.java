@@ -144,8 +144,7 @@ public class TableStoreSink
     @Override
     public DynamicTableSink copy() {
         TableStoreSink copied =
-                new TableStoreSink(
-                        tableStore, logChangelogMode, logStoreContext, logStoreTableFactory);
+                new TableStoreSink(tableStore, logStoreContext, logStoreTableFactory);
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
         copied.lockFactory = lockFactory;
