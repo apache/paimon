@@ -27,6 +27,7 @@ import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.file.utils.SnapshotFinder;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -150,6 +151,20 @@ public class FileStoreExpireTest {
                 }
             }
         }
+
+        // validate earliest hint file
+
+        Path snapshotDir = pathFactory.snapshotDirectory();
+        Path earliest = new Path(snapshotDir, SnapshotFinder.EARLIEST);
+
+        assertThat(earliest.getFileSystem().exists(earliest)).isTrue();
+
+        Long earliestId = SnapshotFinder.findEarliest(snapshotDir);
+
+        // remove earliest hint file
+        earliest.getFileSystem().delete(earliest, false);
+
+        assertThat(SnapshotFinder.findEarliest(snapshotDir)).isEqualTo(earliestId);
     }
 
     @Test

@@ -31,7 +31,6 @@ import org.apache.flink.table.store.connector.sink.global.GlobalCommittingSink;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
-import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.log.LogInitContext;
 import org.apache.flink.table.store.log.LogSinkProvider;
@@ -167,25 +166,30 @@ public class StoreSink<WriterStateT, LogCommT>
 
     @Override
     public StoreGlobalCommitter createGlobalCommitter() {
-        FileStoreCommit commit = fileStore.newCommit();
-        CatalogLock lock;
+        CatalogLock catalogLock;
+        Lock lock;
         if (lockFactory == null) {
+            catalogLock = null;
             lock = null;
         } else {
-            lock = lockFactory.create();
-            commit.withLock(
+            catalogLock = lockFactory.create();
+            lock =
                     new Lock() {
                         @Override
                         public <T> T runWithLock(Callable<T> callable) throws Exception {
-                            return lock.runWithLock(
+                            return catalogLock.runWithLock(
                                     tableIdentifier.getDatabaseName(),
                                     tableIdentifier.getObjectName(),
                                     callable);
                         }
-                    });
+                    };
         }
 
-        return new StoreGlobalCommitter(commit, fileStore.newExpire(), lock, overwritePartition);
+        return new StoreGlobalCommitter(
+                fileStore.newCommit().withLock(lock),
+                fileStore.newExpire().withLock(lock),
+                catalogLock,
+                overwritePartition);
     }
 
     @SuppressWarnings("unchecked")

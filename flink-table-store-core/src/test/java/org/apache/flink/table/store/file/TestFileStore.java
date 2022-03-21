@@ -40,6 +40,7 @@ import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
+import org.apache.flink.table.store.file.utils.SnapshotFinder;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.function.QuadFunction;
 
@@ -314,6 +315,12 @@ public class TestFileStore extends FileStoreImpl {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+
+        // remove best effort latest and earliest hint files
+        Path snapshotDir = pathFactory().snapshotDirectory();
+        actualFiles.remove(new Path(snapshotDir, SnapshotFinder.LATEST));
+        actualFiles.remove(new Path(snapshotDir, SnapshotFinder.EARLIEST));
+
         assertThat(actualFiles).isEqualTo(filesInUse);
     }
 

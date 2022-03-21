@@ -27,6 +27,7 @@ import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
+import org.apache.flink.table.store.file.utils.SnapshotFinder;
 import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -76,6 +77,22 @@ public class FileStoreCommitTest {
     @ValueSource(booleans = {false, true})
     public void testManyCommitUsersNoConflict(boolean failing) throws Exception {
         testRandomConcurrentNoConflict(ThreadLocalRandom.current().nextInt(3) + 2, failing);
+    }
+
+    @Test
+    public void testLatestHint() throws Exception {
+        testRandomConcurrentNoConflict(1, false);
+        Path snapshotDir = createStore(false, 1).pathFactory().snapshotDirectory();
+        Path latest = new Path(snapshotDir, SnapshotFinder.LATEST);
+
+        assertThat(latest.getFileSystem().exists(latest)).isTrue();
+
+        Long latestId = SnapshotFinder.findLatest(snapshotDir);
+
+        // remove latest hint file
+        latest.getFileSystem().delete(latest, false);
+
+        assertThat(SnapshotFinder.findLatest(snapshotDir)).isEqualTo(latestId);
     }
 
     protected void testRandomConcurrentNoConflict(int numThreads, boolean failing)

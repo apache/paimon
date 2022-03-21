@@ -103,7 +103,6 @@ public class StoreGlobalCommitter implements GlobalCommitter<Committable, Manife
             }
         }
 
-        // TODO introduce check interval
         fileStoreExpire.expire();
     }
 }
