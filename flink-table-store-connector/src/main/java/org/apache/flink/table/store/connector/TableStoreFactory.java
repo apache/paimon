@@ -31,8 +31,6 @@ import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
-import org.apache.flink.table.connector.sink.DynamicTableSink;
-import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.DynamicTableSourceFactory;
 import org.apache.flink.table.factories.FactoryUtil;
@@ -155,7 +153,7 @@ public class TableStoreFactory
     }
 
     @Override
-    public DynamicTableSource createDynamicTableSource(Context context) {
+    public TableStoreSource createDynamicTableSource(Context context) {
         return new TableStoreSource(
                 buildTableStore(context),
                 context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
@@ -165,15 +163,9 @@ public class TableStoreFactory
     }
 
     @Override
-    public DynamicTableSink createDynamicTableSink(Context context) {
+    public TableStoreSink createDynamicTableSink(Context context) {
         return new TableStoreSink(
                 buildTableStore(context),
-                LogChangelogMode.valueOf(
-                        context.getCatalogTable()
-                                .getOptions()
-                                .getOrDefault(
-                                        LOG_PREFIX + CHANGELOG_MODE.key(),
-                                        CHANGELOG_MODE.defaultValue().toString().toUpperCase())),
                 createLogContext(context),
                 createOptionalLogStoreFactory(context).orElse(null));
     }

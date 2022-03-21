@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
@@ -46,6 +47,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
+
+import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
+import static org.apache.flink.table.store.log.LogOptions.CONSISTENCY;
+import static org.apache.flink.table.store.log.LogOptions.LogChangelogMode.ALL;
+import static org.apache.flink.table.store.log.LogOptions.LogConsistency.TRANSACTIONAL;
 
 /**
  * Table source to create {@link FileStoreSource} under batch mode or change-tracking is disabled.
@@ -78,13 +84,22 @@ public class TableStoreSource
 
     @Override
     public ChangelogMode getChangelogMode() {
-        return streaming
-                ? tableStore.valueCountMode()
-                        ? ChangelogMode.all()
-                        // TODO: optimize upsert when consistency mode is transactional and
-                        // log.changelog-mode is all
-                        : ChangelogMode.upsert()
-                : ChangelogMode.insertOnly();
+        if (!streaming) {
+            // batch merge all, return insert only
+            return ChangelogMode.insertOnly();
+        }
+
+        if (tableStore.valueCountMode()) {
+            // no primary key, return all
+            return ChangelogMode.all();
+        }
+
+        // optimization: transaction consistency and all changelog mode avoid the generation of
+        // normalized nodes. See TableStoreSink.getChangelogMode validation.
+        Configuration logOptions = tableStore.logOptions();
+        return logOptions.get(CONSISTENCY) == TRANSACTIONAL && logOptions.get(CHANGELOG_MODE) == ALL
+                ? ChangelogMode.all()
+                : ChangelogMode.upsert();
     }
 
     @Override
