@@ -31,6 +31,7 @@ import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
+import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.CatalogLock;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
@@ -53,11 +54,16 @@ import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -73,45 +79,42 @@ public class TableStore {
     private final Configuration options;
 
     /** commit user, default uuid. */
-    private String user = UUID.randomUUID().toString();
+    private final String user;
 
     /** partition keys, default no partition. */
-    private int[] partitions = new int[0];
+    private final int[] partitions;
 
     /** primary keys, default no key. */
-    private int[] primaryKeys = new int[0];
+    private final int[] primaryKeys;
 
-    private RowType type;
+    /** physical row type. */
+    private final RowType type;
 
-    private ObjectIdentifier tableIdentifier;
+    private final ObjectIdentifier tableIdentifier;
 
-    public TableStore(Configuration options) {
+    private TableStore(
+            Configuration options,
+            ObjectIdentifier tableIdentifier,
+            RowType type,
+            int[] partitions,
+            int[] primaryKeys,
+            String user) {
         this.options = options;
-    }
-
-    public TableStore withUser(String user) {
-        this.user = user;
-        return this;
-    }
-
-    public TableStore withSchema(RowType type) {
-        this.type = type;
-        return this;
-    }
-
-    public TableStore withPartitions(int[] partitions) {
-        this.partitions = partitions;
-        return this;
-    }
-
-    public TableStore withPrimaryKeys(int[] primaryKeys) {
-        this.primaryKeys = primaryKeys;
-        return this;
-    }
-
-    public TableStore withTableIdentifier(ObjectIdentifier tableIdentifier) {
         this.tableIdentifier = tableIdentifier;
-        return this;
+        this.type = type;
+        this.partitions = partitions;
+        this.primaryKeys = primaryKeys;
+        this.user = user;
+    }
+
+    public TableStoreBuilder toBuilder() {
+        return new TableStoreBuilder()
+                .withConfiguration(options)
+                .withTableIdentifier(tableIdentifier)
+                .withSchema(type)
+                .withPrimaryKeys(primaryKeys())
+                .withPartitionKeys(partitionKeys())
+                .withUser(user);
     }
 
     public boolean partitioned() {
@@ -176,6 +179,83 @@ public class TableStore {
         }
         return new FileStoreImpl(
                 tableIdentifier, options, user, partitionType, keyType, valueType, mergeFunction);
+    }
+
+    // --------------------------------------------------------------------------------------------
+
+    /** A builder for constructing a immutable {@link TableStore}. */
+    public static final class TableStoreBuilder {
+
+        private Configuration options;
+        private ObjectIdentifier tableIdentifier;
+        private RowType type;
+
+        private List<String> primaryKeys = new ArrayList<>();
+        private List<String> partitionKeys = new ArrayList<>();
+        private String user = UUID.randomUUID().toString();
+
+        public TableStoreBuilder withConfiguration(Configuration options) {
+            this.options = options;
+            return this;
+        }
+
+        public TableStoreBuilder withTableIdentifier(ObjectIdentifier tableIdentifier) {
+            this.tableIdentifier = tableIdentifier;
+            return this;
+        }
+
+        public TableStoreBuilder withSchema(RowType type) {
+            this.type = type;
+            return this;
+        }
+
+        public TableStoreBuilder withPrimaryKeys(List<String> primaryKeys) {
+            this.primaryKeys = primaryKeys;
+            return this;
+        }
+
+        public TableStoreBuilder withPartitionKeys(List<String> partitionKeys) {
+            this.partitionKeys = partitionKeys;
+            return this;
+        }
+
+        public TableStoreBuilder withUser(String user) {
+            this.user = user;
+            return this;
+        }
+
+        public TableStore build() {
+            List<int[]> indices = adjustAndValidate();
+            return new TableStore(
+                    options, tableIdentifier, type, indices.get(0), indices.get(1), user);
+        }
+
+        private List<int[]> adjustAndValidate() {
+            if (primaryKeys.size() > 0 && partitionKeys.size() > 0) {
+                // primary keys must contain all partition keys if table is partitioned
+                Preconditions.checkState(
+                        new HashSet<>(primaryKeys).containsAll(partitionKeys),
+                        String.format(
+                                "Primary key constraint %s should include all partition fields %s",
+                                primaryKeys, partitionKeys));
+            }
+            Set<String> partFilter = new HashSet<>(partitionKeys);
+            int[] pks =
+                    primaryKeys.stream()
+                            .filter(pk -> !partFilter.contains(pk))
+                            .mapToInt(type.getFieldNames()::indexOf)
+                            .toArray();
+            if (pks.length == 0 && primaryKeys.size() > 0) {
+                throw new TableException(
+                        String.format(
+                                "Primary key constraint %s should not be same with partition fields %s,"
+                                        + " this will result in only one record in a partition",
+                                primaryKeys, partitionKeys));
+            }
+            // adjust index according to physical row type
+            return Arrays.asList(
+                    partitionKeys.stream().mapToInt(type.getFieldNames()::indexOf).toArray(), pks);
+        }
     }
 
     /** Source builder to build a flink {@link Source}. */
