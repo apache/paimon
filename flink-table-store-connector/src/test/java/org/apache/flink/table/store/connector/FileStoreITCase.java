@@ -98,7 +98,7 @@ public class FileStoreITCase extends AbstractTestBase {
 
     private final StreamExecutionEnvironment env;
 
-    private TableStore store;
+    private final TableStore store;
 
     public FileStoreITCase(boolean isBatch) throws IOException {
         this.isBatch = isBatch;
@@ -117,11 +117,7 @@ public class FileStoreITCase extends AbstractTestBase {
 
     @Test
     public void testPartitioned() throws Exception {
-        store =
-                store.toBuilder()
-                        .withPartitionKeys(Collections.singletonList("p"))
-                        .withPrimaryKeys(Arrays.asList("p", "_k"))
-                        .build();
+        store.withPartitions(new int[] {1});
 
         // write
         store.sinkBuilder().withInput(buildTestSource(env, isBatch)).build();
@@ -140,11 +136,7 @@ public class FileStoreITCase extends AbstractTestBase {
 
     @Test
     public void testNonPartitioned() throws Exception {
-        store =
-                store.toBuilder()
-                        .withPartitionKeys(Collections.emptyList())
-                        .withPrimaryKeys(Collections.singletonList("_k"))
-                        .build();
+        store.withPartitions(new int[0]);
 
         // write
         store.sinkBuilder().withInput(buildTestSource(env, isBatch)).build();
@@ -161,11 +153,7 @@ public class FileStoreITCase extends AbstractTestBase {
     @Test
     public void testOverwrite() throws Exception {
         Assume.assumeTrue(isBatch);
-        store =
-                store.toBuilder()
-                        .withPartitionKeys(Collections.singletonList("p"))
-                        .withPrimaryKeys(Arrays.asList("p", "_k"))
-                        .build();
+        store.withPartitions(new int[] {1});
 
         // write
         store.sinkBuilder().withInput(buildTestSource(env, isBatch)).build();
@@ -205,11 +193,7 @@ public class FileStoreITCase extends AbstractTestBase {
 
     @Test
     public void testPartitionedNonKey() throws Exception {
-        store =
-                store.toBuilder()
-                        .withPartitionKeys(Collections.singletonList("p"))
-                        .withPrimaryKeys(Collections.emptyList())
-                        .build();
+        store.withPartitions(new int[] {1}).withPrimaryKeys(new int[0]);
 
         // write
         store.sinkBuilder().withInput(buildTestSource(env, isBatch)).build();
@@ -230,13 +214,13 @@ public class FileStoreITCase extends AbstractTestBase {
 
     @Test
     public void testContinuous() throws Exception {
-        store = store.toBuilder().withPrimaryKeys(Collections.singletonList("_k")).build();
+        store.withPrimaryKeys(new int[] {2});
         innerTestContinuous();
     }
 
     @Test
     public void testContinuousWithoutPK() throws Exception {
-        store = store.toBuilder().withPrimaryKeys(Collections.emptyList()).build();
+        store.withPrimaryKeys(new int[0]);
         innerTestContinuous();
     }
 
@@ -317,12 +301,10 @@ public class FileStoreITCase extends AbstractTestBase {
 
     public static TableStore buildTableStore(boolean noFail, TemporaryFolder temporaryFolder)
             throws IOException {
-        return new TableStore.TableStoreBuilder()
-                .withConfiguration(buildConfiguration(noFail, temporaryFolder.newFolder()))
+        return new TableStore(buildConfiguration(noFail, temporaryFolder.newFolder()))
                 .withSchema(TABLE_TYPE)
-                .withPrimaryKeys(Collections.singletonList("_k"))
-                .withTableIdentifier(ObjectIdentifier.of("catalog", "db", "t"))
-                .build();
+                .withPrimaryKeys(new int[] {2})
+                .withTableIdentifier(ObjectIdentifier.of("catalog", "db", "t"));
     }
 
     public static Configuration buildConfiguration(boolean noFail, File folder) {

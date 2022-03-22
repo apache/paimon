@@ -33,7 +33,6 @@ import org.apache.flink.types.Row;
 import org.junit.Ignore;
 import org.junit.Test;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -93,11 +92,11 @@ public class LogStoreSinkITCase extends KafkaTableTestBase {
         // in eventual mode, failure will result in duplicate data
         TableStore store = buildTableStore(isBatch || !transaction, TEMPORARY_FOLDER);
         if (partitioned) {
-            store = store.toBuilder().withPartitionKeys(Collections.singletonList("p")).build();
+            store.withPartitions(new int[] {1});
         }
 
         if (!keyed) {
-            store = store.toBuilder().withPrimaryKeys(Collections.singletonList("v")).build();
+            store.withPrimaryKeys(new int[0]);
         }
 
         // prepare log
