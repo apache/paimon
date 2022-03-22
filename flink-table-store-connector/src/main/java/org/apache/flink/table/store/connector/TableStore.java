@@ -53,11 +53,14 @@ import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -101,11 +104,13 @@ public class TableStore {
 
     public TableStore withPartitions(int[] partitions) {
         this.partitions = partitions;
+        adjustIndexAndValidate();
         return this;
     }
 
     public TableStore withPrimaryKeys(int[] primaryKeys) {
         this.primaryKeys = primaryKeys;
+        adjustIndexAndValidate();
         return this;
     }
 
@@ -176,6 +181,35 @@ public class TableStore {
         }
         return new FileStoreImpl(
                 tableIdentifier, options, user, partitionType, keyType, valueType, mergeFunction);
+    }
+
+    private void adjustIndexAndValidate() {
+        if (primaryKeys.length > 0 && partitions.length > 0) {
+            Set<Integer> pkSet = Arrays.stream(primaryKeys).boxed().collect(Collectors.toSet());
+            Set<Integer> partitionSet =
+                    Arrays.stream(partitions).boxed().collect(Collectors.toSet());
+
+            String pkInfo =
+                    type == null
+                            ? pkSet.toString()
+                            : TypeUtils.project(type, primaryKeys).getFieldNames().toString();
+            String partitionInfo =
+                    type == null
+                            ? partitionSet.toString()
+                            : TypeUtils.project(type, partitions).getFieldNames().toString();
+            Preconditions.checkState(
+                    pkSet.containsAll(partitionSet),
+                    String.format(
+                            "Primary key constraint %s should include all partition fields %s",
+                            pkInfo, partitionInfo));
+            Preconditions.checkState(
+                    !partitionSet.containsAll(pkSet),
+                    String.format(
+                            "Primary key constraint %s should not be same with partition fields %s, this will result in only one record in a partition",
+                            pkInfo, partitionInfo));
+            primaryKeys =
+                    Arrays.stream(primaryKeys).filter(pk -> !partitionSet.contains(pk)).toArray();
+        }
     }
 
     /** Source builder to build a flink {@link Source}. */

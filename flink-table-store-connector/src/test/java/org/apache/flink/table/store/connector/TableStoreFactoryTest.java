@@ -291,7 +291,7 @@ public class TableStoreFactoryTest {
                                 .success(false)
                                 .expectedType(IllegalStateException.class)
                                 .expectedMessage(
-                                        "Primary key constraint [shopId] should include partition key [dt, hr]"));
+                                        "Primary key constraint [shopId] should include all partition fields [dt, hr]"));
 
         // failed case: pk is same as partition key
         Arguments arg2 =
@@ -301,9 +301,10 @@ public class TableStoreFactoryTest {
                         new int[] {0, 1, 2}, // pk is [dt, hr, shopId]
                         new TableStoreTestBase.ExpectedResult()
                                 .success(false)
-                                .expectedType(TableException.class)
+                                .expectedType(IllegalStateException.class)
                                 .expectedMessage(
-                                        "Primary key constraint [dt, hr, shopId] should not be same with partition key [dt, hr, shopId]"));
+                                        "Primary key constraint [dt, hr, shopId] should not be same with partition fields [dt, hr, shopId],"
+                                                + " this will result in only one record in a partition"));
 
         return Stream.of(arg0, arg1, arg2);
     }

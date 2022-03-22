@@ -44,13 +44,11 @@ import org.apache.flink.table.store.log.LogOptions.LogConsistency;
 import org.apache.flink.table.store.log.LogOptions.LogStartupMode;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -248,24 +246,10 @@ public class TableStoreFactory
         List<String> partitionKeys = catalogTable.getPartitionKeys();
         int[] pkIndex = new int[0];
         if (schema.getPrimaryKey().isPresent()) {
-            List<String> pkCols = schema.getPrimaryKey().get().getColumns();
-            Preconditions.checkState(
-                    new HashSet<>(pkCols).containsAll(partitionKeys),
-                    String.format(
-                            "Primary key constraint %s should include partition key %s",
-                            pkCols, partitionKeys));
-            Set<String> partFilter = new HashSet<>(partitionKeys);
             pkIndex =
                     schema.getPrimaryKey().get().getColumns().stream()
-                            .filter(pk -> !partFilter.contains(pk))
                             .mapToInt(rowType.getFieldNames()::indexOf)
                             .toArray();
-            if (pkIndex.length == 0) {
-                throw new TableException(
-                        String.format(
-                                "Primary key constraint %s should not be same with partition key %s",
-                                pkCols, partitionKeys));
-            }
         }
         return new TableStore(Configuration.fromMap(catalogTable.getOptions()))
                 .withTableIdentifier(context.getObjectIdentifier())
