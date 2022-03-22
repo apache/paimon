@@ -33,6 +33,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.catalog.CatalogLock;
 import org.apache.flink.table.catalog.ObjectIdentifier;
+import org.apache.flink.table.connector.Projection;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.connector.sink.BucketStreamPartitioner;
@@ -52,6 +53,7 @@ import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.logical.BigIntType;
+import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
@@ -60,6 +62,7 @@ import javax.annotation.Nullable;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -286,8 +289,6 @@ public class TableStore {
                     return buildFileSource(true);
                 }
 
-                // TODO project log source
-
                 if (isHybrid) {
                     return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
                                     buildFileSource(false))
@@ -304,11 +305,16 @@ public class TableStore {
         }
 
         public DataStreamSource<RowData> build(StreamExecutionEnvironment env) {
+            LogicalType produceType =
+                    Optional.ofNullable(projectedFields)
+                            .map(Projection::of)
+                            .map(p -> p.project(type))
+                            .orElse(type);
             return env.fromSource(
                     build(),
                     WatermarkStrategy.noWatermarks(),
                     tableIdentifier.asSummaryString(),
-                    InternalTypeInfo.of(type));
+                    InternalTypeInfo.of(produceType));
         }
     }
 

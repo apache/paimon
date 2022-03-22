@@ -121,7 +121,7 @@ public class LogStoreSinkITCase extends KafkaTableTestBase {
         KafkaLogStoreFactory factory = discoverKafkaLogFactory();
         KafkaLogSinkProvider sinkProvider = factory.createSinkProvider(context, SINK_CONTEXT);
         KafkaLogSourceProvider sourceProvider =
-                factory.createSourceProvider(context, SOURCE_CONTEXT);
+                factory.createSourceProvider(context, SOURCE_CONTEXT, null);
 
         factory.onCreateTable(context, 3, true);
 

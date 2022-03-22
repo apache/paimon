@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector.source;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.connector.file.src.impl.FileRecords;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.util.MutableRecordAndPosition;
@@ -28,6 +29,7 @@ import org.apache.flink.connector.files.shaded.org.apache.flink.connector.base.s
 import org.apache.flink.connector.files.shaded.org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
 import org.apache.flink.connector.files.shaded.org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.utils.ProjectedRowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
@@ -38,6 +40,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.LinkedList;
+import java.util.Optional;
 import java.util.Queue;
 
 /** The {@link SplitReader} implementation for the file store source. */
@@ -46,6 +49,7 @@ public class FileStoreSourceSplitReader
 
     private final FileStoreRead fileStoreRead;
     private final boolean valueCountMode;
+    @Nullable private final int[][] valueCountProject;
 
     private final Queue<FileStoreSourceSplit> splits;
 
@@ -56,9 +60,18 @@ public class FileStoreSourceSplitReader
     private long currentNumRead;
     private RecordReader.RecordIterator currentFirstBatch;
 
+    @VisibleForTesting
     public FileStoreSourceSplitReader(FileStoreRead fileStoreRead, boolean valueCountMode) {
+        this(fileStoreRead, valueCountMode, null);
+    }
+
+    public FileStoreSourceSplitReader(
+            FileStoreRead fileStoreRead,
+            boolean valueCountMode,
+            @Nullable int[][] valueCountProject) {
         this.fileStoreRead = fileStoreRead;
         this.valueCountMode = valueCountMode;
+        this.valueCountProject = valueCountProject;
         this.splits = new LinkedList<>();
         this.pool = new Pool<>(1);
         this.pool.add(
@@ -221,6 +234,10 @@ public class FileStoreSourceSplitReader
         private long count = 0;
 
         @Nullable
+        private final ProjectedRowData projectedRow =
+                Optional.ofNullable(valueCountProject).map(ProjectedRowData::from).orElse(null);
+
+        @Nullable
         @Override
         public RecordAndPosition<RowData> next() {
             try {
@@ -240,8 +257,9 @@ public class FileStoreSourceSplitReader
                     if (value < 0) {
                         row.setRowKind(RowKind.DELETE);
                     }
-                    recordAndPosition.setNext(row);
+                    setNext(row);
                 } else {
+                    // move forward recordSkipCount
                     recordAndPosition.setNext(recordAndPosition.getRecord());
                 }
                 count--;
@@ -250,6 +268,11 @@ public class FileStoreSourceSplitReader
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
+        }
+
+        private void setNext(RowData row) {
+            row = projectedRow == null ? row : projectedRow.replaceRow(row);
+            recordAndPosition.setNext(row);
         }
     }
 }

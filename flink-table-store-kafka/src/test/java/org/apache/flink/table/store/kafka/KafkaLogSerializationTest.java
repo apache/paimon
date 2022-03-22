@@ -38,7 +38,7 @@ import static org.apache.flink.table.store.kafka.KafkaLogTestUtils.testContext;
 import static org.apache.flink.table.store.kafka.KafkaLogTestUtils.testRecord;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link KafkaLogSerializationSchema} and {@link KafkaLogKeyedDeserializationSchema}. */
+/** Test for {@link KafkaLogSerializationSchema} and {@link KafkaLogDeserializationSchema}. */
 public class KafkaLogSerializationTest {
 
     private static final String TOPIC = "my_topic";
@@ -140,7 +140,7 @@ public class KafkaLogSerializationTest {
     private static KafkaRecordDeserializationSchema<RowData> createTestDeserializationSchema(
             DynamicTableFactory.Context context) {
         return discoverKafkaLogFactory()
-                .createSourceProvider(context, KafkaLogTestUtils.SOURCE_CONTEXT)
+                .createSourceProvider(context, KafkaLogTestUtils.SOURCE_CONTEXT, null)
                 .createDeserializationSchema();
     }
 }

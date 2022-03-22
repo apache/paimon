@@ -36,6 +36,8 @@ import org.apache.flink.table.factories.FactoryUtil.TableFactoryHelper;
 import org.apache.flink.table.factories.SerializationFormatFactory;
 import org.apache.flink.types.RowKind;
 
+import javax.annotation.Nullable;
+
 /**
  * Base interface for configuring a default log table connector. The log table is used by managed
  * table factory.
@@ -55,7 +57,8 @@ public interface LogStoreTableFactory extends DynamicTableFactory {
      * Creates a {@link LogSourceProvider} instance from a {@link CatalogTable} and additional
      * context information.
      */
-    LogSourceProvider createSourceProvider(Context context, SourceContext sourceContext);
+    LogSourceProvider createSourceProvider(
+            Context context, SourceContext sourceContext, @Nullable int[][] projectFields);
 
     /**
      * Creates a {@link LogSinkProvider} instance from a {@link CatalogTable} and additional context

@@ -25,6 +25,8 @@ import org.apache.flink.connector.files.shaded.org.apache.flink.connector.base.s
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 
+import javax.annotation.Nullable;
+
 import java.util.Map;
 
 /** A {@link SourceReader} that read records from {@link FileStoreSourceSplit}. */
@@ -38,9 +40,12 @@ public final class FileStoreSourceReader
     public FileStoreSourceReader(
             SourceReaderContext readerContext,
             FileStoreRead fileStoreRead,
-            boolean valueCountMode) {
+            boolean valueCountMode,
+            @Nullable int[][] valueCountProject) {
         super(
-                () -> new FileStoreSourceSplitReader(fileStoreRead, valueCountMode),
+                () ->
+                        new FileStoreSourceSplitReader(
+                                fileStoreRead, valueCountMode, valueCountProject),
                 (element, output, splitState) -> {
                     output.collect(element.getRecord());
                     splitState.setPosition(element);
