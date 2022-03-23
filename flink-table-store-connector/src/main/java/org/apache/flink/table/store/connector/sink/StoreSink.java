@@ -78,7 +78,7 @@ public class StoreSink<WriterStateT, LogCommT>
             FileStore fileStore,
             int[] partitions,
             int[] primaryKeys,
-            final int[] logPrimaryKeys,
+            int[] logPrimaryKeys,
             int numBucket,
             @Nullable CatalogLock.Factory lockFactory,
             @Nullable Map<String, String> overwritePartition,

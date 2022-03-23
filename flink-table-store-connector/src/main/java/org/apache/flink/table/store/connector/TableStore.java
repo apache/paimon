@@ -83,7 +83,7 @@ public class TableStore {
     /** partition keys, default no partition. */
     private int[] partitions = new int[0];
 
-    /** file store primary keys which excludes partition fields if partitioned, default no key. */
+    /** file store primary keys which exclude partition fields if partitioned, default no key. */
     private int[] primaryKeys = new int[0];
 
     /** log store primary keys which include partition fields if partitioned, default no key. */
