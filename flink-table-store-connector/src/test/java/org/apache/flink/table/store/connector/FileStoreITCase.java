@@ -117,7 +117,7 @@ public class FileStoreITCase extends AbstractTestBase {
 
     @Test
     public void testPartitioned() throws Exception {
-        store.withPartitions(new int[] {1});
+        store.withPrimaryKeys(new int[] {1, 2}).withPartitions(new int[] {1});
 
         // write
         store.sinkBuilder().withInput(buildTestSource(env, isBatch)).build();
@@ -153,7 +153,7 @@ public class FileStoreITCase extends AbstractTestBase {
     @Test
     public void testOverwrite() throws Exception {
         Assume.assumeTrue(isBatch);
-        store.withPartitions(new int[] {1});
+        store.withPrimaryKeys(new int[] {1, 2}).withPartitions(new int[] {1});
 
         // write
         store.sinkBuilder().withInput(buildTestSource(env, isBatch)).build();
@@ -193,7 +193,7 @@ public class FileStoreITCase extends AbstractTestBase {
 
     @Test
     public void testPartitionedNonKey() throws Exception {
-        store.withPartitions(new int[] {1}).withPrimaryKeys(new int[0]);
+        store.withPrimaryKeys(new int[0]).withPartitions(new int[] {1});
 
         // write
         store.sinkBuilder().withInput(buildTestSource(env, isBatch)).build();

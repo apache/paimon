@@ -21,6 +21,7 @@ package org.apache.flink.table.store.connector;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.planner.runtime.utils.TestData;
+import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 
@@ -86,7 +87,7 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
                 }
             }
             assertThat(actual).containsExactlyInAnyOrderElementsOf(expectedResult.expectedRecords);
-            String relativeFilePath = getRelativeFileStoreTablePath(tableIdentifier);
+            String relativeFilePath = FileStoreOptions.relativeTablePath(tableIdentifier);
             // check snapshot file path
             assertThat(Paths.get(rootPath, relativeFilePath, "snapshot")).exists();
             // check manifest file path

@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.annotation.Experimental;
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
@@ -52,9 +53,11 @@ import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -100,11 +103,13 @@ public class TableStore {
 
     public TableStore withPartitions(int[] partitions) {
         this.partitions = partitions;
+        adjustIndexAndValidate();
         return this;
     }
 
     public TableStore withPrimaryKeys(int[] primaryKeys) {
         this.primaryKeys = primaryKeys;
+        adjustIndexAndValidate();
         return this;
     }
 
@@ -128,6 +133,12 @@ public class TableStore {
     public List<String> partitionKeys() {
         RowType partitionType = TypeUtils.project(type, partitions);
         return partitionType.getFieldNames();
+    }
+
+    @VisibleForTesting
+    List<String> primaryKeys() {
+        RowType primaryKeyType = TypeUtils.project(type, primaryKeys);
+        return primaryKeyType.getFieldNames();
     }
 
     public Configuration logOptions() {
@@ -169,6 +180,36 @@ public class TableStore {
         }
         return new FileStoreImpl(
                 tableIdentifier, options, user, partitionType, keyType, valueType, mergeFunction);
+    }
+
+    private void adjustIndexAndValidate() {
+        if (primaryKeys.length > 0 && partitions.length > 0) {
+            List<Integer> pkList = Arrays.stream(primaryKeys).boxed().collect(Collectors.toList());
+            List<Integer> partitionList =
+                    Arrays.stream(partitions).boxed().collect(Collectors.toList());
+
+            String pkInfo =
+                    type == null
+                            ? pkList.toString()
+                            : TypeUtils.project(type, primaryKeys).getFieldNames().toString();
+            String partitionInfo =
+                    type == null
+                            ? partitionList.toString()
+                            : TypeUtils.project(type, partitions).getFieldNames().toString();
+            Preconditions.checkState(
+                    pkList.containsAll(partitionList),
+                    String.format(
+                            "Primary key constraint %s should include all partition fields %s",
+                            pkInfo, partitionInfo));
+            primaryKeys =
+                    Arrays.stream(primaryKeys).filter(pk -> !partitionList.contains(pk)).toArray();
+
+            Preconditions.checkState(
+                    primaryKeys.length > 0,
+                    String.format(
+                            "Primary key constraint %s should not be same with partition fields %s, this will result in only one record in a partition",
+                            pkInfo, partitionInfo));
+        }
     }
 
     /** Source builder to build a flink {@link Source}. */

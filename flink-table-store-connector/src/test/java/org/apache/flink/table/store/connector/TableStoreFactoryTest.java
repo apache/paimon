@@ -27,8 +27,9 @@ import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
-import org.apache.flink.table.factories.ManagedTableFactory;
+import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.log.LogOptions;
+import org.apache.flink.table.types.logical.RowType;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -39,15 +40,19 @@ import org.junit.jupiter.params.provider.MethodSource;
 import java.io.File;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
+import static org.apache.flink.table.store.connector.TableStoreTestBase.createResolvedTable;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.FILE_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
+import static org.apache.flink.table.store.file.FileStoreOptions.relativeTablePath;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.flink.table.store.log.LogOptions.CONSISTENCY;
 import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
@@ -60,7 +65,7 @@ public class TableStoreFactoryTest {
     private static final ObjectIdentifier TABLE_IDENTIFIER =
             ObjectIdentifier.of("catalog", "database", "table");
 
-    private final ManagedTableFactory tableStoreFactory = new TableStoreFactory();
+    private final TableStoreFactory tableStoreFactory = new TableStoreFactory();
 
     @TempDir private static java.nio.file.Path sharedTempDir;
     private DynamicTableFactory.Context context;
@@ -84,11 +89,7 @@ public class TableStoreFactoryTest {
         Path expectedPath =
                 Paths.get(
                         sharedTempDir.toAbsolutePath().toString(),
-                        String.format(
-                                "root/%s.catalog/%s.db/%s",
-                                TABLE_IDENTIFIER.getCatalogName(),
-                                TABLE_IDENTIFIER.getDatabaseName(),
-                                TABLE_IDENTIFIER.getObjectName()));
+                        relativeTablePath(TABLE_IDENTIFIER));
         boolean exist = expectedPath.toFile().exists();
         if (ignoreIfExists || !exist) {
             tableStoreFactory.onCreateTable(context, ignoreIfExists);
@@ -119,11 +120,7 @@ public class TableStoreFactoryTest {
         Path expectedPath =
                 Paths.get(
                         sharedTempDir.toAbsolutePath().toString(),
-                        String.format(
-                                "root/%s.catalog/%s.db/%s",
-                                TABLE_IDENTIFIER.getCatalogName(),
-                                TABLE_IDENTIFIER.getDatabaseName(),
-                                TABLE_IDENTIFIER.getObjectName()));
+                        relativeTablePath(TABLE_IDENTIFIER));
         boolean exist = expectedPath.toFile().exists();
         if (exist || ignoreIfNotExists) {
             tableStoreFactory.onDropTable(context, ignoreIfNotExists);
@@ -161,23 +158,41 @@ public class TableStoreFactoryTest {
                 .containsExactlyInAnyOrderEntriesOf(expectedLogOptions);
     }
 
-    @Test
-    public void testTablePath() {
-        Map<String, String> options = of(FILE_PATH.key(), "dummy:/foo/bar");
-        assertThat(TableStoreFactory.tablePath(options, TABLE_IDENTIFIER))
-                .isEqualTo(
-                        new org.apache.flink.core.fs.Path(
-                                "dummy:/foo/bar/root/catalog.catalog/database.db/table"));
+    @ParameterizedTest
+    @MethodSource("providingResolvedTable")
+    public void testBuildTableStore(
+            RowType rowType,
+            List<String> partitions,
+            int[] pkIndex,
+            TableStoreTestBase.ExpectedResult expectedResult) {
+        ResolvedCatalogTable catalogTable =
+                createResolvedTable(Collections.emptyMap(), rowType, partitions, pkIndex);
+        context =
+                new FactoryUtil.DefaultDynamicTableContext(
+                        TABLE_IDENTIFIER,
+                        catalogTable,
+                        Collections.emptyMap(),
+                        Configuration.fromMap(Collections.emptyMap()),
+                        Thread.currentThread().getContextClassLoader(),
+                        false);
+        if (expectedResult.success) {
+            TableStore tableStore = tableStoreFactory.buildTableStore(context);
+            assertThat(tableStore.partitioned()).isEqualTo(catalogTable.isPartitioned());
+            assertThat(tableStore.valueCountMode())
+                    .isEqualTo(catalogTable.getResolvedSchema().getPrimaryKeyIndexes().length == 0);
 
-        assertThatThrownBy(
-                        () -> TableStoreFactory.tablePath(Collections.emptyMap(), TABLE_IDENTIFIER))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        "Failed to create file store path. "
-                                + "Please specify a root dir by setting session level configuration "
-                                + "as `SET 'table-store.file.path' = '...'`. "
-                                + "Alternatively, you can use a per-table root dir "
-                                + "as `CREATE TABLE ${table} (...) WITH ('file.path' = '...')`");
+            // check primary key doesn't contain partition
+            if (tableStore.partitioned() && !tableStore.valueCountMode()) {
+                assertThat(
+                                tableStore.primaryKeys().stream()
+                                        .noneMatch(pk -> tableStore.partitionKeys().contains(pk)))
+                        .isTrue();
+            }
+        } else {
+            assertThatThrownBy(() -> tableStoreFactory.buildTableStore(context))
+                    .isInstanceOf(expectedResult.expectedType)
+                    .hasMessageContaining(expectedResult.expectedMessage);
+        }
     }
 
     // ~ Tools ------------------------------------------------------------------
@@ -254,6 +269,44 @@ public class TableStoreFactoryTest {
                 Arguments.of(enrichedOptions, false),
                 Arguments.of(enrichedOptions, true),
                 Arguments.of(enrichedOptions, false));
+    }
+
+    private static Stream<Arguments> providingResolvedTable() {
+        RowType rowType = TestKeyValueGenerator.ROW_TYPE;
+        // success case
+        Arguments arg0 =
+                Arguments.of(
+                        rowType,
+                        Arrays.asList("dt", "hr"),
+                        new int[] {0, 1, 2}, // pk is [dt, hr, shopId]
+                        new TableStoreTestBase.ExpectedResult().success(true));
+
+        // failed case: pk doesn't contain partition key
+        Arguments arg1 =
+                Arguments.of(
+                        rowType,
+                        Arrays.asList("dt", "hr"),
+                        new int[] {2}, // pk is [shopId]
+                        new TableStoreTestBase.ExpectedResult()
+                                .success(false)
+                                .expectedType(IllegalStateException.class)
+                                .expectedMessage(
+                                        "Primary key constraint [shopId] should include all partition fields [dt, hr]"));
+
+        // failed case: pk is same as partition key
+        Arguments arg2 =
+                Arguments.of(
+                        rowType,
+                        Arrays.asList("dt", "hr", "shopId"),
+                        new int[] {0, 1, 2}, // pk is [dt, hr, shopId]
+                        new TableStoreTestBase.ExpectedResult()
+                                .success(false)
+                                .expectedType(IllegalStateException.class)
+                                .expectedMessage(
+                                        "Primary key constraint [dt, hr, shopId] should not be same with partition fields [dt, hr, shopId],"
+                                                + " this will result in only one record in a partition"));
+
+        return Stream.of(arg0, arg1, arg2);
     }
 
     private static Map<String, String> addPrefix(
