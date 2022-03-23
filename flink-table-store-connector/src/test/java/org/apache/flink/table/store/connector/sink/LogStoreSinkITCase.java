@@ -85,17 +85,24 @@ public class LogStoreSinkITCase extends KafkaTableTestBase {
     }
 
     private void innerTest(
-            String name, boolean isBatch, boolean partitioned, boolean transaction, boolean keyed)
+            String name, boolean isBatch, boolean partitioned, boolean transaction, boolean hasPk)
             throws Exception {
         StreamExecutionEnvironment env = isBatch ? buildBatchEnv() : buildStreamEnv();
 
         // in eventual mode, failure will result in duplicate data
         TableStore store = buildTableStore(isBatch || !transaction, TEMPORARY_FOLDER);
         if (partitioned) {
+            if (hasPk) {
+                store.withPrimaryKeys(new int[] {1, 2});
+            } else {
+                store.withPrimaryKeys(new int[0]);
+            }
             store.withPartitions(new int[] {1});
+        } else {
+            store.withPartitions(new int[0]);
         }
 
-        if (!keyed) {
+        if (!hasPk) {
             store.withPrimaryKeys(new int[0]);
         }
 
@@ -109,7 +116,7 @@ public class LogStoreSinkITCase extends KafkaTableTestBase {
                                 ? LogOptions.LogConsistency.TRANSACTIONAL
                                 : LogOptions.LogConsistency.EVENTUAL,
                         TABLE_TYPE,
-                        keyed ? new int[] {2} : new int[0]);
+                        hasPk ? new int[] {2} : new int[0]);
 
         KafkaLogStoreFactory factory = discoverKafkaLogFactory();
         KafkaLogSinkProvider sinkProvider = factory.createSinkProvider(context, SINK_CONTEXT);
@@ -130,7 +137,7 @@ public class LogStoreSinkITCase extends KafkaTableTestBase {
             List<Row> results = executeAndCollect(store.sourceBuilder().build(env));
 
             Row[] expected;
-            if (keyed) {
+            if (hasPk) {
                 expected =
                         partitioned
                                 ? new Row[] {
