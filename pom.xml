@@ -57,8 +57,9 @@ under the License.
         <module>flink-table-store-common</module>
         <module>flink-table-store-connector</module>
         <module>flink-table-store-core</module>
+        <module>flink-table-store-dist</module>
+        <module>flink-table-store-format</module>
         <module>flink-table-store-kafka</module>
-        <module>flink-table-store-orc</module>
     </modules>
 
     <properties>
@@ -486,7 +487,7 @@ under the License.
                                     </includes>
                                     <message>
                                         Direct dependencies on flink-table-planner are not allowed.
-                                        You should depend on either Table API modules, flink-table-planner-loader or flink-table-store-delegate-loader.
+                                        You should depend on either Table API modules, flink-table-planner-loader or flink-table-store-codegen-loader.
                                     </message>
                                 </bannedDependencies>
                             </rules>

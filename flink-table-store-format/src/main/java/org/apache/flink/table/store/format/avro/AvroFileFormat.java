@@ -16,41 +16,33 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.format;
+package org.apache.flink.table.store.format.avro;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.connector.file.table.factories.BulkReaderFormatFactory;
-import org.apache.flink.connector.file.table.factories.BulkWriterFormatFactory;
 import org.apache.flink.connector.file.table.format.BulkDecodingFormat;
 import org.apache.flink.table.connector.format.EncodingFormat;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.factories.FactoryUtil;
+import org.apache.flink.table.store.file.format.FileFormat;
 
-/** A {@link FileFormat} which discovers reader and writer from format identifier. */
-public class FileFormatImpl extends FileFormat {
+/** Avro {@link FileFormat}. */
+public class AvroFileFormat extends FileFormat {
 
-    private final ClassLoader classLoader;
-    private final String formatIdentifier;
     private final ReadableConfig formatOptions;
 
-    public FileFormatImpl(
-            ClassLoader classLoader, String formatIdentifier, ReadableConfig formatOptions) {
-        this.classLoader = classLoader;
-        this.formatIdentifier = formatIdentifier;
+    public AvroFileFormat(ReadableConfig formatOptions) {
         this.formatOptions = formatOptions;
     }
 
+    @Override
     protected BulkDecodingFormat<RowData> getDecodingFormat() {
-        return FactoryUtil.discoverFactory(
-                        classLoader, BulkReaderFormatFactory.class, formatIdentifier)
+        return new org.apache.flink.formats.avro.AvroFileFormatFactory()
                 .createDecodingFormat(null, formatOptions); // context is useless
     }
 
     @Override
     protected EncodingFormat<BulkWriter.Factory<RowData>> getEncodingFormat() {
-        return FactoryUtil.discoverFactory(
-                        classLoader, BulkWriterFormatFactory.class, formatIdentifier)
+        return new org.apache.flink.formats.avro.AvroFileFormatFactory()
                 .createEncodingFormat(null, formatOptions); // context is useless
     }
 }

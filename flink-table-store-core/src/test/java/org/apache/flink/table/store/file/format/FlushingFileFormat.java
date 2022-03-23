@@ -20,17 +20,15 @@ package org.apache.flink.table.store.file.format;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.connector.file.src.FileSourceSplit;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
+import org.apache.flink.connector.file.table.format.BulkDecodingFormat;
+import org.apache.flink.table.connector.format.EncodingFormat;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.io.IOException;
-import java.util.List;
 
 /** A special {@link FileFormat} which flushes for every added element. */
-public class FlushingFileFormat implements FileFormat {
+public class FlushingFileFormat extends FileFormat {
 
     private final FileFormat format;
 
@@ -41,16 +39,20 @@ public class FlushingFileFormat implements FileFormat {
     }
 
     @Override
-    public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
-            RowType type, int[][] projection, List<ResolvedExpression> filters) {
-        return format.createReaderFactory(type, projection, filters);
+    protected BulkDecodingFormat<RowData> getDecodingFormat() {
+        return format.getDecodingFormat();
+    }
+
+    @Override
+    protected EncodingFormat<BulkWriter.Factory<RowData>> getEncodingFormat() {
+        return format.getEncodingFormat();
     }
 
     @Override
     public BulkWriter.Factory<RowData> createWriterFactory(RowType type) {
         return fsDataOutputStream -> {
             BulkWriter<RowData> wrapped =
-                    format.createWriterFactory(type).create(fsDataOutputStream);
+                    super.createWriterFactory(type).create(fsDataOutputStream);
             return new BulkWriter<RowData>() {
                 @Override
                 public void addElement(RowData rowData) throws IOException {

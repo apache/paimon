@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.orc;
+package org.apache.flink.table.store.format.orc;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.DecimalData;

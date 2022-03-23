@@ -16,40 +16,38 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.orc;
+package org.apache.flink.table.store.format.orc;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.connector.file.src.FileSourceSplit;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
+import org.apache.flink.connector.file.table.format.BulkDecodingFormat;
+import org.apache.flink.table.connector.format.EncodingFormat;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.store.file.format.FileFormat;
-import org.apache.flink.table.store.file.format.FileFormatImpl;
 import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.types.logical.RowType;
 
-import java.util.List;
 import java.util.Optional;
 
 /** Orc {@link FileFormat}. */
-public class OrcFileFormat implements FileFormat {
+public class OrcFileFormat extends FileFormat {
 
-    private final FileFormatImpl format;
+    private final ReadableConfig formatOptions;
 
-    public OrcFileFormat(ClassLoader classLoader, ReadableConfig formatOptions) {
-        this.format = new FileFormatImpl(classLoader, "orc", formatOptions);
+    public OrcFileFormat(ReadableConfig formatOptions) {
+        this.formatOptions = formatOptions;
     }
 
     @Override
-    public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
-            RowType type, int[][] projection, List<ResolvedExpression> filters) {
-        return format.createReaderFactory(type, projection, filters);
+    protected BulkDecodingFormat<RowData> getDecodingFormat() {
+        return new org.apache.flink.orc.OrcFileFormatFactory()
+                .createDecodingFormat(null, formatOptions); // context is useless
     }
 
     @Override
-    public BulkWriter.Factory<RowData> createWriterFactory(RowType type) {
-        return format.createWriterFactory(type);
+    protected EncodingFormat<BulkWriter.Factory<RowData>> getEncodingFormat() {
+        return new org.apache.flink.orc.OrcFileFormatFactory()
+                .createEncodingFormat(null, formatOptions); // context is useless
     }
 
     @Override

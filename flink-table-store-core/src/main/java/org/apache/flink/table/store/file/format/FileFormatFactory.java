@@ -25,5 +25,5 @@ public interface FileFormatFactory {
 
     String identifier();
 
-    FileFormat create(ClassLoader classLoader, ReadableConfig formatOptions);
+    FileFormat create(ReadableConfig formatOptions);
 }
