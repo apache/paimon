@@ -58,7 +58,7 @@ public class FileStoreSourceReaderTest {
 
     private FileStoreSourceReader createReader(TestingReaderContext context) {
         return new FileStoreSourceReader(
-                context, new TestDataReadWrite(tempDir.toString(), null).createRead(), false);
+                context, new TestDataReadWrite(tempDir.toString(), null).createRead(), false, null);
     }
 
     private static FileStoreSourceSplit createTestFileSplit() {

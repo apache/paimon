@@ -23,6 +23,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
+import org.apache.flink.table.connector.Projection;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
@@ -213,6 +214,54 @@ public class FileStoreITCase extends AbstractTestBase {
     }
 
     @Test
+    public void testKeyedProjection() throws Exception {
+        testProjection();
+    }
+
+    @Test
+    public void testNonKeyedProjection() throws Exception {
+        store.withPrimaryKeys(new int[0]);
+        testProjection();
+    }
+
+    private void testProjection() throws Exception {
+        // write
+        store.sinkBuilder().withInput(buildTestSource(env, isBatch)).build();
+        env.execute();
+
+        // read
+        Projection projection = Projection.of(new int[] {1, 2});
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        DataStructureConverter<RowData, Row> converter =
+                (DataStructureConverter)
+                        DataStructureConverters.getConverter(
+                                TypeConversions.fromLogicalToDataType(
+                                        projection.project(TABLE_TYPE)));
+        List<Row> results =
+                executeAndCollect(
+                        store.sourceBuilder()
+                                .withProjection(projection.toNestedIndexes())
+                                .build(env),
+                        converter);
+
+        // assert
+        Row[] expected = new Row[] {Row.of("p2", 1), Row.of("p1", 2), Row.of("p2", 5)};
+        if (store.primaryKeys().isEmpty()) {
+            // in streaming mode, expect origin data X 2 (FiniteTestSource)
+            Stream<RowData> expectedStream =
+                    isBatch
+                            ? SOURCE_DATA.stream()
+                            : Stream.concat(SOURCE_DATA.stream(), SOURCE_DATA.stream());
+            expected =
+                    expectedStream
+                            .map(CONVERTER::toExternal)
+                            .map(r -> Row.of(r.getField(1), r.getField(2)))
+                            .toArray(Row[]::new);
+        }
+        assertThat(results).containsExactlyInAnyOrder(expected);
+    }
+
+    @Test
     public void testContinuous() throws Exception {
         store.withPrimaryKeys(new int[] {2});
         innerTestContinuous();
@@ -330,10 +379,16 @@ public class FileStoreITCase extends AbstractTestBase {
     }
 
     public static List<Row> executeAndCollect(DataStreamSource<RowData> source) throws Exception {
+        return executeAndCollect(source, CONVERTER);
+    }
+
+    public static List<Row> executeAndCollect(
+            DataStreamSource<RowData> source, DataStructureConverter<RowData, Row> converter)
+            throws Exception {
         CloseableIterator<RowData> iterator = source.executeAndCollect();
         List<Row> results = new ArrayList<>();
         while (iterator.hasNext()) {
-            results.add(CONVERTER.toExternal(iterator.next()));
+            results.add(converter.toExternal(iterator.next()));
         }
         iterator.close();
         return results;

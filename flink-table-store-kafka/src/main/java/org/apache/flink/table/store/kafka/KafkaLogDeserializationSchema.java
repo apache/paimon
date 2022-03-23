@@ -21,8 +21,10 @@ package org.apache.flink.table.store.kafka;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
+import org.apache.flink.table.connector.Projection;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.utils.ProjectedRowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.types.RowKind;
@@ -30,30 +32,41 @@ import org.apache.flink.util.Collector;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 
+import javax.annotation.Nullable;
+
 import java.util.stream.IntStream;
 
 /** A {@link KafkaDeserializationSchema} for the table with primary key in log store. */
-public class KafkaLogKeyedDeserializationSchema implements KafkaDeserializationSchema<RowData> {
+public class KafkaLogDeserializationSchema implements KafkaDeserializationSchema<RowData> {
 
     private static final long serialVersionUID = 1L;
 
     private final TypeInformation<RowData> producedType;
     private final int fieldCount;
     private final int[] primaryKey;
-    private final DeserializationSchema<RowData> keyDeserializer;
+    @Nullable private final DeserializationSchema<RowData> keyDeserializer;
     private final DeserializationSchema<RowData> valueDeserializer;
     private final RowData.FieldGetter[] keyFieldGetters;
+    @Nullable private final int[][] projectFields;
 
-    public KafkaLogKeyedDeserializationSchema(
+    private transient ProjectCollector projectCollector;
+
+    public KafkaLogDeserializationSchema(
             DataType physicalType,
             int[] primaryKey,
-            DeserializationSchema<RowData> keyDeserializer,
-            DeserializationSchema<RowData> valueDeserializer) {
+            @Nullable DeserializationSchema<RowData> keyDeserializer,
+            DeserializationSchema<RowData> valueDeserializer,
+            @Nullable int[][] projectFields) {
         this.primaryKey = primaryKey;
         this.keyDeserializer = keyDeserializer;
         this.valueDeserializer = valueDeserializer;
-        this.producedType = InternalTypeInfo.of(physicalType.getLogicalType());
+        DataType projectedType =
+                projectFields == null
+                        ? physicalType
+                        : Projection.of(projectFields).project(physicalType);
+        this.producedType = InternalTypeInfo.of(projectedType.getLogicalType());
         this.fieldCount = physicalType.getChildren().size();
+        this.projectFields = projectFields;
         this.keyFieldGetters =
                 IntStream.range(0, primaryKey.length)
                         .mapToObj(
@@ -69,8 +82,11 @@ public class KafkaLogKeyedDeserializationSchema implements KafkaDeserializationS
 
     @Override
     public void open(DeserializationSchema.InitializationContext context) throws Exception {
-        keyDeserializer.open(context);
+        if (keyDeserializer != null) {
+            keyDeserializer.open(context);
+        }
         valueDeserializer.open(context);
+        projectCollector = new ProjectCollector();
     }
 
     @Override
@@ -85,22 +101,50 @@ public class KafkaLogKeyedDeserializationSchema implements KafkaDeserializationS
     }
 
     @Override
-    public void deserialize(ConsumerRecord<byte[], byte[]> record, Collector<RowData> out)
+    public void deserialize(
+            ConsumerRecord<byte[], byte[]> record, Collector<RowData> underCollector)
             throws Exception {
-        if (record.value() == null) {
+        Collector<RowData> collector = projectCollector.project(underCollector);
+
+        if (primaryKey.length > 0 && record.value() == null) {
             RowData key = keyDeserializer.deserialize(record.key());
             GenericRowData value = new GenericRowData(RowKind.DELETE, fieldCount);
             for (int i = 0; i < primaryKey.length; i++) {
                 value.setField(primaryKey[i], keyFieldGetters[i].getFieldOrNull(key));
             }
-            out.collect(value);
+            collector.collect(value);
         } else {
-            valueDeserializer.deserialize(record.value(), out);
+            valueDeserializer.deserialize(record.value(), collector);
         }
     }
 
     @Override
     public TypeInformation<RowData> getProducedType() {
         return producedType;
+    }
+
+    private class ProjectCollector implements Collector<RowData> {
+
+        private final ProjectedRowData projectedRow =
+                projectFields == null ? null : ProjectedRowData.from(projectFields);
+
+        private Collector<RowData> underCollector;
+
+        private Collector<RowData> project(Collector<RowData> underCollector) {
+            if (projectedRow == null) {
+                return underCollector;
+            }
+
+            this.underCollector = underCollector;
+            return this;
+        }
+
+        @Override
+        public void collect(RowData rowData) {
+            underCollector.collect(projectedRow.replaceRow(rowData));
+        }
+
+        @Override
+        public void close() {}
     }
 }

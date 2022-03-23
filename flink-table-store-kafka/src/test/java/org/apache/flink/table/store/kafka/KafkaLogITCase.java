@@ -20,6 +20,7 @@ package org.apache.flink.table.store.kafka;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory.Context;
 import org.apache.flink.table.store.log.LogOptions.LogChangelogMode;
@@ -138,8 +139,6 @@ public class KafkaLogITCase extends KafkaTableTestBase {
                 testContext(name, getBootstrapServers(), changelogMode, consistency, keyed);
 
         KafkaLogSinkProvider sinkProvider = factory.createSinkProvider(context, SINK_CONTEXT);
-        KafkaLogSourceProvider sourceProvider =
-                factory.createSourceProvider(context, SOURCE_CONTEXT);
 
         factory.onCreateTable(context, 3, true);
         try {
@@ -158,12 +157,10 @@ public class KafkaLogITCase extends KafkaTableTestBase {
 
             // 1.2 read
             List<RowData> records =
-                    env.fromSource(
-                                    sourceProvider.createSource(null),
-                                    WatermarkStrategy.noWatermarks(),
-                                    "source")
-                            .executeAndCollect(4);
-            records.sort(Comparator.comparingInt(o -> o.getInt(0)));
+                    collect(
+                            factory.createSourceProvider(context, SOURCE_CONTEXT, null)
+                                    .createSource(null),
+                            4);
 
             // delete, upsert mode
             if (changelogMode == LogChangelogMode.UPSERT) {
@@ -171,11 +168,29 @@ public class KafkaLogITCase extends KafkaTableTestBase {
             } else {
                 assertRow(records.get(0), RowKind.DELETE, 1, 2);
             }
-
             // inserts
             assertRow(records.get(1), RowKind.INSERT, 3, 4);
             assertRow(records.get(2), RowKind.INSERT, 5, 6);
             assertRow(records.get(3), RowKind.INSERT, 7, 8);
+
+            // 1.3 read with projection
+            records =
+                    collect(
+                            factory.createSourceProvider(
+                                            context, SOURCE_CONTEXT, new int[][] {new int[] {1}})
+                                    .createSource(null),
+                            4);
+
+            // delete, upsert mode
+            if (changelogMode == LogChangelogMode.UPSERT) {
+                assertValue(records.get(0), RowKind.DELETE, null);
+            } else {
+                assertValue(records.get(0), RowKind.DELETE, 2);
+            }
+            // inserts
+            assertValue(records.get(1), RowKind.INSERT, 4);
+            assertValue(records.get(2), RowKind.INSERT, 6);
+            assertValue(records.get(3), RowKind.INSERT, 8);
 
             // 2.1 sink
             env.fromElements(
@@ -187,19 +202,24 @@ public class KafkaLogITCase extends KafkaTableTestBase {
 
             // 2.2 read from offsets
             records =
-                    env.fromSource(
-                                    sourceProvider.createSource(
-                                            TestOffsetsLogSink.drainOffsets(uuid)),
-                                    WatermarkStrategy.noWatermarks(),
-                                    "source")
-                            .executeAndCollect(3);
-            records.sort(Comparator.comparingInt(o -> o.getInt(0)));
+                    collect(
+                            factory.createSourceProvider(context, SOURCE_CONTEXT, null)
+                                    .createSource(TestOffsetsLogSink.drainOffsets(uuid)),
+                            3);
             assertRow(records.get(0), RowKind.INSERT, 9, 10);
             assertRow(records.get(1), RowKind.INSERT, 11, 12);
             assertRow(records.get(2), RowKind.INSERT, 13, 14);
         } finally {
             factory.onDropTable(context, true);
         }
+    }
+
+    private List<RowData> collect(KafkaSource<RowData> source, int numRecord) throws Exception {
+        List<RowData> records =
+                env.fromSource(source, WatermarkStrategy.noWatermarks(), "source")
+                        .executeAndCollect(numRecord);
+        records.sort(Comparator.comparingInt(o -> o.getInt(0)));
+        return records;
     }
 
     private void enableCheckpoint() {
@@ -213,5 +233,10 @@ public class KafkaLogITCase extends KafkaTableTestBase {
         Assert.assertEquals(rowKind, row.getRowKind());
         Assert.assertEquals(k, row.isNullAt(0) ? null : row.getInt(0));
         Assert.assertEquals(v, row.isNullAt(1) ? null : row.getInt(1));
+    }
+
+    private void assertValue(RowData row, RowKind rowKind, Integer v) {
+        Assert.assertEquals(rowKind, row.getRowKind());
+        Assert.assertEquals(v, row.isNullAt(0) ? null : row.getInt(0));
     }
 }
