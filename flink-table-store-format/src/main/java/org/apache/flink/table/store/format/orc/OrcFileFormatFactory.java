@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,20 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.format;
+package org.apache.flink.table.store.format.orc;
 
 import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.table.store.file.format.FileFormat;
+import org.apache.flink.table.store.file.format.FileFormatFactory;
 
-/** Factory to create {@link FileStatsExtractingAvroFormat}. */
-public class FileStatsExtractingAvroFormatFactory implements FileFormatFactory {
+/** Factory to create {@link OrcFileFormat}. */
+public class OrcFileFormatFactory implements FileFormatFactory {
 
     @Override
     public String identifier() {
-        return "avro-extract";
+        return "orc";
     }
 
     @Override
     public FileFormat create(ReadableConfig formatOptions) {
-        return new FileStatsExtractingAvroFormat();
+        return new OrcFileFormat(formatOptions);
     }
 }
