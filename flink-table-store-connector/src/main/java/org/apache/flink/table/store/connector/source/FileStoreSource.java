@@ -93,22 +93,22 @@ public class FileStoreSource
             read.withDropDelete(false);
         }
 
-        int[][] valueCountProject = null;
+        int[][] valueCountModeProjects = null;
         if (projectedFields != null) {
             if (valueCountMode) {
-                // when isContinuous is false, don't project keys, otherwise, there is no way to
-                // merge
+                // push projection to file store for better performance under continuous read mode,
+                // because the merge cannot be performed anyway
                 if (isContinuous) {
                     read.withKeyProjection(projectedFields);
                 } else {
-                    valueCountProject = projectedFields;
+                    valueCountModeProjects = projectedFields;
                 }
             } else {
                 read.withValueProjection(projectedFields);
             }
         }
 
-        return new FileStoreSourceReader(context, read, valueCountMode, valueCountProject);
+        return new FileStoreSourceReader(context, read, valueCountMode, valueCountModeProjects);
     }
 
     @Override

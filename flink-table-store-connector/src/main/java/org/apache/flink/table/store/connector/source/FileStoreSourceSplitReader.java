@@ -49,7 +49,7 @@ public class FileStoreSourceSplitReader
 
     private final FileStoreRead fileStoreRead;
     private final boolean valueCountMode;
-    @Nullable private final int[][] valueCountProject;
+    @Nullable private final int[][] valueCountModeProjects;
 
     private final Queue<FileStoreSourceSplit> splits;
 
@@ -68,10 +68,10 @@ public class FileStoreSourceSplitReader
     public FileStoreSourceSplitReader(
             FileStoreRead fileStoreRead,
             boolean valueCountMode,
-            @Nullable int[][] valueCountProject) {
+            @Nullable int[][] valueCountModeProjects) {
         this.fileStoreRead = fileStoreRead;
         this.valueCountMode = valueCountMode;
-        this.valueCountProject = valueCountProject;
+        this.valueCountModeProjects = valueCountModeProjects;
         this.splits = new LinkedList<>();
         this.pool = new Pool<>(1);
         this.pool.add(
@@ -235,7 +235,9 @@ public class FileStoreSourceSplitReader
 
         @Nullable
         private final ProjectedRowData projectedRow =
-                Optional.ofNullable(valueCountProject).map(ProjectedRowData::from).orElse(null);
+                Optional.ofNullable(valueCountModeProjects)
+                        .map(ProjectedRowData::from)
+                        .orElse(null);
 
         @Nullable
         @Override

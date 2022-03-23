@@ -41,11 +41,11 @@ public final class FileStoreSourceReader
             SourceReaderContext readerContext,
             FileStoreRead fileStoreRead,
             boolean valueCountMode,
-            @Nullable int[][] valueCountProject) {
+            @Nullable int[][] valueCountModeProjects) {
         super(
                 () ->
                         new FileStoreSourceSplitReader(
-                                fileStoreRead, valueCountMode, valueCountProject),
+                                fileStoreRead, valueCountMode, valueCountModeProjects),
                 (element, output, splitState) -> {
                     output.collect(element.getRecord());
                     splitState.setPosition(element);
