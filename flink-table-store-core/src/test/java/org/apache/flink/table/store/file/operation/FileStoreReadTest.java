@@ -77,6 +77,7 @@ public class FileStoreReadTest {
             int b = random.nextInt(3);
             int c = random.nextInt(3);
             long delta = random.nextLong(21) - 10;
+            // count number of occurrence of (b, a)
             expected.compute(b * 10 + a, (k, v) -> v == null ? delta : v + delta);
             data.add(
                     new KeyValue()
@@ -86,6 +87,8 @@ public class FileStoreReadTest {
                                     ValueKind.ADD,
                                     GenericRowData.of(delta)));
         }
+        // remove zero occurrence, it might be merged and discarded by the merge tree
+        expected.entrySet().removeIf(e -> e.getValue() == 0);
 
         RowType partitionType =
                 RowType.of(new LogicalType[] {new IntType(false)}, new String[] {"c"});
@@ -123,6 +126,7 @@ public class FileStoreReadTest {
             long delta = kv.value().getLong(0);
             actual.compute(key, (k, v) -> v == null ? delta : v + delta);
         }
+        actual.entrySet().removeIf(e -> e.getValue() == 0);
         assertThat(actual).isEqualTo(expected);
     }
 
