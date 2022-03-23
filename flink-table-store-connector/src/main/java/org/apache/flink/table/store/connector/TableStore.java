@@ -60,7 +60,6 @@ import javax.annotation.Nullable;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -185,30 +184,31 @@ public class TableStore {
 
     private void adjustIndexAndValidate() {
         if (primaryKeys.length > 0 && partitions.length > 0) {
-            Set<Integer> pkSet = Arrays.stream(primaryKeys).boxed().collect(Collectors.toSet());
-            Set<Integer> partitionSet =
-                    Arrays.stream(partitions).boxed().collect(Collectors.toSet());
+            List<Integer> pkList = Arrays.stream(primaryKeys).boxed().collect(Collectors.toList());
+            List<Integer> partitionList =
+                    Arrays.stream(partitions).boxed().collect(Collectors.toList());
 
             String pkInfo =
                     type == null
-                            ? pkSet.toString()
+                            ? pkList.toString()
                             : TypeUtils.project(type, primaryKeys).getFieldNames().toString();
             String partitionInfo =
                     type == null
-                            ? partitionSet.toString()
+                            ? partitionList.toString()
                             : TypeUtils.project(type, partitions).getFieldNames().toString();
             Preconditions.checkState(
-                    pkSet.containsAll(partitionSet),
+                    pkList.containsAll(partitionList),
                     String.format(
                             "Primary key constraint %s should include all partition fields %s",
                             pkInfo, partitionInfo));
+            primaryKeys =
+                    Arrays.stream(primaryKeys).filter(pk -> !partitionList.contains(pk)).toArray();
+
             Preconditions.checkState(
-                    !partitionSet.containsAll(pkSet),
+                    primaryKeys.length > 0,
                     String.format(
                             "Primary key constraint %s should not be same with partition fields %s, this will result in only one record in a partition",
                             pkInfo, partitionInfo));
-            primaryKeys =
-                    Arrays.stream(primaryKeys).filter(pk -> !partitionSet.contains(pk)).toArray();
         }
     }
 
