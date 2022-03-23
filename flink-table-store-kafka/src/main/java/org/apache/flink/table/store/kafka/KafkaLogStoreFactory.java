@@ -38,6 +38,8 @@ import org.apache.kafka.common.config.TopicConfig;
 import org.apache.kafka.common.errors.TopicExistsException;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 
+import javax.annotation.Nullable;
+
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -159,7 +161,9 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
 
     @Override
     public KafkaLogSourceProvider createSourceProvider(
-            DynamicTableFactory.Context context, SourceContext sourceContext) {
+            DynamicTableFactory.Context context,
+            SourceContext sourceContext,
+            @Nullable int[][] projectFields) {
         FactoryUtil.TableFactoryHelper helper = createTableFactoryHelper(this, context);
         ResolvedSchema schema = context.getCatalogTable().getResolvedSchema();
         DataType physicalType = schema.toPhysicalRowDataType();
@@ -181,6 +185,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                 primaryKey,
                 keyDeserializer,
                 valueDeserializer,
+                projectFields,
                 helper.getOptions().get(CONSISTENCY),
                 helper.getOptions().get(SCAN),
                 helper.getOptions().get(SCAN_TIMESTAMP_MILLS));

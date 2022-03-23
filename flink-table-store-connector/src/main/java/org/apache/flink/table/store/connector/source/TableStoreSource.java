@@ -128,7 +128,8 @@ public class TableStoreSource
                                     return scanContext.createDataStructureConverter(
                                             producedDataType);
                                 }
-                            });
+                            },
+                            projectFields);
         }
         TableStore.SourceBuilder builder =
                 tableStore

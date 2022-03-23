@@ -56,6 +56,8 @@ public class KafkaLogSourceProvider implements LogSourceProvider {
 
     private final DeserializationSchema<RowData> valueDeserializer;
 
+    @Nullable private final int[][] projectFields;
+
     private final LogConsistency consistency;
 
     private final LogStartupMode scanMode;
@@ -69,6 +71,7 @@ public class KafkaLogSourceProvider implements LogSourceProvider {
             int[] primaryKey,
             @Nullable DeserializationSchema<RowData> keyDeserializer,
             DeserializationSchema<RowData> valueDeserializer,
+            @Nullable int[][] projectFields,
             LogConsistency consistency,
             LogStartupMode scanMode,
             @Nullable Long timestampMills) {
@@ -78,6 +81,7 @@ public class KafkaLogSourceProvider implements LogSourceProvider {
         this.primaryKey = primaryKey;
         this.keyDeserializer = keyDeserializer;
         this.valueDeserializer = valueDeserializer;
+        this.projectFields = projectFields;
         this.consistency = consistency;
         this.scanMode = scanMode;
         this.timestampMills = timestampMills;
@@ -109,11 +113,13 @@ public class KafkaLogSourceProvider implements LogSourceProvider {
 
     @VisibleForTesting
     KafkaRecordDeserializationSchema<RowData> createDeserializationSchema() {
-        return primaryKey.length > 0
-                ? KafkaRecordDeserializationSchema.of(
-                        new KafkaLogKeyedDeserializationSchema(
-                                physicalType, primaryKey, keyDeserializer, valueDeserializer))
-                : KafkaRecordDeserializationSchema.valueOnly(valueDeserializer);
+        return KafkaRecordDeserializationSchema.of(
+                new KafkaLogDeserializationSchema(
+                        physicalType,
+                        primaryKey,
+                        keyDeserializer,
+                        valueDeserializer,
+                        projectFields));
     }
 
     private OffsetsInitializer toOffsetsInitializer(@Nullable Map<Integer, Long> bucketOffsets) {
