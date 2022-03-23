@@ -58,8 +58,8 @@ under the License.
         <module>flink-table-store-connector</module>
         <module>flink-table-store-core</module>
         <module>flink-table-store-dist</module>
+        <module>flink-table-store-format</module>
         <module>flink-table-store-kafka</module>
-        <module>flink-table-store-orc</module>
     </modules>
 
     <properties>

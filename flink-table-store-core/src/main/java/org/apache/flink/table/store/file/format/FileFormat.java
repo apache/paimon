@@ -19,25 +19,41 @@
 package org.apache.flink.table.store.file.format;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.DelegatingConfiguration;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
+import org.apache.flink.connector.file.table.format.BulkDecodingFormat;
+import org.apache.flink.table.connector.format.EncodingFormat;
+import org.apache.flink.table.connector.format.ProjectableDecodingFormat;
+import org.apache.flink.table.connector.sink.DynamicTableSink;
+import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.factories.FactoryUtil;
+import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.file.stats.FileStatsExtractor;
+import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.ServiceLoader;
 
+import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
+
 /** Factory class which creates reader and writer factories for specific file format. */
-public interface FileFormat {
+public abstract class FileFormat {
+
+    protected abstract BulkDecodingFormat<RowData> getDecodingFormat();
+
+    protected abstract EncodingFormat<BulkWriter.Factory<RowData>> getEncodingFormat();
 
     /**
      * Create a {@link BulkFormat} from the type, with projection pushed down.
@@ -46,13 +62,27 @@ public interface FileFormat {
      * @param projection See {@link org.apache.flink.table.connector.Projection#toNestedIndexes()}.
      * @param filters A list of filters in conjunctive form for filtering on a best-effort basis.
      */
-    BulkFormat<RowData, FileSourceSplit> createReaderFactory(
-            RowType type, int[][] projection, List<ResolvedExpression> filters);
+    @SuppressWarnings("unchecked")
+    public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
+            RowType type, int[][] projection, List<ResolvedExpression> filters) {
+        BulkDecodingFormat<RowData> decodingFormat = getDecodingFormat();
+        // TODO use ProjectingBulkFormat if not supported
+        Preconditions.checkState(
+                decodingFormat instanceof ProjectableDecodingFormat,
+                "Format "
+                        + decodingFormat.getClass().getName()
+                        + " does not support projection push down");
+        decodingFormat.applyFilters(filters);
+        return ((ProjectableDecodingFormat<BulkFormat<RowData, FileSourceSplit>>) decodingFormat)
+                .createRuntimeDecoder(SOURCE_CONTEXT, fromLogicalToDataType(type), projection);
+    }
 
     /** Create a {@link BulkWriter.Factory} from the type. */
-    BulkWriter.Factory<RowData> createWriterFactory(RowType type);
+    public BulkWriter.Factory<RowData> createWriterFactory(RowType type) {
+        return getEncodingFormat().createRuntimeEncoder(SINK_CONTEXT, fromLogicalToDataType(type));
+    }
 
-    default BulkFormat<RowData, FileSourceSplit> createReaderFactory(RowType rowType) {
+    public BulkFormat<RowData, FileSourceSplit> createReaderFactory(RowType rowType) {
         int[][] projection = new int[rowType.getFieldCount()][];
         for (int i = 0; i < projection.length; i++) {
             projection[i] = new int[] {i};
@@ -60,17 +90,17 @@ public interface FileFormat {
         return createReaderFactory(rowType, projection);
     }
 
-    default BulkFormat<RowData, FileSourceSplit> createReaderFactory(
+    public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
             RowType rowType, int[][] projection) {
         return createReaderFactory(rowType, projection, new ArrayList<>());
     }
 
-    default Optional<FileStatsExtractor> createStatsExtractor(RowType type) {
+    public Optional<FileStatsExtractor> createStatsExtractor(RowType type) {
         return Optional.empty();
     }
 
     /** Create a {@link FileFormatImpl} from table options. */
-    static FileFormat fromTableOptions(
+    public static FileFormat fromTableOptions(
             ClassLoader classLoader,
             Configuration tableOptions,
             ConfigOption<String> formatOption) {
@@ -81,15 +111,62 @@ public interface FileFormat {
     }
 
     /** Create a {@link FileFormatImpl} from format identifier and format options. */
-    static FileFormat fromIdentifier(
+    public static FileFormat fromIdentifier(
             ClassLoader classLoader, String formatIdentifier, ReadableConfig formatOptions) {
         ServiceLoader<FileFormatFactory> serviceLoader =
                 ServiceLoader.load(FileFormatFactory.class);
         for (FileFormatFactory factory : serviceLoader) {
             if (factory.identifier().equals(formatIdentifier.toLowerCase())) {
-                return factory.create(classLoader, formatOptions);
+                return factory.create(formatOptions);
             }
         }
         return new FileFormatImpl(classLoader, formatIdentifier, formatOptions);
     }
+
+    private static final DynamicTableSink.Context SINK_CONTEXT =
+            new DynamicTableSink.Context() {
+
+                @Override
+                public boolean isBounded() {
+                    return false;
+                }
+
+                @Override
+                public <T> TypeInformation<T> createTypeInformation(DataType consumedDataType) {
+                    return InternalTypeInfo.of(consumedDataType.getLogicalType());
+                }
+
+                @Override
+                public <T> TypeInformation<T> createTypeInformation(
+                        LogicalType consumedLogicalType) {
+                    return InternalTypeInfo.of(consumedLogicalType);
+                }
+
+                @Override
+                public DynamicTableSink.DataStructureConverter createDataStructureConverter(
+                        DataType consumedDataType) {
+                    throw new UnsupportedOperationException();
+                }
+            };
+
+    private static final DynamicTableSource.Context SOURCE_CONTEXT =
+            new DynamicTableSource.Context() {
+
+                @Override
+                public <T> TypeInformation<T> createTypeInformation(DataType consumedDataType) {
+                    return InternalTypeInfo.of(consumedDataType.getLogicalType());
+                }
+
+                @Override
+                public <T> TypeInformation<T> createTypeInformation(
+                        LogicalType producedLogicalType) {
+                    return InternalTypeInfo.of(producedLogicalType);
+                }
+
+                @Override
+                public DynamicTableSource.DataStructureConverter createDataStructureConverter(
+                        DataType consumedDataType) {
+                    throw new UnsupportedOperationException();
+                }
+            };
 }

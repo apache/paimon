@@ -58,13 +58,13 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-kafka</artifactId>
+            <artifactId>flink-table-store-format</artifactId>
             <version>${project.version}</version>
         </dependency>
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-orc</artifactId>
+            <artifactId>flink-table-store-kafka</artifactId>
             <version>${project.version}</version>
         </dependency>
 
@@ -116,14 +116,52 @@ under the License.
                                     <include>org.apache.flink:flink-table-store-common</include>
                                     <include>org.apache.flink:flink-table-store-connector</include>
                                     <include>org.apache.flink:flink-table-store-core</include>
+                                    <include>org.apache.flink:flink-table-store-format</include>
                                     <include>org.apache.flink:flink-table-store-kafka</include>
-                                    <include>org.apache.flink:flink-table-store-orc</include>
                                     <include>org.apache.flink:flink-connector-files</include>
                                     <include>org.apache.flink:flink-sql-connector-kafka</include>
                                     <include>org.apache.flink:flink-sql-avro</include>
                                     <include>org.apache.flink:flink-sql-orc</include>
                                 </includes>
                             </artifactSet>
+                            <filters>
+                                <!--
+                                Throw away all META-INF/services,
+                                otherwise if user has the same format/connector jar in the classpath,
+                                FactoryUtil will complain about multiple matching factories.
+                                -->
+                                <filter>
+                                    <artifact>org.apache.flink:flink-connector-files</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/services/**</exclude>
+                                    </excludes>
+                                </filter>
+                                <filter>
+                                    <artifact>org.apache.flink:flink-sql-connector-kafka</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/services/**</exclude>
+                                    </excludes>
+                                </filter>
+                                <filter>
+                                    <artifact>org.apache.flink:flink-sql-avro</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/services/**</exclude>
+                                    </excludes>
+                                </filter>
+                                <filter>
+                                    <artifact>org.apache.flink:flink-sql-orc</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/services/**</exclude>
+                                    </excludes>
+                                </filter>
+                                <!-- Another copy of the Apache license, which we don't need. -->
+                                <filter>
+                                    <artifact>*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/LICENSE.txt</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
                             <relocations>
                                 <relocation>
                                     <pattern>org.apache.flink.connector</pattern>
@@ -152,6 +190,10 @@ under the License.
                                 <relocation>
                                     <pattern>org.apache.hive</pattern>
                                     <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hive</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.hadoop.hive</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.hive</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>io.airlift</pattern>

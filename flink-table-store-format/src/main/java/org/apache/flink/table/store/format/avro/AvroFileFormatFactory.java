@@ -16,22 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.orc;
+package org.apache.flink.table.store.format.avro;
 
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.format.FileFormatFactory;
 
-/** Factory to create {@link OrcFileFormat}. */
-public class OrcFileFormatFactory implements FileFormatFactory {
+/** Factory to create {@link AvroFileFormat}. */
+public class AvroFileFormatFactory implements FileFormatFactory {
 
     @Override
     public String identifier() {
-        return "orc";
+        return "avro";
     }
 
     @Override
-    public FileFormat create(ClassLoader classLoader, ReadableConfig formatOptions) {
-        return new OrcFileFormat(classLoader, formatOptions);
+    public FileFormat create(ReadableConfig formatOptions) {
+        return new AvroFileFormat(formatOptions);
     }
 }
