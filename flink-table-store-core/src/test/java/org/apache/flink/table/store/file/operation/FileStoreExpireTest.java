@@ -68,7 +68,7 @@ public class FileStoreExpireTest {
     }
 
     @AfterEach
-    public void afterEach() {
+    public void afterEach() throws IOException {
         store.assertCleaned();
     }
 

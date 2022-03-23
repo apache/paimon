@@ -83,24 +83,21 @@ public class SnapshotFinder {
         }
     }
 
-    public static void commitLatestHint(Path snapshotDir, long snapshotId) {
+    public static void commitLatestHint(Path snapshotDir, long snapshotId) throws IOException {
         commitHint(snapshotDir, snapshotId, LATEST);
     }
 
-    public static void commitEarliestHint(Path snapshotDir, long snapshotId) {
+    public static void commitEarliestHint(Path snapshotDir, long snapshotId) throws IOException {
         commitHint(snapshotDir, snapshotId, EARLIEST);
     }
 
-    private static void commitHint(Path snapshotDir, long snapshotId, String fileName) {
-        try {
-            FileSystem fs = snapshotDir.getFileSystem();
-            Path hintFile = new Path(snapshotDir, fileName);
-            Path tempFile = new Path(snapshotDir, UUID.randomUUID() + "-" + fileName + ".temp");
-            FileUtils.writeFileUtf8(tempFile, String.valueOf(snapshotId));
-            fs.delete(hintFile, false);
-            fs.rename(tempFile, hintFile);
-        } catch (IOException e) {
-            LOG.warn(String.format("Commit hint file '%s' failed.", fileName), e);
-        }
+    private static void commitHint(Path snapshotDir, long snapshotId, String fileName)
+            throws IOException {
+        FileSystem fs = snapshotDir.getFileSystem();
+        Path hintFile = new Path(snapshotDir, fileName);
+        Path tempFile = new Path(snapshotDir, UUID.randomUUID() + "-" + fileName + ".temp");
+        FileUtils.writeFileUtf8(tempFile, String.valueOf(snapshotId));
+        fs.delete(hintFile, false);
+        fs.rename(tempFile, hintFile);
     }
 }

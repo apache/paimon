@@ -45,6 +45,8 @@ import java.util.concurrent.Callable;
  *
  * <p>NOTE: This implementation will keep at least one snapshot so that users will not accidentally
  * clear all snapshots.
+ *
+ * <p>TODO: add concurrent tests.
  */
 public class FileStoreExpireImpl implements FileStoreExpire {
 
@@ -125,7 +127,9 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
     private void expireUntil(long earliestId, long endExclusiveId) {
         if (endExclusiveId <= earliestId) {
-            // write hint file if not exists
+            // No expire happens:
+            // write the hint file in order to see the earliest snapshot directly next time
+            // should avoid duplicate writes when the file exists
             Path hint = new Path(pathFactory.snapshotDirectory(), SnapshotFinder.EARLIEST);
             try {
                 if (!hint.getFileSystem().exists(hint)) {
