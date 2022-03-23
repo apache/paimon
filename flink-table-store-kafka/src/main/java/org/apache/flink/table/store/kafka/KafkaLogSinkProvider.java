@@ -46,7 +46,7 @@ public class KafkaLogSinkProvider implements LogSinkProvider {
 
     private final Properties properties;
 
-    @Nullable private final SerializationSchema<RowData> keySerializer;
+    @Nullable private final SerializationSchema<RowData> primaryKeySerializer;
 
     private final SerializationSchema<RowData> valueSerializer;
 
@@ -57,13 +57,13 @@ public class KafkaLogSinkProvider implements LogSinkProvider {
     public KafkaLogSinkProvider(
             String topic,
             Properties properties,
-            @Nullable SerializationSchema<RowData> keySerializer,
+            @Nullable SerializationSchema<RowData> primaryKeySerializer,
             SerializationSchema<RowData> valueSerializer,
             LogConsistency consistency,
             LogChangelogMode changelogMode) {
         this.topic = topic;
         this.properties = properties;
-        this.keySerializer = keySerializer;
+        this.primaryKeySerializer = primaryKeySerializer;
         this.valueSerializer = valueSerializer;
         this.consistency = consistency;
         this.changelogMode = changelogMode;
@@ -78,7 +78,7 @@ public class KafkaLogSinkProvider implements LogSinkProvider {
                         .setTransactionalIdPrefix("log-store-" + topic);
                 break;
             case EVENTUAL:
-                if (keySerializer == null) {
+                if (primaryKeySerializer == null) {
                     throw new IllegalArgumentException(
                             "Can not use EVENTUAL consistency mode for non-pk table.");
                 }
@@ -101,6 +101,6 @@ public class KafkaLogSinkProvider implements LogSinkProvider {
     @VisibleForTesting
     KafkaLogSerializationSchema createSerializationSchema() {
         return new KafkaLogSerializationSchema(
-                topic, keySerializer, valueSerializer, changelogMode);
+                topic, primaryKeySerializer, valueSerializer, changelogMode);
     }
 }

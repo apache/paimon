@@ -83,8 +83,11 @@ public class TableStore {
     /** partition keys, default no partition. */
     private int[] partitions = new int[0];
 
-    /** primary keys, default no key. */
+    /** file store primary keys which excludes partition fields if partitioned, default no key. */
     private int[] primaryKeys = new int[0];
+
+    /** log store primary keys which include partition fields if partitioned, default no key. */
+    private int[] logPrimaryKeys = new int[0];
 
     private RowType type;
 
@@ -112,6 +115,7 @@ public class TableStore {
 
     public TableStore withPrimaryKeys(int[] primaryKeys) {
         this.primaryKeys = primaryKeys;
+        this.logPrimaryKeys = primaryKeys;
         adjustIndexAndValidate();
         return this;
     }
@@ -186,15 +190,16 @@ public class TableStore {
     }
 
     private void adjustIndexAndValidate() {
-        if (primaryKeys.length > 0 && partitions.length > 0) {
-            List<Integer> pkList = Arrays.stream(primaryKeys).boxed().collect(Collectors.toList());
+        if (logPrimaryKeys.length > 0 && partitions.length > 0) {
+            List<Integer> pkList =
+                    Arrays.stream(logPrimaryKeys).boxed().collect(Collectors.toList());
             List<Integer> partitionList =
                     Arrays.stream(partitions).boxed().collect(Collectors.toList());
 
             String pkInfo =
                     type == null
                             ? pkList.toString()
-                            : TypeUtils.project(type, primaryKeys).getFieldNames().toString();
+                            : TypeUtils.project(type, logPrimaryKeys).getFieldNames().toString();
             String partitionInfo =
                     type == null
                             ? partitionList.toString()
@@ -205,7 +210,9 @@ public class TableStore {
                             "Primary key constraint %s should include all partition fields %s",
                             pkInfo, partitionInfo));
             primaryKeys =
-                    Arrays.stream(primaryKeys).filter(pk -> !partitionList.contains(pk)).toArray();
+                    Arrays.stream(logPrimaryKeys)
+                            .filter(pk -> !partitionList.contains(pk))
+                            .toArray();
 
             Preconditions.checkState(
                     primaryKeys.length > 0,
@@ -354,7 +361,8 @@ public class TableStore {
             int numBucket = options.get(BUCKET);
 
             BucketStreamPartitioner partitioner =
-                    new BucketStreamPartitioner(numBucket, type, partitions, primaryKeys);
+                    new BucketStreamPartitioner(
+                            numBucket, type, partitions, primaryKeys, logPrimaryKeys);
             DataStream<RowData> partitioned =
                     new DataStream<>(
                             input.getExecutionEnvironment(),
@@ -366,6 +374,7 @@ public class TableStore {
                             fileStore,
                             partitions,
                             primaryKeys,
+                            logPrimaryKeys,
                             numBucket,
                             lockFactory,
                             overwritePartition,

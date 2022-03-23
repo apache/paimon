@@ -25,6 +25,7 @@ import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 
+import java.util.Arrays;
 import java.util.stream.IntStream;
 
 /** Converter for converting {@link RowData} to {@link SinkRecord}. */
@@ -38,14 +39,24 @@ public class SinkRecordConverter {
 
     private final Projection<RowData, BinaryRowData> pkProjection;
 
+    private final Projection<RowData, BinaryRowData> logPkProjection;
+
     public SinkRecordConverter(
-            int numBucket, RowType inputType, int[] partitions, int[] primaryKeys) {
+            int numBucket,
+            RowType inputType,
+            int[] partitions,
+            int[] primaryKeys,
+            final int[] logPrimaryKeys) {
         this.numBucket = numBucket;
         this.allProjection =
                 CodeGenUtils.newProjection(
                         inputType, IntStream.range(0, inputType.getFieldCount()).toArray());
         this.partProjection = CodeGenUtils.newProjection(inputType, partitions);
         this.pkProjection = CodeGenUtils.newProjection(inputType, primaryKeys);
+        this.logPkProjection =
+                Arrays.equals(primaryKeys, logPrimaryKeys)
+                        ? pkProjection
+                        : CodeGenUtils.newProjection(inputType, logPrimaryKeys);
     }
 
     public SinkRecord convert(RowData row) {
@@ -55,13 +66,26 @@ public class SinkRecordConverter {
         return new SinkRecord(partition, bucket, primaryKey, row);
     }
 
+    public SinkRecord convertToLogPk(RowData row, SinkRecord record) {
+        BinaryRowData logPrimaryKey = logPrimaryKey(row);
+        return new SinkRecord(record.partition(), record.bucket(), logPrimaryKey, row);
+    }
+
     public BinaryRowData primaryKey(RowData row) {
         return pkProjection.apply(row);
+    }
+
+    public BinaryRowData logPrimaryKey(RowData row) {
+        return logPkProjection.apply(row);
     }
 
     public int bucket(RowData row, BinaryRowData primaryKey) {
         int hash = primaryKey.getArity() == 0 ? hashRow(row) : primaryKey.hashCode();
         return Math.abs(hash % numBucket);
+    }
+
+    public boolean reuseRecord() {
+        return pkProjection.equals(logPkProjection);
     }
 
     private int hashRow(RowData row) {
