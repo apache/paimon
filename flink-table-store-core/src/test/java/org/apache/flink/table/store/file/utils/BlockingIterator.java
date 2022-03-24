@@ -37,7 +37,7 @@ public class BlockingIterator<IN, OUT> implements AutoCloseable {
      * A static cached {@link ExecutorService}. We don't limit the number of threads since the work
      * inside is I/O type.
      */
-    private final ExecutorService EXECUTOR = Executors.newCachedThreadPool();
+    private static final ExecutorService EXECUTOR = Executors.newCachedThreadPool();
 
     private final Iterator<IN> iterator;
 
