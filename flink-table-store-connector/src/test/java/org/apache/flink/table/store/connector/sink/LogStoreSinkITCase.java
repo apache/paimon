@@ -22,6 +22,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.store.connector.TableStore;
+import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.kafka.KafkaLogSinkProvider;
 import org.apache.flink.table.store.kafka.KafkaLogSourceProvider;
 import org.apache.flink.table.store.kafka.KafkaLogStoreFactory;
@@ -34,7 +35,6 @@ import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.List;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.apache.flink.table.store.connector.FileStoreITCase.CONVERTER;
@@ -159,12 +159,15 @@ public class LogStoreSinkITCase extends KafkaTableTestBase {
 
             assertThat(results).containsExactlyInAnyOrder(expected);
 
-            results =
-                    store.sourceBuilder().withContinuousMode(true)
-                            .withLogSourceProvider(sourceProvider).build(buildStreamEnv())
-                            .executeAndCollect(expected.length).stream()
-                            .map(CONVERTER::toExternal)
-                            .collect(Collectors.toList());
+            BlockingIterator<RowData, Row> iterator =
+                    BlockingIterator.of(
+                            store.sourceBuilder()
+                                    .withContinuousMode(true)
+                                    .withLogSourceProvider(sourceProvider)
+                                    .build(buildStreamEnv())
+                                    .executeAndCollect(),
+                            CONVERTER::toExternal);
+            results = iterator.collectAndClose(expected.length);
             assertThat(results).containsExactlyInAnyOrder(expected);
         } finally {
             factory.onDropTable(context, true);

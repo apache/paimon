@@ -22,19 +22,17 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
+import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.types.Row;
-import org.apache.flink.util.CloseableIterator;
 
 import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 
 import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
 import static org.apache.flink.table.store.file.FileStoreOptions.FILE_PATH;
@@ -68,80 +66,87 @@ public class ContinuousFileStoreITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testWithoutPrimaryKey() throws ExecutionException, InterruptedException {
+    public void testWithoutPrimaryKey() throws Exception {
         testSimple("T1");
     }
 
     @Test
-    public void testWithPrimaryKey() throws ExecutionException, InterruptedException {
+    public void testWithPrimaryKey() throws Exception {
         testSimple("T2");
     }
 
     @Test
-    public void testProjectionWithoutPrimaryKey() throws ExecutionException, InterruptedException {
+    public void testProjectionWithoutPrimaryKey() throws Exception {
         testProjection("T1");
     }
 
     @Test
-    public void testProjectionWithPrimaryKey() throws ExecutionException, InterruptedException {
+    public void testProjectionWithPrimaryKey() throws Exception {
         testProjection("T2");
     }
 
-    private void testSimple(String table) throws ExecutionException, InterruptedException {
-        CloseableIterator<Row> iterator = sEnv.executeSql("SELECT * FROM " + table).collect();
+    private void testSimple(String table)
+            throws ExecutionException, InterruptedException, TimeoutException {
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(sEnv.executeSql("SELECT * FROM " + table).collect());
 
         bEnv.executeSql(
                         String.format(
                                 "INSERT INTO %s VALUES ('1', '2', '3'), ('4', '5', '6')", table))
                 .await();
-        assertThat(collectFromUnbounded(iterator, 2))
+        assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
 
         bEnv.executeSql(String.format("INSERT INTO %s VALUES ('7', '8', '9')", table)).await();
-        assertThat(collectFromUnbounded(iterator, 1))
-                .containsExactlyInAnyOrder(Row.of("7", "8", "9"));
+        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("7", "8", "9"));
     }
 
-    private void testProjection(String table) throws ExecutionException, InterruptedException {
-        CloseableIterator<Row> iterator = sEnv.executeSql("SELECT b, c FROM " + table).collect();
+    private void testProjection(String table)
+            throws ExecutionException, InterruptedException, TimeoutException {
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(sEnv.executeSql("SELECT b, c FROM " + table).collect());
 
         bEnv.executeSql(
                         String.format(
                                 "INSERT INTO %s VALUES ('1', '2', '3'), ('4', '5', '6')", table))
                 .await();
-        assertThat(collectFromUnbounded(iterator, 2))
+        assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(Row.of("2", "3"), Row.of("5", "6"));
 
         bEnv.executeSql(String.format("INSERT INTO %s VALUES ('7', '8', '9')", table)).await();
-        assertThat(collectFromUnbounded(iterator, 1)).containsExactlyInAnyOrder(Row.of("8", "9"));
+        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("8", "9"));
     }
 
     @Test
-    public void testContinuousLatest() throws ExecutionException, InterruptedException {
+    public void testContinuousLatest()
+            throws ExecutionException, InterruptedException, TimeoutException {
         bEnv.executeSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')").await();
 
-        CloseableIterator<Row> iterator =
-                sEnv.executeSql("SELECT * FROM T1 /*+ OPTIONS('log.scan'='latest') */").collect();
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(
+                        sEnv.executeSql("SELECT * FROM T1 /*+ OPTIONS('log.scan'='latest') */")
+                                .collect());
 
         bEnv.executeSql("INSERT INTO T1 VALUES ('7', '8', '9'), ('10', '11', '12')").await();
-        assertThat(collectFromUnbounded(iterator, 2))
+        assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(Row.of("7", "8", "9"), Row.of("10", "11", "12"));
     }
 
     @Test
-    public void testIgnoreOverwrite() throws ExecutionException, InterruptedException {
-        CloseableIterator<Row> iterator = sEnv.executeSql("SELECT * FROM T1").collect();
+    public void testIgnoreOverwrite()
+            throws ExecutionException, InterruptedException, TimeoutException {
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(sEnv.executeSql("SELECT * FROM T1").collect());
 
         bEnv.executeSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')").await();
-        assertThat(collectFromUnbounded(iterator, 2))
+        assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
 
         // should ignore this overwrite
         bEnv.executeSql("INSERT OVERWRITE T1 VALUES ('7', '8', '9')").await();
 
         bEnv.executeSql("INSERT INTO T1 VALUES ('9', '10', '11')").await();
-        assertThat(collectFromUnbounded(iterator, 1))
-                .containsExactlyInAnyOrder(Row.of("9", "10", "11"));
+        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("9", "10", "11"));
     }
 
     @Test
@@ -173,25 +178,5 @@ public class ContinuousFileStoreITCase extends AbstractTestBase {
                                 .collect(),
                 "File store continuous reading dose not support from_timestamp scan mode, "
                         + "you can add timestamp filters instead.");
-    }
-
-    private List<Row> collectFromUnbounded(CloseableIterator<Row> iterator, int numElements) {
-        if (numElements == 0) {
-            return Collections.emptyList();
-        }
-
-        List<Row> result = new ArrayList<>();
-        while (iterator.hasNext()) {
-            result.add(iterator.next());
-
-            if (result.size() == numElements) {
-                return result;
-            }
-        }
-
-        throw new IllegalArgumentException(
-                String.format(
-                        "The stream ended before reaching the requested %d records. Only %d records were received.",
-                        numElements, result.size()));
     }
 }
