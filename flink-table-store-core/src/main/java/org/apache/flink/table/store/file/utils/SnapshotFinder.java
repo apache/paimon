@@ -98,6 +98,9 @@ public class SnapshotFinder {
         Path tempFile = new Path(snapshotDir, UUID.randomUUID() + "-" + fileName + ".temp");
         FileUtils.writeFileUtf8(tempFile, String.valueOf(snapshotId));
         fs.delete(hintFile, false);
-        fs.rename(tempFile, hintFile);
+        boolean success = fs.rename(tempFile, hintFile);
+        if (!success) {
+            fs.delete(tempFile, false);
+        }
     }
 }
