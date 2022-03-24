@@ -41,46 +41,67 @@ public class SnapshotFinder {
     public static final String LATEST = "LATEST";
 
     public static Long findLatest(Path snapshotDir) throws IOException {
-        return find(snapshotDir, LATEST, Math::max);
-    }
-
-    public static Long findEarliest(Path snapshotDir) throws IOException {
-        return find(snapshotDir, EARLIEST, Math::min);
-    }
-
-    private static Long find(Path snapshotDir, String hintFile, BinaryOperator<Long> reducer)
-            throws IOException {
         FileSystem fs = snapshotDir.getFileSystem();
         if (!fs.exists(snapshotDir)) {
-            LOG.debug("The snapshot director '{}' is not exist.", snapshotDir);
             return null;
         }
 
-        Path hint = new Path(snapshotDir, hintFile);
         try {
-            return Long.parseLong(FileUtils.readFileUtf8(hint));
-        } catch (Exception ignore) {
-            FileStatus[] statuses = fs.listStatus(snapshotDir);
-            if (statuses == null) {
-                throw new RuntimeException(
-                        "The return value is null of the listStatus for the snapshot directory.");
+            long snapshotId = readHint(snapshotDir, LATEST);
+            long nextSnapshot = snapshotId + 1;
+            // it is the latest only there is no next one
+            if (!fs.exists(new Path(snapshotDir, SNAPSHOT_PREFIX + nextSnapshot))) {
+                return snapshotId;
             }
+        } catch (Exception ignore) {
+        }
 
-            Long result = null;
-            for (FileStatus status : statuses) {
-                String fileName = status.getPath().getName();
-                if (fileName.startsWith(SNAPSHOT_PREFIX)) {
-                    try {
-                        long id = Long.parseLong(fileName.substring(SNAPSHOT_PREFIX.length()));
-                        result = result == null ? id : reducer.apply(result, id);
-                    } catch (NumberFormatException e) {
-                        throw new RuntimeException(
-                                "Invalid snapshot file name found " + fileName, e);
-                    }
+        return findByListFiles(snapshotDir, Math::max);
+    }
+
+    public static Long findEarliest(Path snapshotDir) throws IOException {
+        FileSystem fs = snapshotDir.getFileSystem();
+        if (!fs.exists(snapshotDir)) {
+            return null;
+        }
+
+        try {
+            long snapshotId = readHint(snapshotDir, EARLIEST);
+            // it is the earliest only it exists
+            if (fs.exists(new Path(snapshotDir, SNAPSHOT_PREFIX + snapshotId))) {
+                return snapshotId;
+            }
+        } catch (Exception ignore) {
+        }
+
+        return findByListFiles(snapshotDir, Math::min);
+    }
+
+    private static long readHint(Path snapshotDir, String fileName) throws IOException {
+        return Long.parseLong(FileUtils.readFileUtf8(new Path(snapshotDir, fileName)));
+    }
+
+    private static Long findByListFiles(Path snapshotDir, BinaryOperator<Long> reducer)
+            throws IOException {
+        FileStatus[] statuses = snapshotDir.getFileSystem().listStatus(snapshotDir);
+        if (statuses == null) {
+            throw new RuntimeException(
+                    "The return value is null of the listStatus for the snapshot directory.");
+        }
+
+        Long result = null;
+        for (FileStatus status : statuses) {
+            String fileName = status.getPath().getName();
+            if (fileName.startsWith(SNAPSHOT_PREFIX)) {
+                try {
+                    long id = Long.parseLong(fileName.substring(SNAPSHOT_PREFIX.length()));
+                    result = result == null ? id : reducer.apply(result, id);
+                } catch (NumberFormatException e) {
+                    throw new RuntimeException("Invalid snapshot file name found " + fileName, e);
                 }
             }
-            return result;
         }
+        return result;
     }
 
     public static void commitLatestHint(Path snapshotDir, long snapshotId) throws IOException {
