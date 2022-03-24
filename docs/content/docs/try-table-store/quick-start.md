@@ -39,7 +39,7 @@ __Note:__ Table Store is only supported starting from Flink 1.15.
 then extract the archive:
 
 ```bash
-$ tar -xzf flink-*.tgz
+tar -xzf flink-*.tgz
 ```
 
 ## Step 2: Copy Table Store Bundle Jar
@@ -88,7 +88,7 @@ cp flink-shaded-hadoop-2-uber-*.jar FLINK_HOME/lib/
 In order to run multiple jobs, you need to modify the cluster configuration:
 
 ```bash
-$ vi ./conf/flink-conf.yaml
+vi ./conf/flink-conf.yaml
 
 taskmanager.numberOfTaskSlots: 2
 ```
@@ -96,7 +96,7 @@ taskmanager.numberOfTaskSlots: 2
 To start a local cluster, run the bash script that comes with Flink:
 
 ```bash
-$ ./bin/start-cluster.sh
+./bin/start-cluster.sh
 ```
 
 You should be able to navigate to the web UI at [localhost:8081](http://localhost:8081) to view
@@ -184,7 +184,7 @@ EXIT;
 Stop the Flink local cluster:
 
 ```bash
-$ ./bin/stop-cluster.sh
+./bin/stop-cluster.sh
 ```
 
 ## Congratulation!
