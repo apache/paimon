@@ -110,7 +110,7 @@ public class StoreSinkWriter<WriterStateT>
             record =
                     recordConverter.reuseRecord()
                             ? record
-                            : recordConverter.convertToLogPk(rowData, record);
+                            : recordConverter.convertToLogSinkRecord(record);
             logWriter.write(record, context);
         }
     }

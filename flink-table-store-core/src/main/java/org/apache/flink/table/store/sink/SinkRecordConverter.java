@@ -25,6 +25,8 @@ import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.stream.IntStream;
 
@@ -39,14 +41,14 @@ public class SinkRecordConverter {
 
     private final Projection<RowData, BinaryRowData> pkProjection;
 
-    private final Projection<RowData, BinaryRowData> logPkProjection;
+    @Nullable private final Projection<RowData, BinaryRowData> logPkProjection;
 
     public SinkRecordConverter(
             int numBucket,
             RowType inputType,
             int[] partitions,
             int[] primaryKeys,
-            final int[] logPrimaryKeys) {
+            int[] logPrimaryKeys) {
         this.numBucket = numBucket;
         this.allProjection =
                 CodeGenUtils.newProjection(
@@ -55,7 +57,7 @@ public class SinkRecordConverter {
         this.pkProjection = CodeGenUtils.newProjection(inputType, primaryKeys);
         this.logPkProjection =
                 Arrays.equals(primaryKeys, logPrimaryKeys)
-                        ? pkProjection
+                        ? null
                         : CodeGenUtils.newProjection(inputType, logPrimaryKeys);
     }
 
@@ -66,16 +68,19 @@ public class SinkRecordConverter {
         return new SinkRecord(partition, bucket, primaryKey, row);
     }
 
-    public SinkRecord convertToLogPk(RowData row, SinkRecord record) {
-        BinaryRowData logPrimaryKey = logPrimaryKey(row);
-        return new SinkRecord(record.partition(), record.bucket(), logPrimaryKey, row);
+    public SinkRecord convertToLogSinkRecord(SinkRecord record) {
+        if (logPkProjection == null) {
+            return record;
+        }
+        BinaryRowData logPrimaryKey = logPrimaryKey(record.row());
+        return new SinkRecord(record.partition(), record.bucket(), logPrimaryKey, record.row());
     }
 
     public BinaryRowData primaryKey(RowData row) {
         return pkProjection.apply(row);
     }
 
-    public BinaryRowData logPrimaryKey(RowData row) {
+    private BinaryRowData logPrimaryKey(RowData row) {
         return logPkProjection.apply(row);
     }
 

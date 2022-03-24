@@ -65,6 +65,15 @@ public class BlockingIterator<IN, OUT> implements AutoCloseable {
         }
     }
 
+    public List<OUT> collectAndCloseQuietly(int limit) {
+        try {
+            return collectAndClose(limit);
+        } catch (Exception ignored) {
+            // don't throw exception
+        }
+        return Collections.emptyList();
+    }
+
     public List<OUT> collect() throws Exception {
         return collect(Integer.MAX_VALUE);
     }

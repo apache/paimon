@@ -37,7 +37,6 @@ import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.utils.TypeConversions;
 import org.apache.flink.types.Row;
-import org.apache.flink.util.CloseableIterator;
 
 import org.apache.commons.io.FileUtils;
 import org.junit.Before;
@@ -45,7 +44,6 @@ import org.junit.Before;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Paths;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -150,30 +148,6 @@ public abstract class TableStoreTestBase extends KafkaTableTestBase {
     protected void deleteTablePath() {
         FileUtils.deleteQuietly(
                 Paths.get(rootPath, FileStoreOptions.relativeTablePath(tableIdentifier)).toFile());
-    }
-
-    protected static List<Row> collectResult(
-            boolean bounded, CloseableIterator<Row> iterator, int expectedRecordNum) {
-        if (expectedRecordNum == 0) {
-            return Collections.emptyList();
-        }
-
-        List<Row> result = new ArrayList<>();
-        while (iterator.hasNext()) {
-            result.add(iterator.next());
-
-            if (!bounded && result.size() == expectedRecordNum) {
-                return result;
-            }
-        }
-
-        if (!bounded && result.size() < expectedRecordNum) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "The stream ended before reaching the requested %d records. Only %d records were received.",
-                            expectedRecordNum, result.size()));
-        }
-        return result;
     }
 
     /** Expected result wrapper. */

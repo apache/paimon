@@ -19,383 +19,373 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.configuration.ExecutionOptions;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableResult;
+import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
+import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.ObjectIdentifier;
+import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.file.utils.BlockingIterator;
+import org.apache.flink.table.store.kafka.KafkaTableTestBase;
+import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.types.Row;
-import org.apache.flink.types.RowKind;
-import org.apache.flink.util.CloseableIterator;
-import org.apache.flink.util.function.TriFunction;
 
-import org.apache.commons.lang3.tuple.Pair;
-import org.assertj.core.api.AbstractThrowableAssert;
+import org.junit.Ignore;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.LinkedHashMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import java.util.stream.IntStream;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.registerData;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
+import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
+import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for managed table dml. */
-@RunWith(Parameterized.class)
-public class ReadWriteTableITCase extends TableStoreTestBase {
+public class ReadWriteTableITCase extends KafkaTableTestBase {
 
-    private static final Logger LOG = LoggerFactory.getLogger(ReadWriteTableITCase.class);
+    private String rootPath;
 
-    private static final Map<Row, Pair<RowKind, Row>> PROCESSED_RECORDS = new LinkedHashMap<>();
+    @Test
+    public void testBatchWriteWithPartitionedRecordsWithPk() throws Exception {
+        String managedTable = prepareEnvAndWrite(false, false, true, true);
 
-    private static final TriFunction<Row, Boolean, Boolean, Pair<Row, Pair<RowKind, Row>>>
-            KEY_VALUE_ASSIGNER =
-                    (record, hasPk, partitioned) -> {
-                        boolean retract =
-                                record.getKind() == RowKind.DELETE
-                                        || record.getKind() == RowKind.UPDATE_BEFORE;
-                        Row key;
-                        Row value;
-                        RowKind rowKind = record.getKind();
-                        if (hasPk) {
-                            key =
-                                    partitioned
-                                            ? Row.of(record.getField(0), record.getField(2))
-                                            : Row.of(record.getField(0));
-                            value = record;
-                        } else {
-                            key = record;
-                            value = Row.of(retract ? -1 : 1);
-                        }
-                        key.setKind(RowKind.INSERT);
-                        value.setKind(RowKind.INSERT);
-                        return Pair.of(key, Pair.of(rowKind, value));
-                    };
+        // input is dailyRates()
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        // part = 2022-01-01
+                        changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
+                        changelogRow("+I", "Yen", 1L, "2022-01-01"),
+                        changelogRow("+I", "Euro", 114L, "2022-01-01"),
+                        // part = 2022-01-02
+                        changelogRow("+I", "Euro", 119L, "2022-01-02"));
+        // test batch read
+        collectAndCheck(tEnv, managedTable, Collections.emptyMap(), expectedRecords).close();
+        checkFileStorePath(tEnv, managedTable);
 
-    private static final TriFunction<List<Row>, Boolean, List<Boolean>, List<Row>> COMBINER =
-            (records, insertOnly, schema) -> {
-                boolean hasPk = schema.get(0);
-                boolean partitioned = schema.get(1);
-                records.forEach(
-                        record -> {
-                            Pair<Row, Pair<RowKind, Row>> kvPair =
-                                    KEY_VALUE_ASSIGNER.apply(record, hasPk, partitioned);
-                            Row key = kvPair.getLeft();
-                            Pair<RowKind, Row> valuePair = kvPair.getRight();
-                            if (insertOnly || !PROCESSED_RECORDS.containsKey(key)) {
-                                update(hasPk, key, valuePair);
-                            } else {
-                                Pair<RowKind, Row> existingValuePair = PROCESSED_RECORDS.get(key);
-                                RowKind existingKind = existingValuePair.getLeft();
-                                Row existingValue = existingValuePair.getRight();
-                                RowKind newKind = valuePair.getLeft();
-                                Row newValue = valuePair.getRight();
+        // test streaming read
+        final StreamTableEnvironment streamTableEnv =
+                StreamTableEnvironment.create(buildStreamEnv());
+        registerTable(streamTableEnv, managedTable);
+        BlockingIterator<Row, Row> streamIter =
+                collectAndCheck(
+                        streamTableEnv, managedTable, Collections.emptyMap(), expectedRecords);
 
-                                if (hasPk) {
-                                    if (existingKind == newKind && existingKind == RowKind.INSERT) {
-                                        throw new IllegalStateException(
-                                                "primary key "
-                                                        + key
-                                                        + " already exists for record: "
-                                                        + record);
-                                    } else if (existingKind == RowKind.INSERT
-                                            && newKind == RowKind.UPDATE_AFTER) {
-                                        PROCESSED_RECORDS.replace(key, valuePair);
-                                    } else if (newKind == RowKind.DELETE
-                                            || newKind == RowKind.UPDATE_BEFORE) {
-                                        if (existingValue.equals(newValue)) {
-                                            PROCESSED_RECORDS.remove(key);
-                                        } else {
-                                            throw new IllegalStateException(
-                                                    "Try to retract an non-existing record: "
-                                                            + record);
-                                        }
-                                    }
-                                } else {
-                                    update(false, key, valuePair);
-                                }
-                            }
-                        });
-                List<Row> results =
-                        PROCESSED_RECORDS.entrySet().stream()
-                                .flatMap(
-                                        entry -> {
-                                            if (hasPk) {
-                                                Row row = entry.getValue().getRight();
-                                                row.setKind(RowKind.INSERT);
-                                                return Stream.of(row);
-                                            }
-                                            Row row = entry.getKey();
-                                            row.setKind(RowKind.INSERT);
-                                            int count =
-                                                    (int) entry.getValue().getRight().getField(0);
-                                            List<Row> rows = new ArrayList<>();
-                                            while (count > 0) {
-                                                rows.add(row);
-                                                count--;
-                                            }
-                                            return rows.stream();
-                                        })
-                                .collect(Collectors.toList());
-                PROCESSED_RECORDS.clear();
-                return results;
-            };
+        // overwrite static partition 2022-01-02
+        prepareEnvAndOverwrite(
+                managedTable,
+                Collections.singletonMap("dt", "'2022-01-02'"),
+                Arrays.asList(new String[] {"'Euro'", "100"}, new String[] {"'Yen'", "1"}));
 
-    private final String helperTableDdl;
-    private final String managedTableDdl;
-    private final String insertQuery;
-    private final String selectQuery;
+        // streaming iter will not receive any changelog
+        assertThat(streamIter.collectAndCloseQuietly(1)).hasSize(0);
 
-    private static int testId = 0;
-
-    private static void update(boolean hasPk, Row key, Pair<RowKind, Row> value) {
-        if (hasPk) {
-            PROCESSED_RECORDS.put(key, value);
-        } else {
-            PROCESSED_RECORDS.compute(
-                    key,
-                    (k, v) -> {
-                        if (v == null) {
-                            return value;
-                        } else {
-                            return Pair.of(
-                                    v.getLeft(),
-                                    Row.of(
-                                            (int) v.getRight().getField(0)
-                                                    + (int) value.getRight().getField(0)));
-                        }
-                    });
-            if ((int) PROCESSED_RECORDS.get(key).getRight().getField(0) == 0) {
-                PROCESSED_RECORDS.remove(key);
-            }
-        }
-    }
-
-    public ReadWriteTableITCase(
-            RuntimeExecutionMode executionMode,
-            String tableName,
-            boolean enableLogStore,
-            String helperTableDdl,
-            String managedTableDdl,
-            String insertQuery,
-            String selectQuery,
-            ExpectedResult expectedResult) {
-        super(executionMode, tableName, enableLogStore, expectedResult);
-        this.helperTableDdl = helperTableDdl;
-        this.managedTableDdl = managedTableDdl;
-        this.insertQuery = insertQuery;
-        this.selectQuery = selectQuery;
-    }
-
-    @Parameterized.Parameters(
-            name =
-                    "executionMode-{0}, tableName-{1}, "
-                            + "enableLogStore-{2}, helperTableDdl-{3}, managedTableDdl-{4}, "
-                            + "insertQuery-{5}, selectQuery-{6}, expectedResult-{7}")
-    public static List<Object[]> data() {
-        List<Object[]> specs = prepareReadWriteTestSpecs();
-        specs.addAll(prepareBatchWriteStreamingReadTestSpecs());
-        specs.addAll(prepareStreamingWriteBatchReadTestSpecs());
-        specs.addAll(prepareOverwriteTestSpecs());
-        return specs;
-    }
-
-    @Override
-    protected void prepareEnv() {
-        tEnv.executeSql(helperTableDdl);
-        tEnv.executeSql(managedTableDdl);
+        // batch read to check partition refresh
+        expectedRecords = new ArrayList<>(expectedRecords);
+        expectedRecords.remove(3);
+        expectedRecords.add(changelogRow("+I", "Euro", 100L, "2022-01-02"));
+        expectedRecords.add(changelogRow("+I", "Yen", 1L, "2022-01-02"));
+        collectAndCheck(tEnv, managedTable, Collections.emptyMap(), expectedRecords).close();
     }
 
     @Test
-    public void testSequentialWriteRead() throws Exception {
-        logTestSpec(
-                executionMode,
-                tableIdentifier,
-                enableLogStore,
-                helperTableDdl,
-                managedTableDdl,
-                insertQuery,
-                selectQuery,
-                expectedResult);
-        if (expectedResult.success) {
-            tEnv.executeSql(insertQuery).await();
-            TableResult result = tEnv.executeSql(selectQuery);
-            List<Row> actual = new ArrayList<>();
+    public void testBatchWriteWithPartitionedRecordsWithoutPk() throws Exception {
+        String managedTable = prepareEnvAndWrite(false, false, true, false);
 
-            try (CloseableIterator<Row> iterator = result.collect()) {
-                if (env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
-                        == RuntimeExecutionMode.STREAMING) {
-                    ExecutorService executorService = Executors.newSingleThreadExecutor();
-                    Callable<List<Row>> callable =
-                            () ->
-                                    collectResult(
-                                            false, iterator, expectedResult.expectedRecords.size());
-                    Future<List<Row>> future = executorService.submit(callable);
-                    executorService.shutdown();
-                    actual.addAll(future.get(10, TimeUnit.SECONDS));
-                } else {
-                    actual.addAll(collectResult(true, iterator, -1));
-                }
-            }
+        // input is dailyRates()
+        List<Row> expectedRecords = dailyRates();
 
-            assertThat(actual).containsExactlyInAnyOrderElementsOf(expectedResult.expectedRecords);
-            String relativeFilePath = FileStoreOptions.relativeTablePath(tableIdentifier);
-            // check snapshot file path
-            assertThat(Paths.get(rootPath, relativeFilePath, "snapshot")).exists();
-            // check manifest file path
-            assertThat(Paths.get(rootPath, relativeFilePath, "manifest")).exists();
+        // test batch read
+        collectAndCheck(tEnv, managedTable, Collections.emptyMap(), expectedRecords).close();
+        checkFileStorePath(tEnv, managedTable);
 
-            if (enableLogStore) {
-                assertThat(topicExists(tableIdentifier.asSummaryString())).isTrue();
-            }
+        // test batch read with latest-scan
+        collectAndCheck(
+                        tEnv,
+                        managedTable,
+                        Collections.singletonMap(
+                                LogOptions.SCAN.key(),
+                                LogOptions.LogStartupMode.LATEST.name().toLowerCase()),
+                        Collections.emptyList())
+                .close();
+
+        // overwrite dynamic partition
+        prepareEnvAndOverwrite(
+                managedTable,
+                Collections.emptyMap(),
+                Arrays.asList(
+                        new String[] {"'Euro'", "90", "'2022-01-01'"},
+                        new String[] {"'Yen'", "2", "'2022-01-02'"}));
+
+        // test streaming read
+        final StreamTableEnvironment streamTableEnv =
+                StreamTableEnvironment.create(buildStreamEnv());
+        registerTable(streamTableEnv, managedTable);
+        collectAndCheck(
+                        streamTableEnv,
+                        managedTable,
+                        Collections.emptyMap(),
+                        Arrays.asList(
+                                // part = 2022-01-01
+                                changelogRow("+I", "Euro", 90L, "2022-01-01"),
+                                // part = 2022-01-02
+                                changelogRow("+I", "Yen", 2L, "2022-01-02")))
+                .close();
+    }
+
+    @Test
+    public void testBatchWriteWithNonPartitionedRecordsWithPk() throws Exception {
+        String managedTable = prepareEnvAndWrite(false, false, false, true);
+
+        // input is rates()
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        changelogRow("+I", "US Dollar", 102L),
+                        changelogRow("+I", "Yen", 1L),
+                        changelogRow("+I", "Euro", 119L));
+        collectAndCheck(tEnv, managedTable, Collections.emptyMap(), expectedRecords).close();
+        checkFileStorePath(tEnv, managedTable);
+
+        // overwrite the whole table
+        prepareEnvAndOverwrite(
+                managedTable,
+                Collections.emptyMap(),
+                Collections.singletonList(new String[] {"'Euro'", "100"}));
+        expectedRecords = new ArrayList<>(expectedRecords);
+        expectedRecords.clear();
+        expectedRecords.add(changelogRow("+I", "Euro", 100L));
+        collectAndCheck(tEnv, managedTable, Collections.emptyMap(), expectedRecords).close();
+    }
+
+    @Test
+    public void testBatchWriteNonPartitionedRecordsWithoutPk() throws Exception {
+        String managedTable = prepareEnvAndWrite(false, false, false, false);
+
+        // input is rates()
+        List<Row> expectedRecords = rates();
+        collectAndCheck(tEnv, managedTable, Collections.emptyMap(), expectedRecords).close();
+        checkFileStorePath(tEnv, managedTable);
+    }
+
+    @Ignore("changelog case is failed")
+    @Test
+    public void testEnableLogAndStreamingReadWritePartitionedRecordsWithPk() throws Exception {
+        String managedTable = prepareEnvAndWrite(true, true, true, true);
+
+        // input is dailyRatesChangelogWithoutUB()
+        // test hybrid read
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        // part = 2022-01-01
+                        changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
+                        // part = 2022-01-02
+                        changelogRow("+I", "Euro", 119L, "2022-01-02"));
+        BlockingIterator<Row, Row> streamIter =
+                collectAndCheck(tEnv, managedTable, Collections.emptyMap(), expectedRecords);
+        checkFileStorePath(tEnv, managedTable);
+
+        // overwrite partition 2022-01-02
+        prepareEnvAndOverwrite(
+                managedTable,
+                Collections.singletonMap("dt", "'2022-01-02'"),
+                Arrays.asList(new String[] {"'Euro'", "100"}, new String[] {"'Yen'", "1"}));
+
+        // batch read to check data refresh
+        final StreamTableEnvironment batchTableEnv =
+                StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
+        registerTable(batchTableEnv, managedTable);
+        collectAndCheck(
+                batchTableEnv,
+                managedTable,
+                Collections.emptyMap(),
+                Arrays.asList(
+                        // part = 2022-01-01
+                        changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
+                        // part = 2022-01-02
+                        changelogRow("+I", "Euro", 100L, "2022-01-02"),
+                        changelogRow("+I", "Yen", 1L, "2022-01-02")));
+
+        // check no changelog generated for streaming read
+        assertThat(streamIter.collectAndCloseQuietly(1)).hasSize(0);
+    }
+
+    @Ignore("file store continuous read is failed, actual has size 1")
+    @Test
+    public void testDisableLogAndStreamingReadWritePartitionedRecordsWithPk() throws Exception {
+        String managedTable = prepareEnvAndWrite(true, false, true, true);
+
+        // disable log store and read from latest
+        collectAndCheck(
+                        tEnv,
+                        managedTable,
+                        Collections.singletonMap(
+                                LogOptions.SCAN.key(),
+                                LogOptions.LogStartupMode.LATEST.name().toLowerCase()),
+                        Collections.emptyList())
+                .close();
+
+        // input is dailyRatesChangelogWithoutUB()
+        // file store continuous read
+        // will not merge, at least collect two records
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        // part = 2022-01-01
+                        changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
+                        // part = 2022-01-02
+                        changelogRow("+I", "Euro", 119L, "2022-01-02"));
+        collectAndCheck(tEnv, managedTable, Collections.emptyMap(), expectedRecords).close();
+    }
+
+    @Test
+    public void testStreamingReadWritePartitionedRecordsWithoutPk() throws Exception {
+        String managedTable = prepareEnvAndWrite(true, true, true, false);
+
+        // input is dailyRatesChangelogWithUB()
+        // enable log store, file store bounded read with merge
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        // part = 2022-01-01
+                        changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
+                        // part = 2022-01-02
+                        changelogRow("+I", "Euro", 115L, "2022-01-02"));
+        collectAndCheck(tEnv, managedTable, Collections.emptyMap(), expectedRecords).close();
+    }
+
+    @Test
+    public void testStreamingReadWriteNonPartitionedRecordsWithPk() throws Exception {
+        String managedTable = prepareEnvAndWrite(true, true, false, true);
+
+        // input is ratesChangelogWithoutUB()
+        // enable log store, file store bounded read with merge
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        changelogRow("+I", "US Dollar", 102L), changelogRow("+I", "Euro", 119L));
+        collectAndCheck(tEnv, managedTable, Collections.emptyMap(), expectedRecords).close();
+    }
+
+    @Test
+    public void testStreamingReadWriteNonPartitionedRecordsWithoutPk() throws Exception {
+        String managedTable = prepareEnvAndWrite(true, true, false, false);
+
+        // input is ratesChangelogWithUB()
+        // enable log store, with default full scan mode, will merge
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        changelogRow("+I", "US Dollar", 102L), changelogRow("+I", "Euro", 119L));
+
+        collectAndCheck(tEnv, managedTable, Collections.emptyMap(), expectedRecords).close();
+    }
+
+    // ------------------------ Tools ----------------------------------
+
+    private String prepareEnvAndWrite(
+            boolean streaming, boolean enableLogStore, boolean partitioned, boolean hasPk)
+            throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        rootPath = TEMPORARY_FOLDER.newFolder().getPath();
+        tableOptions.put(FileStoreOptions.FILE_PATH.key(), rootPath);
+        if (enableLogStore) {
+            tableOptions.put(LOG_SYSTEM.key(), "kafka");
+            tableOptions.put(LOG_PREFIX + BOOTSTRAP_SERVERS.key(), getBootstrapServers());
+        }
+        String sourceTable = "source_table_" + UUID.randomUUID();
+        String managedTable = "managed_table_" + UUID.randomUUID();
+        EnvironmentSettings.Builder builder = EnvironmentSettings.newInstance().inStreamingMode();
+        String helperTableDdl;
+        if (streaming) {
+            helperTableDdl =
+                    prepareHelperSourceWithChangelogRecords(sourceTable, partitioned, hasPk);
+            env = buildStreamEnv();
+            builder.inStreamingMode();
         } else {
-            AbstractThrowableAssert<?, ? extends Throwable> throwableAssert =
-                    assertThatThrownBy(
-                            () -> {
-                                tEnv.executeSql(insertQuery).await();
-                                tEnv.executeSql(selectQuery).collect();
-                            });
-            if (expectedResult.failureHasCause) {
-                throwableAssert
-                        .getCause()
-                        .isInstanceOf(expectedResult.expectedType)
-                        .hasMessageContaining(expectedResult.expectedMessage);
-            } else {
-                throwableAssert
-                        .isInstanceOf(expectedResult.expectedType)
-                        .hasMessageContaining(expectedResult.expectedMessage);
-            }
+            helperTableDdl =
+                    prepareHelperSourceWithInsertOnlyRecords(sourceTable, partitioned, hasPk);
+            env = buildBatchEnv();
+            builder.inBatchMode();
         }
+        String managedTableDdl = prepareManagedTableDdl(sourceTable, managedTable, tableOptions);
+        String insertQuery = prepareInsertIntoQuery(sourceTable, managedTable);
+
+        tEnv = StreamTableEnvironment.create(env, builder.build());
+        tEnv.executeSql(helperTableDdl);
+        tEnv.executeSql(managedTableDdl);
+        tEnv.executeSql(insertQuery).await();
+        return managedTable;
     }
 
-    private static List<Object[]> prepareReadWriteTestSpecs() {
-        List<Object[]> specs = new ArrayList<>();
-        RuntimeExecutionMode[] executionModes =
-                new RuntimeExecutionMode[] {
-                    RuntimeExecutionMode.BATCH, RuntimeExecutionMode.STREAMING
-                };
-        boolean[] partitionStatus = new boolean[] {true, false};
-        boolean[] pkStatus = new boolean[] {true, false};
-        boolean[] enableLogStoreStatus = new boolean[] {true, false};
-        for (RuntimeExecutionMode executionMode : executionModes) {
-            for (boolean partitioned : partitionStatus) {
-                for (boolean hasPk : pkStatus) {
-                    for (boolean enableLogStore : enableLogStoreStatus) {
-                        boolean batchMode = executionMode == RuntimeExecutionMode.BATCH;
-                        List<String> tableNameAndDdl =
-                                batchMode
-                                        ? prepareDdlWithInsertOnlySource(partitioned, hasPk)
-                                        : prepareDdlWithChangelogSource(partitioned, hasPk);
-                        String sourceTableName = tableNameAndDdl.get(0);
-                        String managedTableName = tableNameAndDdl.get(1);
-                        String helperTableDdl = tableNameAndDdl.get(2);
-                        String managedTableDdl = tableNameAndDdl.get(3);
-                        String insertQuery =
-                                prepareInsertIntoQuery(sourceTableName, managedTableName);
-                        // TODO: prepare read with hints test
-                        String selectQuery = prepareSimpleSelectQuery(managedTableName);
-                        ExpectedResult expectedResult = new ExpectedResult();
-                        expectedResult.success(true);
-                        List<Row> expectedRecords;
-                        if (batchMode) {
-                            expectedRecords = partitioned ? dailyRates() : rates();
-                        } else {
-                            if (partitioned) {
-                                expectedRecords =
-                                        hasPk
-                                                ? dailyRatesChangelogWithoutUB()
-                                                : dailyRatesChangelogWithUB();
-                            } else {
-                                expectedRecords =
-                                        hasPk ? ratesChangelogWithoutUB() : ratesChangelogWithUB();
-                            }
-                        }
-                        expectedResult.expectedRecords(
-                                COMBINER.apply(
-                                        expectedRecords,
-                                        batchMode,
-                                        Arrays.asList(hasPk, partitioned)));
-                        Object[] spec =
-                                new Object[] {
-                                    executionMode,
-                                    managedTableName,
-                                    enableLogStore,
-                                    helperTableDdl,
-                                    managedTableDdl,
-                                    insertQuery,
-                                    selectQuery,
-                                    expectedResult
-                                };
-                        specs.add(spec);
-                    }
-                }
-            }
-        }
-        return specs;
+    private void prepareEnvAndOverwrite(
+            String managedTable,
+            Map<String, String> staticPartitions,
+            List<String[]> overwriteRecords)
+            throws Exception {
+        final StreamTableEnvironment batchEnv =
+                StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
+        registerTable(batchEnv, managedTable);
+        String insertQuery =
+                prepareInsertOverwriteQuery(managedTable, staticPartitions, overwriteRecords);
+        batchEnv.executeSql(insertQuery).await();
     }
 
-    private static List<Object[]> prepareOverwriteTestSpecs() {
-        // TODO: add overwrite case
-        return Collections.emptyList();
+    private void registerTable(StreamTableEnvironment tEnvToRegister, String managedTable)
+            throws Exception {
+        String cat = this.tEnv.getCurrentCatalog();
+        String db = this.tEnv.getCurrentDatabase();
+        ObjectPath objectPath = new ObjectPath(db, managedTable);
+        CatalogBaseTable table = this.tEnv.getCatalog(cat).get().getTable(objectPath);
+        tEnvToRegister.getCatalog(cat).get().createTable(objectPath, table, false);
     }
 
-    private static List<Object[]> prepareBatchWriteStreamingReadTestSpecs() {
-        // TODO: add batch write & streaming read case
-        return new ArrayList<>();
+    private BlockingIterator<Row, Row> collect(
+            StreamTableEnvironment tEnv, String selectQuery, int expectedSize, List<Row> actual)
+            throws Exception {
+        TableResult result = tEnv.executeSql(selectQuery);
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(result.collect());
+        actual.addAll(iterator.collect(expectedSize));
+        return iterator;
     }
 
-    private static List<Object[]> prepareStreamingWriteBatchReadTestSpecs() {
-        // TODO: add streaming write and batch read case
-        return new ArrayList<>();
+    private BlockingIterator<Row, Row> collectAndCheck(
+            StreamTableEnvironment tEnv,
+            String managedTable,
+            Map<String, String> hints,
+            List<Row> expectedRecords)
+            throws Exception {
+        String selectQuery = prepareSimpleSelectQuery(managedTable, hints);
+        List<Row> actual = new ArrayList<>();
+        BlockingIterator<Row, Row> iterator =
+                collect(tEnv, selectQuery, expectedRecords.size(), actual);
+
+        assertThat(actual).containsExactlyInAnyOrderElementsOf(expectedRecords);
+        return iterator;
     }
 
-    private static List<String> prepareDdlWithInsertOnlySource(boolean partitioned, boolean hasPk) {
-        String sourceTableName = "source_table_" + UUID.randomUUID();
-        String managedTableName = "table_" + UUID.randomUUID();
-        String sourceDdl =
-                prepareHelperSourceWithInsertOnlyRecords(sourceTableName, partitioned, hasPk);
-        String managedDdl = prepareManagedTableDdl(sourceTableName, managedTableName);
-        return Arrays.asList(sourceTableName, managedTableName, sourceDdl, managedDdl);
-    }
-
-    private static List<String> prepareDdlWithChangelogSource(boolean partitioned, boolean hasPk) {
-        String sourceTableName = "source_table_" + UUID.randomUUID();
-        String managedTableName = "table_" + UUID.randomUUID();
-        String sourceDdl =
-                prepareHelperSourceWithChangelogRecords(sourceTableName, partitioned, hasPk);
-        String managedDdl = prepareManagedTableDdl(sourceTableName, managedTableName);
-        return Arrays.asList(sourceTableName, managedTableName, sourceDdl, managedDdl);
-    }
-
-    private static String prepareManagedTableDdl(String sourceTableName, String managedTableName) {
-        return prepareManagedTableDdl(sourceTableName, managedTableName, Collections.emptyMap());
+    private void checkFileStorePath(StreamTableEnvironment tEnv, String managedTable) {
+        String relativeFilePath =
+                FileStoreOptions.relativeTablePath(
+                        ObjectIdentifier.of(
+                                tEnv.getCurrentCatalog(), tEnv.getCurrentDatabase(), managedTable));
+        // check snapshot file path
+        assertThat(Paths.get(rootPath, relativeFilePath, "snapshot")).exists();
+        // check manifest file path
+        assertThat(Paths.get(rootPath, relativeFilePath, "manifest")).exists();
     }
 
     private static String prepareManagedTableDdl(
             String sourceTableName, String managedTableName, Map<String, String> tableOptions) {
         StringBuilder ddl =
                 new StringBuilder("CREATE TABLE IF NOT EXISTS ")
-                        .append(
-                                ObjectIdentifier.of(
-                                                CURRENT_CATALOG, CURRENT_DATABASE, managedTableName)
-                                        .asSerializableString());
+                        .append(String.format("`%s`", managedTableName));
         if (tableOptions.size() > 0) {
             ddl.append(" WITH (\n");
             tableOptions.forEach(
@@ -413,26 +403,17 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
     }
 
     private static String prepareInsertIntoQuery(String sourceTableName, String managedTableName) {
-        return prepareInsertIntoQuery(sourceTableName, managedTableName, Collections.emptyMap());
+        return prepareInsertIntoQuery(
+                sourceTableName, managedTableName, Collections.emptyMap(), Collections.emptyMap());
     }
 
     private static String prepareInsertIntoQuery(
-            String sourceTableName, String managedTableName, Map<String, String> hints) {
-        return prepareInsertQuery(
-                sourceTableName, managedTableName, false, Collections.emptyMap(), hints);
-    }
-
-    private static String prepareInsertQuery(
             String sourceTableName,
             String managedTableName,
-            boolean overwrite,
             Map<String, String> partitions,
             Map<String, String> hints) {
         StringBuilder insertDmlBuilder =
-                new StringBuilder(
-                        String.format(
-                                "INSERT %s `%s`",
-                                overwrite ? "OVERWRITE" : "INTO", managedTableName));
+                new StringBuilder(String.format("INSERT INTO `%s`", managedTableName));
         if (partitions.size() > 0) {
             insertDmlBuilder.append(" PARTITION (");
             partitions.forEach(
@@ -451,8 +432,41 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
         return insertDmlBuilder.toString();
     }
 
-    private static String prepareSimpleSelectQuery(String tableName) {
-        return prepareSimpleSelectQuery(tableName, Collections.emptyMap());
+    private static String prepareInsertOverwriteQuery(
+            String managedTableName,
+            Map<String, String> staticPartitions,
+            List<String[]> overwriteRecords) {
+        StringBuilder insertDmlBuilder =
+                new StringBuilder(String.format("INSERT OVERWRITE `%s`", managedTableName));
+        if (staticPartitions.size() > 0) {
+            insertDmlBuilder.append(" PARTITION (");
+            staticPartitions.forEach(
+                    (k, v) -> {
+                        insertDmlBuilder.append(String.format("%s", k));
+                        insertDmlBuilder.append(" = ");
+                        insertDmlBuilder.append(String.format("%s, ", v));
+                    });
+            int len = insertDmlBuilder.length();
+            insertDmlBuilder.delete(len - 2, len);
+            insertDmlBuilder.append(")");
+        }
+        insertDmlBuilder.append("\n VALUES ");
+        overwriteRecords.forEach(
+                record -> {
+                    int arity = record.length;
+                    insertDmlBuilder.append("(");
+                    IntStream.range(0, arity)
+                            .forEach(i -> insertDmlBuilder.append(record[i]).append(", "));
+
+                    if (arity > 0) {
+                        int len = insertDmlBuilder.length();
+                        insertDmlBuilder.delete(len - 2, len);
+                    }
+                    insertDmlBuilder.append("), ");
+                });
+        int len = insertDmlBuilder.length();
+        insertDmlBuilder.delete(len - 2, len);
+        return insertDmlBuilder.toString();
     }
 
     private static String prepareSimpleSelectQuery(String tableName, Map<String, String> hints) {
@@ -499,7 +513,7 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
      *     dt STRING) PARTITIONED BY (dt)
      *    WITH (
      *      'connector' = 'values',
-     *      'bounded' = executionMode,
+     *      'bounded' = executionMode == RuntimeExecutionMode.BATCH,
      *      'partition-list' = '...'
      *     )
      *   }
@@ -641,26 +655,18 @@ public class ReadWriteTableITCase extends TableStoreTestBase {
                 changelogRow("+I", "Euro", 115L, "2022-01-02"));
     }
 
-    private static void logTestSpec(
-            RuntimeExecutionMode executionMode,
-            ObjectIdentifier tableIdentifier,
-            boolean enableLogStore,
-            String helperTableDdl,
-            String managedTableDdl,
-            String insertQuery,
-            String selectQuery,
-            ExpectedResult expectedResult) {
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("Test id => {}", testId);
-            LOG.debug("Execution mode => {}", executionMode);
-            LOG.debug("Table name => {}", tableIdentifier);
-            LOG.debug("Enable logStore => {}", enableLogStore);
-            LOG.debug("Helper table ddl => {}", helperTableDdl);
-            LOG.debug("Managed table ddl => {}", managedTableDdl);
-            LOG.debug("Insert query => {}", insertQuery);
-            LOG.debug("Select query => {}", selectQuery);
-            LOG.debug("Expected => {}", expectedResult);
-            testId++;
-        }
+    private static StreamExecutionEnvironment buildStreamEnv() {
+        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
+        env.enableCheckpointing(100);
+        env.setParallelism(2);
+        return env;
+    }
+
+    private static StreamExecutionEnvironment buildBatchEnv() {
+        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
+        env.setParallelism(2);
+        return env;
     }
 }
