@@ -33,6 +33,7 @@ import org.apache.flink.table.runtime.typeutils.InternalSerializers;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.connector.sink.StoreSink;
 import org.apache.flink.table.store.connector.source.FileStoreSource;
+import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -276,8 +277,13 @@ public class FileStoreITCase extends AbstractTestBase {
     private void innerTestContinuous() throws Exception {
         Assume.assumeFalse(isBatch);
 
-        CloseableIterator<RowData> iterator =
-                store.sourceBuilder().withContinuousMode(true).build(env).executeAndCollect();
+        BlockingIterator<RowData, Row> iterator =
+                BlockingIterator.of(
+                        store.sourceBuilder()
+                                .withContinuousMode(true)
+                                .build(env)
+                                .executeAndCollect(),
+                        CONVERTER::toExternal);
         Thread.sleep(ThreadLocalRandom.current().nextInt(1000));
 
         sinkAndValidate(
@@ -296,7 +302,7 @@ public class FileStoreITCase extends AbstractTestBase {
     }
 
     private void sinkAndValidate(
-            List<RowData> src, CloseableIterator<RowData> iterator, Row... expected)
+            List<RowData> src, BlockingIterator<RowData, Row> iterator, Row... expected)
             throws Exception {
         if (isBatch) {
             throw new UnsupportedOperationException();
@@ -305,32 +311,11 @@ public class FileStoreITCase extends AbstractTestBase {
                 env.addSource(new FiniteTestSource<>(src, true), InternalTypeInfo.of(TABLE_TYPE));
         store.sinkBuilder().withInput(source).build();
         env.execute();
-        assertThat(collectFromUnbounded(iterator, expected.length))
-                .containsExactlyInAnyOrder(expected);
+        assertThat(iterator.collect(expected.length)).containsExactlyInAnyOrder(expected);
     }
 
     private static RowData srcRow(RowKind kind, int v, String p, int k) {
         return wrap(GenericRowData.ofKind(kind, v, StringData.fromString(p), k));
-    }
-
-    private List<Row> collectFromUnbounded(CloseableIterator<RowData> iterator, int numElements) {
-        if (numElements == 0) {
-            return Collections.emptyList();
-        }
-
-        List<Row> result = new ArrayList<>();
-        while (iterator.hasNext()) {
-            result.add(CONVERTER.toExternal(iterator.next()));
-
-            if (result.size() == numElements) {
-                return result;
-            }
-        }
-
-        throw new IllegalArgumentException(
-                String.format(
-                        "The stream ended before reaching the requested %d records. Only %d records were received.",
-                        numElements, result.size()));
     }
 
     public static StreamExecutionEnvironment buildStreamEnv() {

@@ -23,6 +23,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory.Context;
+import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.log.LogOptions.LogChangelogMode;
 import org.apache.flink.table.store.log.LogOptions.LogConsistency;
 import org.apache.flink.types.RowKind;
@@ -216,8 +217,10 @@ public class KafkaLogITCase extends KafkaTableTestBase {
 
     private List<RowData> collect(KafkaSource<RowData> source, int numRecord) throws Exception {
         List<RowData> records =
-                env.fromSource(source, WatermarkStrategy.noWatermarks(), "source")
-                        .executeAndCollect(numRecord);
+                BlockingIterator.of(
+                                env.fromSource(source, WatermarkStrategy.noWatermarks(), "source")
+                                        .executeAndCollect())
+                        .collectAndClose(numRecord);
         records.sort(Comparator.comparingInt(o -> o.getInt(0)));
         return records;
     }
