@@ -320,12 +320,12 @@ public class TestFileStore extends FileStoreImpl {
         Path earliest = new Path(snapshotDir, SnapshotFinder.EARLIEST);
         Path latest = new Path(snapshotDir, SnapshotFinder.LATEST);
         if (actualFiles.remove(earliest)) {
-            long earliestId = SnapshotFinder.findEarliest(snapshotDir);
+            long earliestId = SnapshotFinder.readHint(snapshotDir, SnapshotFinder.EARLIEST);
             earliest.getFileSystem().delete(earliest, false);
             assertThat(earliestId <= SnapshotFinder.findEarliest(snapshotDir)).isTrue();
         }
         if (actualFiles.remove(latest)) {
-            long latestId = SnapshotFinder.findLatest(snapshotDir);
+            long latestId = SnapshotFinder.readHint(snapshotDir, SnapshotFinder.LATEST);
             latest.getFileSystem().delete(latest, false);
             assertThat(latestId <= SnapshotFinder.findLatest(snapshotDir)).isTrue();
         }

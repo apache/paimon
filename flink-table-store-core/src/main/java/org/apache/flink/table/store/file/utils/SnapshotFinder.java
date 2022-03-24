@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.utils;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
@@ -77,7 +78,8 @@ public class SnapshotFinder {
         return findByListFiles(snapshotDir, Math::min);
     }
 
-    private static long readHint(Path snapshotDir, String fileName) throws IOException {
+    @VisibleForTesting
+    public static long readHint(Path snapshotDir, String fileName) throws IOException {
         return Long.parseLong(FileUtils.readFileUtf8(new Path(snapshotDir, fileName)));
     }
 
