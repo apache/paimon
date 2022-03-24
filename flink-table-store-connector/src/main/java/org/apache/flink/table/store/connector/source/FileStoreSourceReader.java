@@ -20,8 +20,8 @@ package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.api.connector.source.SourceReader;
 import org.apache.flink.api.connector.source.SourceReaderContext;
+import org.apache.flink.connector.base.source.reader.SingleThreadMultiplexSourceReaderBase;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
-import org.apache.flink.connector.files.shaded.org.apache.flink.connector.base.source.reader.SingleThreadMultiplexSourceReaderBase;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 
