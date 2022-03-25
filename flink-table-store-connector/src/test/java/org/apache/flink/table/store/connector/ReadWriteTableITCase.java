@@ -43,6 +43,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
@@ -89,7 +90,7 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                 Arrays.asList(new String[] {"'Euro'", "100"}, new String[] {"'Yen'", "1"}));
 
         // streaming iter will not receive any changelog
-        assertThat(streamIter.collectAndCloseQuietly(1)).hasSize(0);
+        assertNoMoreRecords(streamIter);
 
         // batch read to check partition refresh
         expectedRecords = new ArrayList<>(expectedRecords);
@@ -217,7 +218,7 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         changelogRow("+I", "Yen", 1L, "2022-01-02")));
 
         // check no changelog generated for streaming read
-        assertThat(streamIter.collectAndCloseQuietly(1)).hasSize(0);
+        assertNoMoreRecords(streamIter);
     }
 
     @Ignore("file store continuous read is failed, actual has size 1")
@@ -379,6 +380,18 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         assertThat(Paths.get(rootPath, relativeFilePath, "snapshot")).exists();
         // check manifest file path
         assertThat(Paths.get(rootPath, relativeFilePath, "manifest")).exists();
+    }
+
+    private static void assertNoMoreRecords(BlockingIterator<Row, Row> iterator) {
+        List<Row> expectedRecords = Collections.emptyList();
+        try {
+            // set expectation size to 1 to let time pass by until timeout
+            expectedRecords = iterator.collect(1, 1L, TimeUnit.MINUTES);
+            iterator.close();
+        } catch (Exception ignored) {
+            // don't throw exception
+        }
+        assertThat(expectedRecords).isEmpty();
     }
 
     private static String prepareManagedTableDdl(
