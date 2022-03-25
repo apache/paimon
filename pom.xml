@@ -333,6 +333,12 @@ under the License.
                         <!-- Generated content -->
                         <exclude>**/target/**</exclude>
                         <exclude>**/scalastyle-output.xml</exclude>
+                        <exclude>docs/static/font-awesome/**</exclude>
+                        <exclude>docs/resources/**</exclude>
+                        <exclude>docs/public/**</exclude>
+                        <exclude>docs/themes/book/**</exclude>
+                        <exclude>docs/assets/github.css</exclude>
+                        <exclude>docs/static/js/anchor.min.js</exclude>
                         <!-- Bundled license files -->
                         <exclude>**/LICENSE*</exclude>
                         <!-- artifacts created during release process -->
