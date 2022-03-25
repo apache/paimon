@@ -154,6 +154,7 @@ public abstract class TableStoreTestBase extends KafkaTableTestBase {
     protected static class ExpectedResult {
         protected boolean success;
         protected List<Row> expectedRecords;
+        protected boolean failureHasCause;
         protected Class<? extends Throwable> expectedType;
         protected String expectedMessage;
 
@@ -164,6 +165,11 @@ public abstract class TableStoreTestBase extends KafkaTableTestBase {
 
         ExpectedResult expectedRecords(List<Row> expectedRecords) {
             this.expectedRecords = expectedRecords;
+            return this;
+        }
+
+        ExpectedResult failureHasCause(boolean failureHasCause) {
+            this.failureHasCause = failureHasCause;
             return this;
         }
 
@@ -184,6 +190,8 @@ public abstract class TableStoreTestBase extends KafkaTableTestBase {
                     + success
                     + ", expectedRecords="
                     + expectedRecords
+                    + ", failureHasCause="
+                    + failureHasCause
                     + ", expectedType="
                     + expectedType
                     + ", expectedMessage='"
