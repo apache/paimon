@@ -81,16 +81,13 @@ public class SinkRecordConverter {
     }
 
     private BinaryRowData logPrimaryKey(RowData row) {
+        assert logPkProjection != null;
         return logPkProjection.apply(row);
     }
 
     public int bucket(RowData row, BinaryRowData primaryKey) {
         int hash = primaryKey.getArity() == 0 ? hashRow(row) : primaryKey.hashCode();
         return Math.abs(hash % numBucket);
-    }
-
-    public boolean reuseRecord() {
-        return pkProjection.equals(logPkProjection);
     }
 
     private int hashRow(RowData row) {

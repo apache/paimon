@@ -107,10 +107,7 @@ public class StoreSinkWriter<WriterStateT>
 
         // write to log store, need to preserve original pk (which includes partition fields)
         if (logWriter != null) {
-            record =
-                    recordConverter.reuseRecord()
-                            ? record
-                            : recordConverter.convertToLogSinkRecord(record);
+            record = recordConverter.convertToLogSinkRecord(record);
             logWriter.write(record, context);
         }
     }
