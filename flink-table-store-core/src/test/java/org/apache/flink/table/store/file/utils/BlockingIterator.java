@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.file.utils;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
