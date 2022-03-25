@@ -88,7 +88,7 @@ public class BlockingIterator<IN, OUT> implements AutoCloseable {
 
     private List<OUT> doCollect(int limit) {
         if (limit == 0) {
-            return Collections.emptyList();
+            throw new RuntimeException("Collect zero record is meaningless.");
         }
 
         List<OUT> result = new ArrayList<>();
