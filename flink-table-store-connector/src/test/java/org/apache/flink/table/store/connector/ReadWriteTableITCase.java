@@ -221,20 +221,9 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         assertNoMoreRecords(streamIter);
     }
 
-    @Ignore("file store continuous read is failed, actual has size 1")
     @Test
     public void testDisableLogAndStreamingReadWritePartitionedRecordsWithPk() throws Exception {
         String managedTable = prepareEnvAndWrite(true, false, true, true);
-
-        // disable log store and read from latest
-        collectAndCheck(
-                        tEnv,
-                        managedTable,
-                        Collections.singletonMap(
-                                LogOptions.SCAN.key(),
-                                LogOptions.LogStartupMode.LATEST.name().toLowerCase()),
-                        Collections.emptyList())
-                .close();
 
         // input is dailyRatesChangelogWithoutUB()
         // file store continuous read

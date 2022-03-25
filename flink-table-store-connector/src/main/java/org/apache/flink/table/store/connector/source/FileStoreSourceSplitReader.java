@@ -188,7 +188,7 @@ public class FileStoreSourceSplitReader
 
     private abstract class FileStoreRecordIterator implements BulkFormat.RecordIterator<RowData> {
 
-        protected RecordReader.RecordIterator iterator;
+        private RecordReader.RecordIterator iterator;
 
         protected final MutableRecordAndPosition<RowData> recordAndPosition =
                 new MutableRecordAndPosition<>();
@@ -197,6 +197,15 @@ public class FileStoreSourceSplitReader
             this.iterator = iterator;
             this.recordAndPosition.set(null, RecordAndPosition.NO_OFFSET, currentNumRead);
             return this;
+        }
+
+        protected KeyValue nextKeyValue() throws IOException {
+            // The RowData is reused in iterator, we should set back to insert kind
+            if (recordAndPosition.getRecord() != null) {
+                recordAndPosition.getRecord().setRowKind(RowKind.INSERT);
+            }
+
+            return iterator.next();
         }
 
         @Override
@@ -212,7 +221,7 @@ public class FileStoreSourceSplitReader
         @Override
         public RecordAndPosition<RowData> next() {
             try {
-                KeyValue kv = iterator.next();
+                KeyValue kv = nextKeyValue();
                 if (kv == null) {
                     return null;
                 }
@@ -244,7 +253,7 @@ public class FileStoreSourceSplitReader
         public RecordAndPosition<RowData> next() {
             try {
                 if (count == 0) {
-                    KeyValue kv = iterator.next();
+                    KeyValue kv = nextKeyValue();
                     if (kv == null) {
                         return null;
                     }
