@@ -70,7 +70,7 @@ public class Literal implements Serializable {
     }
 
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
-        in.readObject();
+        in.defaultReadObject();
         value = InternalSerializers.create(type).deserialize(new DataInputViewStreamWrapper(in));
     }
 }
