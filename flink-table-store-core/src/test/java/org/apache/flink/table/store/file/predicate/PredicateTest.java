@@ -25,12 +25,32 @@ import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
 import org.apache.flink.table.functions.FunctionDefinition;
 import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.logical.BigIntType;
+import org.apache.flink.table.types.logical.BinaryType;
+import org.apache.flink.table.types.logical.BooleanType;
+import org.apache.flink.table.types.logical.CharType;
+import org.apache.flink.table.types.logical.DecimalType;
+import org.apache.flink.table.types.logical.DoubleType;
+import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.SmallIntType;
+import org.apache.flink.table.types.logical.TimestampType;
+import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.types.Row;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.Arrays;
+import java.util.stream.Stream;
 
 import static org.apache.flink.table.planner.expressions.ExpressionBuilder.literal;
 import static org.apache.flink.table.store.file.predicate.PredicateConverter.CONVERTER;
@@ -322,6 +342,56 @@ public class PredicateTest {
                         literal(Row.of(1), structType));
         assertThatThrownBy(() -> expression.accept(CONVERTER))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+    }
+
+    @MethodSource("provideLiterals")
+    @ParameterizedTest
+    public void testSerDeLiteral(LogicalType type, Object data) throws Exception {
+        Literal literal = new Literal(type, data);
+        Object object = readObject(writeObject(literal));
+        assertThat(object).isInstanceOf(Literal.class);
+        assertThat(((Literal) object).type()).isEqualTo(literal.type());
+        assertThat(((Literal) object).compareValueTo(literal.value())).isEqualTo(0);
+    }
+
+    public static Stream<Arguments> provideLiterals() {
+        CharType charType = new CharType();
+        VarCharType varCharType = VarCharType.STRING_TYPE;
+        BooleanType booleanType = new BooleanType();
+        BinaryType binaryType = new BinaryType();
+        DecimalType decimalType = new DecimalType(2);
+        SmallIntType smallIntType = new SmallIntType();
+        BigIntType bigIntType = new BigIntType();
+        DoubleType doubleType = new DoubleType();
+        TimestampType timestampType = new TimestampType();
+        return Stream.of(
+                Arguments.of(charType, TypeUtils.castFromString("s", charType)),
+                Arguments.of(varCharType, TypeUtils.castFromString("AbCd1Xy%@*", varCharType)),
+                Arguments.of(booleanType, TypeUtils.castFromString("false", booleanType)),
+                Arguments.of(binaryType, TypeUtils.castFromString("0101", binaryType)),
+                Arguments.of(smallIntType, TypeUtils.castFromString("-2", smallIntType)),
+                Arguments.of(decimalType, TypeUtils.castFromString("22.10", decimalType)),
+                Arguments.of(bigIntType, TypeUtils.castFromString("-9999999999", bigIntType)),
+                Arguments.of(doubleType, TypeUtils.castFromString("3.14159265357", doubleType)),
+                Arguments.of(
+                        timestampType,
+                        TypeUtils.castFromString("2022-03-25 15:00:02", timestampType)));
+    }
+
+    private byte[] writeObject(Literal literal) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream(4096);
+        ObjectOutputStream oos = new ObjectOutputStream(baos);
+        oos.writeObject(literal);
+        oos.close();
+        return baos.toByteArray();
+    }
+
+    private Object readObject(byte[] bytes) throws IOException, ClassNotFoundException {
+        ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
+        ObjectInputStream ois = new ObjectInputStream(bais);
+        Object object = ois.readObject();
+        ois.close();
+        return object;
     }
 
     private FieldReferenceExpression field(int i, DataType type) {
