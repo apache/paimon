@@ -29,8 +29,8 @@ tables on Apache Flink. It is designed to be the best connector to Flink as
 the storage for streaming warehouse. It uses a full Log-Structured Merge-Tree
 (LSM) structure for high speed and large amount of data update & query capability.
 
-The Table Store supports the following usage:
-- **Streaming Insert**: Write changelog streams, including cdc from database and streams from Flink Sink.
+Flink Table Store supports the following usage:
+- **Streaming Insert**: Write changelog streams, including CDC from database and streams.
 - **Batch Insert**: Write batch data as offline warehouse, including OVERWRITE support.
 - **Batch/OLAP Query**: Read snapshot of the storage, efficient querying of real-time data.
 - **Streaming Query**: Read changes of the storage, ensure exactly-once consistency.

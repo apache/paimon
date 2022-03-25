@@ -85,7 +85,7 @@ the page:
 
 ### ShortCodes 
 
-Flink uses [shortcodes](https://gohugo.io/content-management/shortcodes/) to add
+Flink Table Store uses [shortcodes](https://gohugo.io/content-management/shortcodes/) to add
 custom functionality to its documentation markdown.
 
 Its implementation and documentation can be found at
