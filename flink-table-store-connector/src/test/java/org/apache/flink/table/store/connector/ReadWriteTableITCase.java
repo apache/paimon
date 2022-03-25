@@ -31,7 +31,6 @@ import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.kafka.KafkaTableTestBase;
 import org.apache.flink.types.Row;
 
-import org.junit.Ignore;
 import org.junit.Test;
 
 import java.nio.file.Paths;
@@ -168,7 +167,6 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         checkFileStorePath(tEnv, managedTable);
     }
 
-    @Ignore("changelog case is failed")
     @Test
     public void testEnableLogAndStreamingReadWritePartitionedRecordsWithPk() throws Exception {
         String managedTable = prepareEnvAndWrite(true, true, true, true);
