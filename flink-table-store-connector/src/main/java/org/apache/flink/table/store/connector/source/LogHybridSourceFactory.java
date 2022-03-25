@@ -44,8 +44,7 @@ public class LogHybridSourceFactory
         Snapshot snapshot = enumerator.snapshot();
         Map<Integer, Long> logOffsets = null;
         if (snapshot != null) {
-            // TODO
-            // logOffsets = snapshot.getLogOffsets();
+            logOffsets = snapshot.getLogOffsets();
         }
         return provider.createSource(logOffsets);
     }

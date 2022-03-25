@@ -34,9 +34,6 @@ import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.util.function.SerializableSupplier;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -51,8 +48,6 @@ public abstract class AbstractCommitterOperator<IN, CommT>
                 BoundedOneInput {
 
     private static final long serialVersionUID = 1L;
-
-    private static final Logger LOG = LoggerFactory.getLogger(AbstractCommitterOperator.class);
 
     /** Record all the inputs until commit. */
     private final Deque<IN> inputs = new ArrayDeque<>();
@@ -115,16 +110,28 @@ public abstract class AbstractCommitterOperator<IN, CommT>
 
     @Override
     public void endInput() throws Exception {
+        // Suppose the last checkpoint before endInput is 5. Flink Streaming Job calling order:
+        // 1. Accept elements from upstream prepareSnapshotPreBarrier(5)
+        // 2. this.snapshotState(5)
+        // 3. Accept elements from upstream endInput
+        // 4. this.endInput
+        // 5. this.notifyCheckpointComplete(5)
+        // So we should submit all the data in the endInput in order to avoid disordered commits.
+        long checkpointId = Long.MAX_VALUE;
         List<IN> poll = pollInputs();
         if (!poll.isEmpty()) {
-            commit(false, toCommittables(Long.MAX_VALUE, poll));
+            committablesPerCheckpoint.put(checkpointId, toCommittables(checkpointId, poll));
         }
+        commitUpToCheckpoint(checkpointId);
     }
 
     @Override
     public void notifyCheckpointComplete(long checkpointId) throws Exception {
         super.notifyCheckpointComplete(checkpointId);
-        LOG.info("Committing the state for checkpoint {}", checkpointId);
+        commitUpToCheckpoint(checkpointId);
+    }
+
+    private void commitUpToCheckpoint(long checkpointId) throws Exception {
         NavigableMap<Long, List<CommT>> headMap =
                 committablesPerCheckpoint.headMap(checkpointId, true);
         commit(false, committables(headMap));
