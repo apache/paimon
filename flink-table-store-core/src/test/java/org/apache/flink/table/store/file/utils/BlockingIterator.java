@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.file.utils;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
@@ -88,7 +87,7 @@ public class BlockingIterator<IN, OUT> implements AutoCloseable {
 
     private List<OUT> doCollect(int limit) {
         if (limit == 0) {
-            return Collections.emptyList();
+            throw new RuntimeException("Collect zero record is meaningless.");
         }
 
         List<OUT> result = new ArrayList<>();

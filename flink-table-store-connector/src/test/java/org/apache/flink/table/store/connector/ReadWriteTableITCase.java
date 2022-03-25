@@ -29,7 +29,6 @@ import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.kafka.KafkaTableTestBase;
-import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.types.Row;
 
 import org.junit.Ignore;
@@ -110,16 +109,6 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test batch read
         collectAndCheck(tEnv, managedTable, Collections.emptyMap(), expectedRecords).close();
         checkFileStorePath(tEnv, managedTable);
-
-        // test batch read with latest-scan
-        collectAndCheck(
-                        tEnv,
-                        managedTable,
-                        Collections.singletonMap(
-                                LogOptions.SCAN.key(),
-                                LogOptions.LogStartupMode.LATEST.name().toLowerCase()),
-                        Collections.emptyList())
-                .close();
 
         // overwrite dynamic partition
         prepareEnvAndOverwrite(
@@ -221,20 +210,9 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         assertNoMoreRecords(streamIter);
     }
 
-    @Ignore("file store continuous read is failed, actual has size 1")
     @Test
     public void testDisableLogAndStreamingReadWritePartitionedRecordsWithPk() throws Exception {
         String managedTable = prepareEnvAndWrite(true, false, true, true);
-
-        // disable log store and read from latest
-        collectAndCheck(
-                        tEnv,
-                        managedTable,
-                        Collections.singletonMap(
-                                LogOptions.SCAN.key(),
-                                LogOptions.LogStartupMode.LATEST.name().toLowerCase()),
-                        Collections.emptyList())
-                .close();
 
         // input is dailyRatesChangelogWithoutUB()
         // file store continuous read
@@ -386,7 +364,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         List<Row> expectedRecords = Collections.emptyList();
         try {
             // set expectation size to 1 to let time pass by until timeout
-            expectedRecords = iterator.collect(1, 1L, TimeUnit.MINUTES);
+            // just wait 5s to avoid too long time
+            expectedRecords = iterator.collect(1, 5L, TimeUnit.SECONDS);
             iterator.close();
         } catch (Exception ignored) {
             // don't throw exception
