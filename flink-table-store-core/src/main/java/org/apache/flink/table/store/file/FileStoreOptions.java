@@ -96,7 +96,7 @@ public class FileStoreOptions implements Serializable {
     public static final ConfigOption<Duration> SNAPSHOT_TIME_RETAINED =
             ConfigOptions.key("snapshot.time-retained")
                     .durationType()
-                    .defaultValue(Duration.ofDays(1))
+                    .defaultValue(Duration.ofHours(1))
                     .withDescription("The maximum time of completed snapshots to retain.");
 
     public static final ConfigOption<Duration> CONTINUOUS_DISCOVERY_INTERVAL =

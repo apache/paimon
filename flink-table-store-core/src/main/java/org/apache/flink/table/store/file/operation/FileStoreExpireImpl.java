@@ -27,14 +27,17 @@ import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.sst.SstPathFactory;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
+import org.apache.flink.table.store.file.utils.SnapshotFinder;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Callable;
 
 /**
  * Default implementation of {@link FileStoreExpire}. It retains a certain number or period of
@@ -42,6 +45,8 @@ import java.util.Set;
  *
  * <p>NOTE: This implementation will keep at least one snapshot so that users will not accidentally
  * clear all snapshots.
+ *
+ * <p>TODO: add concurrent tests.
  */
 public class FileStoreExpireImpl implements FileStoreExpire {
 
@@ -54,6 +59,8 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     private final FileStorePathFactory pathFactory;
     private final ManifestFile manifestFile;
     private final ManifestList manifestList;
+
+    private Lock lock;
 
     public FileStoreExpireImpl(
             int numRetained,
@@ -69,6 +76,12 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     }
 
     @Override
+    public FileStoreExpire withLock(Lock lock) {
+        this.lock = lock;
+        return this;
+    }
+
+    @Override
     public void expire() {
         Long latestSnapshotId = pathFactory.latestSnapshotId();
         if (latestSnapshotId == null) {
@@ -78,10 +91,18 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
         long currentMillis = System.currentTimeMillis();
 
+        Long earliest;
+        try {
+            earliest = SnapshotFinder.findEarliest(pathFactory.snapshotDirectory());
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to find earliest snapshot id", e);
+        }
+        if (earliest == null) {
+            return;
+        }
+
         // find the earliest snapshot to retain
-        // TODO Here id will start from 1, we need to optimize the method of finding the minimum
-        // snapshot
-        for (long id = Math.max(latestSnapshotId - numRetained + 1, Snapshot.FIRST_SNAPSHOT_ID);
+        for (long id = Math.max(latestSnapshotId - numRetained + 1, earliest);
                 id <= latestSnapshotId;
                 id++) {
             Path snapshotPath = pathFactory.toSnapshotPath(id);
@@ -91,7 +112,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                                 <= millisRetained) {
                     // within time threshold, can assume that all snapshots after it are also within
                     // the threshold
-                    expireUntil(id);
+                    expireUntil(earliest, id);
                     return;
                 }
             } catch (IOException e) {
@@ -101,18 +122,30 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         }
 
         // no snapshot can be retained, expire all but last one
-        expireUntil(latestSnapshotId);
+        expireUntil(earliest, latestSnapshotId);
     }
 
-    private void expireUntil(long endExclusiveId) {
-        if (endExclusiveId <= Snapshot.FIRST_SNAPSHOT_ID) {
+    private void expireUntil(long earliestId, long endExclusiveId) {
+        if (endExclusiveId <= earliestId) {
+            // No expire happens:
+            // write the hint file in order to see the earliest snapshot directly next time
+            // should avoid duplicate writes when the file exists
+            Path hint = new Path(pathFactory.snapshotDirectory(), SnapshotFinder.EARLIEST);
+            try {
+                if (!hint.getFileSystem().exists(hint)) {
+                    writeEarliestHint(endExclusiveId);
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+
             // fast exit
             return;
         }
 
         // find first snapshot to expire
-        long beginInclusiveId = Snapshot.FIRST_SNAPSHOT_ID;
-        for (long id = endExclusiveId - 1; id >= Snapshot.FIRST_SNAPSHOT_ID; id--) {
+        long beginInclusiveId = earliestId;
+        for (long id = endExclusiveId - 1; id >= earliestId; id--) {
             Path snapshotPath = pathFactory.toSnapshotPath(id);
             try {
                 if (!snapshotPath.getFileSystem().exists(snapshotPath)) {
@@ -197,6 +230,28 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
             // delete snapshot
             FileUtils.deleteOrWarn(pathFactory.toSnapshotPath(id));
+        }
+
+        writeEarliestHint(endExclusiveId);
+    }
+
+    private void writeEarliestHint(long earliest) {
+        // update earliest hint file
+
+        Callable<Void> callable =
+                () -> {
+                    SnapshotFinder.commitEarliestHint(pathFactory.snapshotDirectory(), earliest);
+                    return null;
+                };
+
+        try {
+            if (lock != null) {
+                lock.runWithLock(callable);
+            } else {
+                callable.call();
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 }

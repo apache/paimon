@@ -35,6 +35,7 @@ import org.apache.flink.table.store.file.predicate.PredicateConverter;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RowDataToObjectArrayConverter;
+import org.apache.flink.table.store.file.utils.SnapshotFinder;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.slf4j.Logger;
@@ -48,6 +49,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
 /**
@@ -383,6 +385,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         try {
             FileSystem fs = tmpSnapshotPath.getFileSystem();
             // atomic rename
+            // TODO rename is not work for object store, use recoverable writer
+            Callable<Boolean> callable =
+                    () -> {
+                        boolean committed = fs.rename(tmpSnapshotPath, newSnapshotPath);
+                        if (committed) {
+                            SnapshotFinder.commitLatestHint(
+                                    pathFactory.snapshotDirectory(), newSnapshotId);
+                        }
+                        return committed;
+                    };
             if (lock != null) {
                 success =
                         lock.runWithLock(
@@ -392,10 +404,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                         // as we're relying on external locking, we can first
                                         // check if file exist then rename to work around this
                                         // case
-                                        !fs.exists(newSnapshotPath)
-                                                && fs.rename(tmpSnapshotPath, newSnapshotPath));
+                                        !fs.exists(newSnapshotPath) && callable.call());
             } else {
-                success = fs.rename(tmpSnapshotPath, newSnapshotPath);
+                success = callable.call();
             }
         } catch (Throwable e) {
             // exception when performing the atomic rename,

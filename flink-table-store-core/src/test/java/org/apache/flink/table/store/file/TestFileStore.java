@@ -40,6 +40,7 @@ import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
+import org.apache.flink.table.store.file.utils.SnapshotFinder;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.function.QuadFunction;
 
@@ -302,18 +303,34 @@ public class TestFileStore extends FileStoreImpl {
         return result;
     }
 
-    public void assertCleaned() {
+    public void assertCleaned() throws IOException {
         Set<Path> filesInUse = getFilesInUse();
-        Set<Path> actualFiles;
-        try {
-            actualFiles =
-                    Files.walk(Paths.get(root))
-                            .filter(p -> Files.isRegularFile(p))
-                            .map(p -> new Path(p.toString()))
-                            .collect(Collectors.toSet());
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        Set<Path> actualFiles =
+                Files.walk(Paths.get(root))
+                        .filter(Files::isRegularFile)
+                        .map(p -> new Path(p.toString()))
+                        .collect(Collectors.toSet());
+
+        // remove best effort latest and earliest hint files
+        // Consider concurrency test, it will not be possible to check here because the hint_file is
+        // possibly not the most accurate, so this check is only.
+        // - latest should < true_latest
+        // - earliest should < true_earliest
+        Path snapshotDir = pathFactory().snapshotDirectory();
+        Path earliest = new Path(snapshotDir, SnapshotFinder.EARLIEST);
+        Path latest = new Path(snapshotDir, SnapshotFinder.LATEST);
+        if (actualFiles.remove(earliest)) {
+            long earliestId = SnapshotFinder.readHint(snapshotDir, SnapshotFinder.EARLIEST);
+            earliest.getFileSystem().delete(earliest, false);
+            assertThat(earliestId <= SnapshotFinder.findEarliest(snapshotDir)).isTrue();
         }
+        if (actualFiles.remove(latest)) {
+            long latestId = SnapshotFinder.readHint(snapshotDir, SnapshotFinder.LATEST);
+            latest.getFileSystem().delete(latest, false);
+            assertThat(latestId <= SnapshotFinder.findLatest(snapshotDir)).isTrue();
+        }
+        actualFiles.remove(latest);
+
         assertThat(actualFiles).isEqualTo(filesInUse);
     }
 

@@ -21,6 +21,9 @@ package org.apache.flink.table.store.file.operation;
 /** Expire operation which provides snapshots expire. */
 public interface FileStoreExpire {
 
+    /** With global lock. */
+    FileStoreExpire withLock(Lock lock);
+
     /** Expire snapshots. */
     void expire();
 }
