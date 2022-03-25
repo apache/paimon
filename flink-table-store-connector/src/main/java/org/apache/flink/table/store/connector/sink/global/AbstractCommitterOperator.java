@@ -111,9 +111,9 @@ public abstract class AbstractCommitterOperator<IN, CommT>
     @Override
     public void endInput() throws Exception {
         // Suppose the last checkpoint before endInput is 5. Flink Streaming Job calling order:
-        // 1. Accept elements from upstream prepareSnapshotPreBarrier(5)
+        // 1. Receives elements from upstream prepareSnapshotPreBarrier(5)
         // 2. this.snapshotState(5)
-        // 3. Accept elements from upstream endInput
+        // 3. Receives elements from upstream endInput
         // 4. this.endInput
         // 5. this.notifyCheckpointComplete(5)
         // So we should submit all the data in the endInput in order to avoid disordered commits.
