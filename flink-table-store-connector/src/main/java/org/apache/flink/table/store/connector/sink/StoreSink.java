@@ -63,6 +63,8 @@ public class StoreSink<WriterStateT, LogCommT>
 
     private final int[] primaryKeys;
 
+    private final int[] logPrimaryKeys;
+
     private final int numBucket;
 
     @Nullable private final CatalogLock.Factory lockFactory;
@@ -76,6 +78,7 @@ public class StoreSink<WriterStateT, LogCommT>
             FileStore fileStore,
             int[] partitions,
             int[] primaryKeys,
+            int[] logPrimaryKeys,
             int numBucket,
             @Nullable CatalogLock.Factory lockFactory,
             @Nullable Map<String, String> overwritePartition,
@@ -84,6 +87,7 @@ public class StoreSink<WriterStateT, LogCommT>
         this.fileStore = fileStore;
         this.partitions = partitions;
         this.primaryKeys = primaryKeys;
+        this.logPrimaryKeys = logPrimaryKeys;
         this.numBucket = numBucket;
         this.lockFactory = lockFactory;
         this.overwritePartition = overwritePartition;
@@ -117,7 +121,8 @@ public class StoreSink<WriterStateT, LogCommT>
                         numBucket,
                         primaryKeys.length > 0 ? fileStore.valueType() : fileStore.keyType(),
                         partitions,
-                        primaryKeys),
+                        primaryKeys,
+                        logPrimaryKeys),
                 overwritePartition != null,
                 logWriter,
                 logCallback);

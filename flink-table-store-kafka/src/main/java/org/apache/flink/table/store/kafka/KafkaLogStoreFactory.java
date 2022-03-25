@@ -197,11 +197,11 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
         FactoryUtil.TableFactoryHelper helper = createTableFactoryHelper(this, context);
         ResolvedSchema schema = context.getCatalogTable().getResolvedSchema();
         DataType physicalType = schema.toPhysicalRowDataType();
-        SerializationSchema<RowData> keySerializer = null;
+        SerializationSchema<RowData> primaryKeySerializer = null;
         int[] primaryKey = schema.getPrimaryKeyIndexes();
         if (primaryKey.length > 0) {
             DataType keyType = DataTypeUtils.projectRow(physicalType, primaryKey);
-            keySerializer =
+            primaryKeySerializer =
                     LogStoreTableFactory.getKeyEncodingFormat(helper)
                             .createRuntimeEncoder(sinkContext, keyType);
         }
@@ -211,7 +211,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
         return new KafkaLogSinkProvider(
                 topic(context),
                 toKafkaProperties(helper.getOptions()),
-                keySerializer,
+                primaryKeySerializer,
                 valueSerializer,
                 helper.getOptions().get(CONSISTENCY),
                 helper.getOptions().get(CHANGELOG_MODE));

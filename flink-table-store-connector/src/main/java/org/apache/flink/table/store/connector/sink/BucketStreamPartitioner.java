@@ -33,22 +33,29 @@ public class BucketStreamPartitioner extends StreamPartitioner<RowData> {
     private final RowType inputType;
     private final int[] partitions;
     private final int[] primaryKeys;
+    private final int[] logPrimaryKeys;
 
     private transient SinkRecordConverter recordConverter;
 
     public BucketStreamPartitioner(
-            int numBucket, RowType inputType, int[] partitions, int[] primaryKeys) {
+            int numBucket,
+            RowType inputType,
+            int[] partitions,
+            int[] primaryKeys,
+            final int[] logPrimaryKeys) {
         this.numBucket = numBucket;
         this.inputType = inputType;
         this.partitions = partitions;
         this.primaryKeys = primaryKeys;
+        this.logPrimaryKeys = logPrimaryKeys;
     }
 
     @Override
     public void setup(int numberOfChannels) {
         super.setup(numberOfChannels);
         this.recordConverter =
-                new SinkRecordConverter(numBucket, inputType, partitions, primaryKeys);
+                new SinkRecordConverter(
+                        numBucket, inputType, partitions, primaryKeys, logPrimaryKeys);
     }
 
     @Override
