@@ -38,7 +38,8 @@ public class LogWriteCallback implements WriteCallback {
             acc = offsetMap.computeIfAbsent(bucket, k -> new LongAccumulator(Long::max, 0));
         } // else lock free
 
-        // Save the next offset
+        // Save the next offset, what we need to provide to the hybrid reading is the starting
+        // offset of the next transaction
         acc.accumulate(offset + 1);
     }
 
