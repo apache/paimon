@@ -47,14 +47,13 @@ public class SnapshotFinder {
             return null;
         }
 
-        try {
-            long snapshotId = readHint(snapshotDir, LATEST);
+        Long snapshotId = readHint(snapshotDir, LATEST);
+        if (snapshotId != null) {
             long nextSnapshot = snapshotId + 1;
             // it is the latest only there is no next one
             if (!fs.exists(new Path(snapshotDir, SNAPSHOT_PREFIX + nextSnapshot))) {
                 return snapshotId;
             }
-        } catch (Exception ignore) {
         }
 
         return findByListFiles(snapshotDir, Math::max);
@@ -66,21 +65,22 @@ public class SnapshotFinder {
             return null;
         }
 
-        try {
-            long snapshotId = readHint(snapshotDir, EARLIEST);
-            // it is the earliest only it exists
-            if (fs.exists(new Path(snapshotDir, SNAPSHOT_PREFIX + snapshotId))) {
-                return snapshotId;
-            }
-        } catch (Exception ignore) {
+        Long snapshotId = readHint(snapshotDir, EARLIEST);
+        // null and it is the earliest only it exists
+        if (snapshotId != null && fs.exists(new Path(snapshotDir, SNAPSHOT_PREFIX + snapshotId))) {
+            return snapshotId;
         }
 
         return findByListFiles(snapshotDir, Math::min);
     }
 
     @VisibleForTesting
-    public static long readHint(Path snapshotDir, String fileName) throws IOException {
-        return Long.parseLong(FileUtils.readFileUtf8(new Path(snapshotDir, fileName)));
+    public static Long readHint(Path snapshotDir, String fileName) throws IOException {
+        Path path = new Path(snapshotDir, fileName);
+        if (path.getFileSystem().exists(path)) {
+            return Long.parseLong(FileUtils.readFileUtf8(path));
+        }
+        return null;
     }
 
     private static Long findByListFiles(Path snapshotDir, BinaryOperator<Long> reducer)
