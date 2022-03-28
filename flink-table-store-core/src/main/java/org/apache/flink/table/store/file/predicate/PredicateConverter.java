@@ -143,7 +143,11 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             ValueLiteralExpression valueExpression = (ValueLiteralExpression) expression;
             DataType actualType = valueExpression.getOutputDataType();
             LogicalType actualLogicalType = actualType.getLogicalType();
-            Object value = valueExpression.getValueAs(actualType.getConversionClass()).get();
+            Optional<?> valueOpt = valueExpression.getValueAs(actualType.getConversionClass());
+            if (!valueOpt.isPresent()) {
+                return Optional.empty();
+            }
+            Object value = valueOpt.get();
             if (actualLogicalType.getTypeRoot().equals(expectedLogicalType.getTypeRoot())) {
                 literal =
                         new Literal(
