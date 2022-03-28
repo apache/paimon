@@ -449,25 +449,25 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         String sourceTable = "source_table_" + UUID.randomUUID();
         String managedTable = "managed_table_" + UUID.randomUUID();
         EnvironmentSettings.Builder builder = EnvironmentSettings.newInstance().inStreamingMode();
-        String managedTableDdl = prepareManagedTableDdl(sourceTable, managedTable, tableOptions);
         String helperTableDdl;
         if (streaming) {
-            env = buildStreamEnv();
-            builder.inStreamingMode();
             helperTableDdl =
                     insertOnly
                             ? prepareHelperSourceWithInsertOnlyRecords(
                                     sourceTable, partitioned, hasPk)
                             : prepareHelperSourceWithChangelogRecords(
                                     sourceTable, partitioned, hasPk);
+            env = buildStreamEnv();
+            builder.inStreamingMode();
         } else {
-            env = buildBatchEnv();
-            builder.inBatchMode();
             helperTableDdl =
                     prepareHelperSourceWithInsertOnlyRecords(sourceTable, partitioned, hasPk);
+            env = buildBatchEnv();
+            builder.inBatchMode();
         }
-        tEnv = StreamTableEnvironment.create(env, builder.build());
+        String managedTableDdl = prepareManagedTableDdl(sourceTable, managedTable, tableOptions);
 
+        tEnv = StreamTableEnvironment.create(env, builder.build());
         tEnv.executeSql(helperTableDdl);
         tEnv.executeSql(managedTableDdl);
 
@@ -486,21 +486,6 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                 .containsExactlyInAnyOrderElementsOf(expected);
 
         return Tuple2.of(managedTable, iterator);
-    }
-
-    private BlockingIterator<Row, Row> collectAndCheck(
-            StreamTableEnvironment tEnv,
-            String managedTable,
-            Map<String, String> hints,
-            List<Row> expectedRecords)
-            throws Exception {
-        String selectQuery = prepareSimpleSelectQuery(managedTable, hints);
-        List<Row> actual = new ArrayList<>();
-        BlockingIterator<Row, Row> iterator =
-                collect(tEnv, selectQuery, expectedRecords.size(), actual);
-
-        assertThat(actual).containsExactlyInAnyOrderElementsOf(expectedRecords);
-        return iterator;
     }
 
     private void prepareEnvAndOverwrite(
@@ -531,6 +516,21 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         TableResult result = tEnv.executeSql(selectQuery);
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(result.collect());
         actual.addAll(iterator.collect(expectedSize));
+        return iterator;
+    }
+
+    private BlockingIterator<Row, Row> collectAndCheck(
+            StreamTableEnvironment tEnv,
+            String managedTable,
+            Map<String, String> hints,
+            List<Row> expectedRecords)
+            throws Exception {
+        String selectQuery = prepareSimpleSelectQuery(managedTable, hints);
+        List<Row> actual = new ArrayList<>();
+        BlockingIterator<Row, Row> iterator =
+                collect(tEnv, selectQuery, expectedRecords.size(), actual);
+
+        assertThat(actual).containsExactlyInAnyOrderElementsOf(expectedRecords);
         return iterator;
     }
 
