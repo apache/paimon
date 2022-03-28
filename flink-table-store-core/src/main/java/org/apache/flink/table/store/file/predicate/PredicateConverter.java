@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.table.data.conversion.DataStructureConverter;
 import org.apache.flink.table.expressions.CallExpression;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.expressions.ExpressionVisitor;
@@ -135,24 +134,28 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
     }
 
     private Optional<Literal> extractLiteral(DataType expectedType, Expression expression) {
+        LogicalType expectedLogicalType = expectedType.getLogicalType();
+        if (!supportsPredicate(expectedLogicalType)) {
+            return Optional.empty();
+        }
         Literal literal = null;
         if (expression instanceof ValueLiteralExpression) {
             ValueLiteralExpression valueExpression = (ValueLiteralExpression) expression;
-            LogicalType expectedLogicalType = expectedType.getLogicalType();
             DataType actualType = valueExpression.getOutputDataType();
             LogicalType actualLogicalType = actualType.getLogicalType();
-            DataStructureConverter<Object, Object> converter = getConverter(expectedType);
             Object value = valueExpression.getValueAs(actualType.getConversionClass()).get();
-            if (!actualLogicalType.equals(expectedLogicalType)
-                    && supportsImplicitCast(actualLogicalType, expectedLogicalType)) {
+            if (actualLogicalType.getTypeRoot().equals(expectedLogicalType.getTypeRoot())) {
+                literal =
+                        new Literal(
+                                expectedLogicalType,
+                                getConverter(expectedType).toInternalOrNull(value));
+            } else if (supportsImplicitCast(actualLogicalType, expectedLogicalType)) {
                 try {
                     value = TypeUtils.castFromString(value.toString(), expectedLogicalType);
-                } catch (UnsupportedOperationException e) {
-                    throw new UnsupportedExpression();
+                    literal = new Literal(expectedLogicalType, value);
+                } catch (Exception ignored) {
+                    // ignore here, let #visit throw UnsupportedExpression
                 }
-            }
-            if (supportsPredicate(expectedLogicalType)) {
-                literal = new Literal(expectedLogicalType, converter.toInternalOrNull(value));
             }
         }
         return literal == null ? Optional.empty() : Optional.of(literal);
