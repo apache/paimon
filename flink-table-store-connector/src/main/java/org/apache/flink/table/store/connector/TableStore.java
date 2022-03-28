@@ -227,8 +227,6 @@ public class TableStore {
 
         private boolean isContinuous = false;
 
-        private boolean isHybrid = true;
-
         @Nullable private int[][] projectedFields;
 
         @Nullable private Predicate partitionPredicate;
@@ -257,11 +255,6 @@ public class TableStore {
             return this;
         }
 
-        public SourceBuilder withHybridMode(boolean isHybrid) {
-            this.isHybrid = isHybrid;
-            return this;
-        }
-
         public SourceBuilder withLogSourceProvider(LogSourceProvider logSourceProvider) {
             this.logSourceProvider = logSourceProvider;
             return this;
@@ -271,20 +264,14 @@ public class TableStore {
             return options.get(CONTINUOUS_DISCOVERY_INTERVAL).toMillis();
         }
 
-        private FileStoreSource buildFileSource(boolean isContinuous) {
-            FileStore fileStore = buildFileStore();
-
-            boolean latestContinuous = false;
-            if (isContinuous) {
-                LogStartupMode startupMode = logOptions().get(SCAN);
-                latestContinuous = startupMode == LogStartupMode.LATEST;
-            }
+        private FileStoreSource buildFileSource(
+                boolean isContinuous, boolean continuousScanLatest) {
             return new FileStoreSource(
-                    fileStore,
+                    buildFileStore(),
                     primaryKeys.length == 0,
                     isContinuous,
                     discoveryIntervalMills(),
-                    latestContinuous,
+                    continuousScanLatest,
                     projectedFields,
                     partitionPredicate,
                     fieldPredicate);
@@ -292,22 +279,23 @@ public class TableStore {
 
         public Source<RowData, ?, ?> build() {
             if (isContinuous) {
+                LogStartupMode startupMode = logOptions().get(SCAN);
+                boolean latestContinuous = startupMode == LogStartupMode.LATEST;
                 if (logSourceProvider == null) {
-                    return buildFileSource(true);
-                }
-
-                if (isHybrid) {
+                    return buildFileSource(true, latestContinuous);
+                } else {
+                    if (latestContinuous) {
+                        return logSourceProvider.createSource(null);
+                    }
                     return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
-                                    buildFileSource(false))
+                                    buildFileSource(false, false))
                             .addSource(
                                     new LogHybridSourceFactory(logSourceProvider),
                                     Boundedness.CONTINUOUS_UNBOUNDED)
                             .build();
-                } else {
-                    return logSourceProvider.createSource(null);
                 }
             } else {
-                return buildFileSource(false);
+                return buildFileSource(false, false);
             }
         }
 
