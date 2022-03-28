@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.predicate;
 
+import org.apache.flink.table.data.conversion.DataStructureConverter;
 import org.apache.flink.table.expressions.CallExpression;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.expressions.ExpressionVisitor;
@@ -40,6 +41,7 @@ import java.util.Optional;
 import java.util.function.BiFunction;
 
 import static org.apache.flink.table.data.conversion.DataStructureConverters.getConverter;
+import static org.apache.flink.table.types.logical.utils.LogicalTypeCasts.supportsImplicitCast;
 
 /** Convert {@link Expression} to {@link Predicate}. */
 public class PredicateConverter implements ExpressionVisitor<Predicate> {
@@ -106,14 +108,20 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         Optional<Integer> field = extractFieldReference(children.get(0));
         Optional<Literal> literal;
         if (field.isPresent()) {
-            literal = extractLiteral(children.get(1));
+            literal =
+                    extractLiteral(
+                            ((FieldReferenceExpression) children.get(0)).getOutputDataType(),
+                            children.get(1));
             if (literal.isPresent()) {
                 return visit1.apply(field.get(), literal.get());
             }
         } else {
             field = extractFieldReference(children.get(1));
             if (field.isPresent()) {
-                literal = extractLiteral(children.get(0));
+                literal =
+                        extractLiteral(
+                                ((FieldReferenceExpression) children.get(1)).getOutputDataType(),
+                                children.get(0));
                 if (literal.isPresent()) {
                     return visit2.apply(field.get(), literal.get());
                 }
@@ -131,22 +139,28 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         return Optional.empty();
     }
 
-    private Optional<Literal> extractLiteral(Expression expression) {
+    private Optional<Literal> extractLiteral(DataType expectedType, Expression expression) {
+        Literal literal = null;
         if (expression instanceof ValueLiteralExpression) {
             ValueLiteralExpression valueExpression = (ValueLiteralExpression) expression;
-            DataType type = valueExpression.getOutputDataType();
-            return supportsPredicate(type.getLogicalType())
-                    ? Optional.of(
-                            new Literal(
-                                    type.getLogicalType(),
-                                    getConverter(type)
-                                            .toInternalOrNull(
-                                                    valueExpression
-                                                            .getValueAs(type.getConversionClass())
-                                                            .get())))
-                    : Optional.empty();
+            LogicalType expectedLogicalType = expectedType.getLogicalType();
+            DataType actualType = valueExpression.getOutputDataType();
+            LogicalType actualLogicalType = actualType.getLogicalType();
+            DataStructureConverter<Object, Object> converter = getConverter(expectedType);
+            Object value = valueExpression.getValueAs(actualType.getConversionClass()).get();
+            if (!actualLogicalType.equals(expectedLogicalType)
+                    && supportsImplicitCast(actualLogicalType, expectedLogicalType)) {
+                try {
+                    value = TypeUtils.castFromString(value.toString(), expectedLogicalType);
+                } catch (UnsupportedOperationException e) {
+                    throw new UnsupportedExpression();
+                }
+            }
+            if (supportsPredicate(expectedLogicalType)) {
+                literal = new Literal(expectedLogicalType, converter.toInternalOrNull(value));
+            }
         }
-        return Optional.empty();
+        return literal == null ? Optional.empty() : Optional.of(literal);
     }
 
     private boolean supportsPredicate(LogicalType type) {

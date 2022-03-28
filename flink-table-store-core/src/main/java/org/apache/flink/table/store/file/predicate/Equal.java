@@ -20,6 +20,8 @@ package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.file.stats.FieldStats;
 
+import java.util.Objects;
+
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /** A {@link Predicate} to eval equal. */
@@ -50,5 +52,22 @@ public class Equal implements Predicate {
         }
         return literal.compareValueTo(stats.minValue()) >= 0
                 && literal.compareValueTo(stats.maxValue()) <= 0;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof Equal)) {
+            return false;
+        }
+        Equal equal = (Equal) o;
+        return index == equal.index && literal.equals(equal.literal);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(index, literal);
     }
 }

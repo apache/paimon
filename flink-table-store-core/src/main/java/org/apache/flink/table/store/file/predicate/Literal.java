@@ -28,6 +28,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
+import java.util.Objects;
 
 /** A serializable literal class. */
 public class Literal implements Serializable {
@@ -72,5 +73,22 @@ public class Literal implements Serializable {
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
         in.defaultReadObject();
         value = InternalSerializers.create(type).deserialize(new DataInputViewStreamWrapper(in));
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof Literal)) {
+            return false;
+        }
+        Literal literal = (Literal) o;
+        return type.equals(literal.type) && value.equals(literal.value);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(type, value);
     }
 }

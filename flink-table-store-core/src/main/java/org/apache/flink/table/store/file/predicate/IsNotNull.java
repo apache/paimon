@@ -20,6 +20,8 @@ package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.file.stats.FieldStats;
 
+import java.util.Objects;
+
 /** A {@link Predicate} to eval is not null. */
 public class IsNotNull implements Predicate {
 
@@ -39,5 +41,22 @@ public class IsNotNull implements Predicate {
     @Override
     public boolean test(long rowCount, FieldStats[] fieldStats) {
         return fieldStats[index].nullCount() < rowCount;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof IsNotNull)) {
+            return false;
+        }
+        IsNotNull isNotNull = (IsNotNull) o;
+        return index == isNotNull.index;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(index);
     }
 }
