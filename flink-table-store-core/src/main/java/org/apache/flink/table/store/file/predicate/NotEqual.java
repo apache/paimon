@@ -20,6 +20,8 @@ package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.file.stats.FieldStats;
 
+import java.util.Objects;
+
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /** A {@link Predicate} to eval not equal. */
@@ -47,5 +49,22 @@ public class NotEqual implements Predicate {
         FieldStats stats = fieldStats[index];
         return literal.compareValueTo(stats.minValue()) != 0
                 || literal.compareValueTo(stats.maxValue()) != 0;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof NotEqual)) {
+            return false;
+        }
+        NotEqual notEqual = (NotEqual) o;
+        return index == notEqual.index && literal.equals(notEqual.literal);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(index, literal);
     }
 }
