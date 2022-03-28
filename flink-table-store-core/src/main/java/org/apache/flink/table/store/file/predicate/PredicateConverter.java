@@ -88,10 +88,12 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             return visitBiFunction(children, LessOrEqual::new, GreaterOrEqual::new);
         } else if (func == BuiltInFunctionDefinitions.IS_NULL) {
             return extractFieldReference(children.get(0))
+                    .map(FieldReferenceExpression::getFieldIndex)
                     .map(IsNull::new)
                     .orElseThrow(UnsupportedExpression::new);
         } else if (func == BuiltInFunctionDefinitions.IS_NOT_NULL) {
             return extractFieldReference(children.get(0))
+                    .map(FieldReferenceExpression::getFieldIndex)
                     .map(IsNotNull::new)
                     .orElseThrow(UnsupportedExpression::new);
         }
@@ -105,25 +107,19 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             List<Expression> children,
             BiFunction<Integer, Literal, Predicate> visit1,
             BiFunction<Integer, Literal, Predicate> visit2) {
-        Optional<Integer> field = extractFieldReference(children.get(0));
+        Optional<FieldReferenceExpression> fieldRefExpr = extractFieldReference(children.get(0));
         Optional<Literal> literal;
-        if (field.isPresent()) {
-            literal =
-                    extractLiteral(
-                            ((FieldReferenceExpression) children.get(0)).getOutputDataType(),
-                            children.get(1));
+        if (fieldRefExpr.isPresent()) {
+            literal = extractLiteral(fieldRefExpr.get().getOutputDataType(), children.get(1));
             if (literal.isPresent()) {
-                return visit1.apply(field.get(), literal.get());
+                return visit1.apply(fieldRefExpr.get().getFieldIndex(), literal.get());
             }
         } else {
-            field = extractFieldReference(children.get(1));
-            if (field.isPresent()) {
-                literal =
-                        extractLiteral(
-                                ((FieldReferenceExpression) children.get(1)).getOutputDataType(),
-                                children.get(0));
+            fieldRefExpr = extractFieldReference(children.get(1));
+            if (fieldRefExpr.isPresent()) {
+                literal = extractLiteral(fieldRefExpr.get().getOutputDataType(), children.get(0));
                 if (literal.isPresent()) {
-                    return visit2.apply(field.get(), literal.get());
+                    return visit2.apply(fieldRefExpr.get().getFieldIndex(), literal.get());
                 }
             }
         }
@@ -131,10 +127,9 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         throw new UnsupportedExpression();
     }
 
-    private Optional<Integer> extractFieldReference(Expression expression) {
+    private Optional<FieldReferenceExpression> extractFieldReference(Expression expression) {
         if (expression instanceof FieldReferenceExpression) {
-            int reference = ((FieldReferenceExpression) expression).getFieldIndex();
-            return Optional.of(reference);
+            return Optional.of((FieldReferenceExpression) expression);
         }
         return Optional.empty();
     }
