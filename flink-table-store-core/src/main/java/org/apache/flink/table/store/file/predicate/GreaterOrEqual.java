@@ -20,6 +20,8 @@ package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.file.stats.FieldStats;
 
+import java.util.Objects;
+
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /** A {@link Predicate} to eval greater or equal. */
@@ -49,5 +51,22 @@ public class GreaterOrEqual implements Predicate {
             return false;
         }
         return literal.compareValueTo(stats.maxValue()) <= 0;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof GreaterOrEqual)) {
+            return false;
+        }
+        GreaterOrEqual that = (GreaterOrEqual) o;
+        return index == that.index && literal.equals(that.literal);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(index, literal);
     }
 }
