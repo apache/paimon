@@ -148,6 +148,10 @@ public class TableStore {
         return primaryKeyType.getFieldNames();
     }
 
+    public Configuration options() {
+        return options;
+    }
+
     public Configuration logOptions() {
         return new DelegatingConfiguration(options, LOG_PREFIX);
     }
@@ -227,6 +231,8 @@ public class TableStore {
 
         private boolean isContinuous = false;
 
+        private StreamExecutionEnvironment env;
+
         @Nullable private int[][] projectedFields;
 
         @Nullable private Predicate partitionPredicate;
@@ -234,6 +240,13 @@ public class TableStore {
         @Nullable private Predicate fieldPredicate;
 
         @Nullable private LogSourceProvider logSourceProvider;
+
+        @Nullable private Integer parallelism;
+
+        public SourceBuilder withEnv(StreamExecutionEnvironment env) {
+            this.env = env;
+            return this;
+        }
 
         public SourceBuilder withProjection(int[][] projectedFields) {
             this.projectedFields = projectedFields;
@@ -260,6 +273,11 @@ public class TableStore {
             return this;
         }
 
+        public SourceBuilder withParallelism(Integer parallelism) {
+            this.parallelism = parallelism;
+            return this;
+        }
+
         private long discoveryIntervalMills() {
             return options.get(CONTINUOUS_DISCOVERY_INTERVAL).toMillis();
         }
@@ -277,7 +295,7 @@ public class TableStore {
                     fieldPredicate);
         }
 
-        public Source<RowData, ?, ?> build() {
+        private Source<RowData, ?, ?> buildSource() {
             if (isContinuous) {
                 LogStartupMode startupMode = logOptions().get(SCAN);
                 if (logSourceProvider == null) {
@@ -298,17 +316,26 @@ public class TableStore {
             }
         }
 
-        public DataStreamSource<RowData> build(StreamExecutionEnvironment env) {
+        public DataStreamSource<RowData> build() {
+            if (env == null) {
+                throw new IllegalArgumentException("Env should not be null.");
+            }
+
             LogicalType produceType =
                     Optional.ofNullable(projectedFields)
                             .map(Projection::of)
                             .map(p -> p.project(type))
                             .orElse(type);
-            return env.fromSource(
-                    build(),
-                    WatermarkStrategy.noWatermarks(),
-                    tableIdentifier.asSummaryString(),
-                    InternalTypeInfo.of(produceType));
+            DataStreamSource<RowData> dataStream =
+                    env.fromSource(
+                            buildSource(),
+                            WatermarkStrategy.noWatermarks(),
+                            tableIdentifier.asSummaryString(),
+                            InternalTypeInfo.of(produceType));
+            if (parallelism != null) {
+                dataStream.setParallelism(parallelism);
+            }
+            return dataStream;
         }
     }
 
@@ -322,6 +349,8 @@ public class TableStore {
         @Nullable private Map<String, String> overwritePartition;
 
         @Nullable private LogSinkProvider logSinkProvider;
+
+        @Nullable private Integer parallelism;
 
         public SinkBuilder withInput(DataStream<RowData> input) {
             this.input = input;
@@ -343,6 +372,11 @@ public class TableStore {
             return this;
         }
 
+        public SinkBuilder withParallelism(Integer parallelism) {
+            this.parallelism = parallelism;
+            return this;
+        }
+
         public DataStreamSink<?> build() {
             FileStore fileStore = buildFileStore();
             int numBucket = options.get(BUCKET);
@@ -350,10 +384,11 @@ public class TableStore {
             BucketStreamPartitioner partitioner =
                     new BucketStreamPartitioner(
                             numBucket, type, partitions, primaryKeys, logPrimaryKeys);
-            DataStream<RowData> partitioned =
-                    new DataStream<>(
-                            input.getExecutionEnvironment(),
-                            new PartitionTransformation<>(input.getTransformation(), partitioner));
+            PartitionTransformation<RowData> partitioned =
+                    new PartitionTransformation<>(input.getTransformation(), partitioner);
+            if (parallelism != null) {
+                partitioned.setParallelism(parallelism);
+            }
 
             StoreSink<?, ?> sink =
                     new StoreSink<>(
@@ -366,7 +401,8 @@ public class TableStore {
                             lockFactory,
                             overwritePartition,
                             logSinkProvider);
-            return GlobalCommittingSinkTranslator.translate(partitioned, sink);
+            return GlobalCommittingSinkTranslator.translate(
+                    new DataStream<>(input.getExecutionEnvironment(), partitioned), sink);
         }
     }
 }

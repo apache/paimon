@@ -126,7 +126,7 @@ public class FileStoreITCase extends AbstractTestBase {
         env.execute();
 
         // read
-        List<Row> results = executeAndCollect(store.sourceBuilder().build(env));
+        List<Row> results = executeAndCollect(store.sourceBuilder().withEnv(env).build());
 
         // assert
         Row[] expected =
@@ -145,7 +145,7 @@ public class FileStoreITCase extends AbstractTestBase {
         env.execute();
 
         // read
-        List<Row> results = executeAndCollect(store.sourceBuilder().build(env));
+        List<Row> results = executeAndCollect(store.sourceBuilder().withEnv(env).build());
 
         // assert
         Row[] expected = new Row[] {Row.of(5, "p2", 1), Row.of(0, "p1", 2), Row.of(3, "p2", 5)};
@@ -173,7 +173,7 @@ public class FileStoreITCase extends AbstractTestBase {
         env.execute();
 
         // read
-        List<Row> results = executeAndCollect(store.sourceBuilder().build(env));
+        List<Row> results = executeAndCollect(store.sourceBuilder().withEnv(env).build());
 
         Row[] expected = new Row[] {Row.of(9, "p2", 5), Row.of(5, "p1", 1), Row.of(0, "p1", 2)};
         assertThat(results).containsExactlyInAnyOrder(expected);
@@ -188,7 +188,7 @@ public class FileStoreITCase extends AbstractTestBase {
         env.execute();
 
         // read
-        results = executeAndCollect(store.sourceBuilder().build(env));
+        results = executeAndCollect(store.sourceBuilder().withEnv(env).build());
         expected = new Row[] {Row.of(19, "p2", 6)};
         assertThat(results).containsExactlyInAnyOrder(expected);
     }
@@ -202,7 +202,7 @@ public class FileStoreITCase extends AbstractTestBase {
         env.execute();
 
         // read
-        List<Row> results = executeAndCollect(store.sourceBuilder().build(env));
+        List<Row> results = executeAndCollect(store.sourceBuilder().withEnv(env).build());
 
         // assert
         // in streaming mode, expect origin data X 2 (FiniteTestSource)
@@ -242,7 +242,8 @@ public class FileStoreITCase extends AbstractTestBase {
                 executeAndCollect(
                         store.sourceBuilder()
                                 .withProjection(projection.toNestedIndexes())
-                                .build(env),
+                                .withEnv(env)
+                                .build(),
                         converter);
 
         // assert
@@ -281,7 +282,8 @@ public class FileStoreITCase extends AbstractTestBase {
                 BlockingIterator.of(
                         store.sourceBuilder()
                                 .withContinuousMode(true)
-                                .build(env)
+                                .withEnv(env)
+                                .build()
                                 .executeAndCollect(),
                         CONVERTER::toExternal);
         Thread.sleep(ThreadLocalRandom.current().nextInt(1000));

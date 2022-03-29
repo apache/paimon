@@ -20,6 +20,10 @@ package org.apache.flink.table.store.connector;
 
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
+import org.apache.flink.table.factories.FactoryUtil;
+
+import java.util.HashSet;
+import java.util.Set;
 
 /** Options for {@link TableStoreFactory}. */
 public class TableStoreFactoryOptions {
@@ -29,4 +33,23 @@ public class TableStoreFactoryOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("The log system used to keep changes of the table.");
+
+    public static final ConfigOption<Integer> SINK_PARALLELISM = FactoryUtil.SINK_PARALLELISM;
+
+    public static final ConfigOption<Integer> SCAN_PARALLELISM =
+            ConfigOptions.key("scan.parallelism")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Defines a custom parallelism for the scan source. "
+                                    + "By default, if this option is not defined, the planner will derive the parallelism "
+                                    + "for each statement individually by also considering the global configuration.");
+
+    public static Set<ConfigOption<?>> allOptions() {
+        Set<ConfigOption<?>> allOptions = new HashSet<>();
+        allOptions.add(LOG_SYSTEM);
+        allOptions.add(SINK_PARALLELISM);
+        allOptions.add(SCAN_PARALLELISM);
+        return allOptions;
+    }
 }
