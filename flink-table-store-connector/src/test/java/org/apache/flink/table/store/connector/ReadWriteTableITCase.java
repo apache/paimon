@@ -448,8 +448,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
                         changelogRow("+I", "Euro", 114L, "2022-01-01"),
                         changelogRow("+I", "Yen", 1L, "2022-01-01"),
-                        changelogRow("-D", "Euro", 114L, "2022-01-01"),
-                        changelogRow("+I", "Euro", 116L, "2022-01-01"),
+                        changelogRow("-U", "Euro", 114L, "2022-01-01"),
+                        changelogRow("+U", "Euro", 116L, "2022-01-01"),
                         changelogRow("-D", "Yen", 1L, "2022-01-01"),
                         changelogRow("-D", "Euro", 116L, "2022-01-01"),
                         // part = 2022-01-02
