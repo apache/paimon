@@ -280,11 +280,10 @@ public class TableStore {
         public Source<RowData, ?, ?> build() {
             if (isContinuous) {
                 LogStartupMode startupMode = logOptions().get(SCAN);
-                boolean latestContinuous = startupMode == LogStartupMode.LATEST;
                 if (logSourceProvider == null) {
-                    return buildFileSource(true, latestContinuous);
+                    return buildFileSource(true, startupMode == LogStartupMode.LATEST);
                 } else {
-                    if (latestContinuous) {
+                    if (startupMode != LogStartupMode.FULL) {
                         return logSourceProvider.createSource(null);
                     }
                     return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(

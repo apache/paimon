@@ -281,9 +281,9 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testReadChangelogOfPartitionedRecordsWithPk() throws Exception {
+    public void testReadLatestChangelogOfPartitionedRecordsWithPk() throws Exception {
         // input is dailyRatesChangelogWithoutUB()
-        collectChangelogAndCheck(
+        collectLatestLogAndCheck(
                 false,
                 true,
                 true,
@@ -301,9 +301,9 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testReadChangelogOfPartitionedRecordsWithoutPk() throws Exception {
+    public void testReadLatestChangelogOfPartitionedRecordsWithoutPk() throws Exception {
         // input is dailyRatesChangelogWithUB()
-        collectChangelogAndCheck(
+        collectLatestLogAndCheck(
                 false,
                 true,
                 false,
@@ -323,9 +323,9 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testReadChangelogOfNonPartitionedRecordsWithPk() throws Exception {
+    public void testReadLatestChangelogOfNonPartitionedRecordsWithPk() throws Exception {
         // input is ratesChangelogWithoutUB()
-        collectChangelogAndCheck(
+        collectLatestLogAndCheck(
                 false,
                 false,
                 true,
@@ -341,9 +341,9 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testReadChangelogOfNonPartitionedRecordsWithoutPk() throws Exception {
+    public void testReadLatestChangelogOfNonPartitionedRecordsWithoutPk() throws Exception {
         // input is ratesChangelogWithUB()
-        collectChangelogAndCheck(
+        collectLatestLogAndCheck(
                 false,
                 false,
                 false,
@@ -361,9 +361,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testReadChangelogOfInsertOnlyRecords() throws Exception {
+    public void testReadLatestChangelogOfInsertOnlyRecords() throws Exception {
         // input is rates()
-
         List<Row> expected =
                 Arrays.asList(
                         changelogRow("+I", "US Dollar", 102L),
@@ -373,10 +372,88 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         changelogRow("+U", "Euro", 119L));
 
         // currency as pk
-        collectChangelogAndCheck(true, false, true, expected);
+        collectLatestLogAndCheck(true, false, true, expected);
 
         // without pk
-        collectChangelogAndCheck(true, false, true, expected);
+        collectLatestLogAndCheck(true, false, true, expected);
+    }
+
+    @Test
+    public void testReadInsertOnlyChangelogFromTimestamp() throws Exception {
+        // input is dailyRates()
+        collectChangelogFromTimestampAndCheck(
+                true,
+                true,
+                true,
+                0,
+                Arrays.asList(
+                        // part = 2022-01-01
+                        changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
+                        changelogRow("+I", "Yen", 1L, "2022-01-01"),
+                        changelogRow("+I", "Euro", 114L, "2022-01-01"),
+                        // part = 2022-01-02
+                        changelogRow("+I", "Euro", 119L, "2022-01-02")));
+
+        collectChangelogFromTimestampAndCheck(true, true, false, 0, dailyRates());
+
+        // input is rates()
+        collectChangelogFromTimestampAndCheck(
+                true,
+                false,
+                true,
+                0,
+                Arrays.asList(
+                        changelogRow("+I", "US Dollar", 102L),
+                        changelogRow("+I", "Euro", 114L),
+                        changelogRow("+I", "Yen", 1L),
+                        changelogRow("-U", "Euro", 114L),
+                        changelogRow("+U", "Euro", 119L)));
+
+        collectChangelogFromTimestampAndCheck(true, false, false, 0, rates());
+
+        collectChangelogFromTimestampAndCheck(
+                true, false, false, Long.MAX_VALUE - 1, Collections.emptyList());
+    }
+
+    @Test
+    public void testReadRetractChangelogFromTimestamp() throws Exception {
+        // input is dailyRatesChangelogWithUB()
+        collectChangelogFromTimestampAndCheck(
+                false,
+                true,
+                false,
+                0,
+                Arrays.asList(
+                        // part = 2022-01-01
+                        changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
+                        changelogRow("+I", "Euro", 116L, "2022-01-01"),
+                        changelogRow("-D", "Euro", 116L, "2022-01-01"),
+                        changelogRow("+I", "Yen", 1L, "2022-01-01"),
+                        changelogRow("-D", "Yen", 1L, "2022-01-01"),
+                        // part = 2022-01-02
+                        changelogRow("+I", "Euro", 114L, "2022-01-02"),
+                        changelogRow("-D", "Euro", 114L, "2022-01-02"),
+                        changelogRow("+I", "Euro", 119L, "2022-01-02"),
+                        changelogRow("-D", "Euro", 119L, "2022-01-02"),
+                        changelogRow("+I", "Euro", 115L, "2022-01-02")));
+
+        // input is dailyRatesChangelogWithoutUB()
+        collectChangelogFromTimestampAndCheck(
+                false,
+                true,
+                true,
+                0,
+                Arrays.asList(
+                        // part = 2022-01-01
+                        changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
+                        changelogRow("+I", "Euro", 114L, "2022-01-01"),
+                        changelogRow("+I", "Yen", 1L, "2022-01-01"),
+                        changelogRow("-D", "Euro", 114L, "2022-01-01"),
+                        changelogRow("+I", "Euro", 116L, "2022-01-01"),
+                        changelogRow("-D", "Yen", 1L, "2022-01-01"),
+                        changelogRow("-D", "Euro", 116L, "2022-01-01"),
+                        // part = 2022-01-02
+                        changelogRow("+I", "Euro", 119L, "2022-01-02")));
     }
 
     // ------------------------ Tools ----------------------------------
@@ -416,7 +493,7 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                 true, true, false, true, true, true, readHints, expected);
     }
 
-    private void collectChangelogAndCheck(
+    private void collectLatestLogAndCheck(
             boolean insertOnly, boolean partitioned, boolean hasPk, List<Row> expected)
             throws Exception {
         Map<String, String> hints = new HashMap<>();
@@ -425,6 +502,22 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                 LogOptions.LogStartupMode.LATEST.name().toLowerCase());
         collectAndCheckUnderSameEnv(
                         true, true, insertOnly, partitioned, hasPk, false, hints, expected)
+                .f1
+                .close();
+    }
+
+    private void collectChangelogFromTimestampAndCheck(
+            boolean insertOnly,
+            boolean partitioned,
+            boolean hasPk,
+            long timestamp,
+            List<Row> expected)
+            throws Exception {
+        Map<String, String> hints = new HashMap<>();
+        hints.put(LOG_PREFIX + LogOptions.SCAN.key(), "from-timestamp");
+        hints.put(LOG_PREFIX + LogOptions.SCAN_TIMESTAMP_MILLS.key(), String.valueOf(timestamp));
+        collectAndCheckUnderSameEnv(
+                        true, true, insertOnly, partitioned, hasPk, true, hints, expected)
                 .f1
                 .close();
     }
@@ -482,9 +575,12 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
             iterator = BlockingIterator.of(tEnv.executeSql(selectQuery).collect());
             tEnv.executeSql(insertQuery).await();
         }
-        assertThat(iterator.collect(expected.size(), 10, TimeUnit.SECONDS))
-                .containsExactlyInAnyOrderElementsOf(expected);
-
+        if (expected.isEmpty()) {
+            assertNoMoreRecords(iterator);
+        } else {
+            assertThat(iterator.collect(expected.size(), 10, TimeUnit.SECONDS))
+                    .containsExactlyInAnyOrderElementsOf(expected);
+        }
         return Tuple2.of(managedTable, iterator);
     }
 
