@@ -135,7 +135,6 @@ public class TableStoreSource
                 tableStore
                         .sourceBuilder()
                         .withContinuousMode(streaming)
-                        .withHybridMode(streaming && logSourceProvider != null)
                         .withLogSourceProvider(logSourceProvider)
                         .withProjection(projectFields)
                         .withPartitionPredicate(PredicateConverter.convert(partitionFilters))
