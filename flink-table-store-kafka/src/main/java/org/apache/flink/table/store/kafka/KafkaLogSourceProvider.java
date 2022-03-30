@@ -52,7 +52,7 @@ public class KafkaLogSourceProvider implements LogSourceProvider {
 
     private final int[] primaryKey;
 
-    @Nullable private final DeserializationSchema<RowData> keyDeserializer;
+    @Nullable private final DeserializationSchema<RowData> primaryKeyDeserializer;
 
     private final DeserializationSchema<RowData> valueDeserializer;
 
@@ -69,7 +69,7 @@ public class KafkaLogSourceProvider implements LogSourceProvider {
             Properties properties,
             DataType physicalType,
             int[] primaryKey,
-            @Nullable DeserializationSchema<RowData> keyDeserializer,
+            @Nullable DeserializationSchema<RowData> primaryKeyDeserializer,
             DeserializationSchema<RowData> valueDeserializer,
             @Nullable int[][] projectFields,
             LogConsistency consistency,
@@ -79,7 +79,7 @@ public class KafkaLogSourceProvider implements LogSourceProvider {
         this.properties = properties;
         this.physicalType = physicalType;
         this.primaryKey = primaryKey;
-        this.keyDeserializer = keyDeserializer;
+        this.primaryKeyDeserializer = primaryKeyDeserializer;
         this.valueDeserializer = valueDeserializer;
         this.projectFields = projectFields;
         this.consistency = consistency;
@@ -95,7 +95,7 @@ public class KafkaLogSourceProvider implements LogSourceProvider {
                 properties.setProperty(ISOLATION_LEVEL_CONFIG, "read_committed");
                 break;
             case EVENTUAL:
-                if (keyDeserializer == null) {
+                if (primaryKeyDeserializer == null) {
                     throw new IllegalArgumentException(
                             "Can not use EVENTUAL consistency mode for non-pk table.");
                 }
@@ -117,7 +117,7 @@ public class KafkaLogSourceProvider implements LogSourceProvider {
                 new KafkaLogDeserializationSchema(
                         physicalType,
                         primaryKey,
-                        keyDeserializer,
+                        primaryKeyDeserializer,
                         valueDeserializer,
                         projectFields));
     }
