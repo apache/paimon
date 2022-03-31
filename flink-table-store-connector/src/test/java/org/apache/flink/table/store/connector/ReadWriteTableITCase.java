@@ -779,8 +779,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         changelogRow("+I", "Euro", 114L, "2022-01-01"),
                         changelogRow("-U", "Euro", 114L, "2022-01-01")));
 
-        // FIXME: expected is empty, but actual is [+I[Euro, 114, 2022-01-02]]
         // test partition and field filter
+        // expected is empty, but actual is [+I[Euro, 114, 2022-01-02]]
         collectLatestLogAndCheck(
                 false,
                 true,
@@ -809,7 +809,7 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         changelogRow("+I", 119L) // Euro
                         ));
 
-        // FIXME: test projection and filter, expected [+I[119]], actual is [+I[102]]
+        // test projection and filter, expected [+I[119]], actual is [+I[102]]
         collectLatestLogAndCheck(
                 false,
                 true,
