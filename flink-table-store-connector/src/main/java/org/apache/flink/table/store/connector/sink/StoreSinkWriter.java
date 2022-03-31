@@ -31,6 +31,7 @@ import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.log.LogWriteCallback;
 import org.apache.flink.table.store.sink.SinkRecord;
 import org.apache.flink.table.store.sink.SinkRecordConverter;
+import org.apache.flink.util.concurrent.ExecutorThreadFactory;
 
 import javax.annotation.Nullable;
 
@@ -76,7 +77,9 @@ public class StoreSinkWriter<WriterStateT>
         this.overwrite = overwrite;
         this.logWriter = logWriter;
         this.logCallback = logCallback;
-        this.compactExecutor = Executors.newSingleThreadScheduledExecutor();
+        this.compactExecutor =
+                Executors.newSingleThreadScheduledExecutor(
+                        new ExecutorThreadFactory("compaction-thread"));
         this.writers = new HashMap<>();
     }
 
