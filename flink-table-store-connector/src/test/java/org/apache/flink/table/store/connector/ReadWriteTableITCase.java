@@ -18,31 +18,23 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
-import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.EnvironmentSettings;
-import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.catalog.CatalogBaseTable;
-import org.apache.flink.table.catalog.CatalogTable;
-import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ObjectPath;
-import org.apache.flink.table.catalog.ResolvedCatalogTable;
-import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.connector.sink.DataStreamSinkProvider;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.factories.DynamicTableFactory.Context;
+import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.runtime.connector.sink.SinkRuntimeProviderContext;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
@@ -50,6 +42,9 @@ import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.kafka.KafkaTableTestBase;
 import org.apache.flink.table.store.log.LogOptions;
+import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.types.Row;
 
 import org.junit.Test;
@@ -61,18 +56,39 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
-import static org.apache.flink.table.planner.factories.TestValuesTableFactory.registerData;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.assertNoMoreRecords;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.buildBatchEnv;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.buildStreamEnv;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.dailyExchangeRates;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.dailyExchangeRatesChangelogWithoutUB;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.dailyRates;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.dailyRatesChangelogWithUB;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.dailyRatesChangelogWithoutUB;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.exchangeRatesChangelogWithoutUB;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.hourlyExchangeRates;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.hourlyExchangeRatesChangelogWithoutUB;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.hourlyRates;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.hourlyRatesChangelogWithoutUB;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.prepareHelperSourceWithChangelogRecords;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.prepareHelperSourceWithInsertOnlyRecords;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.prepareInsertIntoQuery;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.prepareInsertOverwriteQuery;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.prepareManagedTableDdl;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.prepareSelectQuery;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.prepareSimpleSelectQuery;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.rates;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.SCAN_PARALLELISM;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.SINK_PARALLELISM;
+import static org.apache.flink.table.store.connector.TableStoreTestBase.createResolvedTable;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -83,21 +99,25 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
     private String rootPath;
 
     @Test
-    public void testBatchWriteWithPartitionedRecordsWithPk() throws Exception {
+    public void testBatchWriteWithSinglePartitionedRecordsWithExclusiveOnePk() throws Exception {
         // input is dailyRates()
         List<Row> expectedRecords =
                 Arrays.asList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", "US Dollar", 114L, "2022-01-01"),
                         changelogRow("+I", "Yen", 1L, "2022-01-01"),
                         changelogRow("+I", "Euro", 114L, "2022-01-01"),
-                        // part = 2022-01-02
+                        // dt = 2022-01-02
                         changelogRow("+I", "Euro", 119L, "2022-01-02"));
         // test batch read
         String managedTable =
                 collectAndCheckBatchReadWrite(
-                        true, true, null, Collections.emptyList(), expectedRecords);
-        checkFileStorePath(tEnv, managedTable);
+                        Collections.singletonList("dt"),
+                        Arrays.asList("currency", "dt"),
+                        null,
+                        Collections.emptyList(),
+                        expectedRecords);
+        checkFileStorePath(tEnv, managedTable, dailyRates().f1);
 
         // test streaming read
         final StreamTableEnvironment streamTableEnv =
@@ -105,7 +125,11 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         registerTable(streamTableEnv, managedTable);
         BlockingIterator<Row, Row> streamIter =
                 collectAndCheck(
-                        streamTableEnv, managedTable, Collections.emptyMap(), expectedRecords);
+                        streamTableEnv,
+                        managedTable,
+                        Collections.emptyMap(),
+                        null,
+                        expectedRecords);
 
         // overwrite static partition 2022-01-02
         prepareEnvAndOverwrite(
@@ -121,12 +145,9 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         tEnv,
                         managedTable,
                         Collections.emptyMap(),
+                        "dt = '2022-01-02'",
                         Arrays.asList(
-                                // part = 2022-01-01
-                                changelogRow("+I", "US Dollar", 114L, "2022-01-01"),
-                                changelogRow("+I", "Yen", 1L, "2022-01-01"),
-                                changelogRow("+I", "Euro", 114L, "2022-01-01"),
-                                // part = 2022-01-02
+                                // dt = 2022-01-02
                                 changelogRow("+I", "Euro", 100L, "2022-01-02"),
                                 changelogRow("+I", "Yen", 1L, "2022-01-02")))
                 .close();
@@ -138,36 +159,44 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         changelogRow("+I", "Euro", 114L, "2022-01-01"),
                         changelogRow("+I", "US Dollar", 114L, "2022-01-01"));
         collectAndCheckBatchReadWrite(
-                true, true, "dt <> '2022-01-02'", Collections.emptyList(), expected);
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
+                "dt <> '2022-01-02'",
+                Collections.emptyList(),
+                expected);
 
         collectAndCheckBatchReadWrite(
-                true, true, "dt = '2022-01-01'", Collections.emptyList(), expected);
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
+                "dt = '2022-01-01'",
+                Collections.emptyList(),
+                expected);
 
         // test field filter
         collectAndCheckBatchReadWrite(
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 "rate >= 100",
                 Collections.emptyList(),
                 Arrays.asList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", "US Dollar", 114L, "2022-01-01"),
                         changelogRow("+I", "Euro", 114L, "2022-01-01"),
-                        // part = 2022-01-02
+                        // dt = 2022-01-02
                         changelogRow("+I", "Euro", 119L, "2022-01-02")));
 
         // test partition and field filter
         collectAndCheckBatchReadWrite(
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 "rate >= 100 AND dt = '2022-01-02'",
                 Collections.emptyList(),
                 Collections.singletonList(changelogRow("+I", "Euro", 119L, "2022-01-02")));
 
         // test projection
         collectAndCheckBatchReadWrite(
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 null,
                 Collections.singletonList("dt"),
                 Arrays.asList(
@@ -177,8 +206,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         changelogRow("+I", "2022-01-02"))); // Euro
 
         collectAndCheckBatchReadWrite(
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 null,
                 Collections.singletonList("dt, currency, rate"),
                 Arrays.asList(
@@ -189,8 +218,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
 
         // test projection and filter
         collectAndCheckBatchReadWrite(
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 "rate = 114",
                 Collections.singletonList("rate"),
                 Arrays.asList(
@@ -200,14 +229,18 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testBatchWriteWithPartitionedRecordsWithoutPk() throws Exception {
+    public void testBatchWriteWithSinglePartitionedRecordsWithoutPk() throws Exception {
         // input is dailyRates()
 
         // test batch read
         String managedTable =
                 collectAndCheckBatchReadWrite(
-                        true, false, null, Collections.emptyList(), dailyRates());
-        checkFileStorePath(tEnv, managedTable);
+                        Collections.singletonList("dt"),
+                        Collections.emptyList(),
+                        null,
+                        Collections.emptyList(),
+                        dailyRates().f0);
+        checkFileStorePath(tEnv, managedTable, dailyRates().f1);
 
         // overwrite dynamic partition
         prepareEnvAndOverwrite(
@@ -225,41 +258,46 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         streamTableEnv,
                         managedTable,
                         Collections.emptyMap(),
+                        null,
                         Arrays.asList(
-                                // part = 2022-01-01
+                                // dt = 2022-01-01
                                 changelogRow("+I", "Euro", 90L, "2022-01-01"),
-                                // part = 2022-01-02
+                                // dt = 2022-01-02
                                 changelogRow("+I", "Yen", 2L, "2022-01-02")))
                 .close();
 
         // test partition filter
         collectAndCheckBatchReadWrite(
-                true, false, "dt >= '2022-01-01'", Collections.emptyList(), dailyRates());
+                Collections.singletonList("dt"),
+                Collections.emptyList(),
+                "dt >= '2022-01-01'",
+                Collections.emptyList(),
+                dailyRates().f0);
 
         // test field filter
         collectAndCheckBatchReadWrite(
-                true,
-                false,
+                Collections.singletonList("dt"),
+                Collections.emptyList(),
                 "currency = 'US Dollar'",
                 Collections.emptyList(),
                 Arrays.asList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", "US Dollar", 114L, "2022-01-01")));
 
         // test partition and field filter
         collectAndCheckBatchReadWrite(
-                true,
-                false,
+                Collections.singletonList("dt"),
+                Collections.emptyList(),
                 "dt = '2022-01-01' OR rate > 115",
                 Collections.emptyList(),
-                dailyRates());
+                dailyRates().f0);
 
         // test projection
         collectAndCheckBatchReadWrite(
-                true,
-                false,
+                Collections.singletonList("dt"),
+                Collections.emptyList(),
                 null,
                 Collections.singletonList("currency"),
                 Arrays.asList(
@@ -272,27 +310,27 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
 
         // test projection and filter
         collectAndCheckBatchReadWrite(
-                true,
-                false,
+                Collections.singletonList("dt"),
+                Collections.emptyList(),
                 "rate = 119",
                 Arrays.asList("currency", "dt"),
                 Collections.singletonList(changelogRow("+I", "Euro", "2022-01-02")));
     }
 
     @Test
-    public void testBatchWriteWithNonPartitionedRecordsWithPk() throws Exception {
+    public void testBatchWriteWithNonPartitionedRecordsWithOnePk() throws Exception {
         // input is rates()
         String managedTable =
                 collectAndCheckBatchReadWrite(
-                        false,
-                        true,
+                        Collections.emptyList(),
+                        Collections.singletonList("currency"),
                         null,
                         Collections.emptyList(),
                         Arrays.asList(
                                 changelogRow("+I", "US Dollar", 102L),
                                 changelogRow("+I", "Yen", 1L),
                                 changelogRow("+I", "Euro", 119L)));
-        checkFileStorePath(tEnv, managedTable);
+        checkFileStorePath(tEnv, managedTable, null);
 
         // overwrite the whole table
         prepareEnvAndOverwrite(
@@ -303,27 +341,28 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                 tEnv,
                 managedTable,
                 Collections.emptyMap(),
+                null,
                 Collections.singletonList(changelogRow("+I", "Euro", 100L)));
 
         // test field filter
         collectAndCheckBatchReadWrite(
-                false,
-                true,
+                Collections.emptyList(),
+                Collections.singletonList("currency"),
                 "currency = 'Euro'",
                 Collections.emptyList(),
                 Collections.singletonList(changelogRow("+I", "Euro", 119L)));
 
         collectAndCheckBatchReadWrite(
-                false,
-                true,
+                Collections.emptyList(),
+                Collections.singletonList("currency"),
                 "119 >= rate AND 102 < rate",
                 Collections.emptyList(),
                 Collections.singletonList(changelogRow("+I", "Euro", 119L)));
 
         // test projection
         collectAndCheckBatchReadWrite(
-                false,
-                true,
+                Collections.emptyList(),
+                Collections.singletonList("currency"),
                 null,
                 Arrays.asList("rate", "currency"),
                 Arrays.asList(
@@ -333,8 +372,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
 
         // test projection and filter
         collectAndCheckBatchReadWrite(
-                false,
-                true,
+                Collections.emptyList(),
+                Collections.singletonList("currency"),
                 "currency = 'Yen'",
                 Collections.singletonList("rate"),
                 Collections.singletonList(changelogRow("+I", 1L)));
@@ -344,13 +383,18 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
     public void testBatchWriteNonPartitionedRecordsWithoutPk() throws Exception {
         // input is rates()
         String managedTable =
-                collectAndCheckBatchReadWrite(false, false, null, Collections.emptyList(), rates());
-        checkFileStorePath(tEnv, managedTable);
+                collectAndCheckBatchReadWrite(
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        null,
+                        Collections.emptyList(),
+                        rates());
+        checkFileStorePath(tEnv, managedTable, null);
 
         // test field filter
         collectAndCheckBatchReadWrite(
-                false,
-                false,
+                Collections.emptyList(),
+                Collections.emptyList(),
                 "currency = 'Euro'",
                 Collections.emptyList(),
                 Arrays.asList(
@@ -358,12 +402,17 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         changelogRow("+I", "Euro", 114L),
                         changelogRow("+I", "Euro", 119L)));
 
-        collectAndCheckBatchReadWrite(false, false, "rate >= 1", Collections.emptyList(), rates());
+        collectAndCheckBatchReadWrite(
+                Collections.emptyList(),
+                Collections.emptyList(),
+                "rate >= 1",
+                Collections.emptyList(),
+                rates());
 
         // test projection
         collectAndCheckBatchReadWrite(
-                false,
-                false,
+                Collections.emptyList(),
+                Collections.emptyList(),
                 null,
                 Collections.singletonList("currency"),
                 Arrays.asList(
@@ -375,8 +424,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
 
         // test projection and filter
         collectAndCheckBatchReadWrite(
-                false,
-                false,
+                Collections.emptyList(),
+                Collections.emptyList(),
                 "rate > 100 OR currency = 'Yen'",
                 Collections.singletonList("currency"),
                 Arrays.asList(
@@ -388,21 +437,657 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testEnableLogAndStreamingReadWritePartitionedRecordsWithPk() throws Exception {
+    public void testBatchWriteWithMultiPartitionedRecordsWithMultiPk() throws Exception {
+        // input is hourlyExchangeRates()
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        // to_currency is USD, dt = 2022-01-01, hh = 11
+                        changelogRow("+I", "Euro", "US Dollar", 1.11d, "2022-01-01", "11"),
+                        changelogRow("+I", "HK Dollar", "US Dollar", 0.13d, "2022-01-01", "11"),
+                        changelogRow(
+                                "+I", "Singapore Dollar", "US Dollar", 0.74d, "2022-01-01", "11"),
+                        changelogRow("+I", "Yen", "US Dollar", 0.0081d, "2022-01-01", "11"),
+                        changelogRow("+I", "US Dollar", "US Dollar", 1.0d, "2022-01-01", "11"),
+                        // to_currency is USD, dt = 2022-01-01, hh = 12
+                        changelogRow("+I", "US Dollar", "US Dollar", 1.0d, "2022-01-01", "12"),
+                        changelogRow("+I", "Euro", "US Dollar", 1.12d, "2022-01-01", "12"),
+                        changelogRow("+I", "HK Dollar", "US Dollar", 0.129d, "2022-01-01", "12"),
+                        changelogRow(
+                                "+I", "Singapore Dollar", "US Dollar", 0.741d, "2022-01-01", "12"),
+                        changelogRow("+I", "Yen", "US Dollar", 0.00812d, "2022-01-01", "12"),
+                        // to_currency is Euro, dt = 2022-01-02, hh = 23
+                        changelogRow("+I", "US Dollar", "Euro", 0.918d, "2022-01-02", "23"),
+                        changelogRow("+I", "Singapore Dollar", "Euro", 0.67d, "2022-01-02", "23"));
+        // test batch read
+        String managedTable =
+                collectAndCheckBatchReadWrite(
+                        Arrays.asList("dt", "hh"),
+                        Arrays.asList("from_currency", "to_currency", "dt", "hh"),
+                        null,
+                        Collections.emptyList(),
+                        expectedRecords);
+
+        checkFileStorePath(tEnv, managedTable, hourlyExchangeRates().f1);
+
+        // test streaming read
+        final StreamTableEnvironment streamTableEnv =
+                StreamTableEnvironment.create(buildStreamEnv());
+        registerTable(streamTableEnv, managedTable);
+        BlockingIterator<Row, Row> streamIter =
+                collectAndCheck(
+                        streamTableEnv,
+                        managedTable,
+                        Collections.emptyMap(),
+                        null,
+                        expectedRecords);
+
+        // overwrite static partition dt = 2022-01-02 and hh = 23
+        Map<String, String> overwritePartition = new LinkedHashMap<>();
+        overwritePartition.put("dt", "'2022-01-02'");
+        overwritePartition.put("hh", "'23'");
+        prepareEnvAndOverwrite(
+                managedTable,
+                overwritePartition,
+                Collections.singletonList(new String[] {"'US Dollar'", "'Thai Baht'", "33.51"}));
+
+        // streaming iter will not receive any changelog
+        assertNoMoreRecords(streamIter);
+
+        // batch read to check partition refresh
+        collectAndCheck(
+                        tEnv,
+                        managedTable,
+                        Collections.emptyMap(),
+                        "dt = '2022-01-02' AND hh = '23'",
+                        Collections.singletonList(
+                                changelogRow(
+                                        "+I",
+                                        "US Dollar",
+                                        "Thai Baht",
+                                        33.51d,
+                                        "2022-01-02",
+                                        "23")))
+                .close();
+
+        // test partition filter
+        collectAndCheckBatchReadWrite(
+                Arrays.asList("dt", "hh"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt", "hh"), // pk
+                "dt = '2022-01-01'",
+                Collections.emptyList(),
+                Arrays.asList(
+                        // to_currency is USD, dt = 2022-01-01, hh = 11
+                        changelogRow("+I", "Euro", "US Dollar", 1.11d, "2022-01-01", "11"),
+                        changelogRow("+I", "HK Dollar", "US Dollar", 0.13d, "2022-01-01", "11"),
+                        changelogRow(
+                                "+I", "Singapore Dollar", "US Dollar", 0.74d, "2022-01-01", "11"),
+                        changelogRow("+I", "Yen", "US Dollar", 0.0081d, "2022-01-01", "11"),
+                        changelogRow("+I", "US Dollar", "US Dollar", 1.0d, "2022-01-01", "11"),
+                        // to_currency is USD, dt = 2022-01-01, hh = 12
+                        changelogRow("+I", "US Dollar", "US Dollar", 1.0d, "2022-01-01", "12"),
+                        changelogRow("+I", "Euro", "US Dollar", 1.12d, "2022-01-01", "12"),
+                        changelogRow("+I", "HK Dollar", "US Dollar", 0.129d, "2022-01-01", "12"),
+                        changelogRow(
+                                "+I", "Singapore Dollar", "US Dollar", 0.741d, "2022-01-01", "12"),
+                        changelogRow("+I", "Yen", "US Dollar", 0.00812d, "2022-01-01", "12")));
+
+        collectAndCheckBatchReadWrite(
+                Arrays.asList("dt", "hh"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt", "hh"), // pk
+                "dt = '2022-01-01' AND hh = '12'",
+                Collections.emptyList(),
+                Arrays.asList(
+                        changelogRow("+I", "US Dollar", "US Dollar", 1.0d, "2022-01-01", "12"),
+                        changelogRow("+I", "Euro", "US Dollar", 1.12d, "2022-01-01", "12"),
+                        changelogRow("+I", "HK Dollar", "US Dollar", 0.129d, "2022-01-01", "12"),
+                        changelogRow(
+                                "+I", "Singapore Dollar", "US Dollar", 0.741d, "2022-01-01", "12"),
+                        changelogRow("+I", "Yen", "US Dollar", 0.00812d, "2022-01-01", "12")));
+
+        // test field filter
+        collectAndCheckBatchReadWrite(
+                Arrays.asList("dt", "hh"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt", "hh"), // pk
+                "to_currency = 'Euro'",
+                Collections.emptyList(),
+                Arrays.asList(
+                        changelogRow("+I", "US Dollar", "Euro", 0.918d, "2022-01-02", "23"),
+                        changelogRow("+I", "Singapore Dollar", "Euro", 0.67d, "2022-01-02", "23")));
+
+        collectAndCheckBatchReadWrite(
+                Arrays.asList("dt", "hh"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt", "hh"), // pk
+                "from_currency = 'HK Dollar'",
+                Collections.emptyList(),
+                Arrays.asList(
+                        changelogRow("+I", "HK Dollar", "US Dollar", 0.13d, "2022-01-01", "11"),
+                        changelogRow("+I", "HK Dollar", "US Dollar", 0.129d, "2022-01-01", "12")));
+
+        collectAndCheckBatchReadWrite(
+                Arrays.asList("dt", "hh"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt", "hh"), // pk
+                "rate_by_to_currency > 0.5",
+                Collections.emptyList(),
+                Arrays.asList(
+                        changelogRow("+I", "Euro", "US Dollar", 1.11d, "2022-01-01", "11"),
+                        changelogRow(
+                                "+I", "Singapore Dollar", "US Dollar", 0.74d, "2022-01-01", "11"),
+                        changelogRow("+I", "US Dollar", "US Dollar", 1.0d, "2022-01-01", "11"),
+                        changelogRow("+I", "US Dollar", "US Dollar", 1.0d, "2022-01-01", "12"),
+                        changelogRow("+I", "Euro", "US Dollar", 1.12d, "2022-01-01", "12"),
+                        changelogRow(
+                                "+I", "Singapore Dollar", "US Dollar", 0.741d, "2022-01-01", "12"),
+                        changelogRow("+I", "US Dollar", "Euro", 0.918d, "2022-01-02", "23"),
+                        changelogRow("+I", "Singapore Dollar", "Euro", 0.67d, "2022-01-02", "23")));
+
+        // test partition and field filter
+        collectAndCheckBatchReadWrite(
+                Arrays.asList("dt", "hh"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt", "hh"), // pk
+                "rate_by_to_currency > 0.9 AND hh = '23'",
+                Collections.emptyList(),
+                Collections.singletonList(
+                        changelogRow("+I", "US Dollar", "Euro", 0.918d, "2022-01-02", "23")));
+
+        // test projection
+        collectAndCheckBatchReadWrite(
+                Arrays.asList("dt", "hh"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt", "hh"), // pk
+                null,
+                Arrays.asList("from_currency", "dt", "hh"),
+                Arrays.asList(
+                        // to_currency is USD, dt = 2022-01-01, hh = 11
+                        changelogRow("+I", "Euro", "2022-01-01", "11"),
+                        changelogRow("+I", "HK Dollar", "2022-01-01", "11"),
+                        changelogRow("+I", "Singapore Dollar", "2022-01-01", "11"),
+                        changelogRow("+I", "Yen", "2022-01-01", "11"),
+                        changelogRow("+I", "US Dollar", "2022-01-01", "11"),
+                        // to_currency is USD, dt = 2022-01-01, hh = 12
+                        changelogRow("+I", "US Dollar", "2022-01-01", "12"),
+                        changelogRow("+I", "Euro", "2022-01-01", "12"),
+                        changelogRow("+I", "HK Dollar", "2022-01-01", "12"),
+                        changelogRow("+I", "Singapore Dollar", "2022-01-01", "12"),
+                        changelogRow("+I", "Yen", "2022-01-01", "12"),
+                        // to_currency is Euro, dt = 2022-01-02, hh = 23
+                        changelogRow("+I", "US Dollar", "2022-01-02", "23"),
+                        changelogRow("+I", "Singapore Dollar", "2022-01-02", "23")));
+
+        // test projection and filter
+        collectAndCheckBatchReadWrite(
+                Arrays.asList("dt", "hh"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt", "hh"), // pk
+                "dt = '2022-01-01' AND hh >= '12' OR rate_by_to_currency > 2",
+                Arrays.asList("from_currency", "to_currency"),
+                Arrays.asList(
+                        // to_currency is USD, dt = 2022-01-01, hh = 12
+                        changelogRow("+I", "US Dollar", "US Dollar"),
+                        changelogRow("+I", "Euro", "US Dollar"),
+                        changelogRow("+I", "HK Dollar", "US Dollar"),
+                        changelogRow("+I", "Singapore Dollar", "US Dollar"),
+                        changelogRow("+I", "Yen", "US Dollar")));
+    }
+
+    @Test
+    public void testBatchWriteWithSinglePartitionedRecordsWithMultiPk() throws Exception {
+        // input is dailyExchangeRates()
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        changelogRow("+I", "US Dollar", "US Dollar", 1.0d, "2022-01-01"),
+                        changelogRow("+I", "Euro", "US Dollar", 1.11d, "2022-01-01"),
+                        changelogRow("+I", "HK Dollar", "US Dollar", 0.13d, "2022-01-01"),
+                        changelogRow("+I", "Yen", "US Dollar", 0.0082d, "2022-01-01"),
+                        changelogRow("+I", "Singapore Dollar", "US Dollar", 0.74d, "2022-01-01"),
+                        changelogRow("+I", "US Dollar", "Euro", 0.9d, "2022-01-01"),
+                        changelogRow("+I", "Singapore Dollar", "Euro", 0.67d, "2022-01-01"),
+                        changelogRow("+I", "Yen", "Yen", 1.0d, "2022-01-01"),
+                        changelogRow("+I", "Chinese Yuan", "Yen", 19.25d, "2022-01-01"),
+                        changelogRow("+I", "Singapore Dollar", "Yen", 122.46d, "2022-01-01"),
+                        changelogRow("+I", "Yen", "US Dollar", 0.0081d, "2022-01-02"),
+                        changelogRow("+I", "US Dollar", "US Dollar", 1.0d, "2022-01-02"));
+        // test batch read
+        String managedTable =
+                collectAndCheckBatchReadWrite(
+                        Collections.singletonList("dt"),
+                        Arrays.asList("from_currency", "to_currency", "dt"),
+                        null,
+                        Collections.emptyList(),
+                        expectedRecords);
+
+        checkFileStorePath(tEnv, managedTable, dailyExchangeRates().f1);
+
+        // test streaming read
+        final StreamTableEnvironment streamTableEnv =
+                StreamTableEnvironment.create(buildStreamEnv());
+        registerTable(streamTableEnv, managedTable);
+        BlockingIterator<Row, Row> streamIter =
+                collectAndCheck(
+                        streamTableEnv,
+                        managedTable,
+                        Collections.emptyMap(),
+                        null,
+                        expectedRecords);
+
+        // overwrite dynamic partition
+        prepareEnvAndOverwrite(
+                managedTable,
+                Collections.emptyMap(),
+                Collections.singletonList(
+                        new String[] {"'US Dollar'", "'Thai Baht'", "33.51", "'2022-01-01'"}));
+
+        // streaming iter will not receive any changelog
+        assertNoMoreRecords(streamIter);
+
+        // batch read to check partition refresh
+        collectAndCheck(
+                        tEnv,
+                        managedTable,
+                        Collections.emptyMap(),
+                        "dt = '2022-01-01'",
+                        Collections.singletonList(
+                                changelogRow("+I", "US Dollar", "Thai Baht", 33.51d, "2022-01-01")))
+                .close();
+
+        // test partition filter
+        collectAndCheckBatchReadWrite(
+                Collections.singletonList("dt"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt"), // pk
+                "dt = '2022-01-02'",
+                Collections.emptyList(),
+                Arrays.asList(
+                        changelogRow("+I", "Yen", "US Dollar", 0.0081d, "2022-01-02"),
+                        changelogRow("+I", "US Dollar", "US Dollar", 1.0d, "2022-01-02")));
+
+        // test field filter
+        collectAndCheckBatchReadWrite(
+                Collections.singletonList("dt"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt"), // pk
+                "rate_by_to_currency < 0.1",
+                Collections.emptyList(),
+                Arrays.asList(
+                        changelogRow("+I", "Yen", "US Dollar", 0.0082d, "2022-01-01"),
+                        changelogRow("+I", "Yen", "US Dollar", 0.0081d, "2022-01-02")));
+
+        // test partition and field filter
+        collectAndCheckBatchReadWrite(
+                Collections.singletonList("dt"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt"), // pk
+                "rate_by_to_currency > 0.9 OR dt = '2022-01-02'",
+                Collections.emptyList(),
+                Arrays.asList(
+                        changelogRow("+I", "US Dollar", "US Dollar", 1.0d, "2022-01-01"),
+                        changelogRow("+I", "Euro", "US Dollar", 1.11d, "2022-01-01"),
+                        changelogRow("+I", "Yen", "Yen", 1.0d, "2022-01-01"),
+                        changelogRow("+I", "Chinese Yuan", "Yen", 19.25d, "2022-01-01"),
+                        changelogRow("+I", "Singapore Dollar", "Yen", 122.46d, "2022-01-01"),
+                        changelogRow("+I", "Yen", "US Dollar", 0.0081d, "2022-01-02"),
+                        changelogRow("+I", "US Dollar", "US Dollar", 1.0d, "2022-01-02")));
+
+        // test projection
+        collectAndCheckBatchReadWrite(
+                Collections.singletonList("dt"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt"), // pk
+                null,
+                Arrays.asList("rate_by_to_currency", "dt"),
+                Arrays.asList(
+                        changelogRow("+I", 1.0d, "2022-01-01"), // US Dollar，US Dollar
+                        changelogRow("+I", 1.11d, "2022-01-01"), // Euro，US Dollar
+                        changelogRow("+I", 0.13d, "2022-01-01"), // HK Dollar，US Dollar
+                        changelogRow("+I", 0.0082d, "2022-01-01"), // Yen，US Dollar
+                        changelogRow("+I", 0.74d, "2022-01-01"), // Singapore Dollar，US Dollar
+                        changelogRow("+I", 0.9d, "2022-01-01"), // US Dollar，Euro
+                        changelogRow("+I", 0.67d, "2022-01-01"), // Singapore Dollar，Euro
+                        changelogRow("+I", 1.0d, "2022-01-01"), // Yen，Yen
+                        changelogRow("+I", 19.25d, "2022-01-01"), // Chinese Yuan，Yen
+                        changelogRow("+I", 122.46d, "2022-01-01"), // Singapore Dollar，Yen
+                        changelogRow("+I", 0.0081d, "2022-01-02"), // Yen，US Dollar
+                        changelogRow("+I", 1.0d, "2022-01-02") // US Dollar，US Dollar
+                        ));
+
+        // test projection and filter
+        collectAndCheckBatchReadWrite(
+                Collections.singletonList("dt"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt"), // pk
+                "dt = '2022-01-02' OR rate_by_to_currency > 100",
+                Arrays.asList("from_currency", "to_currency"),
+                Arrays.asList(
+                        changelogRow("+I", "Yen", "US Dollar"),
+                        changelogRow("+I", "US Dollar", "US Dollar"),
+                        changelogRow("+I", "Singapore Dollar", "Yen")));
+    }
+
+    @Test
+    public void testBatchWriteWithNonPartitionedRecordsWithMultiPk() throws Exception {
+        // input is exchangeRates()
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        // to_currency is USD
+                        changelogRow("+I", "Euro", "US Dollar", 1.11d),
+                        changelogRow("+I", "HK Dollar", "US Dollar", 0.13d),
+                        changelogRow("+I", "Singapore Dollar", "US Dollar", 0.74d),
+                        changelogRow("+I", "Yen", "US Dollar", 0.0081d),
+                        changelogRow("+I", "US Dollar", "US Dollar", 1.0d),
+                        // to_currency is Euro
+                        changelogRow("+I", "US Dollar", "Euro", 0.9d),
+                        changelogRow("+I", "Singapore Dollar", "Euro", 0.67d),
+                        // to_currency is Yen
+                        changelogRow("+I", "Yen", "Yen", 1.0d),
+                        changelogRow("+I", "Chinese Yuan", "Yen", 19.25d),
+                        changelogRow("+I", "Singapore Dollar", "Yen", 122.46d));
+        // test batch read
+        String managedTable =
+                collectAndCheckBatchReadWrite(
+                        Collections.emptyList(), // partition
+                        Arrays.asList("from_currency", "to_currency"), // pk
+                        null,
+                        Collections.emptyList(),
+                        expectedRecords);
+
+        checkFileStorePath(tEnv, managedTable, null);
+
+        // test streaming read
+        final StreamTableEnvironment streamTableEnv =
+                StreamTableEnvironment.create(buildStreamEnv());
+        registerTable(streamTableEnv, managedTable);
+        BlockingIterator<Row, Row> streamIter =
+                collectAndCheck(
+                        streamTableEnv,
+                        managedTable,
+                        Collections.emptyMap(),
+                        null,
+                        expectedRecords);
+
+        // overwrite the whole table
+        prepareEnvAndOverwrite(
+                managedTable,
+                Collections.emptyMap(),
+                Collections.singletonList(new String[] {"'US Dollar'", "'Thai Baht'", "33.51"}));
+
+        // streaming iter will not receive any changelog
+        assertNoMoreRecords(streamIter);
+
+        // batch read to check data refresh
+        collectAndCheck(
+                        tEnv,
+                        managedTable,
+                        Collections.emptyMap(),
+                        null,
+                        Collections.singletonList(
+                                changelogRow("+I", "US Dollar", "Thai Baht", 33.51d)))
+                .close();
+
+        // test field filter
+        collectAndCheckBatchReadWrite(
+                Collections.emptyList(), // partition
+                Arrays.asList("from_currency", "to_currency"), // pk
+                "rate_by_to_currency < 0.1",
+                Collections.emptyList(),
+                Collections.singletonList(changelogRow("+I", "Yen", "US Dollar", 0.0081d)));
+
+        // test projection
+        collectAndCheckBatchReadWrite(
+                Collections.emptyList(), // partition
+                Arrays.asList("from_currency", "to_currency"), // pk
+                null,
+                Collections.singletonList("rate_by_to_currency"),
+                Arrays.asList(
+                        changelogRow("+I", 1.11d), // Euro, US Dollar
+                        changelogRow("+I", 0.13d), // HK Dollar, US Dollar
+                        changelogRow("+I", 0.74d), // Singapore Dollar, US Dollar
+                        changelogRow("+I", 0.0081d), // Yen, US Dollar
+                        changelogRow("+I", 1.0d), // US Dollar, US Dollar
+                        changelogRow("+I", 0.9d), // US Dollar, Euro
+                        changelogRow("+I", 0.67d), // Singapore Dollar, Euro
+                        changelogRow("+I", 1.0d), // Yen, Yen
+                        changelogRow("+I", 19.25d), // Chinese Yuan, Yen
+                        changelogRow("+I", 122.46d) // Singapore Dollar, Yen
+                        ));
+
+        // test projection and filter
+        collectAndCheckBatchReadWrite(
+                Collections.emptyList(), // partition
+                Arrays.asList("from_currency", "to_currency"), // pk
+                "rate_by_to_currency > 100",
+                Arrays.asList("from_currency", "to_currency"),
+                Collections.singletonList(changelogRow("+I", "Singapore Dollar", "Yen")));
+    }
+
+    @Test
+    public void testBatchWriteMultiPartitionedRecordsWithExclusiveOnePk() throws Exception {
+        // input is hourlyRates()
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        // dt = 2022-01-01, hh = 00
+                        changelogRow("+I", "Yen", 1L, "2022-01-01", "00"),
+                        changelogRow("+I", "Euro", 114L, "2022-01-01", "00"),
+                        changelogRow("+I", "US Dollar", 114L, "2022-01-01", "00"),
+                        // dt = 2022-01-01, hh = 20
+                        changelogRow("+I", "Yen", 1L, "2022-01-01", "20"),
+                        changelogRow("+I", "Euro", 114L, "2022-01-01", "20"),
+                        changelogRow("+I", "US Dollar", 114L, "2022-01-01", "20"),
+                        // dt = 2022-01-02, hh = 12
+                        changelogRow("+I", "Euro", 119L, "2022-01-02", "12"));
+        // test batch read
+        String managedTable =
+                collectAndCheckBatchReadWrite(
+                        Arrays.asList("dt", "hh"), // partition
+                        Arrays.asList("currency", "dt", "hh"), // pk
+                        null,
+                        Collections.emptyList(),
+                        expectedRecords);
+
+        checkFileStorePath(tEnv, managedTable, hourlyRates().f1);
+
+        // test streaming read
+        final StreamTableEnvironment streamTableEnv =
+                StreamTableEnvironment.create(buildStreamEnv());
+        registerTable(streamTableEnv, managedTable);
+        BlockingIterator<Row, Row> streamIter =
+                collectAndCheck(
+                        streamTableEnv,
+                        managedTable,
+                        Collections.emptyMap(),
+                        null,
+                        expectedRecords);
+
+        // dynamic overwrite
+        // INSERT OVERWRITE `manged_table-${uuid}` VALUES(...)
+        prepareEnvAndOverwrite(
+                managedTable,
+                Collections.emptyMap(),
+                Collections.singletonList(
+                        new String[] {"'HK Dollar'", "80", "'2022-01-01'", "'00'"}));
+
+        // INSERT OVERWRITE `manged_table-${uuid}` PARTITION (dt = '2022-01-02') VALUES(...)
+        prepareEnvAndOverwrite(
+                managedTable,
+                Collections.singletonMap("dt", "'2022-01-02'"),
+                Collections.singletonList(new String[] {"'Euro'", "120", "'12'"}));
+
+        // batch read to check data refresh
+        collectAndCheck(
+                tEnv,
+                managedTable,
+                Collections.emptyMap(),
+                "hh = '00' OR hh = '12'",
+                Arrays.asList(
+                        changelogRow("+I", "HK Dollar", 80L, "2022-01-01", "00"),
+                        changelogRow("+I", "Euro", 120L, "2022-01-02", "12")));
+
+        // streaming iter will not receive any changelog
+        assertNoMoreRecords(streamIter);
+
+        // test partition filter
+        collectAndCheckBatchReadWrite(
+                Arrays.asList("dt", "hh"), // partition
+                Arrays.asList("currency", "dt", "hh"), // pk
+                "hh >= '10'",
+                Collections.emptyList(),
+                Arrays.asList(
+                        // dt = 2022-01-01, hh = 20
+                        changelogRow("+I", "Yen", 1L, "2022-01-01", "20"),
+                        changelogRow("+I", "Euro", 114L, "2022-01-01", "20"),
+                        changelogRow("+I", "US Dollar", 114L, "2022-01-01", "20"),
+                        // dt = 2022-01-02, hh = 12
+                        changelogRow("+I", "Euro", 119L, "2022-01-02", "12")));
+
+        // test field filter
+        collectAndCheckBatchReadWrite(
+                Arrays.asList("dt", "hh"), // partition
+                Arrays.asList("currency", "dt", "hh"), // pk
+                "rate >= 119",
+                Collections.emptyList(),
+                Collections.singletonList(
+                        // dt = 2022-01-02, hh = 12
+                        changelogRow("+I", "Euro", 119L, "2022-01-02", "12")));
+
+        // test projection
+        collectAndCheckBatchReadWrite(
+                Arrays.asList("dt", "hh"), // partition
+                Arrays.asList("currency", "dt", "hh"), // pk
+                null,
+                Collections.singletonList("hh"),
+                Arrays.asList(
+                        changelogRow("+I", "00"), // Yen, 1L, 2022-01-01
+                        changelogRow("+I", "00"), // Euro, 114L, 2022-01-01
+                        changelogRow("+I", "00"), // US Dollar, 114L, 2022-01-01
+                        changelogRow("+I", "20"), // Yen, 1L, 2022-01-01
+                        changelogRow("+I", "20"), // Euro, 114L, 2022-01-01
+                        changelogRow("+I", "20"), // US Dollar, 114L, 2022-01-01
+                        changelogRow("+I", "12") // Euro, 119L, "2022-01-02
+                        ));
+
+        // test projection and filter
+        collectAndCheckBatchReadWrite(
+                Arrays.asList("dt", "hh"), // partition
+                Arrays.asList("currency", "dt", "hh"), // pk
+                "rate > 100 AND hh >= '20'",
+                Collections.singletonList("rate"),
+                Collections.singletonList(changelogRow("+I", 114L)));
+    }
+
+    @Test
+    public void testBatchWriteMultiPartitionedRecordsWithoutPk() throws Exception {
+        // input is hourlyRates()
+
+        // test batch read
+        String managedTable =
+                collectAndCheckBatchReadWrite(
+                        Arrays.asList("dt", "hh"), // partition
+                        Collections.emptyList(), // pk
+                        null,
+                        Collections.emptyList(),
+                        hourlyRates().f0);
+
+        checkFileStorePath(tEnv, managedTable, hourlyRates().f1);
+
+        // test streaming read
+        final StreamTableEnvironment streamTableEnv =
+                StreamTableEnvironment.create(buildStreamEnv());
+        registerTable(streamTableEnv, managedTable);
+        BlockingIterator<Row, Row> streamIter =
+                collectAndCheck(
+                        streamTableEnv,
+                        managedTable,
+                        Collections.emptyMap(),
+                        null,
+                        hourlyRates().f0);
+
+        // dynamic overwrite the whole table with null partitions
+        String query =
+                String.format(
+                        "INSERT OVERWRITE `%s` SELECT 'Yen', 1, CAST(null AS STRING), CAST(null AS STRING) FROM `%s`",
+                        managedTable, managedTable);
+        prepareEnvAndOverwrite(managedTable, query);
+        // check new partition path
+        checkFileStorePath(tEnv, managedTable, "dt:null,hh:null");
+
+        // batch read to check data refresh
+        collectAndCheck(
+                tEnv,
+                managedTable,
+                Collections.emptyMap(),
+                null,
+                Collections.singletonList(changelogRow("+I", "Yen", 1L, null, null)));
+
+        // streaming iter will not receive any changelog
+        assertNoMoreRecords(streamIter);
+
+        // test partition filter
+        collectAndCheckBatchReadWrite(
+                Arrays.asList("dt", "hh"), // partition
+                Collections.emptyList(), // pk
+                "hh >= '10'",
+                Collections.emptyList(),
+                Arrays.asList(
+                        // dt = 2022-01-01, hh = 20
+                        changelogRow("+I", "US Dollar", 102L, "2022-01-01", "20"),
+                        changelogRow("+I", "Euro", 114L, "2022-01-01", "20"),
+                        changelogRow("+I", "Yen", 1L, "2022-01-01", "20"),
+                        changelogRow("+I", "Euro", 114L, "2022-01-01", "20"),
+                        changelogRow("+I", "US Dollar", 114L, "2022-01-01", "20"),
+                        // dt = 2022-01-02, hh = 12
+                        changelogRow("+I", "Euro", 119L, "2022-01-02", "12")));
+
+        // test field filter
+        collectAndCheckBatchReadWrite(
+                Arrays.asList("dt", "hh"), // partition
+                Collections.emptyList(), // pk
+                "rate >= 119",
+                Collections.emptyList(),
+                Collections.singletonList(
+                        // dt = 2022-01-02, hh = 12
+                        changelogRow("+I", "Euro", 119L, "2022-01-02", "12")));
+
+        // test projection
+        collectAndCheckBatchReadWrite(
+                Arrays.asList("dt", "hh"), // partition
+                Collections.emptyList(), // pk
+                null,
+                Collections.singletonList("currency"),
+                Arrays.asList(
+                        // dt = 2022-01-01, hh = 00
+                        changelogRow("+I", "US Dollar"),
+                        changelogRow("+I", "Euro"),
+                        changelogRow("+I", "Yen"),
+                        changelogRow("+I", "Euro"),
+                        changelogRow("+I", "US Dollar"),
+                        // dt = 2022-01-01, hh = 20
+                        changelogRow("+I", "US Dollar"),
+                        changelogRow("+I", "Euro"),
+                        changelogRow("+I", "Yen"),
+                        changelogRow("+I", "Euro"),
+                        changelogRow("+I", "US Dollar"),
+                        // dt = 2022-01-02, hh = 12
+                        changelogRow("+I", "Euro")));
+
+        // test projection and filter
+        collectAndCheckBatchReadWrite(
+                Arrays.asList("dt", "hh"), // partition
+                Collections.emptyList(), // pk
+                "rate > 100 AND hh >= '20'",
+                Collections.singletonList("rate"),
+                Collections.singletonList(changelogRow("+I", 114L)));
+    }
+
+    @Test
+    public void testEnableLogAndStreamingReadWriteSinglePartitionedRecordsWithExclusiveOnePk()
+            throws Exception {
         // input is dailyRatesChangelogWithoutUB()
         // test hybrid read
         Tuple2<String, BlockingIterator<Row, Row>> tuple =
                 collectAndCheckStreamingReadWriteWithoutClose(
+                        Collections.singletonList("dt"),
+                        Arrays.asList("currency", "dt"),
                         Collections.emptyMap(),
                         "dt >= '2022-01-01' AND dt <= '2022-01-03' OR currency = 'HK Dollar'",
                         Collections.emptyList(),
                         Arrays.asList(
-                                // part = 2022-01-01
+                                // dt = 2022-01-01
                                 changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
-                                // part = 2022-01-02
+                                // dt = 2022-01-02
                                 changelogRow("+I", "Euro", 119L, "2022-01-02")));
         String managedTable = tuple.f0;
-        checkFileStorePath(tEnv, managedTable);
+        checkFileStorePath(tEnv, managedTable, dailyRatesChangelogWithoutUB().f1);
         BlockingIterator<Row, Row> streamIter = tuple.f1;
 
         // test log store in hybrid mode accepts all filters
@@ -440,10 +1125,11 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                 batchTableEnv,
                 managedTable,
                 Collections.emptyMap(),
+                null,
                 Arrays.asList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
-                        // part = 2022-01-02
+                        // dt = 2022-01-02
                         changelogRow("+I", "Euro", 100L, "2022-01-02"),
                         changelogRow("+I", "Yen", 1L, "2022-01-02"),
                         // part = 2022-01-03
@@ -458,8 +1144,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // filter on partition
         collectAndCheckStreamingReadWriteWithClose(
                 true,
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 Collections.emptyMap(),
                 "dt = '2022-01-01'",
                 Collections.emptyList(),
@@ -468,8 +1154,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test field filter
         collectAndCheckStreamingReadWriteWithClose(
                 true,
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 Collections.emptyMap(),
                 "currency = 'US Dollar'",
                 Collections.emptyList(),
@@ -478,8 +1164,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test partition and field filter
         collectAndCheckStreamingReadWriteWithClose(
                 true,
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 Collections.emptyMap(),
                 "dt = '2022-01-01' AND rate = 1",
                 Collections.emptyList(),
@@ -488,8 +1174,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test projection and filter
         collectAndCheckStreamingReadWriteWithClose(
                 true,
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 Collections.emptyMap(),
                 "dt = '2022-01-02' AND currency = 'Euro'",
                 Arrays.asList("rate", "dt", "currency"),
@@ -497,7 +1183,279 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testDisableLogAndStreamingReadWritePartitionedRecordsWithPk() throws Exception {
+    public void testEnableLogAndStreamingReadWriteSinglePartitionedRecordsWithMultiPk()
+            throws Exception {
+        // input is dailyExchangeRatesChangelogWithoutUB()
+        // test hybrid read
+        Tuple2<String, BlockingIterator<Row, Row>> tuple =
+                collectAndCheckStreamingReadWriteWithoutClose(
+                        Collections.singletonList("dt"),
+                        Arrays.asList("from_currency", "to_currency", "dt"),
+                        Collections.emptyMap(),
+                        null,
+                        Collections.emptyList(),
+                        Arrays.asList(
+                                changelogRow("+I", "HK Dollar", "US Dollar", 0.13d, "2022-01-01"),
+                                changelogRow(
+                                        "+I", "Singapore Dollar", "US Dollar", 0.74d, "2022-01-01"),
+                                changelogRow("+I", "Yen", "US Dollar", 0.0081d, "2022-01-01"),
+                                changelogRow("+I", "Euro", "US Dollar", 1.11d, "2022-01-01"),
+                                changelogRow("+I", "US Dollar", "US Dollar", 1.0d, "2022-01-01"),
+                                changelogRow("+I", "US Dollar", "Euro", 0.9d, "2022-01-02"),
+                                changelogRow("+I", "Yen", "Yen", 1.0d, "2022-01-02"),
+                                changelogRow("+I", "Chinese Yuan", "Yen", 19.25d, "2022-01-02"),
+                                changelogRow(
+                                        "+I", "Singapore Dollar", "Yen", 122.46d, "2022-01-02")));
+        String managedTable = tuple.f0;
+        checkFileStorePath(tEnv, managedTable, dailyRatesChangelogWithoutUB().f1);
+        BlockingIterator<Row, Row> streamIter = tuple.f1;
+
+        // test streaming consume changelog
+        tEnv.executeSql(
+                        String.format(
+                                "INSERT INTO `%s` PARTITION (dt = '2022-01-03')\n"
+                                        + "VALUES('Chinese Yuan', 'HK Dollar', 1.231)\n",
+                                managedTable))
+                .await();
+
+        assertThat(streamIter.collect(1, 5, TimeUnit.SECONDS))
+                .containsExactlyInAnyOrderElementsOf(
+                        Collections.singletonList(
+                                changelogRow(
+                                        "+I", "Chinese Yuan", "HK Dollar", 1.231d, "2022-01-03")));
+
+        // dynamic overwrite the whole table
+        String query =
+                String.format(
+                        "INSERT OVERWRITE `%s` SELECT 'US Dollar', 'US Dollar', 1, '2022-04-02' FROM `%s`",
+                        managedTable, managedTable);
+        prepareEnvAndOverwrite(managedTable, query);
+        checkFileStorePath(tEnv, managedTable, "dt:2022-04-02");
+
+        // batch read to check data refresh
+        final StreamTableEnvironment batchTableEnv =
+                StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
+        registerTable(batchTableEnv, managedTable);
+        collectAndCheck(
+                batchTableEnv,
+                managedTable,
+                Collections.emptyMap(),
+                null,
+                Collections.singletonList(
+                        changelogRow("+I", "US Dollar", "US Dollar", 1.0d, "2022-04-02")));
+
+        // check no changelog generated for streaming read
+        assertNoMoreRecords(streamIter);
+
+        // filter on partition and field filter
+        collectAndCheckStreamingReadWriteWithClose(
+                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("from_currency", "to_currency", "dt"),
+                Collections.emptyMap(),
+                "dt = '2022-01-02' AND from_currency = 'US Dollar'",
+                Collections.emptyList(),
+                Collections.singletonList(
+                        changelogRow("+I", "US Dollar", "Euro", 0.9, "2022-01-02")));
+
+        // test projection and filter
+        collectAndCheckStreamingReadWriteWithClose(
+                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("from_currency", "to_currency", "dt"),
+                Collections.emptyMap(),
+                "dt = '2022-01-01' AND rate_by_to_currency IS NULL",
+                Arrays.asList("from_currency", "to_currency"),
+                Collections.emptyList());
+    }
+
+    @Test
+    public void testEnableLogAndStreamingReadWriteMultiPartitionedRecordsWithMultiPk()
+            throws Exception {
+        // input is hourlyExchangeRatesChangelogWithoutUB()
+        // test hybrid read
+        Tuple2<String, BlockingIterator<Row, Row>> tuple =
+                collectAndCheckStreamingReadWriteWithoutClose(
+                        Arrays.asList("dt", "hh"),
+                        Arrays.asList("from_currency", "to_currency", "dt", "hh"),
+                        Collections.emptyMap(),
+                        null,
+                        Collections.emptyList(),
+                        Arrays.asList(
+                                changelogRow(
+                                        "+I", "HK Dollar", "US Dollar", 0.13d, "2022-01-02", "20"),
+                                changelogRow("+I", "Yen", "US Dollar", 0.0081d, "2022-01-02", "20"),
+                                changelogRow(
+                                        "+I",
+                                        "Singapore Dollar",
+                                        "US Dollar",
+                                        0.76d,
+                                        "2022-01-02",
+                                        "20"),
+                                changelogRow("+I", "US Dollar", "Euro", 0.9d, "2022-01-02", "20"),
+                                changelogRow(
+                                        "+I", "Singapore Dollar", "Euro", null, "2022-01-02", "20"),
+                                changelogRow("+I", "Yen", "Yen", 1.0d, "2022-01-02", "20"),
+                                changelogRow(
+                                        "+I", "Chinese Yuan", "Yen", 25.6d, "2022-01-02", "20"),
+                                changelogRow("+I", "US Dollar", "Yen", 122.46d, "2022-01-02", "21"),
+                                changelogRow(
+                                        "+I",
+                                        "Singapore Dollar",
+                                        "Yen",
+                                        90.1d,
+                                        "2022-01-02",
+                                        "20")));
+        String managedTable = tuple.f0;
+        checkFileStorePath(tEnv, managedTable, hourlyExchangeRatesChangelogWithoutUB().f1);
+        BlockingIterator<Row, Row> streamIter = tuple.f1;
+
+        // test streaming consume changelog
+        tEnv.executeSql(
+                        String.format(
+                                "INSERT INTO `%s` \n"
+                                        + "VALUES('Chinese Yuan', 'HK Dollar', 1.231, '2022-01-03', '15')\n",
+                                managedTable))
+                .await();
+
+        assertThat(streamIter.collect(1, 5, TimeUnit.SECONDS))
+                .containsExactlyInAnyOrderElementsOf(
+                        Collections.singletonList(
+                                changelogRow(
+                                        "+I",
+                                        "Chinese Yuan",
+                                        "HK Dollar",
+                                        1.231d,
+                                        "2022-01-03",
+                                        "15")));
+
+        // dynamic overwrite the whole table
+        String query =
+                String.format(
+                        "INSERT OVERWRITE `%s` SELECT 'US Dollar', 'US Dollar', 1, '2022-04-02', '10' FROM `%s`",
+                        managedTable, managedTable);
+        prepareEnvAndOverwrite(managedTable, query);
+        checkFileStorePath(tEnv, managedTable, "dt:2022-04-02,hh:10");
+
+        // batch read to check data refresh
+        final StreamTableEnvironment batchTableEnv =
+                StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
+        registerTable(batchTableEnv, managedTable);
+        collectAndCheck(
+                batchTableEnv,
+                managedTable,
+                Collections.emptyMap(),
+                null,
+                Collections.singletonList(
+                        changelogRow("+I", "US Dollar", "US Dollar", 1.0d, "2022-04-02", "10")));
+
+        // check no changelog generated for streaming read
+        assertNoMoreRecords(streamIter);
+
+        // filter on partition and field filter
+        collectAndCheckStreamingReadWriteWithClose(
+                true,
+                Arrays.asList("dt", "hh"),
+                Arrays.asList("from_currency", "to_currency", "dt", "hh"),
+                Collections.emptyMap(),
+                "dt = '2022-01-02' AND from_currency = 'US Dollar'",
+                Collections.emptyList(),
+                Arrays.asList(
+                        changelogRow("+I", "US Dollar", "Euro", 0.9d, "2022-01-02", "20"),
+                        changelogRow("+I", "US Dollar", "Yen", 122.46d, "2022-01-02", "21")));
+
+        // test projection and filter
+        collectAndCheckStreamingReadWriteWithClose(
+                true,
+                Arrays.asList("dt", "hh"),
+                Arrays.asList("from_currency", "to_currency", "dt", "hh"),
+                Collections.emptyMap(),
+                "dt = '2022-01-02' AND from_currency = 'US Dollar'",
+                Arrays.asList("from_currency", "to_currency"),
+                Arrays.asList(
+                        changelogRow("+I", "US Dollar", "Euro"),
+                        changelogRow("+I", "US Dollar", "Yen")));
+    }
+
+    @Test
+    public void testEnableLogAndStreamingReadWriteMultiPartitionedRecordsWithoutPk()
+            throws Exception {
+        // input is dailyExchangeRatesChangelogWithUB()
+        // test hybrid read
+        Tuple2<String, BlockingIterator<Row, Row>> tuple =
+                collectAndCheckStreamingReadWriteWithoutClose(
+                        Collections.singletonList("dt"),
+                        Collections.emptyList(),
+                        Collections.emptyMap(),
+                        null,
+                        Collections.emptyList(),
+                        Arrays.asList(
+                                // dt = 2022-01-01
+                                changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
+                                // dt = 2022-01-02
+                                changelogRow("+I", "Euro", 115L, "2022-01-02")));
+        String managedTable = tuple.f0;
+        checkFileStorePath(tEnv, managedTable, dailyRatesChangelogWithUB().f1);
+        BlockingIterator<Row, Row> streamIter = tuple.f1;
+
+        // test streaming consume changelog
+        tEnv.executeSql(
+                        String.format(
+                                "INSERT INTO `%s` PARTITION (dt = '2022-04-02')\n"
+                                        + "VALUES('Euro', 116)\n",
+                                managedTable))
+                .await();
+
+        assertThat(streamIter.collect(1, 5, TimeUnit.SECONDS))
+                .containsExactlyInAnyOrderElementsOf(
+                        Collections.singletonList(changelogRow("+I", "Euro", 116L, "2022-04-02")));
+
+        // dynamic overwrite the whole table
+        String query =
+                String.format(
+                        "INSERT OVERWRITE `%s` SELECT 'US Dollar', 103, '2022-04-02' FROM `%s`",
+                        managedTable, managedTable);
+        prepareEnvAndOverwrite(managedTable, query);
+        checkFileStorePath(tEnv, managedTable, "dt:2022-04-02");
+
+        // batch read to check data refresh
+        final StreamTableEnvironment batchTableEnv =
+                StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
+        registerTable(batchTableEnv, managedTable);
+        collectAndCheck(
+                batchTableEnv,
+                managedTable,
+                Collections.emptyMap(),
+                null,
+                Collections.singletonList(changelogRow("+I", "US Dollar", 103L, "2022-04-02")));
+
+        // check no changelog generated for streaming read
+        assertNoMoreRecords(streamIter);
+
+        // filter on partition and field filter
+        collectAndCheckStreamingReadWriteWithClose(
+                true,
+                Collections.singletonList("dt"),
+                Collections.emptyList(),
+                Collections.emptyMap(),
+                "dt = '2022-01-01' AND currency = 'Yen'",
+                Collections.emptyList(),
+                Collections.emptyList());
+
+        // test projection and filter
+        collectAndCheckStreamingReadWriteWithClose(
+                true,
+                Collections.singletonList("dt"),
+                Collections.emptyList(),
+                Collections.emptyMap(),
+                "dt = '2022-01-01' AND rate = 103",
+                Collections.singletonList("currency"),
+                Collections.emptyList());
+    }
+
+    @Test
+    public void testDisableLogAndStreamingReadWriteSinglePartitionedRecordsWithExclusiveOnePk()
+            throws Exception {
         // input is dailyRatesChangelogWithoutUB()
         // file store continuous read
         // will not merge, at least collect two records
@@ -505,103 +1463,105 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                 tEnv,
                 collectAndCheckStreamingReadWriteWithClose(
                         false,
-                        true,
-                        true,
+                        Collections.singletonList("dt"),
+                        Arrays.asList("currency", "dt"),
                         Collections.emptyMap(),
                         null,
                         Collections.emptyList(),
                         Arrays.asList(
-                                // part = 2022-01-01
+                                // dt = 2022-01-01
                                 changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
-                                // part = 2022-01-02
-                                changelogRow("+I", "Euro", 119L, "2022-01-02"))));
+                                // dt = 2022-01-02
+                                changelogRow("+I", "Euro", 119L, "2022-01-02"))),
+                dailyRatesChangelogWithoutUB().f1);
 
         // test partition filter
         collectAndCheckStreamingReadWriteWithClose(
                 false,
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 Collections.emptyMap(),
                 "dt < '2022-01-02'",
                 Collections.emptyList(),
                 Collections.singletonList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", "US Dollar", 102L, "2022-01-01")));
 
         // test field filter
         collectAndCheckStreamingReadWriteWithClose(
                 false,
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 Collections.emptyMap(),
                 "rate = 102",
                 Collections.emptyList(),
                 Collections.singletonList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", "US Dollar", 102L, "2022-01-01")));
 
         // test partition and field filter
         collectAndCheckStreamingReadWriteWithClose(
                 false,
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 Collections.emptyMap(),
                 "rate = 102 or dt < '2022-01-02'",
                 Collections.emptyList(),
                 Collections.singletonList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", "US Dollar", 102L, "2022-01-01")));
 
         // test projection and filter
         collectAndCheckStreamingReadWriteWithClose(
                 false,
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 Collections.emptyMap(),
                 "rate = 102 or dt < '2022-01-02'",
                 Collections.singletonList("currency"),
                 Collections.singletonList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", "US Dollar")));
     }
 
     @Test
-    public void testStreamingReadWritePartitionedRecordsWithoutPk() throws Exception {
+    public void testStreamingReadWriteSinglePartitionedRecordsWithoutPk() throws Exception {
         // input is dailyRatesChangelogWithUB()
         // enable log store, file store bounded read with merge
         checkFileStorePath(
                 tEnv,
                 collectAndCheckStreamingReadWriteWithClose(
                         true,
-                        true,
-                        false,
+                        Collections.singletonList("dt"),
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         null,
                         Collections.emptyList(),
                         Arrays.asList(
-                                // part = 2022-01-01
+                                // dt = 2022-01-01
                                 changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
-                                // part = 2022-01-02
-                                changelogRow("+I", "Euro", 115L, "2022-01-02"))));
+                                // dt = 2022-01-02
+                                changelogRow("+I", "Euro", 115L, "2022-01-02"))),
+                dailyRatesChangelogWithUB().f1);
 
         // test partition filter
         collectAndCheckStreamingReadWriteWithClose(
                 true,
-                true,
-                false,
+                Collections.singletonList("dt"),
+                Collections.emptyList(),
                 Collections.emptyMap(),
                 "dt IS NOT NULL",
                 Collections.emptyList(),
                 Arrays.asList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
-                        // part = 2022-01-02
+                        // dt = 2022-01-02
                         changelogRow("+I", "Euro", 115L, "2022-01-02")));
 
         collectAndCheckStreamingReadWriteWithClose(
                 true,
-                true,
-                false,
+                Collections.singletonList("dt"),
+                Collections.emptyList(),
                 Collections.emptyMap(),
                 "dt IS NULL",
                 Collections.emptyList(),
@@ -610,22 +1570,22 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test field filter
         collectAndCheckStreamingReadWriteWithClose(
                 true,
-                true,
-                false,
+                Collections.singletonList("dt"),
+                Collections.emptyList(),
                 Collections.emptyMap(),
                 "currency = 'US Dollar' OR rate = 115",
                 Collections.emptyList(),
                 Arrays.asList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
-                        // part = 2022-01-02
+                        // dt = 2022-01-02
                         changelogRow("+I", "Euro", 115L, "2022-01-02")));
 
         // test partition and field filter
         collectAndCheckStreamingReadWriteWithClose(
                 true,
-                true,
-                false,
+                Collections.singletonList("dt"),
+                Collections.emptyList(),
                 Collections.emptyMap(),
                 "(dt = '2022-01-02' AND currency = 'US Dollar') OR (dt = '2022-01-01' AND rate = 115)",
                 Collections.emptyList(),
@@ -634,52 +1594,53 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test projection
         collectAndCheckStreamingReadWriteWithClose(
                 true,
-                true,
-                false,
+                Collections.singletonList("dt"),
+                Collections.emptyList(),
                 Collections.emptyMap(),
                 null,
                 Collections.singletonList("rate"),
                 Arrays.asList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", 102L),
-                        // part = 2022-01-02
+                        // dt = 2022-01-02
                         changelogRow("+I", 115L)));
 
         // test projection and filter
         collectAndCheckStreamingReadWriteWithClose(
                 true,
-                true,
-                false,
+                Collections.singletonList("dt"),
+                Collections.emptyList(),
                 Collections.emptyMap(),
                 "dt <> '2022-01-01'",
                 Collections.singletonList("rate"),
                 Collections.singletonList(
-                        // part = 2022-01-02, Euro
+                        // dt = 2022-01-02, Euro
                         changelogRow("+I", 115L)));
     }
 
     @Test
-    public void testStreamingReadWriteNonPartitionedRecordsWithPk() throws Exception {
+    public void testStreamingReadWriteNonPartitionedRecordsWithExclusiveOnePk() throws Exception {
         // input is ratesChangelogWithoutUB()
         // enable log store, file store bounded read with merge
         checkFileStorePath(
                 tEnv,
                 collectAndCheckStreamingReadWriteWithClose(
                         true,
-                        false,
-                        true,
+                        Collections.emptyList(),
+                        Collections.singletonList("currency"),
                         Collections.emptyMap(),
                         null,
                         Collections.emptyList(),
                         Arrays.asList(
                                 changelogRow("+I", "US Dollar", 102L),
-                                changelogRow("+I", "Euro", 119L))));
+                                changelogRow("+I", "Euro", 119L))),
+                null);
 
         // test field filter
         collectAndCheckStreamingReadWriteWithClose(
                 true,
-                false,
-                true,
+                Collections.emptyList(),
+                Collections.singletonList("currency"),
                 Collections.emptyMap(),
                 "currency = 'Yen'",
                 Collections.emptyList(),
@@ -688,8 +1649,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test projection
         collectAndCheckStreamingReadWriteWithClose(
                 true,
-                false,
-                true,
+                Collections.emptyList(),
+                Collections.singletonList("currency"),
                 Collections.emptyMap(),
                 null,
                 Collections.singletonList("currency"),
@@ -698,8 +1659,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test projection and filter
         collectAndCheckStreamingReadWriteWithClose(
                 true,
-                false,
-                true,
+                Collections.emptyList(),
+                Collections.singletonList("currency"),
                 Collections.emptyMap(),
                 "rate = 102",
                 Collections.singletonList("currency"),
@@ -714,8 +1675,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                 tEnv,
                 collectAndCheckStreamingReadWriteWithClose(
                         true,
-                        false,
-                        false,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         null,
                         Collections.emptyList(),
@@ -723,13 +1684,14 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                                 changelogRow("+I", "US Dollar", 102L),
                                 changelogRow("+I", "Euro", 119L),
                                 changelogRow("+I", null, 100L),
-                                changelogRow("+I", "HK Dollar", null))));
+                                changelogRow("+I", "HK Dollar", null))),
+                null);
 
         // test field filter
         collectAndCheckStreamingReadWriteWithClose(
                 true,
-                false,
-                false,
+                Collections.emptyList(),
+                Collections.emptyList(),
                 Collections.emptyMap(),
                 "currency IS NOT NULL",
                 Collections.emptyList(),
@@ -740,8 +1702,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
 
         collectAndCheckStreamingReadWriteWithClose(
                 true,
-                false,
-                false,
+                Collections.emptyList(),
+                Collections.emptyList(),
                 Collections.emptyMap(),
                 "rate IS NOT NULL",
                 Collections.emptyList(),
@@ -753,8 +1715,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test projection and filter
         collectAndCheckStreamingReadWriteWithClose(
                 true,
-                false,
-                false,
+                Collections.emptyList(),
+                Collections.emptyList(),
                 Collections.emptyMap(),
                 "currency IS NOT NULL AND rate is NOT NULL",
                 Collections.singletonList("rate"),
@@ -765,16 +1727,346 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testReadLatestChangelogOfPartitionedRecordsWithPk() throws Exception {
-        // input is dailyRatesChangelogWithoutUB()
+    public void testReadLatestChangelogOfMultiPartitionedRecordsWithMultiPk() throws Exception {
+        // input is hourlyExchangeRatesChangelogWithoutUB()
+        List<Row> expectedRecords = new ArrayList<>(hourlyExchangeRatesChangelogWithoutUB().f0);
+        expectedRecords.add(changelogRow("-U", "Yen", "US Dollar", 0.0082d, "2022-01-02", "20"));
+        expectedRecords.add(
+                changelogRow("-U", "Singapore Dollar", "US Dollar", 0.74d, "2022-01-02", "20"));
+        expectedRecords.add(
+                changelogRow("-U", "Singapore Dollar", "Euro", 0.67d, "2022-01-02", "20"));
+        expectedRecords.add(changelogRow("-U", "Chinese Yuan", "Yen", 19.25d, "2022-01-02", "20"));
+        expectedRecords.add(
+                changelogRow("-U", "Singapore Dollar", "Yen", 90.32d, "2022-01-02", "20"));
         collectLatestLogAndCheck(
                 false,
-                true,
-                true,
+                Arrays.asList("dt", "hh"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt", "hh"), // pk
+                null,
+                Collections.emptyList(),
+                expectedRecords);
+
+        // test partition filter
+        collectLatestLogAndCheck(
+                false,
+                Arrays.asList("dt", "hh"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt", "hh"), // pk
+                "dt = '2022-01-02' AND hh = '21'",
+                Collections.emptyList(),
+                Collections.singletonList(
+                        changelogRow("+I", "US Dollar", "Yen", 122.46d, "2022-01-02", "21")));
+
+        // test field filter
+        collectLatestLogAndCheck(
+                false,
+                Arrays.asList("dt", "hh"),
+                Arrays.asList("from_currency", "to_currency", "dt", "hh"), // pk
+                "rate_by_to_currency IS NOT NULL AND from_currency = 'US Dollar'",
+                Collections.emptyList(),
+                Arrays.asList(
+                        // to_currency is USD
+                        changelogRow("+I", "US Dollar", "US Dollar", 1.0d, "2022-01-02", "20"),
+                        changelogRow("-D", "US Dollar", "US Dollar", 1.0d, "2022-01-02", "20"),
+                        // to_currency is Euro
+                        changelogRow("+I", "US Dollar", "Euro", 0.9d, "2022-01-02", "20"),
+                        // to_currency is Yen
+                        changelogRow("+I", "US Dollar", "Yen", 122.46d, "2022-01-02", "21")));
+
+        // test partition and field filter
+        collectLatestLogAndCheck(
+                false,
+                Arrays.asList("dt", "hh"),
+                Arrays.asList("from_currency", "to_currency", "dt", "hh"), // pk
+                "hh = '21' AND from_currency = 'US Dollar'",
+                Collections.emptyList(),
+                Collections.singletonList(
+                        changelogRow("+I", "US Dollar", "Yen", 122.46d, "2022-01-02", "21")));
+
+        // test projection
+        collectLatestLogAndCheck(
+                false,
+                Arrays.asList("dt", "hh"),
+                Arrays.asList("from_currency", "to_currency", "dt", "hh"), // pk
+                null,
+                Arrays.asList("from_currency", "to_currency"),
+                Arrays.asList(
+                        // to_currency is USD
+                        changelogRow("+I", "US Dollar", "US Dollar"),
+                        changelogRow("+I", "Euro", "US Dollar"),
+                        changelogRow("+I", "HK Dollar", "US Dollar"),
+                        changelogRow("+I", "Yen", "US Dollar"),
+                        changelogRow("+I", "Singapore Dollar", "US Dollar"),
+                        changelogRow("-D", "US Dollar", "US Dollar"),
+                        changelogRow("-D", "Euro", "US Dollar"),
+                        // to_currency is Euro
+                        changelogRow("+I", "US Dollar", "Euro"),
+                        changelogRow("+I", "Singapore Dollar", "Euro"),
+                        // to_currency is Yen
+                        changelogRow("+I", "Yen", "Yen"),
+                        changelogRow("+I", "Chinese Yuan", "Yen"),
+                        changelogRow("+I", "Singapore Dollar", "Yen"),
+                        changelogRow("+I", "US Dollar", "Yen")));
+
+        // test projection and filter
+        collectLatestLogAndCheck(
+                false,
+                Arrays.asList("dt", "hh"),
+                Arrays.asList("from_currency", "to_currency", "dt", "hh"), // pk
+                "rate_by_to_currency > 100",
+                Arrays.asList("from_currency", "to_currency"),
+                Collections.singletonList(changelogRow("+I", "US Dollar", "Yen")));
+    }
+
+    @Test
+    public void testReadLatestChangelogOfSinglePartitionedRecordsWithMultiPk() throws Exception {
+        // input is dailyExchangeRatesChangelogWithoutUB()
+        List<Row> expectedRecords = new ArrayList<>(dailyExchangeRatesChangelogWithoutUB().f0);
+        expectedRecords.add(changelogRow("-U", "Euro", "US Dollar", null, "2022-01-01"));
+        expectedRecords.add(changelogRow("-U", "US Dollar", "US Dollar", null, "2022-01-01"));
+        expectedRecords.add(changelogRow("-U", "Singapore Dollar", "Yen", 90.32d, "2022-01-02"));
+
+        collectLatestLogAndCheck(
+                false,
+                Collections.singletonList("dt"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt"), // pk
+                null,
+                Collections.emptyList(),
+                expectedRecords);
+
+        // test partition filter
+        collectLatestLogAndCheck(
+                false,
+                Collections.singletonList("dt"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt"), // pk
+                "dt = '2022-01-02'",
+                Collections.emptyList(),
+                Arrays.asList(
+                        changelogRow("+I", "US Dollar", "Euro", 0.9d, "2022-01-02"),
+                        changelogRow("+I", "Singapore Dollar", "Euro", 0.67d, "2022-01-02"),
+                        changelogRow("-D", "Singapore Dollar", "Euro", 0.67d, "2022-01-02"),
+                        changelogRow("+I", "Yen", "Yen", 1.0d, "2022-01-02"),
+                        changelogRow("+I", "Chinese Yuan", "Yen", 19.25d, "2022-01-02"),
+                        changelogRow("+I", "Singapore Dollar", "Yen", 90.32d, "2022-01-02"),
+                        changelogRow("+U", "Singapore Dollar", "Yen", 122.46d, "2022-01-02"),
+                        changelogRow("-U", "Singapore Dollar", "Yen", 90.32d, "2022-01-02")));
+
+        // test field filter
+        collectLatestLogAndCheck(
+                false,
+                Collections.singletonList("dt"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt"), // pk
+                "rate_by_to_currency IS NULL",
+                Collections.emptyList(),
+                Arrays.asList(
+                        changelogRow("+I", "US Dollar", "US Dollar", null, "2022-01-01"),
+                        changelogRow("+I", "Euro", "US Dollar", null, "2022-01-01"),
+                        changelogRow("-U", "Euro", "US Dollar", null, "2022-01-01"),
+                        changelogRow("-U", "US Dollar", "US Dollar", null, "2022-01-01")));
+
+        // test partition and field filter
+        collectLatestLogAndCheck(
+                false,
+                Collections.singletonList("dt"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt"), // pk
+                "dt = '2022-01-02' AND from_currency = 'Yen'",
+                Collections.emptyList(),
+                Collections.singletonList(changelogRow("+I", "Yen", "Yen", 1.0d, "2022-01-02")));
+
+        // test projection and filter
+        collectLatestLogAndCheck(
+                false,
+                Collections.singletonList("dt"), // partition
+                Arrays.asList("from_currency", "to_currency", "dt"), // pk
+                "rate_by_to_currency > 100",
+                Arrays.asList("from_currency", "to_currency"),
+                Collections.singletonList(changelogRow("+U", "Singapore Dollar", "Yen")));
+    }
+
+    @Test
+    public void testReadLatestChangelogOfNonPartitionedRecordsWithMultiPk() throws Exception {
+        // input is exchangeRatesChangelogWithoutUB()
+        List<Row> expectedRecords = new ArrayList<>(exchangeRatesChangelogWithoutUB());
+        expectedRecords.add(changelogRow("-U", "Yen", "US Dollar", 0.0082d));
+        expectedRecords.add(changelogRow("-U", "Euro", "US Dollar", 1.11d));
+        expectedRecords.add(changelogRow("-U", "Singapore Dollar", "Euro", 0.67d));
+        expectedRecords.add(changelogRow("-U", "Singapore Dollar", "Yen", 90.32d));
+        expectedRecords.add(changelogRow("-U", "Singapore Dollar", "Yen", 122.46d));
+
+        collectLatestLogAndCheck(
+                false,
+                Collections.emptyList(), // partition
+                Arrays.asList("from_currency", "to_currency"), // pk
+                null,
+                Collections.emptyList(),
+                expectedRecords);
+
+        // test field filter
+        collectLatestLogAndCheck(
+                false,
+                Collections.emptyList(), // partition
+                Arrays.asList("from_currency", "to_currency"), // pk
+                "rate_by_to_currency < 1 OR rate_by_to_currency > 100",
+                Collections.emptyList(),
+                Arrays.asList(
+                        // to_currency is USD
+                        changelogRow("+I", "HK Dollar", "US Dollar", 0.13d),
+                        changelogRow("+I", "Yen", "US Dollar", 0.0082d),
+                        changelogRow("-U", "Yen", "US Dollar", 0.0082d),
+                        changelogRow("+I", "Singapore Dollar", "US Dollar", 0.74d),
+                        changelogRow("+U", "Yen", "US Dollar", 0.0081d),
+                        changelogRow("-D", "Yen", "US Dollar", 0.0081d),
+                        // to_currency is Euro
+                        changelogRow("+I", "US Dollar", "Euro", 0.9d),
+                        changelogRow("+I", "Singapore Dollar", "Euro", 0.67d),
+                        changelogRow("-U", "Singapore Dollar", "Euro", 0.67d),
+                        changelogRow("+U", "Singapore Dollar", "Euro", 0.69d),
+                        // to_currency is Yen
+                        changelogRow("+U", "Singapore Dollar", "Yen", 122.46d),
+                        changelogRow("-U", "Singapore Dollar", "Yen", 122.46d),
+                        changelogRow("+U", "Singapore Dollar", "Yen", 122d)));
+
+        // test projection and filter
+        collectLatestLogAndCheck(
+                false,
+                Collections.emptyList(), // partition
+                Arrays.asList("from_currency", "to_currency"), // pk
+                "rate_by_to_currency < 1 OR rate_by_to_currency > 100",
+                Arrays.asList("from_currency", "to_currency"),
+                Arrays.asList(
+                        // to_currency is USD
+                        changelogRow("+I", "HK Dollar", "US Dollar"),
+                        changelogRow("+I", "Yen", "US Dollar"),
+                        changelogRow("-U", "Yen", "US Dollar"),
+                        changelogRow("+I", "Singapore Dollar", "US Dollar"),
+                        changelogRow("+U", "Yen", "US Dollar"),
+                        changelogRow("-D", "Yen", "US Dollar"),
+                        // to_currency is Euro
+                        changelogRow("+I", "US Dollar", "Euro"),
+                        changelogRow("+I", "Singapore Dollar", "Euro"),
+                        changelogRow("-U", "Singapore Dollar", "Euro"),
+                        changelogRow("+U", "Singapore Dollar", "Euro"),
+                        // to_currency is Yen
+                        changelogRow("+U", "Singapore Dollar", "Yen"),
+                        changelogRow("-U", "Singapore Dollar", "Yen"),
+                        changelogRow("+U", "Singapore Dollar", "Yen")));
+    }
+
+    @Test
+    public void testReadLatestChangelogOfMultiPartitionedRecordsWithExclusiveOnePk()
+            throws Exception {
+        // input is hourlyRatesChangelogWithoutUB()
+        List<Row> expectedRecords = new ArrayList<>(hourlyRatesChangelogWithoutUB().f0);
+        expectedRecords.remove(changelogRow("+U", "Euro", 119L, "2022-01-02", "23"));
+        expectedRecords.add(changelogRow("-U", "Euro", 114L, "2022-01-01", "15"));
+
+        collectLatestLogAndCheck(
+                false,
+                Arrays.asList("dt", "hh"), // partition
+                Arrays.asList("currency", "dt", "hh"), // pk
+                null,
+                Collections.emptyList(),
+                expectedRecords);
+
+        // test partition filter
+        collectLatestLogAndCheck(
+                false,
+                Arrays.asList("dt", "hh"), // partition
+                Arrays.asList("currency", "dt", "hh"), // pk
+                "dt >= '2022-01-02'",
+                Collections.emptyList(),
+                Collections.singletonList(changelogRow("+I", "Euro", 119L, "2022-01-02", "23")));
+
+        // test field filter
+        collectLatestLogAndCheck(
+                false,
+                Arrays.asList("dt", "hh"), // partition
+                Arrays.asList("currency", "dt", "hh"), // pk
+                "rate = 1",
+                Collections.emptyList(),
+                Arrays.asList(
+                        changelogRow("+I", "Yen", 1L, "2022-01-01", "15"),
+                        changelogRow("-D", "Yen", 1L, "2022-01-01", "15")));
+
+        // test projection and filter
+        collectLatestLogAndCheck(
+                false,
+                Arrays.asList("dt", "hh"), // partition
+                Arrays.asList("currency", "dt", "hh"), // pk
+                "rate = 1",
+                Collections.singletonList("currency"),
+                Arrays.asList(changelogRow("+I", "Yen"), changelogRow("-D", "Yen")));
+    }
+
+    @Test
+    public void testReadLatestChangelogOfMultiPartitionedRecordsWithoutPk() throws Exception {
+        // input is hourlyRatesChangelogWithUB()
+        collectLatestLogAndCheck(
+                false,
+                Arrays.asList("dt", "hh"), // partition
+                Collections.emptyList(), // pk
                 null,
                 Collections.emptyList(),
                 Arrays.asList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01, hh = 15
+                        changelogRow("+I", "US Dollar", 102L, "2022-01-01", "15"),
+                        changelogRow("+I", "Euro", 116L, "2022-01-01", "15"),
+                        changelogRow("-D", "Euro", 116L, "2022-01-01", "15"),
+                        changelogRow("+I", "Yen", 1L, "2022-01-01", "15"),
+                        changelogRow("-D", "Yen", 1L, "2022-01-01", "15"),
+                        // dt = 2022-01-02, hh = 20
+                        changelogRow("+I", "Euro", 114L, "2022-01-02", "20"),
+                        changelogRow("-D", "Euro", 114L, "2022-01-02", "20"),
+                        changelogRow("+I", "Euro", 119L, "2022-01-02", "20"),
+                        changelogRow("-D", "Euro", 119L, "2022-01-02", "20"),
+                        changelogRow("+I", "Euro", 115L, "2022-01-02", "20")));
+
+        // test partition filter
+        collectLatestLogAndCheck(
+                false,
+                Arrays.asList("dt", "hh"), // partition
+                Collections.emptyList(), // pk
+                "hh <> '20'",
+                Collections.emptyList(),
+                Arrays.asList(
+                        changelogRow("+I", "US Dollar", 102L, "2022-01-01", "15"),
+                        changelogRow("+I", "Euro", 116L, "2022-01-01", "15"),
+                        changelogRow("-D", "Euro", 116L, "2022-01-01", "15"),
+                        changelogRow("+I", "Yen", 1L, "2022-01-01", "15"),
+                        changelogRow("-D", "Yen", 1L, "2022-01-01", "15")));
+
+        // test field filter
+        collectLatestLogAndCheck(
+                false,
+                Arrays.asList("dt", "hh"), // partition
+                Collections.emptyList(), // pk
+                "rate = 1",
+                Collections.emptyList(),
+                Arrays.asList(
+                        changelogRow("+I", "Yen", 1L, "2022-01-01", "15"),
+                        changelogRow("-D", "Yen", 1L, "2022-01-01", "15")));
+
+        // test projection and filter
+        collectLatestLogAndCheck(
+                false,
+                Arrays.asList("dt", "hh"), // partition
+                Collections.emptyList(), // pk
+                "rate = 1",
+                Collections.singletonList("currency"),
+                Arrays.asList(changelogRow("+I", "Yen"), changelogRow("-D", "Yen")));
+    }
+
+    @Test
+    public void testReadLatestChangelogOfSinglePartitionedRecordsWithExclusiveOnePk()
+            throws Exception {
+        // input is dailyRatesChangelogWithoutUB()
+        collectLatestLogAndCheck(
+                false,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
+                null,
+                Collections.emptyList(),
+                Arrays.asList(
+                        // dt = 2022-01-01
                         changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
                         changelogRow("+I", "Euro", 114L, "2022-01-01"),
                         changelogRow("+I", "Yen", 1L, "2022-01-01"),
@@ -782,18 +2074,18 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         changelogRow("+U", "Euro", 116L, "2022-01-01"),
                         changelogRow("-D", "Yen", 1L, "2022-01-01"),
                         changelogRow("-D", "Euro", 116L, "2022-01-01"),
-                        // part = 2022-01-02
+                        // dt = 2022-01-02
                         changelogRow("+I", "Euro", 119L, "2022-01-02")));
 
         // test partition filter
         collectLatestLogAndCheck(
                 false,
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 "dt = '2022-01-01'",
                 Collections.emptyList(),
                 Arrays.asList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
                         changelogRow("+I", "Euro", 114L, "2022-01-01"),
                         changelogRow("+I", "Yen", 1L, "2022-01-01"),
@@ -805,31 +2097,31 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test field filter
         collectLatestLogAndCheck(
                 false,
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 "currency = 'Yen'",
                 Collections.emptyList(),
                 Arrays.asList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", "Yen", 1L, "2022-01-01"),
                         changelogRow("-D", "Yen", 1L, "2022-01-01")));
 
         collectLatestLogAndCheck(
                 false,
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 "rate = 114",
                 Collections.emptyList(),
                 Arrays.asList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", "Euro", 114L, "2022-01-01"),
                         changelogRow("-U", "Euro", 114L, "2022-01-01")));
 
         // test partition and field filter
         collectLatestLogAndCheck(
                 false,
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 "rate = 114 AND dt = '2022-01-02'",
                 Collections.emptyList(),
                 Collections.emptyList());
@@ -837,12 +2129,12 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test projection
         collectLatestLogAndCheck(
                 false,
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 null,
                 Collections.singletonList("rate"),
                 Arrays.asList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", 102L), // US Dollar
                         changelogRow("+I", 114L), // Euro
                         changelogRow("+I", 1L), // Yen
@@ -850,39 +2142,39 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         changelogRow("+U", 116L), // Euro
                         changelogRow("-D", 1L), // Yen
                         changelogRow("-D", 116L), // Euro
-                        // part = 2022-01-02
+                        // dt = 2022-01-02
                         changelogRow("+I", 119L) // Euro
                         ));
 
         // test projection and filter
         collectLatestLogAndCheck(
                 false,
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 "dt = '2022-01-02'",
                 Collections.singletonList("rate"),
                 Collections.singletonList(
-                        // part = 2022-01-02, Euro
+                        // dt = 2022-01-02, Euro
                         changelogRow("+I", 119L)));
     }
 
     @Test
-    public void testReadLatestChangelogOfPartitionedRecordsWithoutPk() throws Exception {
+    public void testReadLatestChangelogOfSinglePartitionedRecordsWithoutPk() throws Exception {
         // input is dailyRatesChangelogWithUB()
         collectLatestLogAndCheck(
                 false,
-                true,
-                false,
+                Collections.singletonList("dt"),
+                Collections.emptyList(),
                 null,
                 Collections.emptyList(),
                 Arrays.asList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
                         changelogRow("+I", "Euro", 116L, "2022-01-01"),
                         changelogRow("-D", "Euro", 116L, "2022-01-01"),
                         changelogRow("+I", "Yen", 1L, "2022-01-01"),
                         changelogRow("-D", "Yen", 1L, "2022-01-01"),
-                        // part = 2022-01-02
+                        // dt = 2022-01-02
                         changelogRow("+I", "Euro", 114L, "2022-01-02"),
                         changelogRow("-D", "Euro", 114L, "2022-01-02"),
                         changelogRow("+I", "Euro", 119L, "2022-01-02"),
@@ -891,12 +2183,13 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testReadLatestChangelogOfNonPartitionedRecordsWithPk() throws Exception {
+    public void testReadLatestChangelogOfNonPartitionedRecordsWithExclusiveOnePk()
+            throws Exception {
         // input is ratesChangelogWithoutUB()
         collectLatestLogAndCheck(
                 false,
-                false,
-                true,
+                Collections.emptyList(),
+                Collections.singletonList("currency"),
                 null,
                 Collections.emptyList(),
                 Arrays.asList(
@@ -912,8 +2205,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test field filter
         collectLatestLogAndCheck(
                 false,
-                false,
-                true,
+                Collections.emptyList(),
+                Collections.singletonList("currency"),
                 "currency = 'Euro'",
                 Collections.emptyList(),
                 Arrays.asList(
@@ -926,8 +2219,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test projection
         collectLatestLogAndCheck(
                 false,
-                false,
-                true,
+                Collections.emptyList(),
+                Collections.singletonList("currency"),
                 null,
                 Collections.singletonList("currency"),
                 Arrays.asList(
@@ -941,8 +2234,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test projection and filter
         collectLatestLogAndCheck(
                 false,
-                false,
-                true,
+                Collections.emptyList(),
+                Collections.singletonList("currency"),
                 "currency = 'Euro'",
                 Collections.singletonList("rate"),
                 Arrays.asList(
@@ -958,8 +2251,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // input is ratesChangelogWithUB()
         collectLatestLogAndCheck(
                 false,
-                false,
-                false,
+                Collections.emptyList(),
+                Collections.emptyList(),
                 null,
                 Collections.emptyList(),
                 Arrays.asList(
@@ -979,8 +2272,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test field filter
         collectLatestLogAndCheck(
                 false,
-                false,
-                false,
+                Collections.emptyList(),
+                Collections.emptyList(),
                 "currency = 'Euro'",
                 Collections.emptyList(),
                 Arrays.asList(
@@ -995,8 +2288,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test projection
         collectLatestLogAndCheck(
                 false,
-                false,
-                false,
+                Collections.emptyList(),
+                Collections.emptyList(),
                 null,
                 Arrays.asList("currency", "rate"),
                 Arrays.asList(
@@ -1016,8 +2309,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test projection and filter
         collectLatestLogAndCheck(
                 false,
-                false,
-                false,
+                Collections.emptyList(),
+                Collections.emptyList(),
                 "currency IS NOT NULL",
                 Collections.singletonList("currency"),
                 Arrays.asList(
@@ -1035,8 +2328,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
 
         collectLatestLogAndCheck(
                 false,
-                false,
-                false,
+                Collections.emptyList(),
+                Collections.emptyList(),
                 "rate = 119",
                 Collections.singletonList("currency"),
                 Arrays.asList(
@@ -1057,16 +2350,28 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         changelogRow("+U", "Euro", 119L));
 
         // currency as pk
-        collectLatestLogAndCheck(true, false, true, null, Collections.emptyList(), expected);
+        collectLatestLogAndCheck(
+                true,
+                Collections.emptyList(),
+                Collections.singletonList("currency"),
+                null,
+                Collections.emptyList(),
+                expected);
 
         // without pk
-        collectLatestLogAndCheck(true, false, true, null, Collections.emptyList(), expected);
+        collectLatestLogAndCheck(
+                true,
+                Collections.emptyList(),
+                Collections.singletonList("currency"),
+                null,
+                Collections.emptyList(),
+                expected);
 
         // test field filter
         collectLatestLogAndCheck(
                 true,
-                false,
-                true,
+                Collections.emptyList(),
+                Collections.singletonList("currency"),
                 "rate = 114",
                 Collections.emptyList(),
                 Arrays.asList(changelogRow("+I", "Euro", 114L), changelogRow("-U", "Euro", 114L)));
@@ -1074,8 +2379,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test projection
         collectLatestLogAndCheck(
                 true,
-                false,
-                true,
+                Collections.emptyList(),
+                Collections.singletonList("currency"),
                 null,
                 Collections.singletonList("rate"),
                 Arrays.asList(
@@ -1088,8 +2393,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test projection and filter
         collectLatestLogAndCheck(
                 true,
-                false,
-                true,
+                Collections.emptyList(),
+                Collections.singletonList("currency"),
                 "rate = 114",
                 Collections.singletonList("currency"),
                 Arrays.asList(changelogRow("+I", "Euro"), changelogRow("-U", "Euro")));
@@ -1100,26 +2405,27 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // input is dailyRates()
         collectChangelogFromTimestampAndCheck(
                 true,
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 0,
                 Arrays.asList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
                         changelogRow("+I", "Yen", 1L, "2022-01-01"),
                         changelogRow("+I", "Euro", 114L, "2022-01-01"),
                         changelogRow("-U", "US Dollar", 102L, "2022-01-01"),
                         changelogRow("+U", "US Dollar", 114L, "2022-01-01"),
-                        // part = 2022-01-02
+                        // dt = 2022-01-02
                         changelogRow("+I", "Euro", 119L, "2022-01-02")));
 
-        collectChangelogFromTimestampAndCheck(true, true, false, 0, dailyRates());
+        collectChangelogFromTimestampAndCheck(
+                true, Collections.singletonList("dt"), Collections.emptyList(), 0, dailyRates().f0);
 
         // input is rates()
         collectChangelogFromTimestampAndCheck(
                 true,
-                false,
-                true,
+                Collections.emptyList(),
+                Collections.singletonList("currency"),
                 0,
                 Arrays.asList(
                         changelogRow("+I", "US Dollar", 102L),
@@ -1128,10 +2434,15 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         changelogRow("-U", "Euro", 114L),
                         changelogRow("+U", "Euro", 119L)));
 
-        collectChangelogFromTimestampAndCheck(true, false, false, 0, rates());
+        collectChangelogFromTimestampAndCheck(
+                true, Collections.emptyList(), Collections.emptyList(), 0, rates());
 
         collectChangelogFromTimestampAndCheck(
-                true, false, false, Long.MAX_VALUE - 1, Collections.emptyList());
+                true,
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Long.MAX_VALUE - 1,
+                Collections.emptyList());
     }
 
     @Test
@@ -1139,17 +2450,17 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // input is dailyRatesChangelogWithUB()
         collectChangelogFromTimestampAndCheck(
                 false,
-                true,
-                false,
+                Collections.singletonList("dt"),
+                Collections.emptyList(),
                 0,
                 Arrays.asList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
                         changelogRow("+I", "Euro", 116L, "2022-01-01"),
                         changelogRow("-D", "Euro", 116L, "2022-01-01"),
                         changelogRow("+I", "Yen", 1L, "2022-01-01"),
                         changelogRow("-D", "Yen", 1L, "2022-01-01"),
-                        // part = 2022-01-02
+                        // dt = 2022-01-02
                         changelogRow("+I", "Euro", 114L, "2022-01-02"),
                         changelogRow("-D", "Euro", 114L, "2022-01-02"),
                         changelogRow("+I", "Euro", 119L, "2022-01-02"),
@@ -1159,11 +2470,11 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // input is dailyRatesChangelogWithoutUB()
         collectChangelogFromTimestampAndCheck(
                 false,
-                true,
-                true,
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
                 0,
                 Arrays.asList(
-                        // part = 2022-01-01
+                        // dt = 2022-01-01
                         changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
                         changelogRow("+I", "Euro", 114L, "2022-01-01"),
                         changelogRow("+I", "Yen", 1L, "2022-01-01"),
@@ -1171,13 +2482,43 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         changelogRow("+U", "Euro", 116L, "2022-01-01"),
                         changelogRow("-D", "Yen", 1L, "2022-01-01"),
                         changelogRow("-D", "Euro", 116L, "2022-01-01"),
-                        // part = 2022-01-02
+                        // dt = 2022-01-02
                         changelogRow("+I", "Euro", 119L, "2022-01-02")));
     }
 
+    @Test
+    public void testSourceParallelism() throws Exception {
+        String managedTable =
+                createSourceAndManagedTable(
+                                false,
+                                false,
+                                false,
+                                Collections.emptyList(),
+                                Collections.emptyList())
+                        .f1;
+
+        // without hint
+        String query = prepareSimpleSelectQuery(managedTable, Collections.emptyMap());
+        assertThat(sourceParallelism(query)).isEqualTo(env.getParallelism());
+
+        // with hint
+        query =
+                prepareSimpleSelectQuery(
+                        managedTable, Collections.singletonMap(SCAN_PARALLELISM.key(), "66"));
+        assertThat(sourceParallelism(query)).isEqualTo(66);
+    }
+
+    @Test
+    public void testSinkParallelism() {
+        testSinkParallelism(null, env.getParallelism());
+        testSinkParallelism(23, 23);
+    }
+
+    // ------------------------ Tools ----------------------------------
+
     private String collectAndCheckBatchReadWrite(
-            boolean partitioned,
-            boolean hasPk,
+            List<String> partitions,
+            List<String> primaryKeys,
             @Nullable String filter,
             List<String> projection,
             List<Row> expected)
@@ -1186,8 +2527,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         false,
                         false,
                         true,
-                        partitioned,
-                        hasPk,
+                        partitions,
+                        primaryKeys,
                         true,
                         Collections.emptyMap(),
                         filter,
@@ -1198,8 +2539,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
 
     private String collectAndCheckStreamingReadWriteWithClose(
             boolean enableLogStore,
-            boolean partitioned,
-            boolean hasPk,
+            List<String> partitions,
+            List<String> primaryKeys,
             Map<String, String> readHints,
             @Nullable String filter,
             List<String> projection,
@@ -1210,8 +2551,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         true,
                         enableLogStore,
                         false,
-                        partitioned,
-                        hasPk,
+                        partitions,
+                        primaryKeys,
                         true,
                         readHints,
                         filter,
@@ -1223,19 +2564,30 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
 
     private Tuple2<String, BlockingIterator<Row, Row>>
             collectAndCheckStreamingReadWriteWithoutClose(
+                    List<String> partitions,
+                    List<String> primaryKeys,
                     Map<String, String> readHints,
                     @Nullable String filter,
                     List<String> projection,
                     List<Row> expected)
                     throws Exception {
         return collectAndCheckUnderSameEnv(
-                true, true, false, true, true, true, readHints, filter, projection, expected);
+                true,
+                true,
+                false,
+                partitions,
+                primaryKeys,
+                true,
+                readHints,
+                filter,
+                projection,
+                expected);
     }
 
     private void collectLatestLogAndCheck(
             boolean insertOnly,
-            boolean partitioned,
-            boolean hasPk,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
             @Nullable String filter,
             List<String> projection,
             List<Row> expected)
@@ -1248,8 +2600,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         true,
                         true,
                         insertOnly,
-                        partitioned,
-                        hasPk,
+                        partitionKeys,
+                        primaryKeys,
                         false,
                         hints,
                         filter,
@@ -1261,8 +2613,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
 
     private void collectChangelogFromTimestampAndCheck(
             boolean insertOnly,
-            boolean partitioned,
-            boolean hasPk,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
             long timestamp,
             List<Row> expected)
             throws Exception {
@@ -1273,8 +2625,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         true,
                         true,
                         insertOnly,
-                        partitioned,
-                        hasPk,
+                        partitionKeys,
+                        primaryKeys,
                         true,
                         hints,
                         null,
@@ -1288,8 +2640,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
             boolean streaming,
             boolean enableLogStore,
             boolean insertOnly,
-            boolean partitioned,
-            boolean hasPk)
+            List<String> partitionKeys,
+            List<String> primaryKeys)
             throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
         rootPath = TEMPORARY_FOLDER.newFolder().getPath();
@@ -1306,14 +2658,15 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
             helperTableDdl =
                     insertOnly
                             ? prepareHelperSourceWithInsertOnlyRecords(
-                                    sourceTable, partitioned, hasPk)
+                                    sourceTable, partitionKeys, primaryKeys)
                             : prepareHelperSourceWithChangelogRecords(
-                                    sourceTable, partitioned, hasPk);
+                                    sourceTable, partitionKeys, primaryKeys);
             env = buildStreamEnv();
             builder.inStreamingMode();
         } else {
             helperTableDdl =
-                    prepareHelperSourceWithInsertOnlyRecords(sourceTable, partitioned, hasPk);
+                    prepareHelperSourceWithInsertOnlyRecords(
+                            sourceTable, partitionKeys, primaryKeys);
             env = buildBatchEnv();
             builder.inBatchMode();
         }
@@ -1329,8 +2682,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
             boolean streaming,
             boolean enableLogStore,
             boolean insertOnly,
-            boolean partitioned,
-            boolean hasPk,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
             boolean writeFirst,
             Map<String, String> readHints,
             @Nullable String filter,
@@ -1339,7 +2692,7 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
             throws Exception {
         Tuple2<String, String> tables =
                 createSourceAndManagedTable(
-                        streaming, enableLogStore, insertOnly, partitioned, hasPk);
+                        streaming, enableLogStore, insertOnly, partitionKeys, primaryKeys);
         String sourceTable = tables.f0;
         String managedTable = tables.f1;
 
@@ -1368,12 +2721,16 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
             Map<String, String> staticPartitions,
             List<String[]> overwriteRecords)
             throws Exception {
+        prepareEnvAndOverwrite(
+                managedTable,
+                prepareInsertOverwriteQuery(managedTable, staticPartitions, overwriteRecords));
+    }
+
+    private void prepareEnvAndOverwrite(String managedTable, String query) throws Exception {
         final StreamTableEnvironment batchEnv =
                 StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
         registerTable(batchEnv, managedTable);
-        String insertQuery =
-                prepareInsertOverwriteQuery(managedTable, staticPartitions, overwriteRecords);
-        batchEnv.executeSql(insertQuery).await();
+        batchEnv.executeSql(query).await();
     }
 
     private void registerTable(StreamTableEnvironment tEnvToRegister, String managedTable)
@@ -1398,20 +2755,25 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
             StreamTableEnvironment tEnv,
             String managedTable,
             Map<String, String> hints,
+            @Nullable String filter,
             List<Row> expectedRecords)
             throws Exception {
         List<Row> actual = new ArrayList<>();
         BlockingIterator<Row, Row> iterator =
                 collect(
                         tEnv,
-                        prepareSimpleSelectQuery(managedTable, hints),
+                        filter == null
+                                ? prepareSimpleSelectQuery(managedTable, hints)
+                                : prepareSelectQuery(
+                                        managedTable, hints, filter, Collections.emptyList()),
                         expectedRecords.size(),
                         actual);
         assertThat(actual).containsExactlyInAnyOrderElementsOf(expectedRecords);
         return iterator;
     }
 
-    private void checkFileStorePath(StreamTableEnvironment tEnv, String managedTable) {
+    private void checkFileStorePath(
+            StreamTableEnvironment tEnv, String managedTable, @Nullable String partitionList) {
         String relativeFilePath =
                 FileStoreOptions.relativeTablePath(
                         ObjectIdentifier.of(
@@ -1420,348 +2782,29 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         assertThat(Paths.get(rootPath, relativeFilePath, "snapshot")).exists();
         // check manifest file path
         assertThat(Paths.get(rootPath, relativeFilePath, "manifest")).exists();
-    }
-
-    private static void assertNoMoreRecords(BlockingIterator<Row, Row> iterator) {
-        List<Row> expectedRecords = Collections.emptyList();
-        try {
-            // set expectation size to 1 to let time pass by until timeout
-            // just wait 5s to avoid too long time
-            expectedRecords = iterator.collect(1, 5L, TimeUnit.SECONDS);
-            iterator.close();
-        } catch (Exception ignored) {
-            // don't throw exception
-        }
-        assertThat(expectedRecords).isEmpty();
-    }
-
-    private static String prepareManagedTableDdl(
-            String sourceTableName, String managedTableName, Map<String, String> tableOptions) {
-        StringBuilder ddl =
-                new StringBuilder("CREATE TABLE IF NOT EXISTS ")
-                        .append(String.format("`%s`", managedTableName));
-        ddl.append(prepareOptions(tableOptions))
-                .append(String.format(" LIKE `%s` (EXCLUDING OPTIONS)\n", sourceTableName));
-        return ddl.toString();
-    }
-
-    private static String prepareOptions(Map<String, String> tableOptions) {
-        StringBuilder with = new StringBuilder();
-        if (tableOptions.size() > 0) {
-            with.append(" WITH (\n");
-            tableOptions.forEach(
-                    (k, v) ->
-                            with.append("  ")
-                                    .append(String.format("'%s'", k))
-                                    .append(" = ")
-                                    .append(String.format("'%s',\n", v)));
-            int len = with.length();
-            with.delete(len - 2, len);
-            with.append(")");
-        }
-        return with.toString();
-    }
-
-    private static String prepareInsertIntoQuery(String sourceTableName, String managedTableName) {
-        return prepareInsertIntoQuery(
-                sourceTableName, managedTableName, Collections.emptyMap(), Collections.emptyMap());
-    }
-
-    private static String prepareInsertIntoQuery(
-            String sourceTableName,
-            String managedTableName,
-            Map<String, String> partitions,
-            Map<String, String> hints) {
-        StringBuilder insertDmlBuilder =
-                new StringBuilder(String.format("INSERT INTO `%s`", managedTableName));
-        if (partitions.size() > 0) {
-            insertDmlBuilder.append(" PARTITION (");
-            partitions.forEach(
-                    (k, v) -> {
-                        insertDmlBuilder.append(String.format("'%s'", k));
-                        insertDmlBuilder.append(" = ");
-                        insertDmlBuilder.append(String.format("'%s', ", v));
-                    });
-            int len = insertDmlBuilder.length();
-            insertDmlBuilder.deleteCharAt(len - 1);
-            insertDmlBuilder.append(")");
-        }
-        insertDmlBuilder.append(String.format("\n SELECT * FROM `%s`", sourceTableName));
-        insertDmlBuilder.append(buildHints(hints));
-
-        return insertDmlBuilder.toString();
-    }
-
-    private static String prepareInsertOverwriteQuery(
-            String managedTableName,
-            Map<String, String> staticPartitions,
-            List<String[]> overwriteRecords) {
-        StringBuilder insertDmlBuilder =
-                new StringBuilder(String.format("INSERT OVERWRITE `%s`", managedTableName));
-        if (staticPartitions.size() > 0) {
-            insertDmlBuilder.append(" PARTITION (");
-            staticPartitions.forEach(
-                    (k, v) -> {
-                        insertDmlBuilder.append(String.format("%s", k));
-                        insertDmlBuilder.append(" = ");
-                        insertDmlBuilder.append(String.format("%s, ", v));
-                    });
-            int len = insertDmlBuilder.length();
-            insertDmlBuilder.delete(len - 2, len);
-            insertDmlBuilder.append(")");
-        }
-        insertDmlBuilder.append("\n VALUES ");
-        overwriteRecords.forEach(
-                record -> {
-                    int arity = record.length;
-                    insertDmlBuilder.append("(");
-                    IntStream.range(0, arity)
-                            .forEach(i -> insertDmlBuilder.append(record[i]).append(", "));
-
-                    if (arity > 0) {
-                        int len = insertDmlBuilder.length();
-                        insertDmlBuilder.delete(len - 2, len);
-                    }
-                    insertDmlBuilder.append("), ");
-                });
-        int len = insertDmlBuilder.length();
-        insertDmlBuilder.delete(len - 2, len);
-        return insertDmlBuilder.toString();
-    }
-
-    private static String prepareSimpleSelectQuery(String tableName, Map<String, String> hints) {
-        return prepareSelectQuery(tableName, hints, null, Collections.emptyList());
-    }
-
-    private static String prepareSelectQuery(
-            String tableName,
-            Map<String, String> hints,
-            @Nullable String filter,
-            List<String> projections) {
-        StringBuilder queryBuilder =
-                new StringBuilder(
-                        String.format(
-                                "SELECT %s FROM `%s` %s",
-                                projections.isEmpty() ? "*" : String.join(", ", projections),
-                                tableName,
-                                buildHints(hints)));
-        if (filter != null) {
-            queryBuilder.append("\nWHERE ").append(filter);
-        }
-        return queryBuilder.toString();
-    }
-
-    private static String buildHints(Map<String, String> hints) {
-        if (hints.size() > 0) {
-            String hintString =
-                    hints.entrySet().stream()
-                            .map(
-                                    entry ->
-                                            String.format(
-                                                    "'%s' = '%s'",
-                                                    entry.getKey(), entry.getValue()))
-                            .collect(Collectors.joining(", "));
-            return "/*+ OPTIONS (" + hintString + ") */";
-        }
-        return "";
-    }
-
-    private static String prepareHelperSourceWithInsertOnlyRecords(
-            String sourceTable, boolean partitioned, boolean hasPk) {
-        return prepareHelperSourceRecords(
-                RuntimeExecutionMode.BATCH, sourceTable, partitioned, hasPk);
-    }
-
-    private static String prepareHelperSourceWithChangelogRecords(
-            String sourceTable, boolean partitioned, boolean hasPk) {
-        return prepareHelperSourceRecords(
-                RuntimeExecutionMode.STREAMING, sourceTable, partitioned, hasPk);
-    }
-
-    /**
-     * Prepare helper source table ddl according to different input parameter.
-     *
-     * <pre> E.g. pk with partition
-     *   {@code
-     *   CREATE TABLE source_table (
-     *     currency STRING,
-     *     rate BIGINT,
-     *     dt STRING) PARTITIONED BY (dt)
-     *    WITH (
-     *      'connector' = 'values',
-     *      'bounded' = executionMode == RuntimeExecutionMode.BATCH,
-     *      'partition-list' = '...'
-     *     )
-     *   }
-     * </pre>
-     *
-     * @param executionMode is used to calculate {@code bounded}
-     * @param sourceTable source table name
-     * @param partitioned is used to calculate {@code partition-list}
-     * @param hasPk
-     * @return helper source ddl
-     */
-    private static String prepareHelperSourceRecords(
-            RuntimeExecutionMode executionMode,
-            String sourceTable,
-            boolean partitioned,
-            boolean hasPk) {
-        boolean bounded = executionMode == RuntimeExecutionMode.BATCH;
-        String changelogMode = bounded ? "I" : hasPk ? "I,UA,D" : "I,UA,UB,D";
-        StringBuilder ddlBuilder =
-                new StringBuilder(String.format("CREATE TABLE `%s` (\n", sourceTable))
-                        .append("  currency STRING,\n")
-                        .append("  rate BIGINT");
-        if (partitioned) {
-            ddlBuilder.append(",\n dt STRING");
-        }
-        if (hasPk) {
-            ddlBuilder.append(", \n PRIMARY KEY (currency");
-            if (partitioned) {
-                ddlBuilder.append(", dt");
-            }
-            ddlBuilder.append(") NOT ENFORCED\n");
+        // check sst file path
+        if (partitionList == null) {
+            // at least exists bucket-0
+            assertThat(Paths.get(rootPath, relativeFilePath, "bucket-0")).exists();
         } else {
-            ddlBuilder.append("\n");
+            Arrays.stream(partitionList.split(";"))
+                    .map(str -> str.replaceAll(":", "="))
+                    .map(str -> str.replaceAll(",", "/"))
+                    .map(str -> str.replaceAll("null", "__DEFAULT_PARTITION__"))
+                    .collect(Collectors.toList())
+                    .forEach(
+                            partition -> {
+                                assertThat(Paths.get(rootPath, relativeFilePath, partition))
+                                        .exists();
+                                assertThat(
+                                                Paths.get(
+                                                        rootPath,
+                                                        relativeFilePath,
+                                                        partition,
+                                                        "bucket-0"))
+                                        .exists();
+                            });
         }
-        ddlBuilder.append(")");
-        if (partitioned) {
-            ddlBuilder.append(" PARTITIONED BY (dt)\n");
-        }
-        List<Row> input;
-        if (bounded) {
-            input = partitioned ? dailyRates() : rates();
-        } else {
-            if (hasPk) {
-                input = partitioned ? dailyRatesChangelogWithoutUB() : ratesChangelogWithoutUB();
-            } else {
-                input = partitioned ? dailyRatesChangelogWithUB() : ratesChangelogWithUB();
-            }
-        }
-        ddlBuilder.append(
-                String.format(
-                        "  WITH (\n"
-                                + "  'connector' = 'values',\n"
-                                + "  'bounded' = '%s',\n"
-                                + "  'data-id' = '%s',\n"
-                                + "  'changelog-mode' = '%s',\n"
-                                + "  'disable-lookup' = 'true',\n"
-                                + "  'partition-list' = '%s'\n"
-                                + ")",
-                        bounded,
-                        registerData(input),
-                        changelogMode,
-                        partitioned ? "dt:2022-01-01;dt:2022-01-02" : ""));
-        return ddlBuilder.toString();
-    }
-
-    private static List<Row> rates() {
-        return Arrays.asList(
-                changelogRow("+I", "US Dollar", 102L),
-                changelogRow("+I", "Euro", 114L),
-                changelogRow("+I", "Yen", 1L),
-                changelogRow("+I", "Euro", 114L),
-                changelogRow("+I", "Euro", 119L));
-    }
-
-    private static List<Row> dailyRates() {
-        return Arrays.asList(
-                // part = 2022-01-01
-                changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
-                changelogRow("+I", "Euro", 114L, "2022-01-01"),
-                changelogRow("+I", "Yen", 1L, "2022-01-01"),
-                changelogRow("+I", "Euro", 114L, "2022-01-01"),
-                changelogRow("+I", "US Dollar", 114L, "2022-01-01"),
-                // part = 2022-01-02
-                changelogRow("+I", "Euro", 119L, "2022-01-02"));
-    }
-
-    static List<Row> ratesChangelogWithoutUB() {
-        return Arrays.asList(
-                changelogRow("+I", "US Dollar", 102L),
-                changelogRow("+I", "Euro", 114L),
-                changelogRow("+I", "Yen", 1L),
-                changelogRow("+U", "Euro", 116L),
-                changelogRow("-D", "Euro", 116L),
-                changelogRow("+I", "Euro", 119L),
-                changelogRow("+U", "Euro", 119L),
-                changelogRow("-D", "Yen", 1L));
-    }
-
-    static List<Row> dailyRatesChangelogWithoutUB() {
-        return Arrays.asList(
-                // part = 2022-01-01
-                changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
-                changelogRow("+I", "Euro", 114L, "2022-01-01"),
-                changelogRow("+I", "Yen", 1L, "2022-01-01"),
-                changelogRow("+U", "Euro", 116L, "2022-01-01"),
-                changelogRow("-D", "Yen", 1L, "2022-01-01"),
-                changelogRow("-D", "Euro", 116L, "2022-01-01"),
-                // part = 2022-01-02
-                changelogRow("+I", "Euro", 119L, "2022-01-02"),
-                changelogRow("+U", "Euro", 119L, "2022-01-02"));
-    }
-
-    private static List<Row> ratesChangelogWithUB() {
-        return Arrays.asList(
-                changelogRow("+I", "US Dollar", 102L),
-                changelogRow("+I", "Euro", 114L),
-                changelogRow("+I", "Yen", 1L),
-                changelogRow("-U", "Euro", 114L),
-                changelogRow("+U", "Euro", 116L),
-                changelogRow("-D", "Euro", 116L),
-                changelogRow("+I", "Euro", 119L),
-                changelogRow("-U", "Euro", 119L),
-                changelogRow("+U", "Euro", 119L),
-                changelogRow("-D", "Yen", 1L),
-                changelogRow("+I", null, 100L),
-                changelogRow("+I", "HK Dollar", null));
-    }
-
-    private static List<Row> dailyRatesChangelogWithUB() {
-        return Arrays.asList(
-                // part = 2022-01-01
-                changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
-                changelogRow("+I", "Euro", 116L, "2022-01-01"),
-                changelogRow("-D", "Euro", 116L, "2022-01-01"),
-                changelogRow("+I", "Yen", 1L, "2022-01-01"),
-                changelogRow("-D", "Yen", 1L, "2022-01-01"),
-                // part = 2022-01-02
-                changelogRow("+I", "Euro", 114L, "2022-01-02"),
-                changelogRow("-U", "Euro", 114L, "2022-01-02"),
-                changelogRow("+U", "Euro", 119L, "2022-01-02"),
-                changelogRow("-D", "Euro", 119L, "2022-01-02"),
-                changelogRow("+I", "Euro", 115L, "2022-01-02"));
-    }
-
-    private static StreamExecutionEnvironment buildStreamEnv() {
-        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
-        env.enableCheckpointing(100);
-        env.setParallelism(2);
-        return env;
-    }
-
-    private static StreamExecutionEnvironment buildBatchEnv() {
-        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        env.setParallelism(2);
-        return env;
-    }
-
-    @Test
-    public void testSourceParallelism() throws Exception {
-        String managedTable = createSourceAndManagedTable(false, false, false, false, false).f1;
-
-        // without hint
-        String query = prepareSimpleSelectQuery(managedTable, Collections.emptyMap());
-        assertThat(sourceParallelism(query)).isEqualTo(env.getParallelism());
-
-        // with hint
-        query =
-                prepareSimpleSelectQuery(
-                        managedTable, Collections.singletonMap(SCAN_PARALLELISM.key(), "66"));
-        assertThat(sourceParallelism(query)).isEqualTo(66);
     }
 
     private int sourceParallelism(String sql) {
@@ -1769,30 +2812,23 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         return stream.getParallelism();
     }
 
-    @Test
-    public void testSinkParallelism() {
-        testSinkParallelism(null, env.getParallelism());
-        testSinkParallelism(23, 23);
-    }
-
     private void testSinkParallelism(Integer configParallelism, int expectedParallelism) {
         // 1. create a mock table sink
-        ResolvedSchema schema = ResolvedSchema.of(Column.physical("a", DataTypes.STRING()));
         Map<String, String> options = new HashMap<>();
         if (configParallelism != null) {
             options.put(SINK_PARALLELISM.key(), configParallelism.toString());
         }
 
-        Context context =
+        DynamicTableFactory.Context context =
                 new FactoryUtil.DefaultDynamicTableContext(
                         ObjectIdentifier.of("default", "default", "t1"),
-                        new ResolvedCatalogTable(
-                                CatalogTable.of(
-                                        Schema.newBuilder().fromResolvedSchema(schema).build(),
-                                        "mock context",
-                                        Collections.emptyList(),
-                                        options),
-                                schema),
+                        createResolvedTable(
+                                options,
+                                RowType.of(
+                                        new LogicalType[] {new VarCharType(Integer.MAX_VALUE)},
+                                        new String[] {"a"}),
+                                Collections.emptyList(),
+                                Collections.emptyList()),
                         Collections.emptyMap(),
                         new Configuration(),
                         Thread.currentThread().getContextClassLoader(),

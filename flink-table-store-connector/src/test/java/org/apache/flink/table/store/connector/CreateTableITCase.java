@@ -56,7 +56,7 @@ public class CreateTableITCase extends TableStoreTestBase {
                     Collections.emptyMap(),
                     RowType.of(new IntType(), new VarCharType()),
                     Collections.emptyList(),
-                    new int[0]);
+                    Collections.emptyList());
 
     public CreateTableITCase(
             RuntimeExecutionMode executionMode,

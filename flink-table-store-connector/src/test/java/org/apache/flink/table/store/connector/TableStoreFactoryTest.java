@@ -163,10 +163,10 @@ public class TableStoreFactoryTest {
     public void testBuildTableStore(
             RowType rowType,
             List<String> partitions,
-            int[] pkIndex,
+            List<String> primaryKeys,
             TableStoreTestBase.ExpectedResult expectedResult) {
         ResolvedCatalogTable catalogTable =
-                createResolvedTable(Collections.emptyMap(), rowType, partitions, pkIndex);
+                createResolvedTable(Collections.emptyMap(), rowType, partitions, primaryKeys);
         context =
                 new FactoryUtil.DefaultDynamicTableContext(
                         TABLE_IDENTIFIER,
@@ -278,7 +278,7 @@ public class TableStoreFactoryTest {
                 Arguments.of(
                         rowType,
                         Arrays.asList("dt", "hr"),
-                        new int[] {0, 1, 2}, // pk is [dt, hr, shopId]
+                        Arrays.asList("dt", "hr", "shopId"), // pk is [dt, hr, shopId]
                         new TableStoreTestBase.ExpectedResult().success(true));
 
         // failed case: pk doesn't contain partition key
@@ -286,7 +286,7 @@ public class TableStoreFactoryTest {
                 Arguments.of(
                         rowType,
                         Arrays.asList("dt", "hr"),
-                        new int[] {2}, // pk is [shopId]
+                        Collections.singletonList("shopId"), // pk is [shopId]
                         new TableStoreTestBase.ExpectedResult()
                                 .success(false)
                                 .expectedType(IllegalStateException.class)
@@ -298,7 +298,7 @@ public class TableStoreFactoryTest {
                 Arguments.of(
                         rowType,
                         Arrays.asList("dt", "hr", "shopId"),
-                        new int[] {0, 1, 2}, // pk is [dt, hr, shopId]
+                        Arrays.asList("dt", "hr", "shopId"), // pk is [dt, hr, shopId]
                         new TableStoreTestBase.ExpectedResult()
                                 .success(false)
                                 .expectedType(IllegalStateException.class)
