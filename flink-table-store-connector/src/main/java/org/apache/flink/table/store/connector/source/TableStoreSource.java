@@ -158,7 +158,7 @@ public class TableStoreSource
 
     @Override
     public Result applyFilters(List<ResolvedExpression> filters) {
-        if (logStoreTableFactory == null && tableStore.partitioned()) {
+        if (tableStore.partitioned()) {
             classifyFilters(filters);
         } else {
             fieldFilters = filters;
