@@ -167,11 +167,11 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
         FactoryUtil.TableFactoryHelper helper = createTableFactoryHelper(this, context);
         ResolvedSchema schema = context.getCatalogTable().getResolvedSchema();
         DataType physicalType = schema.toPhysicalRowDataType();
-        DeserializationSchema<RowData> keyDeserializer = null;
+        DeserializationSchema<RowData> primaryKeyDeserializer = null;
         int[] primaryKey = schema.getPrimaryKeyIndexes();
         if (primaryKey.length > 0) {
             DataType keyType = DataTypeUtils.projectRow(physicalType, primaryKey);
-            keyDeserializer =
+            primaryKeyDeserializer =
                     LogStoreTableFactory.getKeyDecodingFormat(helper)
                             .createRuntimeDecoder(sourceContext, keyType);
         }
@@ -183,7 +183,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                 toKafkaProperties(helper.getOptions()),
                 physicalType,
                 primaryKey,
-                keyDeserializer,
+                primaryKeyDeserializer,
                 valueDeserializer,
                 projectFields,
                 helper.getOptions().get(CONSISTENCY),

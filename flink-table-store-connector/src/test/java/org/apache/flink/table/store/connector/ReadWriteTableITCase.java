@@ -33,7 +33,6 @@ import org.apache.flink.table.store.kafka.KafkaTableTestBase;
 import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.types.Row;
 
-import org.junit.Ignore;
 import org.junit.Test;
 
 import javax.annotation.Nullable;
@@ -717,7 +716,6 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                 );
     }
 
-    @Ignore("filter with projection is failed")
     @Test
     public void testReadLatestChangelogOfPartitionedRecordsWithPk() throws Exception {
         // input is dailyRatesChangelogWithoutUB()
@@ -780,7 +778,6 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         changelogRow("-U", "Euro", 114L, "2022-01-01")));
 
         // test partition and field filter
-        // expected is empty, but actual is [+I[Euro, 114, 2022-01-02]]
         collectLatestLogAndCheck(
                 false,
                 true,
@@ -809,7 +806,7 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         changelogRow("+I", 119L) // Euro
                         ));
 
-        // test projection and filter, expected [+I[119]], actual is [+I[102]]
+        // test projection and filter
         collectLatestLogAndCheck(
                 false,
                 true,

@@ -44,7 +44,6 @@ import org.apache.flink.table.types.logical.LogicalType;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -159,14 +158,12 @@ public class TableStoreSource
 
     @Override
     public Result applyFilters(List<ResolvedExpression> filters) {
-        if (tableStore.partitioned()) {
+        if (logStoreTableFactory == null && tableStore.partitioned()) {
             classifyFilters(filters);
         } else {
             fieldFilters = filters;
         }
-        return Result.of(
-                new ArrayList<>(filters),
-                fieldFilters == null ? Collections.emptyList() : fieldFilters);
+        return Result.of(new ArrayList<>(filters), fieldFilters);
     }
 
     @Override
