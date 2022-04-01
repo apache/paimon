@@ -37,3 +37,17 @@ if [ $? -ne 0 ]; then
 	echo "Error building the docs"
 	exit 1
 fi
+
+# build Flink Table Store; required for Javadoc step
+mvn clean install -B -DskipTests
+
+# build java/scala docs
+mkdir -p docs/target/api
+mvn javadoc:aggregate -B \
+    -DadditionalJOption="-Xdoclint:none --allow-script-in-comments" \
+    -Dmaven.javadoc.failOnError=false \
+    -Dcheckstyle.skip=true \
+    -Dspotless.check.skip=true \
+    -Denforcer.skip=true \
+    -Dheader="<a href=\"http://flink.apache.org/\" target=\"_top\"><h1>Back to Flink Website</h1></a> <script>var _paq=window._paq=window._paq||[];_paq.push([\"disableCookies\"]),_paq.push([\"setDomains\",[\"*.flink.apache.org\",\"*.nightlies.apache.org/flink\"]]),_paq.push([\"trackPageView\"]),_paq.push([\"enableLinkTracking\"]),function(){var u=\"//matomo.privacy.apache.org/\";_paq.push([\"setTrackerUrl\",u+\"matomo.php\"]),_paq.push([\"setSiteId\",\"1\"]);var d=document, g=d.createElement('script'), s=d.getElementsByTagName('script')[0];g.async=true; g.src=u+'matomo.js'; s.parentNode.insertBefore(g,s)}();</script>"
+mv target/site/apidocs docs/target/api/java
