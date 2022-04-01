@@ -63,7 +63,8 @@ public class UniversalCompaction implements CompactStrategy {
         // 3 checking for file num
         if (runs.size() > maxRunNum) {
             // compacting for file num
-            return Optional.of(createUnit(runs, maxLevel, runs.size() - maxRunNum + 1));
+            int candidateCount = runs.size() - maxRunNum + 1;
+            return Optional.ofNullable(pickForSizeRatio(maxLevel, runs, candidateCount));
         }
 
         return Optional.empty();
@@ -97,10 +98,13 @@ public class UniversalCompaction implements CompactStrategy {
             return null;
         }
 
-        int candidateCount = 1;
-        long candidateSize = runs.get(0).run().totalSize();
+        return pickForSizeRatio(maxLevel, runs, 1);
+    }
 
-        for (int i = 1; i < runs.size(); i++) {
+    private CompactUnit pickForSizeRatio(
+            int maxLevel, List<LevelSortedRun> runs, int candidateCount) {
+        long candidateSize = candidateSize(runs, candidateCount);
+        for (int i = candidateCount; i < runs.size(); i++) {
             LevelSortedRun next = runs.get(i);
             if (candidateSize * (100.0 + sizeRatio) / 100.0 < next.run().totalSize()) {
                 break;
@@ -115,6 +119,14 @@ public class UniversalCompaction implements CompactStrategy {
         }
 
         return null;
+    }
+
+    private long candidateSize(List<LevelSortedRun> runs, int candidateCount) {
+        long size = 0;
+        for (int i = 0; i < candidateCount; i++) {
+            size += runs.get(i).run().totalSize();
+        }
+        return size;
     }
 
     @VisibleForTesting
