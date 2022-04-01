@@ -57,7 +57,7 @@ as a management unit.
 
 Partitioned filtering is the most effective way to improve performance,
 your query statements should contain partition filtering conditions
-as much as possible..
+as much as possible.
 
 ## Bucket
 

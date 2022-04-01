@@ -118,8 +118,9 @@ LogStore would serve the need of message systems, while FileStore will
 play the role of file systems with columnar formats. At each point in time,
 LogStore and FileStore will store exactly the same data for the latest
 written data (LogStore has TTL), but with different physical layouts.
-If one remembers the concept of dynamic table in Flink SQL, this is
-exactly what we want to build here:
+Flink Table Store aims to bridge the storage layout gap between the
+batch table and streaming changelog, to provide a unified experience
+as Flink SQL:
 - LogStore: Store the latest data, support second level streaming incremental
 consumption, use Kafka by default.
 - FileStore: Store latest data + historical data, provide batch Ad-Hoc analysis.

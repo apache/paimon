@@ -146,7 +146,7 @@ Important options include the following:
 ## Physical storage
 
 Creating a table will create the corresponding physical storage:
-- The table's FileStore directory will be created in:
+- The table's FileStore directory will be created under:
   `${file.path}/${catalog_name}.catalog/${database_name}.db/${table_name}`
 - If `log.system` is configured as Kafka, a Topic named
   "${catalog_name}.${database_name}.${table_name}" will be created
