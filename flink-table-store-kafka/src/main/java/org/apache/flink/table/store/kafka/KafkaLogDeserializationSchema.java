@@ -44,7 +44,7 @@ public class KafkaLogDeserializationSchema implements KafkaDeserializationSchema
     private final TypeInformation<RowData> producedType;
     private final int fieldCount;
     private final int[] primaryKey;
-    @Nullable private final DeserializationSchema<RowData> keyDeserializer;
+    @Nullable private final DeserializationSchema<RowData> primaryKeyDeserializer;
     private final DeserializationSchema<RowData> valueDeserializer;
     private final RowData.FieldGetter[] keyFieldGetters;
     @Nullable private final int[][] projectFields;
@@ -54,11 +54,11 @@ public class KafkaLogDeserializationSchema implements KafkaDeserializationSchema
     public KafkaLogDeserializationSchema(
             DataType physicalType,
             int[] primaryKey,
-            @Nullable DeserializationSchema<RowData> keyDeserializer,
+            @Nullable DeserializationSchema<RowData> primaryKeyDeserializer,
             DeserializationSchema<RowData> valueDeserializer,
             @Nullable int[][] projectFields) {
         this.primaryKey = primaryKey;
-        this.keyDeserializer = keyDeserializer;
+        this.primaryKeyDeserializer = primaryKeyDeserializer;
         this.valueDeserializer = valueDeserializer;
         DataType projectedType =
                 projectFields == null
@@ -82,8 +82,8 @@ public class KafkaLogDeserializationSchema implements KafkaDeserializationSchema
 
     @Override
     public void open(DeserializationSchema.InitializationContext context) throws Exception {
-        if (keyDeserializer != null) {
-            keyDeserializer.open(context);
+        if (primaryKeyDeserializer != null) {
+            primaryKeyDeserializer.open(context);
         }
         valueDeserializer.open(context);
         projectCollector = new ProjectCollector();
@@ -107,7 +107,7 @@ public class KafkaLogDeserializationSchema implements KafkaDeserializationSchema
         Collector<RowData> collector = projectCollector.project(underCollector);
 
         if (primaryKey.length > 0 && record.value() == null) {
-            RowData key = keyDeserializer.deserialize(record.key());
+            RowData key = primaryKeyDeserializer.deserialize(record.key());
             GenericRowData value = new GenericRowData(RowKind.DELETE, fieldCount);
             for (int i = 0; i < primaryKey.length; i++) {
                 value.setField(primaryKey[i], keyFieldGetters[i].getFieldOrNull(key));
