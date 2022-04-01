@@ -44,7 +44,6 @@ import org.apache.flink.table.types.logical.LogicalType;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -165,8 +164,7 @@ public class TableStoreSource
             fieldFilters = filters;
         }
         return Result.of(
-                new ArrayList<>(filters),
-                fieldFilters == null ? Collections.emptyList() : fieldFilters);
+                filters, streaming && logStoreTableFactory != null ? filters : fieldFilters);
     }
 
     @Override
