@@ -170,7 +170,7 @@ public class TableStoreSource
         if (tableStore.partitioned()
                 && (!streaming || logStoreTableFactory == null || hybridScan)) {
             classifyFilters(filters);
-            // when log system is involved, should return all filters are remaining filters
+            // when log system is involved, should return all filters as remaining filters
             return Result.of(partitionFilters, hybridScan ? filters : fieldFilters);
         } else {
             fieldFilters = filters;
