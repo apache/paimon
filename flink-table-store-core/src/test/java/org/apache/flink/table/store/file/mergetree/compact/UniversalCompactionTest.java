@@ -64,7 +64,8 @@ public class UniversalCompactionTest {
         pick = compaction.pick(3, level0(1, 2, 3, 50));
         assertThat(pick.isPresent()).isTrue();
         results = pick.get().files().stream().mapToLong(SstFileMeta::fileSize).toArray();
-        assertThat(results).isEqualTo(new long[] {1, 2});
+        // 3 should be in the candidate, by size ratio after picking by file num
+        assertThat(results).isEqualTo(new long[] {1, 2, 3});
     }
 
     @Test
