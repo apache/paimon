@@ -372,7 +372,7 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         Tuple2<String, BlockingIterator<Row, Row>> tuple =
                 collectAndCheckStreamingReadWriteWithoutClose(
                         Collections.emptyMap(),
-                        null,
+                        "dt >= '2022-01-01' AND dt <= '2022-01-03' OR currency = 'HK Dollar'",
                         Collections.emptyList(),
                         Arrays.asList(
                                 // part = 2022-01-01
@@ -382,6 +382,27 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         String managedTable = tuple.f0;
         checkFileStorePath(tEnv, managedTable);
         BlockingIterator<Row, Row> streamIter = tuple.f1;
+
+        // test log store in hybrid mode accepts all filters
+        tEnv.executeSql(
+                        String.format(
+                                "INSERT INTO `%s` PARTITION (dt = '2022-01-03')\n"
+                                        + "VALUES('HK Dollar', 100), ('Yen', 20)\n",
+                                managedTable))
+                .await();
+
+        tEnv.executeSql(
+                        String.format(
+                                "INSERT INTO `%s` PARTITION (dt = '2022-01-04')\n"
+                                        + "VALUES('Yen', 20)\n",
+                                managedTable))
+                .await();
+
+        assertThat(streamIter.collect(2, 10, TimeUnit.SECONDS))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(
+                                changelogRow("+I", "HK Dollar", 100L, "2022-01-03"),
+                                changelogRow("+I", "Yen", 20L, "2022-01-03")));
 
         // overwrite partition 2022-01-02
         prepareEnvAndOverwrite(
@@ -402,7 +423,12 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
                         // part = 2022-01-02
                         changelogRow("+I", "Euro", 100L, "2022-01-02"),
-                        changelogRow("+I", "Yen", 1L, "2022-01-02")));
+                        changelogRow("+I", "Yen", 1L, "2022-01-02"),
+                        // part = 2022-01-03
+                        changelogRow("+I", "HK Dollar", 100L, "2022-01-03"),
+                        changelogRow("+I", "Yen", 20L, "2022-01-03"),
+                        // part = 2022-01-04
+                        changelogRow("+I", "Yen", 20L, "2022-01-04")));
 
         // check no changelog generated for streaming read
         assertNoMoreRecords(streamIter);

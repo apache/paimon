@@ -51,6 +51,7 @@ import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
 import static org.apache.flink.table.store.log.LogOptions.CONSISTENCY;
 import static org.apache.flink.table.store.log.LogOptions.LogChangelogMode.ALL;
 import static org.apache.flink.table.store.log.LogOptions.LogConsistency.TRANSACTIONAL;
+import static org.apache.flink.table.store.log.LogOptions.SCAN;
 
 /**
  * Table source to create {@link FileStoreSource} under batch mode or change-tracking is disabled.
@@ -158,12 +159,23 @@ public class TableStoreSource
 
     @Override
     public Result applyFilters(List<ResolvedExpression> filters) {
-        if (logStoreTableFactory == null && tableStore.partitioned()) {
+        // extract partition filters when file store read is involved
+        // <1> under batch mode
+        // <2> disable log system under streaming mode
+        // <3> hybrid read with FULL scan under streaming mode
+        boolean hybridScan =
+                streaming
+                        && logStoreTableFactory != null
+                        && tableStore.logOptions().get(SCAN) == SCAN.defaultValue();
+        if (tableStore.partitioned()
+                && (!streaming || logStoreTableFactory == null || hybridScan)) {
             classifyFilters(filters);
+            // when log system is involved, should return all filters are remaining filters
+            return Result.of(partitionFilters, hybridScan ? filters : fieldFilters);
         } else {
             fieldFilters = filters;
+            return Result.of(filters, filters);
         }
-        return Result.of(new ArrayList<>(filters), fieldFilters);
     }
 
     @Override
