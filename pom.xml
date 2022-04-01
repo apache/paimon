@@ -339,6 +339,7 @@ under the License.
                         <exclude>docs/themes/book/**</exclude>
                         <exclude>docs/assets/github.css</exclude>
                         <exclude>docs/static/js/anchor.min.js</exclude>
+                        <exclude>**/*.svg</exclude>
                         <!-- Bundled license files -->
                         <exclude>**/LICENSE*</exclude>
                         <!-- artifacts created during release process -->
