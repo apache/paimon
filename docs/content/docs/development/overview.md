@@ -37,6 +37,7 @@ the complex connection information in 'with'. The DDL just establishes an implic
 relationship with the external system. We call such Table as external table.
 
 ```sql
+-- an external table ddl
 CREATE TABLE KafkaTable (
   `user_id` BIGINT,
   `item_id` BIGINT,
@@ -53,12 +54,13 @@ CREATE TABLE KafkaTable (
 
 The managed table is different, the connection information is already
 filled in the session environment, the user only needs to focus on the
-business logic when creating the DDL. The DDL is no longer just an
-implicit relationship; creating a table will create the corresponding
+business logic when writing the table creation DDL. The DDL is no longer
+just an implicit relationship; creating a table will create the corresponding
 physical storage, and dropping a table will delete the corresponding
 physical storage.
 
 ```sql
+-- a managed table ddl
 CREATE TABLE MyTable (
   `user_id` BIGINT,
   `item_id` BIGINT,
@@ -68,28 +70,50 @@ CREATE TABLE MyTable (
 
 ## Unify Streaming and Batch
 
-Three types of connectors are included in Flink SQL.
+There are three types of connectors in Flink SQL.
 - Message queue, such as Apache Kafka, it is used in both source and 
   intermediate stages in this pipeline, to guarantee the latency stay
   within seconds.
 - OLAP system, such as Clickhouse, it receives processed data in
   streaming fashion and serving user’s ad-hoc queries. 
 - Batch storage, such as Apache Hive, it supports various operations
-  of the traditional batch, including `INSERT OVERWRITE`.
+  of the traditional batch processing, including `INSERT OVERWRITE`.
 
-Flink Table Store provides table abstraction, you can use it as if
-it were a table in a database:
+Flink Table Store provides table abstraction. It is used in a way that
+does not differ from the traditional database:
 - In Flink `batch` execution mode, it acts like a Hive table and
   supports various operations of Batch SQL. Query it to see the
   latest snapshot.
 - In Flink `streaming` execution mode, it acts like a message queue.
-  Query it to get its change log stream. It does not drop a record
-  because of TTL, and querying it by default will read the full amount
-  of data first, followed by logging the incremental data.
+  Query it acts like querying a stream changelog from a message queue
+  where historical data never expires.
+
+Different `log.scan` mode will result in different consuming behavior under streaming mode.
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 20%">Scan Mode</th>
+      <th class="text-center" style="width: 5%">Default</th>
+      <th class="text-center" style="width: 60%">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><h5>FULL</h5></td>
+      <td>Yes</td>
+      <td>FULL scan mode performs a hybrid reading with a snapshot scan and the continuous incremental scan.</td>
+    </tr>
+    <tr>
+      <td><h5>LATEST</h5></td>
+      <td>No</td>
+      <td>LATEST scan mode only reads incremental data from the latest offset.</td>
+    </tr>
+    </tbody>
+</table>
 
 ## Architecture
 
-Flink Table Store consist of two parts, LogStore and FileStore. The
+Flink Table Store consists of two parts, LogStore and FileStore. The
 LogStore would serve the need of message systems, while FileStore will
 play the role of file systems with columnar formats. At each point in time,
 LogStore and FileStore will store exactly the same data for the latest

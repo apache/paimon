@@ -61,8 +61,8 @@ primary key must contain the partition field.
 __Note:__ Metadata column is not supported yet.
 {{< /hint >}}
 
-Table options does not contain the 'connector' key value
-that is managed table. Creating a table will create the
+Table options that do not contain the 'connector' key and value
+represent a managed table. Creating a table will create the
 corresponding physical storage.
 
 When the corresponding physical storage already exists,
@@ -78,9 +78,9 @@ the same options each time.
 ## Session Options
 
 To create a managed table, you need to set the required
-session options in advance. Session options are only
-valid when creating a table, not when reading or
-writing a table.
+session options in advance. Session options are only valid
+when creating a table, not interfering with reading or
+writing the table.
 
 You can set session options in the following two ways:
 - Edit `flink-conf.yaml`.
@@ -88,9 +88,9 @@ You can set session options in the following two ways:
 
 The difference between session options and table options
 is that the session option needs to be prefixed with
-"table-store", for example, for the `bucket` option:
-- session: `SET 'table-store.bucket' = '4';`
-- table: `WITH ('bucket' = '4')`
+`table-store`. Take `bucket` option for example:
+- set as session level: `SET 'table-store.bucket' = '4';`
+- set as per table level: `CREATE TABLE ... WITH ('bucket' = '4')`
 
 Important options include the following:
 
@@ -138,7 +138,7 @@ Important options include the following:
       <td>No</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>Duration</td>
-      <td>It means how long changes log will be kept. The default value is from the log system cluster.</td>
+      <td>The duration to keep a log file before deleting it. The default value is from the log system cluster.</td>
     </tr>
     </tbody>
 </table>

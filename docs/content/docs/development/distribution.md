@@ -51,12 +51,13 @@ in the following order:
 
 ## Partition
 
-Table Store has the same concept of partitioning as Apache Hive,
-which will separate the data and various operations can be managed
-by partition as a management unit.
+Table Store adopts the same partitioning concept as Apache Hive to
+separate data, and thus various operations can be managed by partition
+as a management unit.
 
 Partitioned filtering is the most effective way to improve performance,
-your query statements should contain partition filtering conditions.
+your query statements should contain partition filtering conditions
+as much as possible..
 
 ## Bucket
 
@@ -64,22 +65,24 @@ The record is hashed into different buckets according to the
 primary key or the whole row (without primary key).
 
 The number of buckets is very important as it determines the
-worst-case maximum processing parallelism. But it should not
-be too big, otherwise it will create a lot of small files.
+worst-case maximum processing parallelism. But it should not be
+too big, otherwise, the system will create a lot of small files.
 
 In general, the desired file size is 128 MB, the recommended data
 to be kept on disk in each sub-bucket is about 1 GB.
 
 ## Primary Key
 
-The primary key is unique, and the bucket will be sorted by the
-primary key. When no primary key is defined, data will be sorted
-by all fields. Using this ordered feature, you can achieve very
-high performance by filtering conditions on primary key.
+The primary key is unique and is indexed.
 
-The setting of the primary key is very critical, especially the
-setting of the composite primary key, in which the more in front
-of the field the more effective the filtering is. For example:
+Flink Table Store imposes an ordering of data, which means the system
+will sort the primary key within each bucket. All fields will be used
+to sort if no primary key is defined. Using this feature, you can
+achieve high performance by adding filter conditions on the primary key.
+
+The primary key's choice is critical, especially when setting the composite
+primary key. A rule of thumb is to put the most frequently queried field in
+the front. For example:
 
 ```sql
 CREATE TABLE MyTable (
