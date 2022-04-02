@@ -1761,7 +1761,6 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         query =
                 prepareSimpleSelectQuery(
                         managedTable, Collections.singletonMap(SCAN_PARALLELISM.key(), "66"));
-        System.out.println(query);
         assertThat(sourceParallelism(query)).isEqualTo(66);
     }
 

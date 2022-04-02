@@ -273,7 +273,7 @@ public class TableStore {
             return this;
         }
 
-        public SourceBuilder withParallelism(Integer parallelism) {
+        public SourceBuilder withParallelism(@Nullable Integer parallelism) {
             this.parallelism = parallelism;
             return this;
         }
@@ -318,7 +318,8 @@ public class TableStore {
 
         public DataStreamSource<RowData> build() {
             if (env == null) {
-                throw new IllegalArgumentException("Env should not be null.");
+                throw new IllegalArgumentException(
+                        "StreamExecutionEnvironment should not be null.");
             }
 
             LogicalType produceType =
@@ -372,7 +373,7 @@ public class TableStore {
             return this;
         }
 
-        public SinkBuilder withParallelism(Integer parallelism) {
+        public SinkBuilder withParallelism(@Nullable Integer parallelism) {
             this.parallelism = parallelism;
             return this;
         }
