@@ -42,7 +42,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.flink.table.factories.FactoryUtil.FORMAT;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link FileFormatImpl}. */
@@ -100,8 +99,9 @@ public class FileFormatTest {
 
     public FileFormat createFileFormat(String codec) {
         Configuration tableOptions = new Configuration();
-        tableOptions.set(FORMAT, "avro");
+        tableOptions.set(FileStoreOptions.FILE_FORMAT, "avro");
         tableOptions.setString("avro.codec", codec);
-        return FileFormat.fromTableOptions(this.getClass().getClassLoader(), tableOptions, FORMAT);
+        return FileFormat.fromTableOptions(
+                this.getClass().getClassLoader(), tableOptions, FileStoreOptions.FILE_FORMAT);
     }
 }

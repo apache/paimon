@@ -33,7 +33,6 @@ import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.expressions.ResolvedExpression;
-import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.types.DataType;
@@ -105,8 +104,8 @@ public abstract class FileFormat {
             Configuration tableOptions,
             ConfigOption<String> formatOption) {
         String formatIdentifier = tableOptions.get(formatOption);
-        String formatPrefix = FactoryUtil.getFormatPrefix(formatOption, formatIdentifier);
-        ReadableConfig formatOptions = new DelegatingConfiguration(tableOptions, formatPrefix);
+        ReadableConfig formatOptions =
+                new DelegatingConfiguration(tableOptions, formatIdentifier + ".");
         return fromIdentifier(classLoader, formatIdentifier, formatOptions);
     }
 
