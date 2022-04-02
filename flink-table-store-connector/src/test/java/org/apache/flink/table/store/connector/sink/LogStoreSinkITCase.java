@@ -134,7 +134,7 @@ public class LogStoreSinkITCase extends KafkaTableTestBase {
             env.execute();
 
             // read
-            List<Row> results = executeAndCollect(store.sourceBuilder().build(env));
+            List<Row> results = executeAndCollect(store.sourceBuilder().withEnv(env).build());
 
             Row[] expected;
             if (hasPk) {
@@ -164,7 +164,8 @@ public class LogStoreSinkITCase extends KafkaTableTestBase {
                             store.sourceBuilder()
                                     .withContinuousMode(true)
                                     .withLogSourceProvider(sourceProvider)
-                                    .build(buildStreamEnv())
+                                    .withEnv(buildStreamEnv())
+                                    .build()
                                     .executeAndCollect(),
                             CONVERTER::toExternal);
             results = iterator.collectAndClose(expected.length);

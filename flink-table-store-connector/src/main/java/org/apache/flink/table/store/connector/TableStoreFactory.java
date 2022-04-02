@@ -177,6 +177,7 @@ public class TableStoreFactory
     public Set<ConfigOption<?>> optionalOptions() {
         Set<ConfigOption<?>> options = FileStoreOptions.allOptions();
         options.addAll(MergeTreeOptions.allOptions());
+        options.addAll(TableStoreFactoryOptions.allOptions());
         return options;
     }
 
