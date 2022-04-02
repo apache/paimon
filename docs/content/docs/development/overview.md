@@ -30,6 +30,25 @@ Flink Table Store is a unified streaming and batch store for building dynamic
 tables on Apache Flink. Flink Table Store serves as the storage engine behind
 Flink SQL Managed Table.
 
+## Setup Table Store
+
+{{< hint info >}}
+__Note:__ Table Store is only supported starting from Flink 1.15.
+{{< /hint >}}
+
+You can get the bundle jar for the Table Store in one of the following ways:
+- [Download the latest bundle jar](https://flink.apache.org/downloads.html) of
+  Flink Table Store.
+- Build bundle jar from `flink-table-store-dist` in the source code.
+
+We have shaded all the dependencies in the package, so you don't have
+to worry about conflicts with other connector dependencies.
+
+The steps to set up are:
+- Copy the Table Store bundle jar to `flink/lib`.
+- Setting the HADOOP_CLASSPATH environment variable or copy the
+  [Pre-bundled Hadoop Jar](https://flink.apache.org/downloads.html) to `flink/lib`.
+
 ## Managed Table
 
 The typical usage of Flink SQL DDL is to specify the 'connector' and fill in
