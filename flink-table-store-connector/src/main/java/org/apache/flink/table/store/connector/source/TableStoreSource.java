@@ -20,12 +20,16 @@ package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.connector.ChangelogMode;
+import org.apache.flink.table.connector.ProviderContext;
+import org.apache.flink.table.connector.source.DataStreamScanProvider;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
-import org.apache.flink.table.connector.source.SourceProvider;
 import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.expressions.CallExpression;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.expressions.ExpressionVisitor;
@@ -47,6 +51,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.SCAN_PARALLELISM;
 import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
 import static org.apache.flink.table.store.log.LogOptions.CONSISTENCY;
 import static org.apache.flink.table.store.log.LogOptions.LogChangelogMode.ALL;
@@ -130,15 +135,29 @@ public class TableStoreSource
                             },
                             projectFields);
         }
-        TableStore.SourceBuilder builder =
+
+        TableStore.SourceBuilder sourceBuilder =
                 tableStore
                         .sourceBuilder()
                         .withContinuousMode(streaming)
                         .withLogSourceProvider(logSourceProvider)
                         .withProjection(projectFields)
                         .withPartitionPredicate(PredicateConverter.convert(partitionFilters))
-                        .withFieldPredicate(PredicateConverter.convert(fieldFilters));
-        return SourceProvider.of(builder.build());
+                        .withFieldPredicate(PredicateConverter.convert(fieldFilters))
+                        .withParallelism(tableStore.options().get(SCAN_PARALLELISM));
+
+        return new DataStreamScanProvider() {
+            @Override
+            public DataStream<RowData> produceDataStream(
+                    ProviderContext providerContext, StreamExecutionEnvironment env) {
+                return sourceBuilder.withEnv(env).build();
+            }
+
+            @Override
+            public boolean isBounded() {
+                return !streaming;
+            }
+        };
     }
 
     @Override

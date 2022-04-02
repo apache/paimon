@@ -19,14 +19,33 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.transformations.PartitionTransformation;
+import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.EnvironmentSettings;
+import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.catalog.CatalogBaseTable;
+import org.apache.flink.table.catalog.CatalogTable;
+import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.catalog.ResolvedCatalogTable;
+import org.apache.flink.table.catalog.ResolvedSchema;
+import org.apache.flink.table.connector.sink.DataStreamSinkProvider;
+import org.apache.flink.table.connector.sink.DynamicTableSink;
+import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.factories.DynamicTableFactory.Context;
+import org.apache.flink.table.factories.FactoryUtil;
+import org.apache.flink.table.runtime.connector.sink.SinkRuntimeProviderContext;
+import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.kafka.KafkaTableTestBase;
@@ -46,11 +65,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.registerData;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.SCAN_PARALLELISM;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.SINK_PARALLELISM;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1262,17 +1284,12 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                 .close();
     }
 
-    private Tuple2<String, BlockingIterator<Row, Row>> collectAndCheckUnderSameEnv(
+    private Tuple2<String, String> createSourceAndManagedTable(
             boolean streaming,
             boolean enableLogStore,
             boolean insertOnly,
             boolean partitioned,
-            boolean hasPk,
-            boolean writeFirst,
-            Map<String, String> readHints,
-            @Nullable String filter,
-            List<String> projection,
-            List<Row> expected)
+            boolean hasPk)
             throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
         rootPath = TEMPORARY_FOLDER.newFolder().getPath();
@@ -1305,6 +1322,26 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         tEnv = StreamTableEnvironment.create(env, builder.build());
         tEnv.executeSql(helperTableDdl);
         tEnv.executeSql(managedTableDdl);
+        return new Tuple2<>(sourceTable, managedTable);
+    }
+
+    private Tuple2<String, BlockingIterator<Row, Row>> collectAndCheckUnderSameEnv(
+            boolean streaming,
+            boolean enableLogStore,
+            boolean insertOnly,
+            boolean partitioned,
+            boolean hasPk,
+            boolean writeFirst,
+            Map<String, String> readHints,
+            @Nullable String filter,
+            List<String> projection,
+            List<Row> expected)
+            throws Exception {
+        Tuple2<String, String> tables =
+                createSourceAndManagedTable(
+                        streaming, enableLogStore, insertOnly, partitioned, hasPk);
+        String sourceTable = tables.f0;
+        String managedTable = tables.f1;
 
         String insertQuery = prepareInsertIntoQuery(sourceTable, managedTable);
         String selectQuery = prepareSelectQuery(managedTable, readHints, filter, projection);
@@ -1516,17 +1553,15 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
 
     private static String buildHints(Map<String, String> hints) {
         if (hints.size() > 0) {
-            StringBuilder hintsBuilder = new StringBuilder("/*+ OPTIONS (");
-            hints.forEach(
-                    (k, v) -> {
-                        hintsBuilder.append(String.format("'%s'", k));
-                        hintsBuilder.append(" = ");
-                        hintsBuilder.append(String.format("'%s', ", v));
-                    });
-            int len = hintsBuilder.length();
-            hintsBuilder.deleteCharAt(len - 2);
-            hintsBuilder.append(") */");
-            return hintsBuilder.toString();
+            String hintString =
+                    hints.entrySet().stream()
+                            .map(
+                                    entry ->
+                                            String.format(
+                                                    "'%s' = '%s'",
+                                                    entry.getKey(), entry.getValue()))
+                            .collect(Collectors.joining(", "));
+            return "/*+ OPTIONS (" + hintString + ") */";
         }
         return "";
     }
@@ -1712,5 +1747,74 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         env.setParallelism(2);
         return env;
+    }
+
+    @Test
+    public void testSourceParallelism() throws Exception {
+        String managedTable = createSourceAndManagedTable(false, false, false, false, false).f1;
+
+        // without hint
+        String query = prepareSimpleSelectQuery(managedTable, Collections.emptyMap());
+        assertThat(sourceParallelism(query)).isEqualTo(env.getParallelism());
+
+        // with hint
+        query =
+                prepareSimpleSelectQuery(
+                        managedTable, Collections.singletonMap(SCAN_PARALLELISM.key(), "66"));
+        assertThat(sourceParallelism(query)).isEqualTo(66);
+    }
+
+    private int sourceParallelism(String sql) {
+        DataStream<Row> stream = tEnv.toChangelogStream(tEnv.sqlQuery(sql));
+        return stream.getParallelism();
+    }
+
+    @Test
+    public void testSinkParallelism() {
+        testSinkParallelism(null, env.getParallelism());
+        testSinkParallelism(23, 23);
+    }
+
+    private void testSinkParallelism(Integer configParallelism, int expectedParallelism) {
+        // 1. create a mock table sink
+        ResolvedSchema schema = ResolvedSchema.of(Column.physical("a", DataTypes.STRING()));
+        Map<String, String> options = new HashMap<>();
+        if (configParallelism != null) {
+            options.put(SINK_PARALLELISM.key(), configParallelism.toString());
+        }
+
+        Context context =
+                new FactoryUtil.DefaultDynamicTableContext(
+                        ObjectIdentifier.of("default", "default", "t1"),
+                        new ResolvedCatalogTable(
+                                CatalogTable.of(
+                                        Schema.newBuilder().fromResolvedSchema(schema).build(),
+                                        "mock context",
+                                        Collections.emptyList(),
+                                        options),
+                                schema),
+                        Collections.emptyMap(),
+                        new Configuration(),
+                        Thread.currentThread().getContextClassLoader(),
+                        false);
+        DynamicTableSink tableSink = new TableStoreFactory().createDynamicTableSink(context);
+        assertThat(tableSink).isInstanceOf(TableStoreSink.class);
+
+        // 2. get sink provider
+        DynamicTableSink.SinkRuntimeProvider provider =
+                tableSink.getSinkRuntimeProvider(new SinkRuntimeProviderContext(false));
+        assertThat(provider).isInstanceOf(DataStreamSinkProvider.class);
+        DataStreamSinkProvider sinkProvider = (DataStreamSinkProvider) provider;
+
+        // 3. assert parallelism from transformation
+        DataStream<RowData> mockSource =
+                env.fromCollection(Collections.singletonList(GenericRowData.of()));
+        DataStreamSink<?> sink = sinkProvider.consumeDataStream(null, mockSource);
+        Transformation<?> transformation = sink.getTransformation();
+        // until a PartitionTransformation, see TableStore.SinkBuilder.build()
+        while (!(transformation instanceof PartitionTransformation)) {
+            assertThat(transformation.getParallelism()).isIn(1, expectedParallelism);
+            transformation = transformation.getInputs().get(0);
+        }
     }
 }
