@@ -42,3 +42,46 @@ SELECT * FROM MyTable;
 SET 'execution.runtime-mode' = 'streaming';
 SELECT * FROM MyTable /*+ OPTIONS ('log.scan'='latest') */;
 ```
+
+## Query Optimization
+
+It is highly recommended taking partition and primary key filters
+in the query, which will speed up the data skipping of the query.
+
+Supported filter functions are:
+- `=`
+- `<>`
+- `<`
+- `<=`
+- `>`
+- `>=`
+- `in`
+- starts with `like`
+
+## Streaming Real-time
+
+By default, data is only visible after the checkpoint, which means
+that the streaming reading has transactional consistency.
+
+If you want the data to be immediately visible, you need to:
+- 'log.system' = 'kafka', you can't use the FileStore's continuous consumption
+  capability because the FileStore only provides checkpoint-based visibility.
+- 'log.consistency' = 'eventual', this means that writes are visible without 
+  using LogSystem's transaction mechanism.
+- All tables need to have primary key defined, because only then can the
+  data be de-duplicated by normalize node of downstream job.
+
+## Streaming Low Cost
+
+By default, for the table with primary key, the records in the table store only
+contains INSERT, UPDATE_AFTER, DELETE. No UPDATE_BEFORE. A normalized node is
+generated in downstream consuming job, the node will store all key-value for
+producing UPDATE_BEFORE message.
+
+If you want to remove downstream normalized node (It's costly) or see the all
+changes of this table, you can configure:
+- 'log.changelog-mode' = 'all'
+- 'log.consistency' = 'transactional' (default)
+
+The query written to the table store must contain all message types with
+UPDATE_BEFORE, otherwise the planner will throw an exception.
