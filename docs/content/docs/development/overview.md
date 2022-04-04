@@ -33,15 +33,15 @@ Flink SQL Managed Table.
 ## Setup Table Store
 
 {{< hint info >}}
-__Note:__ Table Store is only supported starting from Flink 1.15.
+__Note:__ Table Store is only supported since Flink 1.15.
 {{< /hint >}}
 
 You can get the bundle jar for the Table Store in one of the following ways:
 - [Download the latest bundle jar](https://flink.apache.org/downloads.html) of
   Flink Table Store.
-- Build bundle jar from `flink-table-store-dist` in the source code.
+- Build bundle jar under submodule `flink-table-store-dist` from source code.
 
-We have shaded all the dependencies in the package, so you don't have
+Flink Table Store has shaded all the dependencies in the package, so you don't have
 to worry about conflicts with other connector dependencies.
 
 The steps to set up are:

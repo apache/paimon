@@ -39,34 +39,47 @@ column_list:
 
 ## Unify Streaming and Batch
 
-Table Store data writing supports Flink's batch and streaming modes.
-Moreover, Table Store supports simultaneous writing of streaming and batch:
+Flink Table Store supports read/write under both batch and streaming mode.
+Beyond that, it can also write to the same managed table simultaneously by
+different streaming and batch jobs.
+
+Suppose you have a warehouse pipeline:
+
+{{< img src="/img/stream_batch_insert.svg" alt="Unify Streaming and Batch" >}}
+
+The DWD layer has a following table:
 
 ```sql
 -- a managed table ddl
-CREATE TABLE MyTable (
+CREATE TABLE MyDwdTable (
   user_id BIGINT,
   item_id BIGINT,
   dt STRING
 ) PARTITIONED BY (dt);
-
--- Run a stream job that continuously writes to the table
-SET 'execution.runtime-mode' = 'streaming';
-INSERT INTO MyTable SELECT ... FROM MyCdcTable;
 ```
 
-You have this partitioned table, and now there is a stream job that
-is continuously writing data.
+And there is a real-time pipeline to perform the data sync task, followed
+by the downstream jobs to perform the rest ETL steps.
 
-After a few days, you find that there is a problem with yesterday's
-partition data, the data in the partition is wrong, you need to
-recalculate and revise the partition.
+```sql
+-- Run a streaming job that continuously writes to the table
+SET 'execution.runtime-mode' = 'streaming';
+INSERT INTO MyDwdTable SELECT user_id, item_id, dt FROM MyCdcTable WHERE some_filter;
+
+-- The downstream aggregation task
+INSERT INTO MyDwsTable
+SELECT dt, item_id, COUNT(user_id) FROM MyDwdTable GROUP BY dt, item_id;
+```
+
+Some backfill tasks are often required to correct historical data, which means
+you can start a new batch job overwriting the table's historical partition
+without influencing the current streaming pipeline and the downstream tasks.
 
 ```sql
 -- Run a batch job to revise yesterday's partition
 SET 'execution.runtime-mode' = 'batch';
-INSERT OVERWRITE MyTable PARTITION ('dt'='20220402')
-  SELECT ... FROM SourceTable WHERE dt = '20220402';
+INSERT OVERWRITE MyDwdTable PARTITION ('dt'='20220402')
+SELECT user_id, item_id FROM MyCdcTable WHERE dt = '20220402' AND new_filter;
 ```
 
 This way you revise yesterday's partition without suspending the streaming job.
@@ -104,11 +117,11 @@ parallelism of the sink with the `sink.parallelism` option.
     </tbody>
 </table>
 
-## Expire Snapshot
+## Expiring Snapshot
 
-Table Store generates one or two snapshots per commit. To avoid too many snapshots
-that create a lot of small files and redundant storage, Table Store write defaults
-to eliminating expired snapshots, controlled by the following options:
+Table Store generates one or two snapshots per commit. To avoid too many snapshots 
+that create a lot of small files and redundant storage, Table Store writes defaults
+to eliminate expired snapshots:
 
 <table class="table table-bordered">
     <thead>
@@ -172,12 +185,13 @@ following parameters control this tradeoff:
     </tbody>
 </table>
 
-- The larger `num-sorted-run.max`: the less merge cost when updating data, which
-  can avoid many invalid merges. However, if this value is too large, more memory
-  will be needed when merging files, because each FileReader will take up a lot
-  of memory.
-- Smaller `num-sorted-run.max`: better performance when querying, fewer files
-  will be merged.
+- The larger `num-sorted-run.max`, the less merge cost when updating data, which
+  can avoid many invalid merges. However, if this value is too large, more memory 
+  will be needed when merging files because each FileReader will take up a lot of
+  memory.
+
+- The smaller `num-sorted-run.max`, the better performance when querying, fewer
+  files will be merged.
 
 ## Memory
 
@@ -186,5 +200,5 @@ There are three main places in the Table Store's sink writer that take up memory
   bucket, and this memory value can be adjustable by the `write-buffer-size`
   option (default 64 MB).
 - The memory consumed by compaction for reading files, it can be adjusted by the
-  `num-sorted-run.max` option to adjust the maximum number of files to be merged.
+  `num-sorted-run.max` option to change the maximum number of files to be merged.
 - The memory consumed by writing file, which is not adjustable.

@@ -201,7 +201,7 @@ to be kept on disk in each sub-bucket is about 1 GB.
 
 ## Primary Key
 
-The primary key is unique and is indexed.
+The primary key is unique and indexed.
 
 Flink Table Store imposes an ordering of data, which means the system
 will sort the primary key within each bucket. All fields will be used
@@ -230,6 +230,6 @@ set the primary key:
 2. PRIMARY KEY (catalog_id, user_id)
 
 The two methods do not behave in the same way when querying.
-Use approach 1 if you have a large number of filtered queries
-with only `user_id`, and use approach 2 if you have a large
+Use approach one if you have a large number of filtered queries
+with only `user_id`, and use approach two if you have a large
 number of filtered queries with only `catalog_id`.
