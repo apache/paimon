@@ -32,7 +32,7 @@ document will be guided to create a simple dynamic table to read and write it.
 ## Step 1: Downloading Flink
 
 {{< hint info >}}
-__Note:__ Table Store is only supported starting from Flink 1.15.
+__Note:__ Table Store is only supported since Flink 1.15.
 {{< /hint >}}
 
 [Download the latest binary release](https://flink.apache.org/downloads.html) of Flink,

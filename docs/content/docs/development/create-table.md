@@ -24,7 +24,7 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# CREATE statement
+# Create Table
 
 ```sql
 CREATE TABLE [IF NOT EXISTS] [catalog_name.][db_name.]table_name
@@ -151,3 +151,85 @@ Creating a table will create the corresponding physical storage:
 - If `log.system` is configured as Kafka, a Topic named
   "${catalog_name}.${database_name}.${table_name}" will be created
   automatically when the table is created.
+
+## Distribution
+
+The data distribution of Table Store consists of three concepts:
+Partition, Bucket, and Primary Key.
+
+```sql
+CREATE TABLE MyTable (
+  user_id BIGINT,
+  item_id BIGINT,
+  behavior STRING,
+  dt STRING,
+  PRIMARY KEY (dt, user_id) NOT ENFORCED
+) PARTITIONED BY (dt) WITH (
+  'bucket' = '4'
+);
+```
+
+For example, the `MyTable` table above has its data distribution
+in the following order:
+- Partition: isolating different data based on partition fields.
+- Bucket: Within a single partition, distributed into 4 different
+  buckets based on the hash value of the primary key.
+- Primary key: Within a single bucket, sorted by primary key to
+  build LSM structure.
+
+## Partition
+
+Table Store adopts the same partitioning concept as Apache Hive to
+separate data, and thus various operations can be managed by partition
+as a management unit.
+
+Partitioned filtering is the most effective way to improve performance,
+your query statements should contain partition filtering conditions
+as much as possible.
+
+## Bucket
+
+The record is hashed into different buckets according to the
+primary key or the whole row (without primary key).
+
+The number of buckets is very important as it determines the
+worst-case maximum processing parallelism. But it should not be
+too big, otherwise, the system will create a lot of small files.
+
+In general, the desired file size is 128 MB, the recommended data
+to be kept on disk in each sub-bucket is about 1 GB.
+
+## Primary Key
+
+The primary key is unique and indexed.
+
+Flink Table Store imposes an ordering of data, which means the system
+will sort the primary key within each bucket. All fields will be used
+to sort if no primary key is defined. Using this feature, you can
+achieve high performance by adding filter conditions on the primary key.
+
+The primary key's choice is critical, especially when setting the composite
+primary key. A rule of thumb is to put the most frequently queried field in
+the front. For example:
+
+```sql
+CREATE TABLE MyTable (
+  catalog_id BIGINT,
+  user_id BIGINT,
+  item_id BIGINT,
+  behavior STRING,
+  dt STRING,
+  ......
+);
+```
+
+For this table, assuming that the composite primary keys are
+the `catalog_id` and `user_id` fields, there are two ways to
+set the primary key:
+1. PRIMARY KEY (user_id, catalog_id)
+2. PRIMARY KEY (catalog_id, user_id)
+
+The two methods do not behave in the same way when querying.
+Use approach one if you have a large number of filtered queries
+with only `user_id`, and use approach two if you have a large
+number of filtered queries with only `catalog_id`.
