@@ -22,18 +22,19 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.api.TableConfig;
 
-import java.lang.reflect.Field;
-
 /** Utils for {@link TableConfig}. */
 public class TableConfigUtils {
 
     public static Configuration extractConfiguration(ReadableConfig readableConfig) {
-        return extractConfiguration(readableConfig, new Configuration());
+        Configuration to = new Configuration();
+        copyConfiguration(readableConfig, to);
+        return to;
     }
 
-    private static Configuration extractConfiguration(ReadableConfig from, Configuration to) {
+    private static void copyConfiguration(ReadableConfig from, Configuration to) {
         if (from instanceof Configuration) {
-            return (Configuration) from;
+            to.addAll((Configuration) from);
+            return;
         }
 
         if (!(from instanceof TableConfig)) {
@@ -41,15 +42,11 @@ public class TableConfigUtils {
         }
 
         TableConfig tableConfig = (TableConfig) from;
-        try {
-            Field rootField = TableConfig.class.getDeclaredField("rootConfiguration");
-            rootField.setAccessible(true);
-            ReadableConfig rootConfig = (ReadableConfig) rootField.get(tableConfig);
-            extractConfiguration(rootConfig, to);
-        } catch (NoSuchFieldException | IllegalAccessException e) {
-            throw new RuntimeException(e);
-        }
+
+        // copy root configuration first
+        copyConfiguration(tableConfig.getRootConfiguration(), to);
+
+        // copy table configuration
         to.addAll(tableConfig.getConfiguration());
-        return to;
     }
 }
