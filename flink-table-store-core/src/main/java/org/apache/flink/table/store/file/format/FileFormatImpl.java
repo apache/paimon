@@ -30,27 +30,27 @@ import org.apache.flink.table.factories.FactoryUtil;
 /** A {@link FileFormat} which discovers reader and writer from format identifier. */
 public class FileFormatImpl extends FileFormat {
 
-    private final ClassLoader classLoader;
-    private final String formatIdentifier;
+    private final BulkReaderFormatFactory readerFactory;
+    private final BulkWriterFormatFactory writerFactory;
     private final ReadableConfig formatOptions;
 
     public FileFormatImpl(
             ClassLoader classLoader, String formatIdentifier, ReadableConfig formatOptions) {
-        this.classLoader = classLoader;
-        this.formatIdentifier = formatIdentifier;
+        this.readerFactory =
+                FactoryUtil.discoverFactory(
+                        classLoader, BulkReaderFormatFactory.class, formatIdentifier);
+        this.writerFactory =
+                FactoryUtil.discoverFactory(
+                        classLoader, BulkWriterFormatFactory.class, formatIdentifier);
         this.formatOptions = formatOptions;
     }
 
     protected BulkDecodingFormat<RowData> getDecodingFormat() {
-        return FactoryUtil.discoverFactory(
-                        classLoader, BulkReaderFormatFactory.class, formatIdentifier)
-                .createDecodingFormat(null, formatOptions); // context is useless
+        return readerFactory.createDecodingFormat(null, formatOptions); // context is useless
     }
 
     @Override
     protected EncodingFormat<BulkWriter.Factory<RowData>> getEncodingFormat() {
-        return FactoryUtil.discoverFactory(
-                        classLoader, BulkWriterFormatFactory.class, formatIdentifier)
-                .createEncodingFormat(null, formatOptions); // context is useless
+        return writerFactory.createEncodingFormat(null, formatOptions); // context is useless
     }
 }

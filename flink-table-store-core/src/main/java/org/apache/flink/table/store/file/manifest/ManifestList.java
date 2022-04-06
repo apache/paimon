@@ -103,24 +103,22 @@ public class ManifestList {
     public static class Factory {
 
         private final RowType partitionType;
-        private final BulkFormat<RowData, FileSourceSplit> readerFactory;
-        private final BulkWriter.Factory<RowData> writerFactory;
+        private final FileFormat fileFormat;
         private final FileStorePathFactory pathFactory;
 
         public Factory(
                 RowType partitionType, FileFormat fileFormat, FileStorePathFactory pathFactory) {
             this.partitionType = partitionType;
-            RowType metaType = ManifestFileMeta.schema(partitionType);
-            this.readerFactory = fileFormat.createReaderFactory(metaType);
-            this.writerFactory = fileFormat.createWriterFactory(metaType);
+            this.fileFormat = fileFormat;
             this.pathFactory = pathFactory;
         }
 
         public ManifestList create() {
+            RowType metaType = ManifestFileMeta.schema(partitionType);
             return new ManifestList(
                     new ManifestFileMetaSerializer(partitionType),
-                    readerFactory,
-                    writerFactory,
+                    fileFormat.createReaderFactory(metaType),
+                    fileFormat.createWriterFactory(metaType),
                     pathFactory);
         }
     }

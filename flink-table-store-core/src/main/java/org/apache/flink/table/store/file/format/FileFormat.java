@@ -47,7 +47,11 @@ import java.util.ServiceLoader;
 
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 
-/** Factory class which creates reader and writer factories for specific file format. */
+/**
+ * Factory class which creates reader and writer factories for specific file format.
+ *
+ * <p>NOTE: This class must be thread safe.
+ */
 public abstract class FileFormat {
 
     protected abstract BulkDecodingFormat<RowData> getDecodingFormat();
