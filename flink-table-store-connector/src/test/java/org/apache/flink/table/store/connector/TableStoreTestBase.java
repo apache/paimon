@@ -127,20 +127,29 @@ public abstract class TableStoreTestBase extends KafkaTableTestBase {
                 rowType.getChildren().stream()
                         .map(TypeConversions::fromLogicalToDataType)
                         .collect(Collectors.toList());
-        CatalogTable origin =
-                CatalogTable.of(
-                        Schema.newBuilder().fromFields(fieldNames, fieldDataTypes).build(),
-                        "a comment",
-                        partitionKeys,
-                        options);
         List<Column> resolvedColumns =
                 IntStream.range(0, fieldNames.size())
                         .mapToObj(i -> Column.physical(fieldNames.get(i), fieldDataTypes.get(i)))
                         .collect(Collectors.toList());
+        return createResolvedTable(options, resolvedColumns, partitionKeys, primaryKeys);
+    }
+
+    protected static ResolvedCatalogTable createResolvedTable(
+            Map<String, String> options,
+            List<Column> resolvedColumns,
+            List<String> partitionKeys,
+            List<String> primaryKeys) {
         UniqueConstraint constraint =
                 primaryKeys.isEmpty() ? null : UniqueConstraint.primaryKey("pk", primaryKeys);
-        return new ResolvedCatalogTable(
-                origin, new ResolvedSchema(resolvedColumns, Collections.emptyList(), constraint));
+        ResolvedSchema resolvedSchema =
+                new ResolvedSchema(resolvedColumns, Collections.emptyList(), constraint);
+        CatalogTable origin =
+                CatalogTable.of(
+                        Schema.newBuilder().fromResolvedSchema(resolvedSchema).build(),
+                        "a comment",
+                        partitionKeys,
+                        options);
+        return new ResolvedCatalogTable(origin, resolvedSchema);
     }
 
     protected void deleteTablePath() {

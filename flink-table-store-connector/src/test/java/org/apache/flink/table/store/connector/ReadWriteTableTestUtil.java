@@ -20,187 +20,36 @@ package org.apache.flink.table.store.connector;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
-import org.apache.flink.table.store.file.utils.BlockingIterator;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.DoubleType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.types.Row;
-
-import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
+import static org.apache.flink.table.api.DataTypes.BIGINT;
+import static org.apache.flink.table.api.DataTypes.DOUBLE;
+import static org.apache.flink.table.api.DataTypes.STRING;
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.registerData;
+import static org.apache.flink.table.store.connector.ShowCreateUtil.buildShowCreateTable;
 import static org.apache.flink.table.store.connector.TableStoreTestBase.createResolvedTable;
-import static org.assertj.core.api.Assertions.assertThat;
 
-/** Util for {@link ReadWriteTableITCase}. */
+/** Data util for {@link ReadWriteTableITCase}. */
 public class ReadWriteTableTestUtil {
 
-    static void assertNoMoreRecords(BlockingIterator<Row, Row> iterator) {
-        List<Row> expectedRecords = Collections.emptyList();
-        try {
-            // set expectation size to 1 to let time pass by until timeout
-            // just wait 5s to avoid too long time
-            expectedRecords = iterator.collect(1, 5L, TimeUnit.SECONDS);
-            iterator.close();
-        } catch (Exception ignored) {
-            // don't throw exception
-        }
-        assertThat(expectedRecords).isEmpty();
-    }
-
-    static String prepareManagedTableDdl(
-            String sourceTableName, String managedTableName, Map<String, String> tableOptions) {
-        StringBuilder ddl =
-                new StringBuilder("CREATE TABLE IF NOT EXISTS ")
-                        .append(String.format("`%s`", managedTableName));
-        ddl.append(prepareOptions(tableOptions))
-                .append(String.format(" LIKE `%s` (EXCLUDING OPTIONS)\n", sourceTableName));
-        return ddl.toString();
-    }
-
-    static String prepareOptions(Map<String, String> tableOptions) {
-        StringBuilder with = new StringBuilder();
-        if (tableOptions.size() > 0) {
-            with.append(" WITH (\n");
-            tableOptions.forEach(
-                    (k, v) ->
-                            with.append("  ")
-                                    .append(String.format("'%s'", k))
-                                    .append(" = ")
-                                    .append(String.format("'%s',\n", v)));
-            int len = with.length();
-            with.delete(len - 2, len);
-            with.append(")");
-        }
-        return with.toString();
-    }
-
-    static String prepareInsertIntoQuery(String sourceTableName, String managedTableName) {
-        return prepareInsertIntoQuery(
-                sourceTableName, managedTableName, Collections.emptyMap(), Collections.emptyMap());
-    }
-
-    static String prepareInsertIntoQuery(
-            String sourceTableName,
-            String managedTableName,
-            Map<String, String> partitions,
-            Map<String, String> hints) {
-        StringBuilder insertDmlBuilder =
-                new StringBuilder(String.format("INSERT INTO `%s`", managedTableName));
-        if (partitions.size() > 0) {
-            insertDmlBuilder.append(" PARTITION (");
-            partitions.forEach(
-                    (k, v) -> {
-                        insertDmlBuilder.append(String.format("'%s'", k));
-                        insertDmlBuilder.append(" = ");
-                        insertDmlBuilder.append(String.format("'%s', ", v));
-                    });
-            int len = insertDmlBuilder.length();
-            insertDmlBuilder.deleteCharAt(len - 1);
-            insertDmlBuilder.append(")");
-        }
-        insertDmlBuilder.append(String.format("\n SELECT * FROM `%s`", sourceTableName));
-        insertDmlBuilder.append(buildHints(hints));
-
-        return insertDmlBuilder.toString();
-    }
-
-    static String prepareInsertOverwriteQuery(
-            String managedTableName,
-            Map<String, String> staticPartitions,
-            List<String[]> overwriteRecords) {
-        StringBuilder insertDmlBuilder =
-                new StringBuilder(String.format("INSERT OVERWRITE `%s`", managedTableName));
-        if (staticPartitions.size() > 0) {
-            String partitionString =
-                    staticPartitions.entrySet().stream()
-                            .map(
-                                    entry ->
-                                            String.format(
-                                                    "%s = %s", entry.getKey(), entry.getValue()))
-                            .collect(Collectors.joining(", "));
-            insertDmlBuilder.append(String.format("PARTITION (%s)", partitionString));
-        }
-        insertDmlBuilder.append("\n VALUES ");
-        overwriteRecords.forEach(
-                record -> {
-                    int arity = record.length;
-                    insertDmlBuilder.append("(");
-                    IntStream.range(0, arity)
-                            .forEach(i -> insertDmlBuilder.append(record[i]).append(", "));
-
-                    if (arity > 0) {
-                        int len = insertDmlBuilder.length();
-                        insertDmlBuilder.delete(len - 2, len);
-                    }
-                    insertDmlBuilder.append("), ");
-                });
-        int len = insertDmlBuilder.length();
-        insertDmlBuilder.delete(len - 2, len);
-        return insertDmlBuilder.toString();
-    }
-
-    static String prepareSimpleSelectQuery(String tableName, Map<String, String> hints) {
-        return prepareSelectQuery(tableName, hints, null, Collections.emptyList());
-    }
-
-    static String prepareSelectQuery(
-            String tableName,
-            Map<String, String> hints,
-            @Nullable String filter,
-            List<String> projections) {
-        StringBuilder queryBuilder =
-                new StringBuilder(
-                        String.format(
-                                "SELECT %s FROM `%s` %s",
-                                projections.isEmpty() ? "*" : String.join(", ", projections),
-                                tableName,
-                                buildHints(hints)));
-        if (filter != null) {
-            queryBuilder.append("\nWHERE ").append(filter);
-        }
-        return queryBuilder.toString();
-    }
-
-    static String buildHints(Map<String, String> hints) {
-        if (hints.size() > 0) {
-            String hintString =
-                    hints.entrySet().stream()
-                            .map(
-                                    entry ->
-                                            String.format(
-                                                    "'%s' = '%s'",
-                                                    entry.getKey(), entry.getValue()))
-                            .collect(Collectors.joining(", "));
-            return "/*+ OPTIONS (" + hintString + ") */";
-        }
-        return "";
-    }
-
-    static String prepareHelperSourceWithInsertOnlyRecords(
+    public static String prepareHelperSourceWithInsertOnlyRecords(
             String sourceTable, List<String> partitionKeys, List<String> primaryKeys) {
         return prepareHelperSourceRecords(
                 RuntimeExecutionMode.BATCH, sourceTable, partitionKeys, primaryKeys);
     }
 
-    static String prepareHelperSourceWithChangelogRecords(
+    public static String prepareHelperSourceWithChangelogRecords(
             String sourceTable, List<String> partitionKeys, List<String> primaryKeys) {
         return prepareHelperSourceRecords(
                 RuntimeExecutionMode.STREAMING, sourceTable, partitionKeys, primaryKeys);
@@ -229,7 +78,7 @@ public class ReadWriteTableTestUtil {
      * @param primaryKeys
      * @return helper source ddl
      */
-    static String prepareHelperSourceRecords(
+    private static String prepareHelperSourceRecords(
             RuntimeExecutionMode executionMode,
             String sourceTable,
             List<String> partitionKeys,
@@ -253,17 +102,17 @@ public class ReadWriteTableTestUtil {
         }
         ResolvedCatalogTable table;
         if (exclusivePk.size() > 1) {
-            table = prepareExchangeRateSource(primaryKeys, partitionKeys, tableOptions);
+            table = prepareExchangeRateSource(partitionKeys, primaryKeys, tableOptions);
         } else {
-            table = prepareRateSource(primaryKeys, partitionKeys, tableOptions);
+            table = prepareRateSource(partitionKeys, primaryKeys, tableOptions);
         }
-        return ShowCreateUtil.buildShowCreateTable(
+        return buildShowCreateTable(
                 table,
                 ObjectIdentifier.of("default_catalog", "default_database", sourceTable),
                 true);
     }
 
-    static Tuple2<List<Row>, String> prepareHelperSource(
+    private static Tuple2<List<Row>, String> prepareHelperSource(
             boolean bounded, int pkSize, int partitionSize) {
         List<Row> input;
         String partitionList = null;
@@ -355,79 +204,40 @@ public class ReadWriteTableTestUtil {
         return Tuple2.of(input, partitionList);
     }
 
-    static ResolvedCatalogTable prepareRateSource(
-            List<String> primaryKeys,
+    private static ResolvedCatalogTable prepareRateSource(
             List<String> partitionKeys,
+            List<String> primaryKeys,
             Map<String, String> tableOptions) {
-        RowType rowType;
-        if (partitionKeys.isEmpty()) {
-            rowType =
-                    RowType.of(
-                            new LogicalType[] {VarCharType.STRING_TYPE, new BigIntType()},
-                            new String[] {"currency", "rate"});
-        } else if (partitionKeys.size() == 1) {
-            rowType =
-                    RowType.of(
-                            new LogicalType[] {
-                                VarCharType.STRING_TYPE, new BigIntType(), VarCharType.STRING_TYPE
-                            },
-                            new String[] {"currency", "rate", "dt"});
-        } else {
-            rowType =
-                    RowType.of(
-                            new LogicalType[] {
-                                VarCharType.STRING_TYPE,
-                                new BigIntType(),
-                                VarCharType.STRING_TYPE,
-                                VarCharType.STRING_TYPE
-                            },
-                            new String[] {"currency", "rate", "dt", "hh"});
+        List<Column> resolvedColumns = new ArrayList<>();
+        resolvedColumns.add(Column.physical("currency", STRING()));
+        resolvedColumns.add(Column.physical("rate", BIGINT()));
+        if (partitionKeys.size() > 0) {
+            resolvedColumns.add(Column.physical("dt", STRING()));
         }
-        return createResolvedTable(tableOptions, rowType, partitionKeys, primaryKeys);
+        if (partitionKeys.size() == 2) {
+            resolvedColumns.add(Column.physical("hh", STRING()));
+        }
+        return createResolvedTable(tableOptions, resolvedColumns, partitionKeys, primaryKeys);
     }
 
-    static ResolvedCatalogTable prepareExchangeRateSource(
-            List<String> primaryKeys,
+    private static ResolvedCatalogTable prepareExchangeRateSource(
             List<String> partitionKeys,
+            List<String> primaryKeys,
             Map<String, String> tableOptions) {
-        RowType rowType;
-        if (partitionKeys.isEmpty()) {
-            rowType =
-                    RowType.of(
-                            new LogicalType[] {
-                                VarCharType.STRING_TYPE, VarCharType.STRING_TYPE, new DoubleType()
-                            },
-                            new String[] {"from_currency", "to_currency", "rate_by_to_currency"});
-        } else if (partitionKeys.size() == 1) {
-            rowType =
-                    RowType.of(
-                            new LogicalType[] {
-                                VarCharType.STRING_TYPE,
-                                VarCharType.STRING_TYPE,
-                                new DoubleType(),
-                                VarCharType.STRING_TYPE
-                            },
-                            new String[] {
-                                "from_currency", "to_currency", "rate_by_to_currency", "dt"
-                            });
-        } else {
-            rowType =
-                    RowType.of(
-                            new LogicalType[] {
-                                VarCharType.STRING_TYPE,
-                                VarCharType.STRING_TYPE,
-                                new DoubleType(),
-                                VarCharType.STRING_TYPE,
-                                VarCharType.STRING_TYPE
-                            },
-                            new String[] {
-                                "from_currency", "to_currency", "rate_by_to_currency", "dt", "hh"
-                            });
+        List<Column> resolvedColumns = new ArrayList<>();
+        resolvedColumns.add(Column.physical("from_currency", STRING()));
+        resolvedColumns.add(Column.physical("to_currency", STRING()));
+        resolvedColumns.add(Column.physical("rate_by_to_currency", DOUBLE()));
+        if (partitionKeys.size() > 0) {
+            resolvedColumns.add(Column.physical("dt", STRING()));
         }
-        return createResolvedTable(tableOptions, rowType, partitionKeys, primaryKeys);
+        if (partitionKeys.size() == 2) {
+            resolvedColumns.add(Column.physical("hh", STRING()));
+        }
+        return createResolvedTable(tableOptions, resolvedColumns, partitionKeys, primaryKeys);
     }
 
-    static List<Row> rates() {
+    public static List<Row> rates() {
         // currency, rate
         return Arrays.asList(
                 changelogRow("+I", "US Dollar", 102L),
@@ -437,7 +247,7 @@ public class ReadWriteTableTestUtil {
                 changelogRow("+I", "Euro", 119L));
     }
 
-    static List<Row> exchangeRates() {
+    public static List<Row> exchangeRates() {
         // from_currency, to_currency, rate_by_to_currency
         return Arrays.asList(
                 // to_currency is USD
@@ -458,7 +268,7 @@ public class ReadWriteTableTestUtil {
                 changelogRow("+I", "Singapore Dollar", "Yen", 122.46d));
     }
 
-    static Tuple2<List<Row>, String> dailyRates() {
+    public static Tuple2<List<Row>, String> dailyRates() {
         // currency, rate, dt
         return Tuple2.of(
                 Arrays.asList(
@@ -473,7 +283,7 @@ public class ReadWriteTableTestUtil {
                 "dt:2022-01-01;dt:2022-01-02");
     }
 
-    static Tuple2<List<Row>, String> dailyExchangeRates() {
+    public static Tuple2<List<Row>, String> dailyExchangeRates() {
         // from_currency, to_currency, rate_by_to_currency, dt
         return Tuple2.of(
                 Arrays.asList(
@@ -496,7 +306,7 @@ public class ReadWriteTableTestUtil {
                 "dt:2022-01-01;dt:2022-01-02");
     }
 
-    static Tuple2<List<Row>, String> hourlyRates() {
+    public static Tuple2<List<Row>, String> hourlyRates() {
         // currency, rate, dt, hh
         return Tuple2.of(
                 Arrays.asList(
@@ -517,7 +327,7 @@ public class ReadWriteTableTestUtil {
                 "dt:2022-01-01,hh:00;dt:2022-01-01,hh:20;dt:2022-01-02,hh:12");
     }
 
-    static Tuple2<List<Row>, String> hourlyExchangeRates() {
+    public static Tuple2<List<Row>, String> hourlyExchangeRates() {
         // from_currency, to_currency, rate_by_to_currency, dt, hh
         return Tuple2.of(
                 Arrays.asList(
@@ -544,7 +354,7 @@ public class ReadWriteTableTestUtil {
                 "dt:2022-01-01,hh:11;dt:2022-01-01,hh:12;dt:2022-01-02,hh:23");
     }
 
-    static List<Row> ratesChangelogWithoutUB() {
+    public static List<Row> ratesChangelogWithoutUB() {
         return Arrays.asList(
                 changelogRow("+I", "US Dollar", 102L),
                 changelogRow("+I", "Euro", 114L),
@@ -556,7 +366,7 @@ public class ReadWriteTableTestUtil {
                 changelogRow("-D", "Yen", 1L));
     }
 
-    static List<Row> exchangeRatesChangelogWithoutUB() {
+    public static List<Row> exchangeRatesChangelogWithoutUB() {
         // from_currency, to_currency, rate_by_to_currency
         return Arrays.asList(
                 // to_currency is USD
@@ -582,7 +392,7 @@ public class ReadWriteTableTestUtil {
                 changelogRow("+U", "Singapore Dollar", "Yen", 122d));
     }
 
-    static Tuple2<List<Row>, String> dailyRatesChangelogWithoutUB() {
+    public static Tuple2<List<Row>, String> dailyRatesChangelogWithoutUB() {
         return Tuple2.of(
                 Arrays.asList(
                         // dt = 2022-01-01
@@ -598,7 +408,7 @@ public class ReadWriteTableTestUtil {
                 "dt:2022-01-01;dt:2022-01-02");
     }
 
-    static Tuple2<List<Row>, String> dailyExchangeRatesChangelogWithoutUB() {
+    public static Tuple2<List<Row>, String> dailyExchangeRatesChangelogWithoutUB() {
         // from_currency, to_currency, rate_by_to_currency, dt
         return Tuple2.of(
                 Arrays.asList(
@@ -624,7 +434,7 @@ public class ReadWriteTableTestUtil {
                 "dt:2022-01-01;dt:2022-01-02");
     }
 
-    static Tuple2<List<Row>, String> hourlyRatesChangelogWithoutUB() {
+    public static Tuple2<List<Row>, String> hourlyRatesChangelogWithoutUB() {
         return Tuple2.of(
                 Arrays.asList(
                         // dt = 2022-01-01, hh = "15"
@@ -640,7 +450,7 @@ public class ReadWriteTableTestUtil {
                 "dt:2022-01-01,hh:15;dt:2022-01-02,hh:23");
     }
 
-    static Tuple2<List<Row>, String> hourlyExchangeRatesChangelogWithoutUB() {
+    public static Tuple2<List<Row>, String> hourlyExchangeRatesChangelogWithoutUB() {
         // from_currency, to_currency, rate_by_to_currency, dt, hh
         return Tuple2.of(
                 Arrays.asList(
@@ -670,7 +480,7 @@ public class ReadWriteTableTestUtil {
                 "dt:2022-01-02,hh:20;dt:2022-01-02,hh:21");
     }
 
-    static List<Row> ratesChangelogWithUB() {
+    public static List<Row> ratesChangelogWithUB() {
         return Arrays.asList(
                 changelogRow("+I", "US Dollar", 102L),
                 changelogRow("+I", "Euro", 114L),
@@ -686,7 +496,7 @@ public class ReadWriteTableTestUtil {
                 changelogRow("+I", "HK Dollar", null));
     }
 
-    static Tuple2<List<Row>, String> dailyRatesChangelogWithUB() {
+    public static Tuple2<List<Row>, String> dailyRatesChangelogWithUB() {
         return Tuple2.of(
                 Arrays.asList(
                         // dt = 2022-01-01
@@ -704,7 +514,7 @@ public class ReadWriteTableTestUtil {
                 "dt:2022-01-01;dt:2022-01-02");
     }
 
-    static Tuple2<List<Row>, String> hourlyRatesChangelogWithUB() {
+    public static Tuple2<List<Row>, String> hourlyRatesChangelogWithUB() {
         return Tuple2.of(
                 Arrays.asList(
                         // dt = 2022-01-01, hh = 15
@@ -720,20 +530,5 @@ public class ReadWriteTableTestUtil {
                         changelogRow("-D", "Euro", 119L, "2022-01-02", "20"),
                         changelogRow("+I", "Euro", 115L, "2022-01-02", "20")),
                 "dt:2022-01-01,hh:15;dt:2022-01-02,hh:20");
-    }
-
-    static StreamExecutionEnvironment buildStreamEnv() {
-        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
-        env.enableCheckpointing(100);
-        env.setParallelism(2);
-        return env;
-    }
-
-    static StreamExecutionEnvironment buildBatchEnv() {
-        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        env.setParallelism(2);
-        return env;
     }
 }
