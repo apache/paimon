@@ -265,8 +265,7 @@ public class SstFileWriter {
 
         private final RowType keyType;
         private final RowType valueType;
-        private final BulkWriter.Factory<RowData> writerFactory;
-        private final FileStatsExtractor fileStatsExtractor;
+        private final FileFormat fileFormat;
         private final FileStorePathFactory pathFactory;
         private final long suggestedFileSize;
 
@@ -278,19 +277,18 @@ public class SstFileWriter {
                 long suggestedFileSize) {
             this.keyType = keyType;
             this.valueType = valueType;
-            RowType recordType = KeyValue.schema(keyType, valueType);
-            this.writerFactory = fileFormat.createWriterFactory(recordType);
-            this.fileStatsExtractor = fileFormat.createStatsExtractor(recordType).orElse(null);
+            this.fileFormat = fileFormat;
             this.pathFactory = pathFactory;
             this.suggestedFileSize = suggestedFileSize;
         }
 
         public SstFileWriter create(BinaryRowData partition, int bucket) {
+            RowType recordType = KeyValue.schema(keyType, valueType);
             return new SstFileWriter(
                     keyType,
                     valueType,
-                    writerFactory,
-                    fileStatsExtractor,
+                    fileFormat.createWriterFactory(recordType),
+                    fileFormat.createStatsExtractor(recordType).orElse(null),
                     pathFactory.createSstPathFactory(partition, bucket),
                     suggestedFileSize);
         }
