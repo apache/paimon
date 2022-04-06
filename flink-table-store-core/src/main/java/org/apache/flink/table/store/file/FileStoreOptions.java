@@ -87,8 +87,14 @@ public class FileStoreOptions implements Serializable {
                             "The default partition name in case the dynamic partition"
                                     + " column value is null/empty string.");
 
-    public static final ConfigOption<Integer> SNAPSHOT_NUM_RETAINED =
-            ConfigOptions.key("snapshot.num-retained")
+    public static final ConfigOption<Integer> SNAPSHOT_NUM_RETAINED_MIN =
+            ConfigOptions.key("snapshot.num-retained.min")
+                    .intType()
+                    .defaultValue(10)
+                    .withDescription("The minimum number of completed snapshots to retain.");
+
+    public static final ConfigOption<Integer> SNAPSHOT_NUM_RETAINED_MAX =
+            ConfigOptions.key("snapshot.num-retained.max")
                     .intType()
                     .defaultValue(Integer.MAX_VALUE)
                     .withDescription("The maximum number of completed snapshots to retain.");
@@ -116,7 +122,8 @@ public class FileStoreOptions implements Serializable {
         allOptions.add(MANIFEST_TARGET_FILE_SIZE);
         allOptions.add(MANIFEST_MERGE_MIN_COUNT);
         allOptions.add(PARTITION_DEFAULT_NAME);
-        allOptions.add(SNAPSHOT_NUM_RETAINED);
+        allOptions.add(SNAPSHOT_NUM_RETAINED_MIN);
+        allOptions.add(SNAPSHOT_NUM_RETAINED_MAX);
         allOptions.add(SNAPSHOT_TIME_RETAINED);
         return allOptions;
     }
@@ -124,6 +131,14 @@ public class FileStoreOptions implements Serializable {
     public FileStoreOptions(Configuration options) {
         this.options = options;
         // TODO validate all keys
+        Preconditions.checkArgument(
+                snapshotNumRetainMin() > 0,
+                SNAPSHOT_NUM_RETAINED_MIN.key() + " should be at least 1");
+        Preconditions.checkArgument(
+                snapshotNumRetainMin() <= snapshotNumRetainMax(),
+                SNAPSHOT_NUM_RETAINED_MIN.key()
+                        + " should not be larger than "
+                        + SNAPSHOT_NUM_RETAINED_MAX.key());
     }
 
     public int bucket() {
@@ -177,8 +192,12 @@ public class FileStoreOptions implements Serializable {
         return new MergeTreeOptions(options);
     }
 
-    public int snapshotNumRetain() {
-        return options.get(SNAPSHOT_NUM_RETAINED);
+    public int snapshotNumRetainMin() {
+        return options.get(SNAPSHOT_NUM_RETAINED_MIN);
+    }
+
+    public int snapshotNumRetainMax() {
+        return options.get(SNAPSHOT_NUM_RETAINED_MAX);
     }
 
     public Duration snapshotTimeRetain() {

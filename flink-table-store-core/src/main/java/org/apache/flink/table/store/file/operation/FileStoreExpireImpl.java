@@ -52,8 +52,9 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreExpireImpl.class);
 
+    private final int numRetainedMin;
     // snapshots exceeding any constraint will be expired
-    private final int numRetained;
+    private final int numRetainedMax;
     private final long millisRetained;
 
     private final FileStorePathFactory pathFactory;
@@ -63,12 +64,14 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     private Lock lock;
 
     public FileStoreExpireImpl(
-            int numRetained,
+            int numRetainedMin,
+            int numRetainedMax,
             long millisRetained,
             FileStorePathFactory pathFactory,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory) {
-        this.numRetained = numRetained;
+        this.numRetainedMin = numRetainedMin;
+        this.numRetainedMax = numRetainedMax;
         this.millisRetained = millisRetained;
         this.pathFactory = pathFactory;
         this.manifestFile = manifestFileFactory.create();
@@ -102,8 +105,8 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         }
 
         // find the earliest snapshot to retain
-        for (long id = Math.max(latestSnapshotId - numRetained + 1, earliest);
-                id <= latestSnapshotId;
+        for (long id = Math.max(latestSnapshotId - numRetainedMax + 1, earliest);
+                id <= latestSnapshotId - numRetainedMin;
                 id++) {
             Path snapshotPath = pathFactory.toSnapshotPath(id);
             try {
@@ -121,8 +124,8 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             }
         }
 
-        // no snapshot can be retained, expire all but last one
-        expireUntil(earliest, latestSnapshotId);
+        // no snapshot can be retained, expire until there are only numRetainedMin snapshots left
+        expireUntil(earliest, latestSnapshotId - numRetainedMin + 1);
     }
 
     private void expireUntil(long earliestId, long endExclusiveId) {
