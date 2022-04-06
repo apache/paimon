@@ -122,9 +122,11 @@ public class TestFileStore extends FileStoreImpl {
         this.valueSerializer = new RowDataSerializer(valueType);
     }
 
-    public FileStoreExpireImpl newExpire(int numRetained, long millisRetained) {
+    public FileStoreExpireImpl newExpire(
+            int numRetainedMin, int numRetainedMax, long millisRetained) {
         return new FileStoreExpireImpl(
-                numRetained,
+                numRetainedMin,
+                numRetainedMax,
                 millisRetained,
                 pathFactory(),
                 manifestFileFactory(),

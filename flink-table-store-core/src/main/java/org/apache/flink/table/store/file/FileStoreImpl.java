@@ -135,7 +135,8 @@ public class FileStoreImpl implements FileStore {
     @Override
     public FileStoreExpireImpl newExpire() {
         return new FileStoreExpireImpl(
-                options.snapshotNumRetain(),
+                options.snapshotNumRetainMin(),
+                options.snapshotNumRetainMax(),
                 options.snapshotTimeRetain().toMillis(),
                 pathFactory(),
                 manifestFileFactory(),
