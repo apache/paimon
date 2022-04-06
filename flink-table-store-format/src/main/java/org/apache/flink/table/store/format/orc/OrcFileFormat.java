@@ -32,22 +32,22 @@ import java.util.Optional;
 /** Orc {@link FileFormat}. */
 public class OrcFileFormat extends FileFormat {
 
+    private final org.apache.flink.orc.OrcFileFormatFactory factory;
     private final ReadableConfig formatOptions;
 
     public OrcFileFormat(ReadableConfig formatOptions) {
+        this.factory = new org.apache.flink.orc.OrcFileFormatFactory();
         this.formatOptions = formatOptions;
     }
 
     @Override
     protected BulkDecodingFormat<RowData> getDecodingFormat() {
-        return new org.apache.flink.orc.OrcFileFormatFactory()
-                .createDecodingFormat(null, formatOptions); // context is useless
+        return factory.createDecodingFormat(null, formatOptions); // context is useless
     }
 
     @Override
     protected EncodingFormat<BulkWriter.Factory<RowData>> getEncodingFormat() {
-        return new org.apache.flink.orc.OrcFileFormatFactory()
-                .createEncodingFormat(null, formatOptions); // context is useless
+        return factory.createEncodingFormat(null, formatOptions); // context is useless
     }
 
     @Override

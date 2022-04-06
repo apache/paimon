@@ -28,21 +28,21 @@ import org.apache.flink.table.store.file.format.FileFormat;
 /** Avro {@link FileFormat}. */
 public class AvroFileFormat extends FileFormat {
 
+    private final org.apache.flink.formats.avro.AvroFileFormatFactory factory;
     private final ReadableConfig formatOptions;
 
     public AvroFileFormat(ReadableConfig formatOptions) {
+        this.factory = new org.apache.flink.formats.avro.AvroFileFormatFactory();
         this.formatOptions = formatOptions;
     }
 
     @Override
     protected BulkDecodingFormat<RowData> getDecodingFormat() {
-        return new org.apache.flink.formats.avro.AvroFileFormatFactory()
-                .createDecodingFormat(null, formatOptions); // context is useless
+        return factory.createDecodingFormat(null, formatOptions); // context is useless
     }
 
     @Override
     protected EncodingFormat<BulkWriter.Factory<RowData>> getEncodingFormat() {
-        return new org.apache.flink.formats.avro.AvroFileFormatFactory()
-                .createEncodingFormat(null, formatOptions); // context is useless
+        return factory.createEncodingFormat(null, formatOptions); // context is useless
     }
 }
