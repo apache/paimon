@@ -142,7 +142,14 @@ to eliminate expired snapshots:
       <td>The maximum time of completed snapshots to retain.</td>
     </tr>
     <tr>
-      <td><h5>snapshot.num-retained</h5></td>
+      <td><h5>snapshot.num-retained.min</h5></td>
+      <td>No</td>
+      <td style="word-wrap: break-word;">10</td>
+      <td>Integer</td>
+      <td>The minimum number of completed snapshots to retain.</td>
+    </tr>
+    <tr>
+      <td><h5>snapshot.num-retained.max</h5></td>
       <td>No</td>
       <td style="word-wrap: break-word;">Integer.MAX_VALUE</td>
       <td>Integer</td>
