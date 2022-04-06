@@ -125,7 +125,6 @@ public class SstFileReader {
         private int[][] valueProjection;
         private RowType projectedKeyType;
         private RowType projectedValueType;
-        private BulkFormat<RowData, FileSourceSplit> readerFactory;
 
         public Factory(
                 RowType keyType,
@@ -155,21 +154,19 @@ public class SstFileReader {
         }
 
         public SstFileReader create(BinaryRowData partition, int bucket) {
+            RowType recordType = KeyValue.schema(keyType, valueType);
+            int[][] projection =
+                    KeyValue.project(keyProjection, valueProjection, keyType.getFieldCount());
             return new SstFileReader(
                     projectedKeyType,
                     projectedValueType,
-                    readerFactory,
+                    fileFormat.createReaderFactory(recordType, projection),
                     pathFactory.createSstPathFactory(partition, bucket));
         }
 
         private void applyProjection() {
             projectedKeyType = (RowType) Projection.of(keyProjection).project(keyType);
             projectedValueType = (RowType) Projection.of(valueProjection).project(valueType);
-
-            RowType recordType = KeyValue.schema(keyType, valueType);
-            int[][] projection =
-                    KeyValue.project(keyProjection, valueProjection, keyType.getFieldCount());
-            readerFactory = fileFormat.createReaderFactory(recordType, projection);
         }
     }
 }

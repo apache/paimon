@@ -119,7 +119,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                         sstFileWriter.valueType(),
                         options.writeBufferSize,
                         options.pageSize),
-                createCompactManager(partition, bucket, sstFileWriter, compactExecutor),
+                createCompactManager(partition, bucket, compactExecutor),
                 new Levels(keyComparator, restoreFiles, options.numLevels),
                 maxSequenceNumber,
                 keyComparator,
@@ -129,15 +129,13 @@ public class FileStoreWriteImpl implements FileStoreWrite {
     }
 
     private CompactManager createCompactManager(
-            BinaryRowData partition,
-            int bucket,
-            SstFileWriter sstFileWriter,
-            ExecutorService compactExecutor) {
+            BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
         CompactStrategy compactStrategy =
                 new UniversalCompaction(
                         options.maxSizeAmplificationPercent,
                         options.sizeRatio,
                         options.numSortedRunMax);
+        SstFileWriter sstFileWriter = sstFileWriterFactory.create(partition, bucket);
         CompactManager.Rewriter rewriter =
                 (outputLevel, dropDelete, sections) ->
                         sstFileWriter.write(
