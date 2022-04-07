@@ -49,10 +49,19 @@ public class ShowCreateUtil {
     private ShowCreateUtil() {}
 
     public static String createTableLikeDDL(
-            String sourceTableName, String managedTableName, Map<String, String> tableOptions) {
+            String sourceTableName,
+            String managedTableName,
+            Map<String, String> tableOptions,
+            @Nullable ReadWriteTableTestBase.WatermarkSpec watermarkSpec) {
         StringBuilder ddl =
                 new StringBuilder("CREATE TABLE IF NOT EXISTS ")
                         .append(String.format("`%s`", managedTableName));
+        if (watermarkSpec != null) {
+            ddl.append(
+                    String.format(
+                            "(\n WATERMARK FOR %s AS %s)\n",
+                            watermarkSpec.columnName, watermarkSpec.expressionAsString));
+        }
         ddl.append(optionsToSql(tableOptions))
                 .append(String.format(" LIKE `%s` (EXCLUDING OPTIONS)\n", sourceTableName));
         return ddl.toString();
