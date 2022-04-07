@@ -160,20 +160,46 @@ public class ComputedColumnAndWatermarkTableITCase extends ReadWriteTableTestBas
     public void testStreamingSelectWithWatermark() throws Exception {
         String lateEventFilter = "CURRENT_WATERMARK(ts) IS NULL OR ts > CURRENT_WATERMARK(ts)";
         // input is ratesWithTimestamp()
+
+        // physical column as watermark
         collectAndCheckUnderSameEnv(
                         true,
                         true,
                         true,
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
+                        Collections.emptyList(), // partition
+                        Collections.emptyList(), // pk
+                        Collections.emptyList(), // computed column
                         WatermarkSpec.of("ts", "ts - INTERVAL '3' YEAR"),
                         false,
                         Collections.singletonMap(
                                 LOG_PREFIX + LogOptions.SCAN.key(),
                                 LogOptions.LogStartupMode.LATEST.name().toLowerCase()),
                         lateEventFilter,
-                        Collections.emptyList(),
+                        Collections.emptyList(), // projection
+                        Collections.singletonList(
+                                changelogRow(
+                                        "+I",
+                                        "US Dollar",
+                                        102L,
+                                        LocalDateTime.parse("1990-04-07T10:00:11.120"))))
+                .f1
+                .close();
+
+        // computed column as watermark
+        collectAndCheckUnderSameEnv(
+                        true,
+                        true,
+                        true,
+                        Collections.emptyList(), // partition
+                        Collections.emptyList(), // pk
+                        Collections.singletonList(Tuple2.of("ts1", "ts")), // computed column
+                        WatermarkSpec.of("ts1", "ts1 - INTERVAL '3' YEAR"),
+                        false,
+                        Collections.singletonMap(
+                                LOG_PREFIX + LogOptions.SCAN.key(),
+                                LogOptions.LogStartupMode.LATEST.name().toLowerCase()),
+                        lateEventFilter.replaceAll("ts", "ts1"),
+                        Arrays.asList("currency", "rate", "ts1"),
                         Collections.singletonList(
                                 changelogRow(
                                         "+I",
@@ -202,7 +228,7 @@ public class ComputedColumnAndWatermarkTableITCase extends ReadWriteTableTestBas
                                 "currency",
                                 "rate",
                                 "ts",
-                                "CHAR_LENGTH(DATE_FORMAT(ptime, 'yyyy-MM-dd HH:mm'))"),
+                                "CHAR_LENGTH(DATE_FORMAT(ptime, 'yyyy-MM-dd HH:mm'))"), // projection
                         Collections.singletonList(
                                 changelogRow(
                                         "+I",
