@@ -30,6 +30,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.rates;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.ratesWithTimestamp;
 import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 
 /** Table store IT case when the managed table has computed column and watermark spec. */
@@ -154,6 +155,24 @@ public class ComputedColumnAndWatermarkTableITCase extends ReadWriteTableTestBas
                         Collections.singletonList(changelogRow("+I", 1d, 16)))
                 .f1
                 .close();
+    }
+
+    @Test
+    public void testBatchSelectWithWatermark() throws Exception {
+        // input is ratesWithTimestamp(), test `ts` as an ordinary field under batch mode
+        collectAndCheckUnderSameEnv(
+                false,
+                false,
+                true,
+                Collections.emptyList(), // partition
+                Collections.emptyList(), // pk
+                Collections.emptyList(), // computed column
+                WatermarkSpec.of("ts", "ts - INTERVAL '3' YEAR"),
+                true,
+                Collections.emptyMap(), // read hints
+                null,
+                Collections.emptyList(), // projection
+                ratesWithTimestamp());
     }
 
     @Test
