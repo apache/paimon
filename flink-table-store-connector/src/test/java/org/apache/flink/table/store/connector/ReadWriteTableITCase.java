@@ -18,69 +18,53 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
-import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.EnvironmentSettings;
-import org.apache.flink.table.api.Schema;
-import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
-import org.apache.flink.table.catalog.CatalogBaseTable;
-import org.apache.flink.table.catalog.CatalogTable;
-import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectIdentifier;
-import org.apache.flink.table.catalog.ObjectPath;
-import org.apache.flink.table.catalog.ResolvedCatalogTable;
-import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.connector.sink.DataStreamSinkProvider;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.factories.DynamicTableFactory.Context;
+import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.runtime.connector.sink.SinkRuntimeProviderContext;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
-import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
-import org.apache.flink.table.store.kafka.KafkaTableTestBase;
-import org.apache.flink.table.store.log.LogOptions;
+import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.types.Row;
 
 import org.junit.Test;
 
 import javax.annotation.Nullable;
 
-import java.nio.file.Paths;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
-import static org.apache.flink.table.planner.factories.TestValuesTableFactory.registerData;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.dailyRates;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.dailyRatesChangelogWithUB;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.dailyRatesChangelogWithoutUB;
+import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.rates;
+import static org.apache.flink.table.store.connector.ShowCreateUtil.buildSimpleSelectQuery;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.SCAN_PARALLELISM;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.SINK_PARALLELISM;
-import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
-import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
+import static org.apache.flink.table.store.connector.TableStoreTestBase.createResolvedTable;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for managed table dml. */
-public class ReadWriteTableITCase extends KafkaTableTestBase {
-
-    private String rootPath;
+public class ReadWriteTableITCase extends ReadWriteTableTestBase {
 
     @Test
     public void testBatchWriteWithPartitionedRecordsWithPk() throws Exception {
@@ -97,7 +81,7 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         String managedTable =
                 collectAndCheckBatchReadWrite(
                         true, true, null, Collections.emptyList(), expectedRecords);
-        checkFileStorePath(tEnv, managedTable);
+        checkFileStorePath(tEnv, managedTable, dailyRates().f1);
 
         // test streaming read
         final StreamTableEnvironment streamTableEnv =
@@ -105,7 +89,11 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         registerTable(streamTableEnv, managedTable);
         BlockingIterator<Row, Row> streamIter =
                 collectAndCheck(
-                        streamTableEnv, managedTable, Collections.emptyMap(), expectedRecords);
+                        streamTableEnv,
+                        managedTable,
+                        Collections.emptyMap(),
+                        null,
+                        expectedRecords);
 
         // overwrite static partition 2022-01-02
         prepareEnvAndOverwrite(
@@ -121,12 +109,9 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         tEnv,
                         managedTable,
                         Collections.emptyMap(),
+                        "dt = '2022-01-02'",
                         Arrays.asList(
                                 // part = 2022-01-01
-                                changelogRow("+I", "US Dollar", 114L, "2022-01-01"),
-                                changelogRow("+I", "Yen", 1L, "2022-01-01"),
-                                changelogRow("+I", "Euro", 114L, "2022-01-01"),
-                                // part = 2022-01-02
                                 changelogRow("+I", "Euro", 100L, "2022-01-02"),
                                 changelogRow("+I", "Yen", 1L, "2022-01-02")))
                 .close();
@@ -206,8 +191,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // test batch read
         String managedTable =
                 collectAndCheckBatchReadWrite(
-                        true, false, null, Collections.emptyList(), dailyRates());
-        checkFileStorePath(tEnv, managedTable);
+                        true, false, null, Collections.emptyList(), dailyRates().f0);
+        checkFileStorePath(tEnv, managedTable, dailyRates().f1);
 
         // overwrite dynamic partition
         prepareEnvAndOverwrite(
@@ -225,6 +210,7 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         streamTableEnv,
                         managedTable,
                         Collections.emptyMap(),
+                        null,
                         Arrays.asList(
                                 // part = 2022-01-01
                                 changelogRow("+I", "Euro", 90L, "2022-01-01"),
@@ -234,7 +220,7 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
 
         // test partition filter
         collectAndCheckBatchReadWrite(
-                true, false, "dt >= '2022-01-01'", Collections.emptyList(), dailyRates());
+                true, false, "dt >= '2022-01-01'", Collections.emptyList(), dailyRates().f0);
 
         // test field filter
         collectAndCheckBatchReadWrite(
@@ -254,7 +240,7 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                 false,
                 "dt = '2022-01-01' OR rate > 115",
                 Collections.emptyList(),
-                dailyRates());
+                dailyRates().f0);
 
         // test projection
         collectAndCheckBatchReadWrite(
@@ -292,7 +278,7 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                                 changelogRow("+I", "US Dollar", 102L),
                                 changelogRow("+I", "Yen", 1L),
                                 changelogRow("+I", "Euro", 119L)));
-        checkFileStorePath(tEnv, managedTable);
+        checkFileStorePath(tEnv, managedTable, null);
 
         // overwrite the whole table
         prepareEnvAndOverwrite(
@@ -303,6 +289,7 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                 tEnv,
                 managedTable,
                 Collections.emptyMap(),
+                null,
                 Collections.singletonList(changelogRow("+I", "Euro", 100L)));
 
         // test field filter
@@ -345,7 +332,7 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         // input is rates()
         String managedTable =
                 collectAndCheckBatchReadWrite(false, false, null, Collections.emptyList(), rates());
-        checkFileStorePath(tEnv, managedTable);
+        checkFileStorePath(tEnv, managedTable, null);
 
         // test field filter
         collectAndCheckBatchReadWrite(
@@ -402,7 +389,7 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                                 // part = 2022-01-02
                                 changelogRow("+I", "Euro", 119L, "2022-01-02")));
         String managedTable = tuple.f0;
-        checkFileStorePath(tEnv, managedTable);
+        checkFileStorePath(tEnv, managedTable, dailyRatesChangelogWithoutUB().f1);
         BlockingIterator<Row, Row> streamIter = tuple.f1;
 
         // test log store in hybrid mode accepts all filters
@@ -440,6 +427,7 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                 batchTableEnv,
                 managedTable,
                 Collections.emptyMap(),
+                null,
                 Arrays.asList(
                         // part = 2022-01-01
                         changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
@@ -514,7 +502,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                                 // part = 2022-01-01
                                 changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
                                 // part = 2022-01-02
-                                changelogRow("+I", "Euro", 119L, "2022-01-02"))));
+                                changelogRow("+I", "Euro", 119L, "2022-01-02"))),
+                dailyRatesChangelogWithoutUB().f1);
 
         // test partition filter
         collectAndCheckStreamingReadWriteWithClose(
@@ -582,7 +571,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                                 // part = 2022-01-01
                                 changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
                                 // part = 2022-01-02
-                                changelogRow("+I", "Euro", 115L, "2022-01-02"))));
+                                changelogRow("+I", "Euro", 115L, "2022-01-02"))),
+                dailyRatesChangelogWithUB().f1);
 
         // test partition filter
         collectAndCheckStreamingReadWriteWithClose(
@@ -673,7 +663,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         Collections.emptyList(),
                         Arrays.asList(
                                 changelogRow("+I", "US Dollar", 102L),
-                                changelogRow("+I", "Euro", 119L))));
+                                changelogRow("+I", "Euro", 119L))),
+                null);
 
         // test field filter
         collectAndCheckStreamingReadWriteWithClose(
@@ -723,7 +714,8 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                                 changelogRow("+I", "US Dollar", 102L),
                                 changelogRow("+I", "Euro", 119L),
                                 changelogRow("+I", null, 100L),
-                                changelogRow("+I", "HK Dollar", null))));
+                                changelogRow("+I", "HK Dollar", null))),
+                null);
 
         // test field filter
         collectAndCheckStreamingReadWriteWithClose(
@@ -1113,7 +1105,7 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         // part = 2022-01-02
                         changelogRow("+I", "Euro", 119L, "2022-01-02")));
 
-        collectChangelogFromTimestampAndCheck(true, true, false, 0, dailyRates());
+        collectChangelogFromTimestampAndCheck(true, true, false, 0, dailyRates().f0);
 
         // input is rates()
         collectChangelogFromTimestampAndCheck(
@@ -1175,6 +1167,36 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                         changelogRow("+I", "Euro", 119L, "2022-01-02")));
     }
 
+    @Test
+    public void testSourceParallelism() throws Exception {
+        String managedTable =
+                createSourceAndManagedTable(
+                                false,
+                                false,
+                                false,
+                                Collections.emptyList(),
+                                Collections.emptyList())
+                        .f1;
+
+        // without hint
+        String query = buildSimpleSelectQuery(managedTable, Collections.emptyMap());
+        assertThat(sourceParallelism(query)).isEqualTo(env.getParallelism());
+
+        // with hint
+        query =
+                buildSimpleSelectQuery(
+                        managedTable, Collections.singletonMap(SCAN_PARALLELISM.key(), "66"));
+        assertThat(sourceParallelism(query)).isEqualTo(66);
+    }
+
+    @Test
+    public void testSinkParallelism() {
+        testSinkParallelism(null, env.getParallelism());
+        testSinkParallelism(23, 23);
+    }
+
+    // ------------------------ Tools ----------------------------------
+
     private String collectAndCheckBatchReadWrite(
             boolean partitioned,
             boolean hasPk,
@@ -1182,18 +1204,16 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
             List<String> projection,
             List<Row> expected)
             throws Exception {
-        return collectAndCheckUnderSameEnv(
-                        false,
-                        false,
-                        true,
-                        partitioned,
-                        hasPk,
-                        true,
-                        Collections.emptyMap(),
-                        filter,
-                        projection,
-                        expected)
-                .f0;
+        return collectAndCheckBatchReadWrite(
+                partitioned ? Collections.singletonList("dt") : Collections.emptyList(),
+                hasPk
+                        ? partitioned
+                                ? Arrays.asList("currency", "dt")
+                                : Collections.singletonList("currency")
+                        : Collections.emptyList(),
+                filter,
+                projection,
+                expected);
     }
 
     private String collectAndCheckStreamingReadWriteWithClose(
@@ -1205,20 +1225,18 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
             List<String> projection,
             List<Row> expected)
             throws Exception {
-        Tuple2<String, BlockingIterator<Row, Row>> tuple =
-                collectAndCheckUnderSameEnv(
-                        true,
-                        enableLogStore,
-                        false,
-                        partitioned,
-                        hasPk,
-                        true,
-                        readHints,
-                        filter,
-                        projection,
-                        expected);
-        tuple.f1.close();
-        return tuple.f0;
+        return collectAndCheckStreamingReadWriteWithClose(
+                enableLogStore,
+                partitioned ? Collections.singletonList("dt") : Collections.emptyList(),
+                hasPk
+                        ? partitioned
+                                ? Arrays.asList("currency", "dt")
+                                : Collections.singletonList("currency")
+                        : Collections.emptyList(),
+                readHints,
+                filter,
+                projection,
+                expected);
     }
 
     private Tuple2<String, BlockingIterator<Row, Row>>
@@ -1228,8 +1246,13 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
                     List<String> projection,
                     List<Row> expected)
                     throws Exception {
-        return collectAndCheckUnderSameEnv(
-                true, true, false, true, true, true, readHints, filter, projection, expected);
+        return collectAndCheckStreamingReadWriteWithoutClose(
+                Collections.singletonList("dt"),
+                Arrays.asList("currency", "dt"),
+                readHints,
+                filter,
+                projection,
+                expected);
     }
 
     private void collectLatestLogAndCheck(
@@ -1240,23 +1263,17 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
             List<String> projection,
             List<Row> expected)
             throws Exception {
-        Map<String, String> hints = new HashMap<>();
-        hints.put(
-                LOG_PREFIX + LogOptions.SCAN.key(),
-                LogOptions.LogStartupMode.LATEST.name().toLowerCase());
-        collectAndCheckUnderSameEnv(
-                        true,
-                        true,
-                        insertOnly,
-                        partitioned,
-                        hasPk,
-                        false,
-                        hints,
-                        filter,
-                        projection,
-                        expected)
-                .f1
-                .close();
+        collectLatestLogAndCheck(
+                insertOnly,
+                partitioned ? Collections.singletonList("dt") : Collections.emptyList(),
+                hasPk
+                        ? partitioned
+                                ? Arrays.asList("currency", "dt")
+                                : Collections.singletonList("currency")
+                        : Collections.emptyList(),
+                filter,
+                projection,
+                expected);
     }
 
     private void collectChangelogFromTimestampAndCheck(
@@ -1266,502 +1283,16 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
             long timestamp,
             List<Row> expected)
             throws Exception {
-        Map<String, String> hints = new HashMap<>();
-        hints.put(LOG_PREFIX + LogOptions.SCAN.key(), "from-timestamp");
-        hints.put(LOG_PREFIX + LogOptions.SCAN_TIMESTAMP_MILLS.key(), String.valueOf(timestamp));
-        collectAndCheckUnderSameEnv(
-                        true,
-                        true,
-                        insertOnly,
-                        partitioned,
-                        hasPk,
-                        true,
-                        hints,
-                        null,
-                        Collections.emptyList(),
-                        expected)
-                .f1
-                .close();
-    }
-
-    private Tuple2<String, String> createSourceAndManagedTable(
-            boolean streaming,
-            boolean enableLogStore,
-            boolean insertOnly,
-            boolean partitioned,
-            boolean hasPk)
-            throws Exception {
-        Map<String, String> tableOptions = new HashMap<>();
-        rootPath = TEMPORARY_FOLDER.newFolder().getPath();
-        tableOptions.put(FileStoreOptions.FILE_PATH.key(), rootPath);
-        if (enableLogStore) {
-            tableOptions.put(LOG_SYSTEM.key(), "kafka");
-            tableOptions.put(LOG_PREFIX + BOOTSTRAP_SERVERS.key(), getBootstrapServers());
-        }
-        String sourceTable = "source_table_" + UUID.randomUUID();
-        String managedTable = "managed_table_" + UUID.randomUUID();
-        EnvironmentSettings.Builder builder = EnvironmentSettings.newInstance().inStreamingMode();
-        String helperTableDdl;
-        if (streaming) {
-            helperTableDdl =
-                    insertOnly
-                            ? prepareHelperSourceWithInsertOnlyRecords(
-                                    sourceTable, partitioned, hasPk)
-                            : prepareHelperSourceWithChangelogRecords(
-                                    sourceTable, partitioned, hasPk);
-            env = buildStreamEnv();
-            builder.inStreamingMode();
-        } else {
-            helperTableDdl =
-                    prepareHelperSourceWithInsertOnlyRecords(sourceTable, partitioned, hasPk);
-            env = buildBatchEnv();
-            builder.inBatchMode();
-        }
-        String managedTableDdl = prepareManagedTableDdl(sourceTable, managedTable, tableOptions);
-
-        tEnv = StreamTableEnvironment.create(env, builder.build());
-        tEnv.executeSql(helperTableDdl);
-        tEnv.executeSql(managedTableDdl);
-        return new Tuple2<>(sourceTable, managedTable);
-    }
-
-    private Tuple2<String, BlockingIterator<Row, Row>> collectAndCheckUnderSameEnv(
-            boolean streaming,
-            boolean enableLogStore,
-            boolean insertOnly,
-            boolean partitioned,
-            boolean hasPk,
-            boolean writeFirst,
-            Map<String, String> readHints,
-            @Nullable String filter,
-            List<String> projection,
-            List<Row> expected)
-            throws Exception {
-        Tuple2<String, String> tables =
-                createSourceAndManagedTable(
-                        streaming, enableLogStore, insertOnly, partitioned, hasPk);
-        String sourceTable = tables.f0;
-        String managedTable = tables.f1;
-
-        String insertQuery = prepareInsertIntoQuery(sourceTable, managedTable);
-        String selectQuery = prepareSelectQuery(managedTable, readHints, filter, projection);
-
-        BlockingIterator<Row, Row> iterator;
-        if (writeFirst) {
-            tEnv.executeSql(insertQuery).await();
-            iterator = BlockingIterator.of(tEnv.executeSql(selectQuery).collect());
-        } else {
-            iterator = BlockingIterator.of(tEnv.executeSql(selectQuery).collect());
-            tEnv.executeSql(insertQuery).await();
-        }
-        if (expected.isEmpty()) {
-            assertNoMoreRecords(iterator);
-        } else {
-            assertThat(iterator.collect(expected.size(), 10, TimeUnit.SECONDS))
-                    .containsExactlyInAnyOrderElementsOf(expected);
-        }
-        return Tuple2.of(managedTable, iterator);
-    }
-
-    private void prepareEnvAndOverwrite(
-            String managedTable,
-            Map<String, String> staticPartitions,
-            List<String[]> overwriteRecords)
-            throws Exception {
-        final StreamTableEnvironment batchEnv =
-                StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
-        registerTable(batchEnv, managedTable);
-        String insertQuery =
-                prepareInsertOverwriteQuery(managedTable, staticPartitions, overwriteRecords);
-        batchEnv.executeSql(insertQuery).await();
-    }
-
-    private void registerTable(StreamTableEnvironment tEnvToRegister, String managedTable)
-            throws Exception {
-        String cat = this.tEnv.getCurrentCatalog();
-        String db = this.tEnv.getCurrentDatabase();
-        ObjectPath objectPath = new ObjectPath(db, managedTable);
-        CatalogBaseTable table = this.tEnv.getCatalog(cat).get().getTable(objectPath);
-        tEnvToRegister.getCatalog(cat).get().createTable(objectPath, table, false);
-    }
-
-    private BlockingIterator<Row, Row> collect(
-            StreamTableEnvironment tEnv, String selectQuery, int expectedSize, List<Row> actual)
-            throws Exception {
-        TableResult result = tEnv.executeSql(selectQuery);
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(result.collect());
-        actual.addAll(iterator.collect(expectedSize));
-        return iterator;
-    }
-
-    private BlockingIterator<Row, Row> collectAndCheck(
-            StreamTableEnvironment tEnv,
-            String managedTable,
-            Map<String, String> hints,
-            List<Row> expectedRecords)
-            throws Exception {
-        List<Row> actual = new ArrayList<>();
-        BlockingIterator<Row, Row> iterator =
-                collect(
-                        tEnv,
-                        prepareSimpleSelectQuery(managedTable, hints),
-                        expectedRecords.size(),
-                        actual);
-        assertThat(actual).containsExactlyInAnyOrderElementsOf(expectedRecords);
-        return iterator;
-    }
-
-    private void checkFileStorePath(StreamTableEnvironment tEnv, String managedTable) {
-        String relativeFilePath =
-                FileStoreOptions.relativeTablePath(
-                        ObjectIdentifier.of(
-                                tEnv.getCurrentCatalog(), tEnv.getCurrentDatabase(), managedTable));
-        // check snapshot file path
-        assertThat(Paths.get(rootPath, relativeFilePath, "snapshot")).exists();
-        // check manifest file path
-        assertThat(Paths.get(rootPath, relativeFilePath, "manifest")).exists();
-    }
-
-    private static void assertNoMoreRecords(BlockingIterator<Row, Row> iterator) {
-        List<Row> expectedRecords = Collections.emptyList();
-        try {
-            // set expectation size to 1 to let time pass by until timeout
-            // just wait 5s to avoid too long time
-            expectedRecords = iterator.collect(1, 5L, TimeUnit.SECONDS);
-            iterator.close();
-        } catch (Exception ignored) {
-            // don't throw exception
-        }
-        assertThat(expectedRecords).isEmpty();
-    }
-
-    private static String prepareManagedTableDdl(
-            String sourceTableName, String managedTableName, Map<String, String> tableOptions) {
-        StringBuilder ddl =
-                new StringBuilder("CREATE TABLE IF NOT EXISTS ")
-                        .append(String.format("`%s`", managedTableName));
-        ddl.append(prepareOptions(tableOptions))
-                .append(String.format(" LIKE `%s` (EXCLUDING OPTIONS)\n", sourceTableName));
-        return ddl.toString();
-    }
-
-    private static String prepareOptions(Map<String, String> tableOptions) {
-        StringBuilder with = new StringBuilder();
-        if (tableOptions.size() > 0) {
-            with.append(" WITH (\n");
-            tableOptions.forEach(
-                    (k, v) ->
-                            with.append("  ")
-                                    .append(String.format("'%s'", k))
-                                    .append(" = ")
-                                    .append(String.format("'%s',\n", v)));
-            int len = with.length();
-            with.delete(len - 2, len);
-            with.append(")");
-        }
-        return with.toString();
-    }
-
-    private static String prepareInsertIntoQuery(String sourceTableName, String managedTableName) {
-        return prepareInsertIntoQuery(
-                sourceTableName, managedTableName, Collections.emptyMap(), Collections.emptyMap());
-    }
-
-    private static String prepareInsertIntoQuery(
-            String sourceTableName,
-            String managedTableName,
-            Map<String, String> partitions,
-            Map<String, String> hints) {
-        StringBuilder insertDmlBuilder =
-                new StringBuilder(String.format("INSERT INTO `%s`", managedTableName));
-        if (partitions.size() > 0) {
-            insertDmlBuilder.append(" PARTITION (");
-            partitions.forEach(
-                    (k, v) -> {
-                        insertDmlBuilder.append(String.format("'%s'", k));
-                        insertDmlBuilder.append(" = ");
-                        insertDmlBuilder.append(String.format("'%s', ", v));
-                    });
-            int len = insertDmlBuilder.length();
-            insertDmlBuilder.deleteCharAt(len - 1);
-            insertDmlBuilder.append(")");
-        }
-        insertDmlBuilder.append(String.format("\n SELECT * FROM `%s`", sourceTableName));
-        insertDmlBuilder.append(buildHints(hints));
-
-        return insertDmlBuilder.toString();
-    }
-
-    private static String prepareInsertOverwriteQuery(
-            String managedTableName,
-            Map<String, String> staticPartitions,
-            List<String[]> overwriteRecords) {
-        StringBuilder insertDmlBuilder =
-                new StringBuilder(String.format("INSERT OVERWRITE `%s`", managedTableName));
-        if (staticPartitions.size() > 0) {
-            insertDmlBuilder.append(" PARTITION (");
-            staticPartitions.forEach(
-                    (k, v) -> {
-                        insertDmlBuilder.append(String.format("%s", k));
-                        insertDmlBuilder.append(" = ");
-                        insertDmlBuilder.append(String.format("%s, ", v));
-                    });
-            int len = insertDmlBuilder.length();
-            insertDmlBuilder.delete(len - 2, len);
-            insertDmlBuilder.append(")");
-        }
-        insertDmlBuilder.append("\n VALUES ");
-        overwriteRecords.forEach(
-                record -> {
-                    int arity = record.length;
-                    insertDmlBuilder.append("(");
-                    IntStream.range(0, arity)
-                            .forEach(i -> insertDmlBuilder.append(record[i]).append(", "));
-
-                    if (arity > 0) {
-                        int len = insertDmlBuilder.length();
-                        insertDmlBuilder.delete(len - 2, len);
-                    }
-                    insertDmlBuilder.append("), ");
-                });
-        int len = insertDmlBuilder.length();
-        insertDmlBuilder.delete(len - 2, len);
-        return insertDmlBuilder.toString();
-    }
-
-    private static String prepareSimpleSelectQuery(String tableName, Map<String, String> hints) {
-        return prepareSelectQuery(tableName, hints, null, Collections.emptyList());
-    }
-
-    private static String prepareSelectQuery(
-            String tableName,
-            Map<String, String> hints,
-            @Nullable String filter,
-            List<String> projections) {
-        StringBuilder queryBuilder =
-                new StringBuilder(
-                        String.format(
-                                "SELECT %s FROM `%s` %s",
-                                projections.isEmpty() ? "*" : String.join(", ", projections),
-                                tableName,
-                                buildHints(hints)));
-        if (filter != null) {
-            queryBuilder.append("\nWHERE ").append(filter);
-        }
-        return queryBuilder.toString();
-    }
-
-    private static String buildHints(Map<String, String> hints) {
-        if (hints.size() > 0) {
-            String hintString =
-                    hints.entrySet().stream()
-                            .map(
-                                    entry ->
-                                            String.format(
-                                                    "'%s' = '%s'",
-                                                    entry.getKey(), entry.getValue()))
-                            .collect(Collectors.joining(", "));
-            return "/*+ OPTIONS (" + hintString + ") */";
-        }
-        return "";
-    }
-
-    private static String prepareHelperSourceWithInsertOnlyRecords(
-            String sourceTable, boolean partitioned, boolean hasPk) {
-        return prepareHelperSourceRecords(
-                RuntimeExecutionMode.BATCH, sourceTable, partitioned, hasPk);
-    }
-
-    private static String prepareHelperSourceWithChangelogRecords(
-            String sourceTable, boolean partitioned, boolean hasPk) {
-        return prepareHelperSourceRecords(
-                RuntimeExecutionMode.STREAMING, sourceTable, partitioned, hasPk);
-    }
-
-    /**
-     * Prepare helper source table ddl according to different input parameter.
-     *
-     * <pre> E.g. pk with partition
-     *   {@code
-     *   CREATE TABLE source_table (
-     *     currency STRING,
-     *     rate BIGINT,
-     *     dt STRING) PARTITIONED BY (dt)
-     *    WITH (
-     *      'connector' = 'values',
-     *      'bounded' = executionMode == RuntimeExecutionMode.BATCH,
-     *      'partition-list' = '...'
-     *     )
-     *   }
-     * </pre>
-     *
-     * @param executionMode is used to calculate {@code bounded}
-     * @param sourceTable source table name
-     * @param partitioned is used to calculate {@code partition-list}
-     * @param hasPk
-     * @return helper source ddl
-     */
-    private static String prepareHelperSourceRecords(
-            RuntimeExecutionMode executionMode,
-            String sourceTable,
-            boolean partitioned,
-            boolean hasPk) {
-        boolean bounded = executionMode == RuntimeExecutionMode.BATCH;
-        String changelogMode = bounded ? "I" : hasPk ? "I,UA,D" : "I,UA,UB,D";
-        StringBuilder ddlBuilder =
-                new StringBuilder(String.format("CREATE TABLE `%s` (\n", sourceTable))
-                        .append("  currency STRING,\n")
-                        .append("  rate BIGINT");
-        if (partitioned) {
-            ddlBuilder.append(",\n dt STRING");
-        }
-        if (hasPk) {
-            ddlBuilder.append(", \n PRIMARY KEY (currency");
-            if (partitioned) {
-                ddlBuilder.append(", dt");
-            }
-            ddlBuilder.append(") NOT ENFORCED\n");
-        } else {
-            ddlBuilder.append("\n");
-        }
-        ddlBuilder.append(")");
-        if (partitioned) {
-            ddlBuilder.append(" PARTITIONED BY (dt)\n");
-        }
-        List<Row> input;
-        if (bounded) {
-            input = partitioned ? dailyRates() : rates();
-        } else {
-            if (hasPk) {
-                input = partitioned ? dailyRatesChangelogWithoutUB() : ratesChangelogWithoutUB();
-            } else {
-                input = partitioned ? dailyRatesChangelogWithUB() : ratesChangelogWithUB();
-            }
-        }
-        ddlBuilder.append(
-                String.format(
-                        "  WITH (\n"
-                                + "  'connector' = 'values',\n"
-                                + "  'bounded' = '%s',\n"
-                                + "  'data-id' = '%s',\n"
-                                + "  'changelog-mode' = '%s',\n"
-                                + "  'disable-lookup' = 'true',\n"
-                                + "  'partition-list' = '%s'\n"
-                                + ")",
-                        bounded,
-                        registerData(input),
-                        changelogMode,
-                        partitioned ? "dt:2022-01-01;dt:2022-01-02" : ""));
-        return ddlBuilder.toString();
-    }
-
-    private static List<Row> rates() {
-        return Arrays.asList(
-                changelogRow("+I", "US Dollar", 102L),
-                changelogRow("+I", "Euro", 114L),
-                changelogRow("+I", "Yen", 1L),
-                changelogRow("+I", "Euro", 114L),
-                changelogRow("+I", "Euro", 119L));
-    }
-
-    private static List<Row> dailyRates() {
-        return Arrays.asList(
-                // part = 2022-01-01
-                changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
-                changelogRow("+I", "Euro", 114L, "2022-01-01"),
-                changelogRow("+I", "Yen", 1L, "2022-01-01"),
-                changelogRow("+I", "Euro", 114L, "2022-01-01"),
-                changelogRow("+I", "US Dollar", 114L, "2022-01-01"),
-                // part = 2022-01-02
-                changelogRow("+I", "Euro", 119L, "2022-01-02"));
-    }
-
-    static List<Row> ratesChangelogWithoutUB() {
-        return Arrays.asList(
-                changelogRow("+I", "US Dollar", 102L),
-                changelogRow("+I", "Euro", 114L),
-                changelogRow("+I", "Yen", 1L),
-                changelogRow("+U", "Euro", 116L),
-                changelogRow("-D", "Euro", 116L),
-                changelogRow("+I", "Euro", 119L),
-                changelogRow("+U", "Euro", 119L),
-                changelogRow("-D", "Yen", 1L));
-    }
-
-    static List<Row> dailyRatesChangelogWithoutUB() {
-        return Arrays.asList(
-                // part = 2022-01-01
-                changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
-                changelogRow("+I", "Euro", 114L, "2022-01-01"),
-                changelogRow("+I", "Yen", 1L, "2022-01-01"),
-                changelogRow("+U", "Euro", 116L, "2022-01-01"),
-                changelogRow("-D", "Yen", 1L, "2022-01-01"),
-                changelogRow("-D", "Euro", 116L, "2022-01-01"),
-                // part = 2022-01-02
-                changelogRow("+I", "Euro", 119L, "2022-01-02"),
-                changelogRow("+U", "Euro", 119L, "2022-01-02"));
-    }
-
-    private static List<Row> ratesChangelogWithUB() {
-        return Arrays.asList(
-                changelogRow("+I", "US Dollar", 102L),
-                changelogRow("+I", "Euro", 114L),
-                changelogRow("+I", "Yen", 1L),
-                changelogRow("-U", "Euro", 114L),
-                changelogRow("+U", "Euro", 116L),
-                changelogRow("-D", "Euro", 116L),
-                changelogRow("+I", "Euro", 119L),
-                changelogRow("-U", "Euro", 119L),
-                changelogRow("+U", "Euro", 119L),
-                changelogRow("-D", "Yen", 1L),
-                changelogRow("+I", null, 100L),
-                changelogRow("+I", "HK Dollar", null));
-    }
-
-    private static List<Row> dailyRatesChangelogWithUB() {
-        return Arrays.asList(
-                // part = 2022-01-01
-                changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
-                changelogRow("+I", "Euro", 116L, "2022-01-01"),
-                changelogRow("-D", "Euro", 116L, "2022-01-01"),
-                changelogRow("+I", "Yen", 1L, "2022-01-01"),
-                changelogRow("-D", "Yen", 1L, "2022-01-01"),
-                // part = 2022-01-02
-                changelogRow("+I", "Euro", 114L, "2022-01-02"),
-                changelogRow("-U", "Euro", 114L, "2022-01-02"),
-                changelogRow("+U", "Euro", 119L, "2022-01-02"),
-                changelogRow("-D", "Euro", 119L, "2022-01-02"),
-                changelogRow("+I", "Euro", 115L, "2022-01-02"));
-    }
-
-    private static StreamExecutionEnvironment buildStreamEnv() {
-        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
-        env.enableCheckpointing(100);
-        env.setParallelism(2);
-        return env;
-    }
-
-    private static StreamExecutionEnvironment buildBatchEnv() {
-        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        env.setParallelism(2);
-        return env;
-    }
-
-    @Test
-    public void testSourceParallelism() throws Exception {
-        String managedTable = createSourceAndManagedTable(false, false, false, false, false).f1;
-
-        // without hint
-        String query = prepareSimpleSelectQuery(managedTable, Collections.emptyMap());
-        assertThat(sourceParallelism(query)).isEqualTo(env.getParallelism());
-
-        // with hint
-        query =
-                prepareSimpleSelectQuery(
-                        managedTable, Collections.singletonMap(SCAN_PARALLELISM.key(), "66"));
-        assertThat(sourceParallelism(query)).isEqualTo(66);
+        collectChangelogFromTimestampAndCheck(
+                insertOnly,
+                partitioned ? Collections.singletonList("dt") : Collections.emptyList(),
+                hasPk
+                        ? partitioned
+                                ? Arrays.asList("currency", "dt")
+                                : Collections.singletonList("currency")
+                        : Collections.emptyList(),
+                timestamp,
+                expected);
     }
 
     private int sourceParallelism(String sql) {
@@ -1769,30 +1300,23 @@ public class ReadWriteTableITCase extends KafkaTableTestBase {
         return stream.getParallelism();
     }
 
-    @Test
-    public void testSinkParallelism() {
-        testSinkParallelism(null, env.getParallelism());
-        testSinkParallelism(23, 23);
-    }
-
     private void testSinkParallelism(Integer configParallelism, int expectedParallelism) {
         // 1. create a mock table sink
-        ResolvedSchema schema = ResolvedSchema.of(Column.physical("a", DataTypes.STRING()));
         Map<String, String> options = new HashMap<>();
         if (configParallelism != null) {
             options.put(SINK_PARALLELISM.key(), configParallelism.toString());
         }
 
-        Context context =
+        DynamicTableFactory.Context context =
                 new FactoryUtil.DefaultDynamicTableContext(
                         ObjectIdentifier.of("default", "default", "t1"),
-                        new ResolvedCatalogTable(
-                                CatalogTable.of(
-                                        Schema.newBuilder().fromResolvedSchema(schema).build(),
-                                        "mock context",
-                                        Collections.emptyList(),
-                                        options),
-                                schema),
+                        createResolvedTable(
+                                options,
+                                RowType.of(
+                                        new LogicalType[] {new VarCharType(Integer.MAX_VALUE)},
+                                        new String[] {"a"}),
+                                Collections.emptyList(),
+                                Collections.emptyList()),
                         Collections.emptyMap(),
                         new Configuration(),
                         Thread.currentThread().getContextClassLoader(),
