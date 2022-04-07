@@ -44,7 +44,6 @@ import org.junit.Before;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Paths;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -119,30 +118,38 @@ public abstract class TableStoreTestBase extends KafkaTableTestBase {
     }
 
     protected static ResolvedCatalogTable createResolvedTable(
-            Map<String, String> options, RowType rowType, List<String> partitionKeys, int[] pk) {
+            Map<String, String> options,
+            RowType rowType,
+            List<String> partitionKeys,
+            List<String> primaryKeys) {
         List<String> fieldNames = rowType.getFieldNames();
         List<DataType> fieldDataTypes =
                 rowType.getChildren().stream()
                         .map(TypeConversions::fromLogicalToDataType)
                         .collect(Collectors.toList());
-        CatalogTable origin =
-                CatalogTable.of(
-                        Schema.newBuilder().fromFields(fieldNames, fieldDataTypes).build(),
-                        "a comment",
-                        partitionKeys,
-                        options);
         List<Column> resolvedColumns =
                 IntStream.range(0, fieldNames.size())
                         .mapToObj(i -> Column.physical(fieldNames.get(i), fieldDataTypes.get(i)))
                         .collect(Collectors.toList());
-        UniqueConstraint constraint = null;
-        if (pk.length > 0) {
-            List<String> pkNames =
-                    Arrays.stream(pk).mapToObj(fieldNames::get).collect(Collectors.toList());
-            constraint = UniqueConstraint.primaryKey("pk", pkNames);
-        }
-        return new ResolvedCatalogTable(
-                origin, new ResolvedSchema(resolvedColumns, Collections.emptyList(), constraint));
+        return createResolvedTable(options, resolvedColumns, partitionKeys, primaryKeys);
+    }
+
+    protected static ResolvedCatalogTable createResolvedTable(
+            Map<String, String> options,
+            List<Column> resolvedColumns,
+            List<String> partitionKeys,
+            List<String> primaryKeys) {
+        UniqueConstraint constraint =
+                primaryKeys.isEmpty() ? null : UniqueConstraint.primaryKey("pk", primaryKeys);
+        ResolvedSchema resolvedSchema =
+                new ResolvedSchema(resolvedColumns, Collections.emptyList(), constraint);
+        CatalogTable origin =
+                CatalogTable.of(
+                        Schema.newBuilder().fromResolvedSchema(resolvedSchema).build(),
+                        "a comment",
+                        partitionKeys,
+                        options);
+        return new ResolvedCatalogTable(origin, resolvedSchema);
     }
 
     protected void deleteTablePath() {
