@@ -1214,7 +1214,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                         id));
         tEnv.executeSql(
                 String.format(
-                        "create table managed_table with ('file.path' = '%s') "
+                        "create table managed_table with ('path' = '%s') "
                                 + "like dummy_source (excluding options)",
                         rootPath));
         tEnv.executeSql("insert into managed_table select * from dummy_source").await();

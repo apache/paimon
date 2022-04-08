@@ -47,8 +47,8 @@ public class FileStoreOptions implements Serializable {
                     .defaultValue(1)
                     .withDescription("Bucket number for file store.");
 
-    public static final ConfigOption<String> FILE_PATH =
-            ConfigOptions.key("file.path")
+    public static final ConfigOption<String> PATH =
+            ConfigOptions.key("path")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("The root file path of the table store in the filesystem.");
@@ -116,7 +116,7 @@ public class FileStoreOptions implements Serializable {
     public static Set<ConfigOption<?>> allOptions() {
         Set<ConfigOption<?>> allOptions = new HashSet<>();
         allOptions.add(BUCKET);
-        allOptions.add(FILE_PATH);
+        allOptions.add(PATH);
         allOptions.add(FILE_FORMAT);
         allOptions.add(MANIFEST_FORMAT);
         allOptions.add(MANIFEST_TARGET_FILE_SIZE);
@@ -151,15 +151,15 @@ public class FileStoreOptions implements Serializable {
 
     public static Path path(Map<String, String> options, ObjectIdentifier tableIdentifier) {
         Preconditions.checkArgument(
-                options.containsKey(FILE_PATH.key()),
+                options.containsKey(PATH.key()),
                 String.format(
                         "Failed to create file store path. "
                                 + "Please specify a root dir by setting session level configuration "
                                 + "as `SET 'table-store.%s' = '...'`. "
                                 + "Alternatively, you can use a per-table root dir "
                                 + "as `CREATE TABLE ${table} (...) WITH ('%s' = '...')`",
-                        FILE_PATH.key(), FILE_PATH.key()));
-        return new Path(options.get(FILE_PATH.key()), relativeTablePath(tableIdentifier));
+                        PATH.key(), PATH.key()));
+        return new Path(options.get(PATH.key()), relativeTablePath(tableIdentifier));
     }
 
     public static String relativeTablePath(ObjectIdentifier tableIdentifier) {
