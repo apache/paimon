@@ -50,7 +50,7 @@ import java.util.stream.Stream;
 
 import static org.apache.flink.table.store.connector.TableStoreTestBase.createResolvedTable;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
-import static org.apache.flink.table.store.file.FileStoreOptions.FILE_PATH;
+import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
 import static org.apache.flink.table.store.file.FileStoreOptions.relativeTablePath;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
@@ -202,7 +202,7 @@ public class TableStoreFactoryTest {
                 of(
                         BUCKET.key(),
                         BUCKET.defaultValue().toString(),
-                        FILE_PATH.key(),
+                        PATH.key(),
                         sharedTempDir.toString(),
                         LOG_PREFIX + BOOTSTRAP_SERVERS.key(),
                         "localhost:9092",
@@ -226,7 +226,7 @@ public class TableStoreFactoryTest {
 
         // set both session and table level configuration to test options combination
         Map<String, String> tableOptions = new HashMap<>(enrichedOptions);
-        tableOptions.remove(FILE_PATH.key());
+        tableOptions.remove(PATH.key());
         tableOptions.remove(CONSISTENCY.key());
         Arguments arg3 =
                 Arguments.of(
@@ -247,7 +247,7 @@ public class TableStoreFactoryTest {
 
     private static Stream<Arguments> providingEnrichedOptionsForCreation() {
         Map<String, String> enrichedOptions = new HashMap<>();
-        enrichedOptions.put(FILE_PATH.key(), sharedTempDir.toAbsolutePath().toString());
+        enrichedOptions.put(PATH.key(), sharedTempDir.toAbsolutePath().toString());
         return Stream.of(
                 Arguments.of(enrichedOptions, false),
                 Arguments.of(enrichedOptions, true),
@@ -264,7 +264,7 @@ public class TableStoreFactoryTest {
             tablePath.mkdirs();
         }
         Map<String, String> enrichedOptions = new HashMap<>();
-        enrichedOptions.put(FILE_PATH.key(), sharedTempDir.toAbsolutePath().toString());
+        enrichedOptions.put(PATH.key(), sharedTempDir.toAbsolutePath().toString());
         return Stream.of(
                 Arguments.of(enrichedOptions, false),
                 Arguments.of(enrichedOptions, true),
