@@ -134,7 +134,7 @@ public class SstFileWriter {
         private long maxSequenceNumber;
 
         private SstRollingFile(int level) {
-            super(suggestedFileSize);
+            super(level == 0 ? Long.MAX_VALUE : suggestedFileSize);
             this.level = level;
             this.serializer = new KeyValueSerializer(keyType, valueType);
             this.keySerializer = new RowDataSerializer(keyType);
