@@ -36,6 +36,7 @@ import javax.annotation.Nullable;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.UUID;
 
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ISOLATION_LEVEL_CONFIG;
 
@@ -108,6 +109,7 @@ public class KafkaLogSourceProvider implements LogSourceProvider {
                 .setStartingOffsets(toOffsetsInitializer(bucketOffsets))
                 .setProperties(properties)
                 .setDeserializer(createDeserializationSchema())
+                .setGroupId(UUID.randomUUID().toString())
                 .build();
     }
 
