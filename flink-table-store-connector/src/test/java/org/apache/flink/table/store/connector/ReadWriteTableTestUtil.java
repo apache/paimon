@@ -26,8 +26,10 @@ import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +37,7 @@ import java.util.Map;
 import static org.apache.flink.table.api.DataTypes.BIGINT;
 import static org.apache.flink.table.api.DataTypes.DOUBLE;
 import static org.apache.flink.table.api.DataTypes.STRING;
+import static org.apache.flink.table.api.DataTypes.TIMESTAMP;
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.registerData;
 import static org.apache.flink.table.store.connector.ShowCreateUtil.buildShowCreateTable;
@@ -44,15 +47,29 @@ import static org.apache.flink.table.store.connector.TableStoreTestBase.createRe
 public class ReadWriteTableTestUtil {
 
     public static String prepareHelperSourceWithInsertOnlyRecords(
-            String sourceTable, List<String> partitionKeys, List<String> primaryKeys) {
+            String sourceTable,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            boolean assignWatermark) {
         return prepareHelperSourceRecords(
-                RuntimeExecutionMode.BATCH, sourceTable, partitionKeys, primaryKeys);
+                RuntimeExecutionMode.BATCH,
+                sourceTable,
+                partitionKeys,
+                primaryKeys,
+                assignWatermark);
     }
 
     public static String prepareHelperSourceWithChangelogRecords(
-            String sourceTable, List<String> partitionKeys, List<String> primaryKeys) {
+            String sourceTable,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            boolean assignWatermark) {
         return prepareHelperSourceRecords(
-                RuntimeExecutionMode.STREAMING, sourceTable, partitionKeys, primaryKeys);
+                RuntimeExecutionMode.STREAMING,
+                sourceTable,
+                partitionKeys,
+                primaryKeys,
+                assignWatermark);
     }
 
     /**
@@ -76,20 +93,23 @@ public class ReadWriteTableTestUtil {
      * @param sourceTable source table name
      * @param partitionKeys is used to calculate {@code partition-list}
      * @param primaryKeys
+     * @param assignWatermark
      * @return helper source ddl
      */
     private static String prepareHelperSourceRecords(
             RuntimeExecutionMode executionMode,
             String sourceTable,
             List<String> partitionKeys,
-            List<String> primaryKeys) {
+            List<String> primaryKeys,
+            boolean assignWatermark) {
         Map<String, String> tableOptions = new HashMap<>();
         boolean bounded = executionMode == RuntimeExecutionMode.BATCH;
         String changelogMode = bounded ? "I" : primaryKeys.size() > 0 ? "I,UA,D" : "I,UA,UB,D";
         List<String> exclusivePk = new ArrayList<>(primaryKeys);
         exclusivePk.removeAll(partitionKeys);
         Tuple2<List<Row>, String> tuple =
-                prepareHelperSource(bounded, exclusivePk.size(), partitionKeys.size());
+                prepareHelperSource(
+                        bounded, exclusivePk.size(), partitionKeys.size(), assignWatermark);
         String dataId = registerData(tuple.f0);
         String partitionList = tuple.f1;
         tableOptions.put("connector", TestValuesTableFactory.IDENTIFIER);
@@ -101,10 +121,14 @@ public class ReadWriteTableTestUtil {
             tableOptions.put("partition-list", partitionList);
         }
         ResolvedCatalogTable table;
-        if (exclusivePk.size() > 1) {
-            table = prepareExchangeRateSource(partitionKeys, primaryKeys, tableOptions);
+        if (assignWatermark) {
+            table = prepareRateSourceWithTimestamp(tableOptions);
         } else {
-            table = prepareRateSource(partitionKeys, primaryKeys, tableOptions);
+            if (exclusivePk.size() > 1) {
+                table = prepareExchangeRateSource(partitionKeys, primaryKeys, tableOptions);
+            } else {
+                table = prepareRateSource(partitionKeys, primaryKeys, tableOptions);
+            }
         }
         return buildShowCreateTable(
                 table,
@@ -113,9 +137,12 @@ public class ReadWriteTableTestUtil {
     }
 
     private static Tuple2<List<Row>, String> prepareHelperSource(
-            boolean bounded, int pkSize, int partitionSize) {
+            boolean bounded, int pkSize, int partitionSize, boolean assignWatermark) {
         List<Row> input;
         String partitionList = null;
+        if (assignWatermark) {
+            return Tuple2.of(ratesWithTimestamp(), null);
+        }
         if (pkSize == 2) {
             if (bounded) {
                 if (partitionSize == 0) {
@@ -220,6 +247,16 @@ public class ReadWriteTableTestUtil {
         return createResolvedTable(tableOptions, resolvedColumns, partitionKeys, primaryKeys);
     }
 
+    private static ResolvedCatalogTable prepareRateSourceWithTimestamp(
+            Map<String, String> tableOptions) {
+        List<Column> resolvedColumns = new ArrayList<>();
+        resolvedColumns.add(Column.physical("currency", STRING()));
+        resolvedColumns.add(Column.physical("rate", BIGINT()));
+        resolvedColumns.add(Column.physical("ts", TIMESTAMP(3)));
+        return createResolvedTable(
+                tableOptions, resolvedColumns, Collections.emptyList(), Collections.emptyList());
+    }
+
     private static ResolvedCatalogTable prepareExchangeRateSource(
             List<String> partitionKeys,
             List<String> primaryKeys,
@@ -245,6 +282,15 @@ public class ReadWriteTableTestUtil {
                 changelogRow("+I", "Yen", 1L),
                 changelogRow("+I", "Euro", 114L),
                 changelogRow("+I", "Euro", 119L));
+    }
+
+    public static List<Row> ratesWithTimestamp() {
+        // currency, rate, timestamp
+        return Arrays.asList(
+                changelogRow(
+                        "+I", "US Dollar", 102L, LocalDateTime.parse("1990-04-07T10:00:11.120")),
+                changelogRow("+I", "Euro", 119L, LocalDateTime.parse("2020-04-07T10:10:11.120")),
+                changelogRow("+I", "Yen", 1L, LocalDateTime.parse("2022-04-07T09:54:11.120")));
     }
 
     public static List<Row> exchangeRates() {

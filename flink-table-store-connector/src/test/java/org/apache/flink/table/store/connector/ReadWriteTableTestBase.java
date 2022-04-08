@@ -22,11 +22,14 @@ import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
+import org.apache.flink.table.api.Schema;
+import org.apache.flink.table.api.TableDescriptor;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.kafka.KafkaTableTestBase;
@@ -157,6 +160,8 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
                         true,
                         partitions,
                         primaryKeys,
+                        Collections.emptyList(),
+                        null,
                         true,
                         Collections.emptyMap(),
                         filter,
@@ -181,6 +186,8 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
                         false,
                         partitions,
                         primaryKeys,
+                        Collections.emptyList(),
+                        null,
                         true,
                         readHints,
                         filter,
@@ -205,6 +212,8 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
                 false,
                 partitions,
                 primaryKeys,
+                Collections.emptyList(),
+                null,
                 true,
                 readHints,
                 filter,
@@ -230,6 +239,8 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
                         insertOnly,
                         partitionKeys,
                         primaryKeys,
+                        Collections.emptyList(),
+                        null,
                         false,
                         hints,
                         filter,
@@ -255,6 +266,8 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
                         insertOnly,
                         partitionKeys,
                         primaryKeys,
+                        Collections.emptyList(),
+                        null,
                         true,
                         hints,
                         null,
@@ -269,7 +282,9 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
             boolean enableLogStore,
             boolean insertOnly,
             List<String> partitionKeys,
-            List<String> primaryKeys)
+            List<String> primaryKeys,
+            List<Tuple2<String, String>> computedColumnExpressions,
+            @Nullable WatermarkSpec watermarkSpec)
             throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
         rootPath = TEMPORARY_FOLDER.newFolder().getPath();
@@ -286,23 +301,50 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
             helperTableDdl =
                     insertOnly
                             ? prepareHelperSourceWithInsertOnlyRecords(
-                                    sourceTable, partitionKeys, primaryKeys)
+                                    sourceTable, partitionKeys, primaryKeys, watermarkSpec != null)
                             : prepareHelperSourceWithChangelogRecords(
-                                    sourceTable, partitionKeys, primaryKeys);
+                                    sourceTable, partitionKeys, primaryKeys, watermarkSpec != null);
             env = buildStreamEnv();
             builder.inStreamingMode();
         } else {
             helperTableDdl =
                     prepareHelperSourceWithInsertOnlyRecords(
-                            sourceTable, partitionKeys, primaryKeys);
+                            sourceTable, partitionKeys, primaryKeys, watermarkSpec != null);
             env = buildBatchEnv();
             builder.inBatchMode();
         }
-        String managedTableDdl = createTableLikeDDL(sourceTable, managedTable, tableOptions);
-
         tEnv = StreamTableEnvironment.create(env, builder.build());
         tEnv.executeSql(helperTableDdl);
-        tEnv.executeSql(managedTableDdl);
+
+        String managedTableDdl;
+        if (computedColumnExpressions.isEmpty()) {
+            managedTableDdl =
+                    createTableLikeDDL(sourceTable, managedTable, tableOptions, watermarkSpec);
+            tEnv.executeSql(managedTableDdl);
+        } else {
+            String cat = tEnv.getCurrentCatalog();
+            String db = tEnv.getCurrentDatabase();
+            ObjectPath objectPath = new ObjectPath(db, sourceTable);
+            ResolvedCatalogTable helperSource =
+                    (ResolvedCatalogTable) tEnv.getCatalog(cat).get().getTable(objectPath);
+            Schema.Builder schemaBuilder =
+                    Schema.newBuilder().fromSchema(helperSource.getUnresolvedSchema());
+            computedColumnExpressions.forEach(
+                    tuple -> schemaBuilder.columnByExpression(tuple.f0, tuple.f1));
+
+            if (watermarkSpec != null) {
+                schemaBuilder.watermark(watermarkSpec.columnName, watermarkSpec.expressionAsString);
+            }
+
+            TableDescriptor.Builder descriptorBuilder =
+                    TableDescriptor.forManaged()
+                            .partitionedBy(helperSource.getPartitionKeys().toArray(new String[0]))
+                            .schema(schemaBuilder.build());
+            tableOptions.forEach(descriptorBuilder::option);
+            tEnv.createTable(
+                    ObjectIdentifier.of(cat, db, managedTable).asSerializableString(),
+                    descriptorBuilder.build());
+        }
         return new Tuple2<>(sourceTable, managedTable);
     }
 
@@ -312,6 +354,8 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
             boolean insertOnly,
             List<String> partitionKeys,
             List<String> primaryKeys,
+            List<Tuple2<String, String>> computedColumnExpressions,
+            @Nullable WatermarkSpec watermarkSpec,
             boolean writeFirst,
             Map<String, String> readHints,
             @Nullable String filter,
@@ -320,7 +364,13 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
             throws Exception {
         Tuple2<String, String> tables =
                 createSourceAndManagedTable(
-                        streaming, enableLogStore, insertOnly, partitionKeys, primaryKeys);
+                        streaming,
+                        enableLogStore,
+                        insertOnly,
+                        partitionKeys,
+                        primaryKeys,
+                        computedColumnExpressions,
+                        watermarkSpec);
         String sourceTable = tables.f0;
         String managedTable = tables.f1;
 
@@ -383,5 +433,20 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         env.setParallelism(2);
         return env;
+    }
+
+    /** A POJO class to help assign watermark by string. */
+    protected static class WatermarkSpec {
+        String columnName;
+        String expressionAsString;
+
+        private WatermarkSpec(String columnName, String expressionAsString) {
+            this.columnName = columnName;
+            this.expressionAsString = expressionAsString;
+        }
+
+        protected static WatermarkSpec of(String columnName, String expressionAsString) {
+            return new WatermarkSpec(columnName, expressionAsString);
+        }
     }
 }
