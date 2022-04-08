@@ -43,6 +43,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -129,8 +130,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             identifiers.put(committable.identifier(), committable);
         }
 
-        for (long id = latestSnapshotId; id >= Snapshot.FIRST_SNAPSHOT_ID; id--) {
+        for (long id = latestSnapshotId;
+                id >= Snapshot.FIRST_SNAPSHOT_ID && !identifiers.isEmpty();
+                id--) {
             Path snapshotPath = pathFactory.toSnapshotPath(id);
+            try {
+                if (!snapshotPath.getFileSystem().exists(snapshotPath)) {
+                    // snapshots before this are expired
+                    break;
+                }
+            } catch (IOException e) {
+                throw new RuntimeException("Cannot determine if snapshot #" + id + " exists.", e);
+            }
             Snapshot snapshot = Snapshot.fromPath(snapshotPath);
             if (commitUser.equals(snapshot.commitUser())) {
                 if (identifiers.containsKey(snapshot.commitIdentifier())) {
