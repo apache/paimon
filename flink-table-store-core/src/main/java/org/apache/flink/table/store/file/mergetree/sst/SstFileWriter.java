@@ -134,7 +134,10 @@ public class SstFileWriter {
         private long maxSequenceNumber;
 
         private SstRollingFile(int level) {
-            super(suggestedFileSize);
+            // each level 0 sst file is a sorted run,
+            // we must not write rolling files for level 0 ssts
+            // otherwise we cannot reduce the number of sorted runs when compacting
+            super(level == 0 ? Long.MAX_VALUE : suggestedFileSize);
             this.level = level;
             this.serializer = new KeyValueSerializer(keyType, valueType);
             this.keySerializer = new RowDataSerializer(keyType);
