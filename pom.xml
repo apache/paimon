@@ -167,7 +167,7 @@ under the License.
             <dependency>
                 <groupId>junit</groupId>
                 <artifactId>junit</artifactId>
-                <version>${junit.version}</version>
+                <version>${junit4.version}</version>
             </dependency>
 
             <dependency>
