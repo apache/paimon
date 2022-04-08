@@ -53,6 +53,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
+import static org.apache.flink.table.planner.factories.TestValuesTableFactory.registerData;
 import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.dailyRates;
 import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.dailyRatesChangelogWithUB;
 import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.dailyRatesChangelogWithoutUB;
@@ -1195,6 +1196,32 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
     public void testSinkParallelism() {
         testSinkParallelism(null, env.getParallelism());
         testSinkParallelism(23, 23);
+    }
+
+    @Test
+    public void testQueryContainsDefaultFieldName() throws Exception {
+        rootPath = TEMPORARY_FOLDER.newFolder().getPath();
+        tEnv = StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
+        String id = registerData(Collections.singletonList(changelogRow("+I", 1, "abc")));
+        tEnv.executeSql(
+                String.format(
+                        "create table dummy_source ("
+                                + "f0 int, "
+                                + "f1 string) with ("
+                                + "'connector' = 'values', "
+                                + "'bounded' = 'true', "
+                                + "'data-id' = '%s')",
+                        id));
+        tEnv.executeSql(
+                String.format(
+                        "create table managed_table with ('file.path' = '%s') "
+                                + "like dummy_source (excluding options)",
+                        rootPath));
+        tEnv.executeSql("insert into managed_table select * from dummy_source").await();
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(tEnv.executeSql("select * from managed_table").collect());
+        assertThat(iterator.collect(1, 5, TimeUnit.SECONDS))
+                .containsOnly(changelogRow("+I", 1, "abc"));
     }
 
     // ------------------------ Tools ----------------------------------

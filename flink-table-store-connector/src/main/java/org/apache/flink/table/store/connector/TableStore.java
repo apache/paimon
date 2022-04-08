@@ -171,7 +171,10 @@ public class TableStore {
         MergeFunction mergeFunction;
         if (primaryKeys.length == 0) {
             keyType = type;
-            valueType = RowType.of(new BigIntType(false));
+            valueType =
+                    RowType.of(
+                            new LogicalType[] {new BigIntType(false)},
+                            new String[] {"_VALUE_COUNT"});
             mergeFunction = new ValueCountMergeFunction();
         } else {
             List<RowType.RowField> fields = TypeUtils.project(type, primaryKeys).getFields();
