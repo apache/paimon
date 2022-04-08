@@ -1175,7 +1175,9 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                                 false,
                                 false,
                                 Collections.emptyList(),
-                                Collections.emptyList())
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                null)
                         .f1;
 
         // without hint
