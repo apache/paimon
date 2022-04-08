@@ -112,7 +112,7 @@ Start the SQL Client CLI:
 
 ```sql
 -- set root path to session config
-SET 'table-store.file.path' = '/tmp/table_store';
+SET 'table-store.path' = '/tmp/table_store';
 
 -- create a word count dynamic table without 'connector' option
 CREATE TABLE word_count (

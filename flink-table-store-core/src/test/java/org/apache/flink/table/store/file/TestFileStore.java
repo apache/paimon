@@ -97,7 +97,7 @@ public class TestFileStore extends FileStoreImpl {
 
         conf.set(FileStoreOptions.FILE_FORMAT, format);
         conf.set(FileStoreOptions.MANIFEST_FORMAT, format);
-        conf.set(FileStoreOptions.FILE_PATH, root);
+        conf.set(FileStoreOptions.PATH, root);
         conf.set(FileStoreOptions.BUCKET, numBuckets);
 
         return new TestFileStore(conf, partitionType, keyType, valueType, mergeFunction);
@@ -117,7 +117,7 @@ public class TestFileStore extends FileStoreImpl {
                 keyType,
                 valueType,
                 mergeFunction);
-        this.root = conf.getString(FileStoreOptions.FILE_PATH);
+        this.root = conf.getString(FileStoreOptions.PATH);
         this.keySerializer = new RowDataSerializer(keyType);
         this.valueSerializer = new RowDataSerializer(valueType);
     }

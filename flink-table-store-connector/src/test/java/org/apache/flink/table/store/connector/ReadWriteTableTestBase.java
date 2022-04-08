@@ -288,7 +288,7 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
             throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
         rootPath = TEMPORARY_FOLDER.newFolder().getPath();
-        tableOptions.put(FileStoreOptions.FILE_PATH.key(), rootPath);
+        tableOptions.put(FileStoreOptions.PATH.key(), rootPath);
         if (enableLogStore) {
             tableOptions.put(LOG_SYSTEM.key(), "kafka");
             tableOptions.put(LOG_PREFIX + BOOTSTRAP_SERVERS.key(), getBootstrapServers());
