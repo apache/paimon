@@ -91,27 +91,29 @@ public class CompactManager {
                                     unit.outputLevel() != 0
                                             && unit.outputLevel() >= levels.nonEmptyHighestLevel();
 
-                            LOG.info(
-                                    "Submit compaction with files (level, size): "
-                                            + levels.levelSortedRuns().stream()
-                                                    .flatMap(lsr -> lsr.run().files().stream())
-                                                    .map(
-                                                            file ->
-                                                                    String.format(
-                                                                            "(%d, %d)",
-                                                                            file.level(),
-                                                                            file.fileSize()))
-                                                    .collect(Collectors.joining(", ")));
-                            LOG.info(
-                                    "Pick these files (level, size) for compaction: "
-                                            + unit.files().stream()
-                                                    .map(
-                                                            file ->
-                                                                    String.format(
-                                                                            "(%d, %d)",
-                                                                            file.level(),
-                                                                            file.fileSize()))
-                                                    .collect(Collectors.joining(", ")));
+                            if (LOG.isDebugEnabled()) {
+                                LOG.debug(
+                                        "Submit compaction with files (level, size): "
+                                                + levels.levelSortedRuns().stream()
+                                                        .flatMap(lsr -> lsr.run().files().stream())
+                                                        .map(
+                                                                file ->
+                                                                        String.format(
+                                                                                "(%d, %d)",
+                                                                                file.level(),
+                                                                                file.fileSize()))
+                                                        .collect(Collectors.joining(", ")));
+                                LOG.debug(
+                                        "Pick these files (level, size) for compaction: "
+                                                + unit.files().stream()
+                                                        .map(
+                                                                file ->
+                                                                        String.format(
+                                                                                "(%d, %d)",
+                                                                                file.level(),
+                                                                                file.fileSize()))
+                                                        .collect(Collectors.joining(", ")));
+                            }
 
                             CompactTask task = new CompactTask(unit, dropDelete);
                             taskFuture = executor.submit(task);
@@ -214,16 +216,20 @@ public class CompactManager {
                 }
             }
             rewrite(candidate, before, after);
-            LOG.info(
-                    "Done compacting {} files to {} files in {}ms. "
-                            + "Rewrite input size = {}, output size = {}, rewrite file num = {}, upgrade file num = {}",
-                    before.size(),
-                    after.size(),
-                    System.currentTimeMillis() - startMillis,
-                    rewriteInputSize,
-                    rewriteOutputSize,
-                    rewriteFilesNum,
-                    upgradeFilesNum);
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Done compacting {} files to {} files in {}ms. "
+                                + "Rewrite input size = {}, output size = {}, rewrite file num = {}, upgrade file num = {}",
+                        before.size(),
+                        after.size(),
+                        System.currentTimeMillis() - startMillis,
+                        rewriteInputSize,
+                        rewriteOutputSize,
+                        rewriteFilesNum,
+                        upgradeFilesNum);
+            }
+
             return result(before, after);
         }
 

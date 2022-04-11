@@ -56,14 +56,18 @@ public class UniversalCompaction implements CompactStrategy {
         // 1 checking for reducing size amplification
         CompactUnit unit = pickForSizeAmp(maxLevel, runs);
         if (unit != null) {
-            LOG.info("Universal compaction due to size amplification");
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Universal compaction due to size amplification");
+            }
             return Optional.of(unit);
         }
 
         // 2 checking for size ratio
         unit = pickForSizeRatio(maxLevel, runs);
         if (unit != null) {
-            LOG.info("Universal compaction due to size ratio");
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Universal compaction due to size ratio");
+            }
             return Optional.of(unit);
         }
 
@@ -71,7 +75,9 @@ public class UniversalCompaction implements CompactStrategy {
         if (runs.size() > maxRunNum) {
             // compacting for file num
             int candidateCount = runs.size() - maxRunNum + 1;
-            LOG.info("Universal compaction due to file num");
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Universal compaction due to file num");
+            }
             return Optional.ofNullable(pickForSizeRatio(maxLevel, runs, candidateCount));
         }
 
