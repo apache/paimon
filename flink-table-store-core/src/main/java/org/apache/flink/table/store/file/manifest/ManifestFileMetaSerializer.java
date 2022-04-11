@@ -22,11 +22,11 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
-import org.apache.flink.table.store.file.utils.ObjectSerializer;
+import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
 import org.apache.flink.table.types.logical.RowType;
 
 /** Serializer for {@link ManifestFileMeta}. */
-public class ManifestFileMetaSerializer extends ObjectSerializer<ManifestFileMeta> {
+public class ManifestFileMetaSerializer extends VersionedObjectSerializer<ManifestFileMeta> {
 
     private static final long serialVersionUID = 1L;
 
@@ -38,7 +38,12 @@ public class ManifestFileMetaSerializer extends ObjectSerializer<ManifestFileMet
     }
 
     @Override
-    public RowData toRow(ManifestFileMeta meta) {
+    public int getVersion() {
+        return 1;
+    }
+
+    @Override
+    public RowData convertTo(ManifestFileMeta meta) {
         GenericRowData row = new GenericRowData(5);
         row.setField(0, StringData.fromString(meta.fileName()));
         row.setField(1, meta.fileSize());
@@ -49,7 +54,10 @@ public class ManifestFileMetaSerializer extends ObjectSerializer<ManifestFileMet
     }
 
     @Override
-    public ManifestFileMeta fromRow(RowData row) {
+    public ManifestFileMeta convertFrom(int version, RowData row) {
+        if (version != 1) {
+            throw new IllegalArgumentException("Unsupported version: " + version);
+        }
         return new ManifestFileMeta(
                 row.getString(0).toString(),
                 row.getLong(1),
