@@ -323,7 +323,7 @@ public class PredicateTest {
 
     @MethodSource("provideLikeExpressions")
     @ParameterizedTest
-    public void testLike(
+    public void testStartsWith(
             Tuple3<
                             CallExpression,
                             List<Tuple2<Object[], Boolean>>,
@@ -349,6 +349,24 @@ public class PredicateTest {
                                 field(1, DataTypes.INT()),
                                 literal(5)));
         assertThatThrownBy(() -> expression.accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        CallExpression endPattern =
+                call(
+                        BuiltInFunctionDefinitions.LIKE,
+                        field(0, STRING()),
+                        literal("%456", STRING()));
+
+        assertThatThrownBy(() -> endPattern.accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        CallExpression middlePattern =
+                call(
+                        BuiltInFunctionDefinitions.LIKE,
+                        field(0, STRING()),
+                        literal("123%456", STRING()));
+
+        assertThatThrownBy(() -> middlePattern.accept(CONVERTER))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
     }
 
@@ -403,18 +421,18 @@ public class PredicateTest {
                 call(
                         BuiltInFunctionDefinitions.LIKE,
                         field(0, STRING()),
-                        literal("abc%", STRING()));
+                        literal("abd%", STRING()));
         List<Tuple2<Object[], Boolean>> objects1 =
                 Arrays.asList(
                         Tuple2.of(new Object[] {null}, false),
                         Tuple2.of(new Object[] {StringData.fromString("a")}, false),
                         Tuple2.of(new Object[] {StringData.fromString("ab")}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("abc")}, true),
-                        Tuple2.of(new Object[] {StringData.fromString("abc%")}, true),
-                        Tuple2.of(new Object[] {StringData.fromString("abcd")}, true),
-                        Tuple2.of(new Object[] {StringData.fromString("abcde")}, true),
-                        Tuple2.of(new Object[] {StringData.fromString("abc_")}, true),
-                        Tuple2.of(new Object[] {StringData.fromString("abc_%")}, true));
+                        Tuple2.of(new Object[] {StringData.fromString("abd")}, true),
+                        Tuple2.of(new Object[] {StringData.fromString("abd%")}, true),
+                        Tuple2.of(new Object[] {StringData.fromString("abd1")}, true),
+                        Tuple2.of(new Object[] {StringData.fromString("abde@")}, true),
+                        Tuple2.of(new Object[] {StringData.fromString("abd_")}, true),
+                        Tuple2.of(new Object[] {StringData.fromString("abd_%")}, true));
 
         List<Tuple3<Long, FieldStats[], Boolean>> fieldStats1 =
                 Arrays.asList(
@@ -426,6 +444,15 @@ public class PredicateTest {
                                     new FieldStats(
                                             StringData.fromString("ab"),
                                             StringData.fromString("abc123"),
+                                            1L)
+                                },
+                                false),
+                        Tuple3.of(
+                                3L,
+                                new FieldStats[] {
+                                    new FieldStats(
+                                            StringData.fromString("abc"),
+                                            StringData.fromString("abe"),
                                             1L)
                                 },
                                 true));
@@ -464,8 +491,8 @@ public class PredicateTest {
                 call(
                         BuiltInFunctionDefinitions.LIKE,
                         field(0, STRING()),
-                        literal("test\\_%", STRING()),
-                        literal("\\", STRING()));
+                        literal("test=_%", STRING()),
+                        literal("=", STRING()));
 
         List<Tuple2<Object[], Boolean>> objects3 =
                 Arrays.asList(
@@ -491,8 +518,8 @@ public class PredicateTest {
                 call(
                         BuiltInFunctionDefinitions.LIKE,
                         field(0, STRING()),
-                        literal("\\%_", STRING()),
-                        literal("\\", STRING()));
+                        literal("=%_", STRING()),
+                        literal("=", STRING()));
 
         List<Tuple2<Object[], Boolean>> objects4 =
                 Arrays.asList(
@@ -514,35 +541,11 @@ public class PredicateTest {
                                 },
                                 true));
 
-        CallExpression expr5 =
-                call(
-                        BuiltInFunctionDefinitions.LIKE,
-                        field(0, STRING()),
-                        literal("%456", STRING()));
-
-        List<Tuple2<Object[], Boolean>> objects5 =
-                Arrays.asList(
-                        Tuple2.of(new Object[] {null}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("123456")}, false));
-
-        List<Tuple3<Long, FieldStats[], Boolean>> fieldStats5 =
-                Collections.singletonList(
-                        Tuple3.of(
-                                3L,
-                                new FieldStats[] {
-                                    new FieldStats(
-                                            StringData.fromString("12456"),
-                                            StringData.fromString("23456"),
-                                            0L)
-                                },
-                                false));
-
         return Stream.of(
                 Arguments.of(Tuple3.of(expr1, objects1, fieldStats1)),
                 Arguments.of(Tuple3.of(expr2, objects2, fieldStats2)),
                 Arguments.of(Tuple3.of(expr3, objects3, fieldStats3)),
-                Arguments.of(Tuple3.of(expr4, objects4, fieldStats4)),
-                Arguments.of(Tuple3.of(expr5, objects5, fieldStats5)));
+                Arguments.of(Tuple3.of(expr4, objects4, fieldStats4)));
     }
 
     private byte[] writeObject(Literal literal) throws IOException {

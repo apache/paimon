@@ -1234,7 +1234,10 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                         changelogRow("+I", 1, "test_1"),
                         changelogRow("+I", 2, "test_2"),
                         changelogRow("+I", 1, "test_%"),
-                        changelogRow("+I", 2, "test%2"));
+                        changelogRow("+I", 2, "test%2"),
+                        changelogRow("+I", 3, "university"),
+                        changelogRow("+I", 4, "very"),
+                        changelogRow("+I", 5, "yield"));
         String id = registerData(input);
         tEnv.executeSql(
                 String.format(
@@ -1253,7 +1256,22 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                         FileStoreOptions.PATH.key(), rootPath));
         tEnv.executeSql("insert into managed_table select * from helper_source").await();
 
-        collectAndCheck(tEnv, "managed_table", Collections.emptyMap(), "f1 like 'test%'", input);
+        collectAndCheck(
+                tEnv,
+                "managed_table",
+                Collections.emptyMap(),
+                "f1 like 'test%'",
+                Arrays.asList(
+                        changelogRow("+I", 1, "test_1"),
+                        changelogRow("+I", 2, "test_2"),
+                        changelogRow("+I", 1, "test_%"),
+                        changelogRow("+I", 2, "test%2")));
+        collectAndCheck(
+                tEnv,
+                "managed_table",
+                Collections.emptyMap(),
+                "f1 like 've%'",
+                Collections.singletonList(changelogRow("+I", 4, "very")));
         collectAndCheck(
                 tEnv,
                 "managed_table",

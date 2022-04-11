@@ -27,9 +27,11 @@ import org.apache.flink.table.expressions.TypeLiteralExpression;
 import org.apache.flink.table.expressions.ValueLiteralExpression;
 import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
 import org.apache.flink.table.functions.FunctionDefinition;
+import org.apache.flink.table.functions.SqlLikeUtils;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.LogicalTypeRoot;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
@@ -38,6 +40,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiFunction;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.apache.flink.table.data.conversion.DataStructureConverters.getConverter;
 import static org.apache.flink.table.types.logical.utils.LogicalTypeCasts.supportsImplicitCast;
@@ -46,6 +50,9 @@ import static org.apache.flink.table.types.logical.utils.LogicalTypeCasts.suppor
 public class PredicateConverter implements ExpressionVisitor<Predicate> {
 
     public static final PredicateConverter CONVERTER = new PredicateConverter();
+
+    /** simple LIKE patterns for 'abc%' or 'abc_' */
+    private static final Pattern BEGIN_PATTERN = Pattern.compile("([^%_]+)[%_]");
 
     @Nullable
     public Predicate fromMap(Map<String, String> map, RowType rowType) {
@@ -96,22 +103,42 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                     .map(IsNotNull::new)
                     .orElseThrow(UnsupportedExpression::new);
         } else if (func == BuiltInFunctionDefinitions.LIKE) {
-            return extractFieldReference(children.get(0))
-                    .map(
-                            fieldRef ->
-                                    new Like(
-                                            fieldRef.getFieldIndex(),
-                                            extractLiteral(
-                                                            fieldRef.getOutputDataType(),
-                                                            children.get(1))
-                                                    .orElseThrow(UnsupportedExpression::new),
-                                            children.size() >= 3
-                                                    ? extractLiteral(
-                                                                    fieldRef.getOutputDataType(),
-                                                                    children.get(2))
-                                                            .orElseThrow(UnsupportedExpression::new)
-                                                    : null))
-                    .orElseThrow(UnsupportedExpression::new);
+            FieldReferenceExpression fieldRefExpr =
+                    extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
+            if (fieldRefExpr.getOutputDataType().getLogicalType().getTypeRoot()
+                    == LogicalTypeRoot.VARCHAR) {
+                String sqlPattern =
+                        extractLiteral(fieldRefExpr.getOutputDataType(), children.get(1))
+                                .orElseThrow(UnsupportedExpression::new)
+                                .value()
+                                .toString();
+                String escape =
+                        children.size() <= 2
+                                ? null
+                                : extractLiteral(fieldRefExpr.getOutputDataType(), children.get(2))
+                                        .orElseThrow(UnsupportedExpression::new)
+                                        .value()
+                                        .toString();
+                if (escape == null) {
+                    Matcher matcher = BEGIN_PATTERN.matcher(sqlPattern);
+                    if (matcher.matches()) {
+                        return new StartsWith(
+                                fieldRefExpr.getFieldIndex(),
+                                matcher.group(1),
+                                sqlPattern.endsWith("_"));
+                    }
+                } else {
+                    String regexPattern = SqlLikeUtils.sqlToRegexLike(sqlPattern, escape);
+                    boolean matchOneCharacter = regexPattern.endsWith(".");
+                    if (matchOneCharacter) {
+                        regexPattern = regexPattern.substring(0, regexPattern.length() - 1);
+                    } else if (regexPattern.endsWith("(?s:.*)")) {
+                        regexPattern = regexPattern.substring(0, regexPattern.length() - 7);
+                    }
+                    return new StartsWith(
+                            fieldRefExpr.getFieldIndex(), regexPattern, matchOneCharacter);
+                }
+            }
         }
 
         // TODO is_xxx, between_xxx, similar, in, not_in, not?
