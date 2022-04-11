@@ -23,6 +23,9 @@ import org.apache.flink.table.store.file.mergetree.Levels;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -31,11 +34,14 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonList;
 
 /** Manager to submit compaction task. */
 public class CompactManager {
+
+    private static final Logger LOG = LoggerFactory.getLogger(CompactManager.class);
 
     private final ExecutorService executor;
 
@@ -84,6 +90,31 @@ public class CompactManager {
                             boolean dropDelete =
                                     unit.outputLevel() != 0
                                             && unit.outputLevel() >= levels.nonEmptyHighestLevel();
+
+                            if (LOG.isDebugEnabled()) {
+                                LOG.debug(
+                                        "Submit compaction with files (level, size): "
+                                                + levels.levelSortedRuns().stream()
+                                                        .flatMap(lsr -> lsr.run().files().stream())
+                                                        .map(
+                                                                file ->
+                                                                        String.format(
+                                                                                "(%d, %d)",
+                                                                                file.level(),
+                                                                                file.fileSize()))
+                                                        .collect(Collectors.joining(", ")));
+                                LOG.debug(
+                                        "Pick these files (level, size) for compaction: "
+                                                + unit.files().stream()
+                                                        .map(
+                                                                file ->
+                                                                        String.format(
+                                                                                "(%d, %d)",
+                                                                                file.level(),
+                                                                                file.fileSize()))
+                                                        .collect(Collectors.joining(", ")));
+                            }
+
                             CompactTask task = new CompactTask(unit, dropDelete);
                             taskFuture = executor.submit(task);
                         });
@@ -131,10 +162,21 @@ public class CompactManager {
 
         private final boolean dropDelete;
 
+        // metrics
+        private long rewriteInputSize;
+        private long rewriteOutputSize;
+        private int rewriteFilesNum;
+        private int upgradeFilesNum;
+
         private CompactTask(CompactUnit unit, boolean dropDelete) {
             this.outputLevel = unit.outputLevel();
             this.partitioned = new IntervalPartition(unit.files(), keyComparator).partition();
             this.dropDelete = dropDelete;
+
+            this.rewriteInputSize = 0;
+            this.rewriteOutputSize = 0;
+            this.rewriteFilesNum = 0;
+            this.upgradeFilesNum = 0;
         }
 
         @Override
@@ -143,6 +185,8 @@ public class CompactManager {
         }
 
         private CompactResult compact() throws Exception {
+            long startMillis = System.currentTimeMillis();
+
             List<List<SortedRun>> candidate = new ArrayList<>();
             List<SstFileMeta> before = new ArrayList<>();
             List<SstFileMeta> after = new ArrayList<>();
@@ -172,6 +216,20 @@ public class CompactManager {
                 }
             }
             rewrite(candidate, before, after);
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Done compacting {} files to {} files in {}ms. "
+                                + "Rewrite input size = {}, output size = {}, rewrite file num = {}, upgrade file num = {}",
+                        before.size(),
+                        after.size(),
+                        System.currentTimeMillis() - startMillis,
+                        rewriteInputSize,
+                        rewriteOutputSize,
+                        rewriteFilesNum,
+                        upgradeFilesNum);
+            }
+
             return result(before, after);
         }
 
@@ -179,6 +237,7 @@ public class CompactManager {
             if (file.level() != outputLevel) {
                 before.add(file);
                 after.add(file.upgrade(outputLevel));
+                upgradeFilesNum++;
             }
         }
 
@@ -200,8 +259,20 @@ public class CompactManager {
                     return;
                 }
             }
-            candidate.forEach(runs -> runs.forEach(run -> before.addAll(run.files())));
-            after.addAll(rewriter.rewrite(outputLevel, dropDelete, candidate));
+            candidate.forEach(
+                    runs ->
+                            runs.forEach(
+                                    run -> {
+                                        before.addAll(run.files());
+                                        rewriteInputSize +=
+                                                run.files().stream()
+                                                        .mapToLong(SstFileMeta::fileSize)
+                                                        .sum();
+                                        rewriteFilesNum += run.files().size();
+                                    }));
+            List<SstFileMeta> result = rewriter.rewrite(outputLevel, dropDelete, candidate);
+            after.addAll(result);
+            rewriteOutputSize += result.stream().mapToLong(SstFileMeta::fileSize).sum();
             candidate.clear();
         }
 
