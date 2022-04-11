@@ -118,6 +118,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @Override
     public List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committableList) {
+        // nothing to filter, fast exit
+        if (committableList.isEmpty()) {
+            return committableList;
+        }
+
         // if there is no previous snapshots then nothing should be filtered
         Long latestSnapshotId = pathFactory.latestSnapshotId();
         if (latestSnapshotId == null) {
@@ -130,9 +135,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             identifiers.put(committable.identifier(), committable);
         }
 
-        for (long id = latestSnapshotId;
-                id >= Snapshot.FIRST_SNAPSHOT_ID && !identifiers.isEmpty();
-                id--) {
+        for (long id = latestSnapshotId; id >= Snapshot.FIRST_SNAPSHOT_ID; id--) {
             Path snapshotPath = pathFactory.toSnapshotPath(id);
             try {
                 if (!snapshotPath.getFileSystem().exists(snapshotPath)) {
