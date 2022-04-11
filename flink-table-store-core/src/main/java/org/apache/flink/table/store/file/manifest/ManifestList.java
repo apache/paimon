@@ -28,6 +28,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
+import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.io.IOException;
@@ -114,7 +115,8 @@ public class ManifestList {
         }
 
         public ManifestList create() {
-            RowType metaType = ManifestFileMeta.schema(partitionType);
+            RowType metaType =
+                    VersionedObjectSerializer.versionType(ManifestFileMeta.schema(partitionType));
             return new ManifestList(
                     new ManifestFileMetaSerializer(partitionType),
                     fileFormat.createReaderFactory(metaType),
