@@ -51,7 +51,7 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
 
     public static final PredicateConverter CONVERTER = new PredicateConverter();
 
-    /** simple LIKE patterns for 'abc%' or 'abc_' */
+    /** simple LIKE patterns for 'abc%' or 'abc_'. */
     private static final Pattern BEGIN_PATTERN = Pattern.compile("([^%_]+)[%_]");
 
     @Nullable
