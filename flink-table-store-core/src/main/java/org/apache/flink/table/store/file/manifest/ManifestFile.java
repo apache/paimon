@@ -30,6 +30,7 @@ import org.apache.flink.table.store.file.stats.FieldStatsCollector;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RollingFile;
+import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.slf4j.Logger;
@@ -193,7 +194,9 @@ public class ManifestFile {
         }
 
         public ManifestFile create() {
-            RowType entryType = ManifestEntry.schema(partitionType, keyType, valueType);
+            RowType entryType =
+                    VersionedObjectSerializer.versionType(
+                            ManifestEntry.schema(partitionType, keyType, valueType));
             return new ManifestFile(
                     partitionType,
                     new ManifestEntrySerializer(partitionType, keyType, valueType),

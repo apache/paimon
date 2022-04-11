@@ -23,11 +23,11 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.mergetree.sst.SstFileMetaSerializer;
-import org.apache.flink.table.store.file.utils.ObjectSerializer;
+import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
 import org.apache.flink.table.types.logical.RowType;
 
 /** Serializer for {@link ManifestEntry}. */
-public class ManifestEntrySerializer extends ObjectSerializer<ManifestEntry> {
+public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestEntry> {
 
     private static final long serialVersionUID = 1L;
 
@@ -41,7 +41,12 @@ public class ManifestEntrySerializer extends ObjectSerializer<ManifestEntry> {
     }
 
     @Override
-    public RowData toRow(ManifestEntry entry) {
+    public int getVersion() {
+        return 1;
+    }
+
+    @Override
+    public RowData convertTo(ManifestEntry entry) {
         GenericRowData row = new GenericRowData(5);
         row.setField(0, entry.kind().toByteValue());
         row.setField(1, entry.partition());
@@ -52,7 +57,10 @@ public class ManifestEntrySerializer extends ObjectSerializer<ManifestEntry> {
     }
 
     @Override
-    public ManifestEntry fromRow(RowData row) {
+    public ManifestEntry convertFrom(int version, RowData row) {
+        if (version != 1) {
+            throw new IllegalArgumentException("Unsupported version: " + version);
+        }
         return new ManifestEntry(
                 ValueKind.fromByteValue(row.getByte(0)),
                 partitionSerializer
