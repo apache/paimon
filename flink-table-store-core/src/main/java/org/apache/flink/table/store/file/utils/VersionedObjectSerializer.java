@@ -33,10 +33,10 @@ public abstract class VersionedObjectSerializer<T> extends ObjectSerializer<T> {
     private static final long serialVersionUID = 1L;
 
     public VersionedObjectSerializer(RowType rowType) {
-        super(addVersionType(rowType));
+        super(versionType(rowType));
     }
 
-    private static RowType addVersionType(RowType rowType) {
+    public static RowType versionType(RowType rowType) {
         List<RowType.RowField> fields = new ArrayList<>();
         fields.add(new RowType.RowField("_VERSION", new IntType(false)));
         fields.addAll(rowType.getFields());

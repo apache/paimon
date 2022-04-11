@@ -23,11 +23,11 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
-import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
+import org.apache.flink.table.store.file.utils.ObjectSerializer;
 import org.apache.flink.table.types.logical.RowType;
 
 /** Serializer for {@link SstFileMeta}. */
-public class SstFileMetaSerializer extends VersionedObjectSerializer<SstFileMeta> {
+public class SstFileMetaSerializer extends ObjectSerializer<SstFileMeta> {
 
     private static final long serialVersionUID = 1L;
 
@@ -43,12 +43,7 @@ public class SstFileMetaSerializer extends VersionedObjectSerializer<SstFileMeta
     }
 
     @Override
-    public int getVersion() {
-        return 1;
-    }
-
-    @Override
-    public RowData convertTo(SstFileMeta meta) {
+    public RowData toRow(SstFileMeta meta) {
         return GenericRowData.of(
                 StringData.fromString(meta.fileName()),
                 meta.fileSize(),
@@ -63,10 +58,7 @@ public class SstFileMetaSerializer extends VersionedObjectSerializer<SstFileMeta
     }
 
     @Override
-    public SstFileMeta convertFrom(int version, RowData row) {
-        if (version != 1) {
-            throw new IllegalArgumentException("Unsupported version: " + version);
-        }
+    public SstFileMeta fromRow(RowData row) {
         int keyFieldCount = keySerializer.getArity();
         return new SstFileMeta(
                 row.getString(0).toString(),
