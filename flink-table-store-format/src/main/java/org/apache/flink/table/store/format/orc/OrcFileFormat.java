@@ -18,8 +18,9 @@
 
 package org.apache.flink.table.store.format.orc;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.file.table.format.BulkDecodingFormat;
 import org.apache.flink.table.connector.format.EncodingFormat;
 import org.apache.flink.table.data.RowData;
@@ -33,11 +34,16 @@ import java.util.Optional;
 public class OrcFileFormat extends FileFormat {
 
     private final org.apache.flink.orc.OrcFileFormatFactory factory;
-    private final ReadableConfig formatOptions;
+    private final Configuration formatOptions;
 
-    public OrcFileFormat(ReadableConfig formatOptions) {
+    public OrcFileFormat(Configuration formatOptions) {
         this.factory = new org.apache.flink.orc.OrcFileFormatFactory();
         this.formatOptions = formatOptions;
+    }
+
+    @VisibleForTesting
+    Configuration formatOptions() {
+        return formatOptions;
     }
 
     @Override
