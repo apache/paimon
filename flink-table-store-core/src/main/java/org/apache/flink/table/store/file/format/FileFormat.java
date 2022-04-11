@@ -23,7 +23,6 @@ import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.DelegatingConfiguration;
-import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.table.format.BulkDecodingFormat;
@@ -108,14 +107,14 @@ public abstract class FileFormat {
             Configuration tableOptions,
             ConfigOption<String> formatOption) {
         String formatIdentifier = tableOptions.get(formatOption);
-        ReadableConfig formatOptions =
+        DelegatingConfiguration formatOptions =
                 new DelegatingConfiguration(tableOptions, formatIdentifier + ".");
         return fromIdentifier(classLoader, formatIdentifier, formatOptions);
     }
 
     /** Create a {@link FileFormatImpl} from format identifier and format options. */
     public static FileFormat fromIdentifier(
-            ClassLoader classLoader, String formatIdentifier, ReadableConfig formatOptions) {
+            ClassLoader classLoader, String formatIdentifier, Configuration formatOptions) {
         ServiceLoader<FileFormatFactory> serviceLoader =
                 ServiceLoader.load(FileFormatFactory.class);
         for (FileFormatFactory factory : serviceLoader) {
