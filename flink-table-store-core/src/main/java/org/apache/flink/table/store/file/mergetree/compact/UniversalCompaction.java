@@ -22,6 +22,9 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.mergetree.LevelSortedRun;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.List;
 import java.util.Optional;
 
@@ -33,6 +36,8 @@ import java.util.Optional;
  * https://github.com/facebook/rocksdb/wiki/Universal-Compaction.
  */
 public class UniversalCompaction implements CompactStrategy {
+
+    private static final Logger LOG = LoggerFactory.getLogger(UniversalCompaction.class);
 
     private final int maxSizeAmp;
     private final int sizeRatio;
@@ -51,12 +56,18 @@ public class UniversalCompaction implements CompactStrategy {
         // 1 checking for reducing size amplification
         CompactUnit unit = pickForSizeAmp(maxLevel, runs);
         if (unit != null) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Universal compaction due to size amplification");
+            }
             return Optional.of(unit);
         }
 
         // 2 checking for size ratio
         unit = pickForSizeRatio(maxLevel, runs);
         if (unit != null) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Universal compaction due to size ratio");
+            }
             return Optional.of(unit);
         }
 
@@ -64,6 +75,9 @@ public class UniversalCompaction implements CompactStrategy {
         if (runs.size() > maxRunNum) {
             // compacting for file num
             int candidateCount = runs.size() - maxRunNum + 1;
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Universal compaction due to file num");
+            }
             return Optional.ofNullable(pickForSizeRatio(maxLevel, runs, candidateCount));
         }
 
