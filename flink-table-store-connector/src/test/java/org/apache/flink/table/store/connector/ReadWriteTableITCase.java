@@ -35,6 +35,7 @@ import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.runtime.connector.sink.SinkRuntimeProviderContext;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
+import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -110,7 +111,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                         tEnv,
                         managedTable,
                         Collections.emptyMap(),
-                        "dt = '2022-01-02'",
+                        "dt IN ('2022-01-02')",
                         Arrays.asList(
                                 // part = 2022-01-01
                                 changelogRow("+I", "Euro", 100L, "2022-01-02"),
@@ -127,7 +128,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                 true, true, "dt <> '2022-01-02'", Collections.emptyList(), expected);
 
         collectAndCheckBatchReadWrite(
-                true, true, "dt = '2022-01-01'", Collections.emptyList(), expected);
+                true, true, "dt IN ('2022-01-01')", Collections.emptyList(), expected);
 
         // test field filter
         collectAndCheckBatchReadWrite(
@@ -211,7 +212,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                         streamTableEnv,
                         managedTable,
                         Collections.emptyMap(),
-                        null,
+                        "dt IN ('2022-01-01', '2022-01-02')",
                         Arrays.asList(
                                 // part = 2022-01-01
                                 changelogRow("+I", "Euro", 90L, "2022-01-01"),
@@ -323,7 +324,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
         collectAndCheckBatchReadWrite(
                 false,
                 true,
-                "currency = 'Yen'",
+                "currency IN ('Yen')",
                 Collections.singletonList("rate"),
                 Collections.singletonList(changelogRow("+I", 1L)));
     }
@@ -1222,6 +1223,52 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                 BlockingIterator.of(tEnv.executeSql("select * from managed_table").collect());
         assertThat(iterator.collect(1, 5, TimeUnit.SECONDS))
                 .containsOnly(changelogRow("+I", 1, "abc"));
+    }
+
+    @Test
+    public void testLike() throws Exception {
+        rootPath = TEMPORARY_FOLDER.newFolder().getPath();
+        tEnv = StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
+        List<Row> input =
+                Arrays.asList(
+                        changelogRow("+I", 1, "test_1"),
+                        changelogRow("+I", 2, "test_2"),
+                        changelogRow("+I", 1, "test_%"),
+                        changelogRow("+I", 2, "test%2"));
+        String id = registerData(input);
+        tEnv.executeSql(
+                String.format(
+                        "create table helper_source (f0 int, f1 string) with ("
+                                + "'connector' = 'values', "
+                                + "'bounded' = 'true', "
+                                + "'data-id' = '%s')",
+                        id));
+
+        tEnv.executeSql(
+                String.format(
+                        "create table managed_table with ("
+                                + "'%s' = '%s'"
+                                + ") like helper_source "
+                                + "(excluding options)",
+                        FileStoreOptions.PATH.key(), rootPath));
+        tEnv.executeSql("insert into managed_table select * from helper_source").await();
+
+        collectAndCheck(tEnv, "managed_table", Collections.emptyMap(), "f1 like 'test%'", input);
+        collectAndCheck(
+                tEnv,
+                "managed_table",
+                Collections.emptyMap(),
+                "f1 like 'test\\_%' escape '\\'",
+                Arrays.asList(
+                        changelogRow("+I", 1, "test_1"),
+                        changelogRow("+I", 2, "test_2"),
+                        changelogRow("+I", 1, "test_%")));
+        collectAndCheck(
+                tEnv,
+                "managed_table",
+                Collections.emptyMap(),
+                "f1 like 'test$%%' escape '$'",
+                Collections.singletonList(changelogRow("+I", 2, "test%2")));
     }
 
     // ------------------------ Tools ----------------------------------

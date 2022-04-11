@@ -95,9 +95,26 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                     .map(FieldReferenceExpression::getFieldIndex)
                     .map(IsNotNull::new)
                     .orElseThrow(UnsupportedExpression::new);
+        } else if (func == BuiltInFunctionDefinitions.LIKE) {
+            return extractFieldReference(children.get(0))
+                    .map(
+                            fieldRef ->
+                                    new Like(
+                                            fieldRef.getFieldIndex(),
+                                            extractLiteral(
+                                                            fieldRef.getOutputDataType(),
+                                                            children.get(1))
+                                                    .orElseThrow(UnsupportedExpression::new),
+                                            children.size() >= 3
+                                                    ? extractLiteral(
+                                                                    fieldRef.getOutputDataType(),
+                                                                    children.get(2))
+                                                            .orElseThrow(UnsupportedExpression::new)
+                                                    : null))
+                    .orElseThrow(UnsupportedExpression::new);
         }
 
-        // TODO is_xxx, between_xxx, like, similar, in, not_in, not?
+        // TODO is_xxx, between_xxx, similar, in, not_in, not?
 
         throw new UnsupportedExpression();
     }

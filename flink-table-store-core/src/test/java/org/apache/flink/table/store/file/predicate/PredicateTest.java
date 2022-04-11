@@ -18,7 +18,10 @@
 
 package org.apache.flink.table.store.file.predicate;
 
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.table.api.DataTypes;
+import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.expressions.CallExpression;
 import org.apache.flink.table.expressions.FieldReferenceExpression;
 import org.apache.flink.table.expressions.ResolvedExpression;
@@ -50,8 +53,11 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.stream.Stream;
 
+import static org.apache.flink.table.api.DataTypes.STRING;
 import static org.apache.flink.table.planner.expressions.ExpressionBuilder.literal;
 import static org.apache.flink.table.store.file.predicate.PredicateConverter.CONVERTER;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -315,6 +321,20 @@ public class PredicateTest {
                 .isEqualTo(false);
     }
 
+    @MethodSource("provideLikeExpressions")
+    @ParameterizedTest
+    public void testLike(
+            Tuple3<
+                            CallExpression,
+                            List<Tuple2<Object[], Boolean>>,
+                            List<Tuple3<Long, FieldStats[], Boolean>>>
+                    param) {
+        Predicate predicate = param.f0.accept(CONVERTER);
+        param.f1.forEach(tuple -> assertThat(predicate.test(tuple.f0)).isEqualTo(tuple.f1));
+        param.f2.forEach(
+                triple -> assertThat(predicate.test(triple.f0, triple.f1)).isEqualTo(triple.f2));
+    }
+
     @Test
     public void testUnsupportedExpression() {
         CallExpression expression =
@@ -325,7 +345,7 @@ public class PredicateTest {
                                 field(0, DataTypes.INT()),
                                 literal(3)),
                         call(
-                                BuiltInFunctionDefinitions.LIKE,
+                                BuiltInFunctionDefinitions.SIMILAR,
                                 field(1, DataTypes.INT()),
                                 literal(5)));
         assertThatThrownBy(() -> expression.accept(CONVERTER))
@@ -378,6 +398,153 @@ public class PredicateTest {
                         TypeUtils.castFromString("2022-03-25 15:00:02", timestampType)));
     }
 
+    public static Stream<Arguments> provideLikeExpressions() {
+        CallExpression expr1 =
+                call(
+                        BuiltInFunctionDefinitions.LIKE,
+                        field(0, STRING()),
+                        literal("abc%", STRING()));
+        List<Tuple2<Object[], Boolean>> objects1 =
+                Arrays.asList(
+                        Tuple2.of(new Object[] {null}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("a")}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("ab")}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("abc")}, true),
+                        Tuple2.of(new Object[] {StringData.fromString("abc%")}, true),
+                        Tuple2.of(new Object[] {StringData.fromString("abcd")}, true),
+                        Tuple2.of(new Object[] {StringData.fromString("abcde")}, true),
+                        Tuple2.of(new Object[] {StringData.fromString("abc_")}, true),
+                        Tuple2.of(new Object[] {StringData.fromString("abc_%")}, true));
+
+        List<Tuple3<Long, FieldStats[], Boolean>> fieldStats1 =
+                Arrays.asList(
+                        Tuple3.of(0L, new FieldStats[] {new FieldStats(null, null, 0L)}, false),
+                        Tuple3.of(3L, new FieldStats[] {new FieldStats(null, null, 3L)}, false),
+                        Tuple3.of(
+                                3L,
+                                new FieldStats[] {
+                                    new FieldStats(
+                                            StringData.fromString("ab"),
+                                            StringData.fromString("abc123"),
+                                            1L)
+                                },
+                                true));
+
+        CallExpression expr2 =
+                call(
+                        BuiltInFunctionDefinitions.LIKE,
+                        field(0, STRING()),
+                        literal("abc_", STRING()));
+
+        List<Tuple2<Object[], Boolean>> objects2 =
+                Arrays.asList(
+                        Tuple2.of(new Object[] {null}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("a")}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("ab")}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("abcde")}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("abc_%")}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("abc")}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("abc_%")}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("abcd")}, true),
+                        Tuple2.of(new Object[] {StringData.fromString("abc_")}, true));
+
+        List<Tuple3<Long, FieldStats[], Boolean>> fieldStats2 =
+                Collections.singletonList(
+                        Tuple3.of(
+                                3L,
+                                new FieldStats[] {
+                                    new FieldStats(
+                                            StringData.fromString("abc"),
+                                            StringData.fromString("abc_"),
+                                            1L)
+                                },
+                                true));
+
+        CallExpression expr3 =
+                call(
+                        BuiltInFunctionDefinitions.LIKE,
+                        field(0, STRING()),
+                        literal("test\\_%", STRING()),
+                        literal("\\", STRING()));
+
+        List<Tuple2<Object[], Boolean>> objects3 =
+                Arrays.asList(
+                        Tuple2.of(new Object[] {null}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("test%")}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("test_123")}, true),
+                        Tuple2.of(new Object[] {StringData.fromString("test_%")}, true),
+                        Tuple2.of(new Object[] {StringData.fromString("test__")}, true));
+
+        List<Tuple3<Long, FieldStats[], Boolean>> fieldStats3 =
+                Collections.singletonList(
+                        Tuple3.of(
+                                3L,
+                                new FieldStats[] {
+                                    new FieldStats(
+                                            StringData.fromString("test_123"),
+                                            StringData.fromString("test_789"),
+                                            0L)
+                                },
+                                true));
+
+        CallExpression expr4 =
+                call(
+                        BuiltInFunctionDefinitions.LIKE,
+                        field(0, STRING()),
+                        literal("\\%_", STRING()),
+                        literal("\\", STRING()));
+
+        List<Tuple2<Object[], Boolean>> objects4 =
+                Arrays.asList(
+                        Tuple2.of(new Object[] {null}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("%")}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("%123")}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("%%")}, true),
+                        Tuple2.of(new Object[] {StringData.fromString("%_")}, true));
+
+        List<Tuple3<Long, FieldStats[], Boolean>> fieldStats4 =
+                Collections.singletonList(
+                        Tuple3.of(
+                                3L,
+                                new FieldStats[] {
+                                    new FieldStats(
+                                            StringData.fromString("%"),
+                                            StringData.fromString("%_"),
+                                            0L)
+                                },
+                                true));
+
+        CallExpression expr5 =
+                call(
+                        BuiltInFunctionDefinitions.LIKE,
+                        field(0, STRING()),
+                        literal("%456", STRING()));
+
+        List<Tuple2<Object[], Boolean>> objects5 =
+                Arrays.asList(
+                        Tuple2.of(new Object[] {null}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("123456")}, false));
+
+        List<Tuple3<Long, FieldStats[], Boolean>> fieldStats5 =
+                Collections.singletonList(
+                        Tuple3.of(
+                                3L,
+                                new FieldStats[] {
+                                    new FieldStats(
+                                            StringData.fromString("12456"),
+                                            StringData.fromString("23456"),
+                                            0L)
+                                },
+                                false));
+
+        return Stream.of(
+                Arguments.of(Tuple3.of(expr1, objects1, fieldStats1)),
+                Arguments.of(Tuple3.of(expr2, objects2, fieldStats2)),
+                Arguments.of(Tuple3.of(expr3, objects3, fieldStats3)),
+                Arguments.of(Tuple3.of(expr4, objects4, fieldStats4)),
+                Arguments.of(Tuple3.of(expr5, objects5, fieldStats5)));
+    }
+
     private byte[] writeObject(Literal literal) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream(4096);
         ObjectOutputStream oos = new ObjectOutputStream(baos);
@@ -394,11 +561,11 @@ public class PredicateTest {
         return object;
     }
 
-    private FieldReferenceExpression field(int i, DataType type) {
+    private static FieldReferenceExpression field(int i, DataType type) {
         return new FieldReferenceExpression("name", type, 0, i);
     }
 
-    private CallExpression call(FunctionDefinition function, ResolvedExpression... args) {
+    private static CallExpression call(FunctionDefinition function, ResolvedExpression... args) {
         return new CallExpression(function, Arrays.asList(args), DataTypes.BOOLEAN());
     }
 }
