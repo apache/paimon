@@ -59,7 +59,7 @@ public class MergeTreeOptions {
     public static final ConfigOption<Integer> NUM_LEVELS =
             ConfigOptions.key("num-levels")
                     .intType()
-                    .defaultValue(4)
+                    .noDefaultValue()
                     .withDescription(
                             "Total level number, for example, there are 3 levels, including 0,1,2 levels.");
 
@@ -107,7 +107,7 @@ public class MergeTreeOptions {
             long pageSize,
             long targetFileSize,
             int numSortedRunMax,
-            int numLevels,
+            Integer numLevels,
             boolean commitForceCompact,
             int maxSizeAmplificationPercent,
             int sizeRatio) {
@@ -115,7 +115,9 @@ public class MergeTreeOptions {
         this.pageSize = pageSize;
         this.targetFileSize = targetFileSize;
         this.numSortedRunMax = numSortedRunMax;
-        this.numLevels = numLevels;
+        // By default, this ensures that the compaction does not fall to level 0, but at least to
+        // level 1
+        this.numLevels = numLevels == null ? numSortedRunMax + 1 : numLevels;
         this.commitForceCompact = commitForceCompact;
         this.maxSizeAmplificationPercent = maxSizeAmplificationPercent;
         this.sizeRatio = sizeRatio;

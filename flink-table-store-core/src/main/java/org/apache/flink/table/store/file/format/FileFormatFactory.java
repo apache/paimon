@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.file.format;
 
-import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.configuration.Configuration;
 
 /** Factory to create {@link FileFormat}. */
 public interface FileFormatFactory {
 
     String identifier();
 
-    FileFormat create(ReadableConfig formatOptions);
+    FileFormat create(Configuration formatOptions);
 }
