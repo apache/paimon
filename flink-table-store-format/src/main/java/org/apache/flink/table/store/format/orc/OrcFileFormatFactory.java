@@ -18,9 +18,10 @@
 
 package org.apache.flink.table.store.format.orc;
 
-import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.table.store.file.format.FileFormat;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.file.format.FileFormatFactory;
+
+import java.util.Properties;
 
 /** Factory to create {@link OrcFileFormat}. */
 public class OrcFileFormatFactory implements FileFormatFactory {
@@ -31,7 +32,19 @@ public class OrcFileFormatFactory implements FileFormatFactory {
     }
 
     @Override
-    public FileFormat create(ReadableConfig formatOptions) {
-        return new OrcFileFormat(formatOptions);
+    public OrcFileFormat create(Configuration formatOptions) {
+        return new OrcFileFormat(supplyDefaultOptions(formatOptions));
+    }
+
+    private Configuration supplyDefaultOptions(Configuration options) {
+        if (!options.containsKey("compress")) {
+            Properties properties = new Properties();
+            options.addAllToProperties(properties);
+            properties.setProperty("compress", "lz4");
+            Configuration newOptions = new Configuration();
+            properties.forEach((k, v) -> newOptions.setString(k.toString(), v.toString()));
+            return newOptions;
+        }
+        return options;
     }
 }
