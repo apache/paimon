@@ -25,8 +25,11 @@ import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
+import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.SnapshotFinder;
 import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
 
@@ -41,6 +44,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -93,6 +97,19 @@ public class FileStoreCommitTest {
         latest.getFileSystem().delete(latest, false);
 
         assertThat(SnapshotFinder.findLatest(snapshotDir)).isEqualTo(latestId);
+    }
+
+    @Test
+    public void testFilterCommittedAfterExpire() throws Exception {
+        testRandomConcurrentNoConflict(1, false);
+        // remove first snapshot to mimic expiration
+        TestFileStore store = createStore(false);
+        FileStorePathFactory pathFactory = store.pathFactory();
+        Path firstSnapshotPath = pathFactory.toSnapshotPath(Snapshot.FIRST_SNAPSHOT_ID);
+        FileUtils.deleteOrWarn(firstSnapshotPath);
+        // this test succeeds if this call does not fail
+        store.newCommit()
+                .filterCommitted(Collections.singletonList(new ManifestCommittable("dummy")));
     }
 
     protected void testRandomConcurrentNoConflict(int numThreads, boolean failing)
