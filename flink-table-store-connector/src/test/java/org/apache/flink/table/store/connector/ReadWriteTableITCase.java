@@ -1257,10 +1257,24 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                                 + ") like `helper_source_%s` "
                                 + "(excluding options)",
                         randomSinkId, FileStoreOptions.PATH.key(), rootPath, randomSourceId));
+
+        // insert multiple times
         tEnv.executeSql(
                         String.format(
                                 "insert into `managed_table_%s` select * from `helper_source_%s`",
                                 randomSinkId, randomSourceId))
+                .await();
+
+        tEnv.executeSql(
+                        String.format(
+                                "insert into `managed_table_%s` values (7, 'villa'), (8, 'tests'), (20, 'test_123')",
+                                randomSinkId))
+                .await();
+
+        tEnv.executeSql(
+                        "insert into `managed_table_"
+                                + randomSinkId
+                                + "` values (9, 'valley'), (10, 'tested'), (100, 'test%fff')")
                 .await();
 
         collectAndCheck(
@@ -1272,18 +1286,34 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                         changelogRow("+I", 1, "test_1"),
                         changelogRow("+I", 2, "test_2"),
                         changelogRow("+I", 1, "test_%"),
-                        changelogRow("+I", 2, "test%2")));
+                        changelogRow("+I", 2, "test%2"),
+                        changelogRow("+I", 8, "tests"),
+                        changelogRow("+I", 10, "tested"),
+                        changelogRow("+I", 20, "test_123")));
         collectAndCheck(
                 tEnv,
                 "managed_table_" + randomSinkId,
                 Collections.emptyMap(),
-                "f1 like 've%'",
-                Collections.singletonList(changelogRow("+I", 4, "very")));
+                "f1 like 'v%'",
+                Arrays.asList(
+                        changelogRow("+I", 4, "very"),
+                        changelogRow("+I", 7, "villa"),
+                        changelogRow("+I", 9, "valley")));
         collectAndCheck(
                 tEnv,
                 "managed_table_" + randomSinkId,
                 Collections.emptyMap(),
-                "f1 like 'test\\_%' escape '\\'",
+                "f1 like 'test=_%' escape '='",
+                Arrays.asList(
+                        changelogRow("+I", 1, "test_1"),
+                        changelogRow("+I", 2, "test_2"),
+                        changelogRow("+I", 1, "test_%"),
+                        changelogRow("+I", 20, "test_123")));
+        collectAndCheck(
+                tEnv,
+                "managed_table_" + randomSinkId,
+                Collections.emptyMap(),
+                "f1 like 'test=__' escape '='",
                 Arrays.asList(
                         changelogRow("+I", 1, "test_1"),
                         changelogRow("+I", 2, "test_2"),
@@ -1293,7 +1323,8 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                 "managed_table_" + randomSinkId,
                 Collections.emptyMap(),
                 "f1 like 'test$%%' escape '$'",
-                Collections.singletonList(changelogRow("+I", 2, "test%2")));
+                Arrays.asList(
+                        changelogRow("+I", 2, "test%2"), changelogRow("+I", 100, "test%fff")));
     }
 
     @Test

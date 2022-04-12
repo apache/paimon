@@ -350,23 +350,352 @@ public class PredicateTest {
                                 literal(5)));
         assertThatThrownBy(() -> expression.accept(CONVERTER))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+    }
 
-        CallExpression endPattern =
-                call(
-                        BuiltInFunctionDefinitions.LIKE,
-                        field(0, STRING()),
-                        literal("%456", STRING()));
-
-        assertThatThrownBy(() -> endPattern.accept(CONVERTER))
+    @Test
+    public void testUnsupportedStartsPatternForLike() {
+        // starts pattern with '[]' as wildcard
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal(
+                                                        "[a-z]%",
+                                                        STRING())) // matches "[a-z](?s:.*)"
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal(
+                                                        "[1xyz]%",
+                                                        STRING())) // matches "[1xyz](?s:.*)"
+                                        .accept(CONVERTER))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
-        CallExpression middlePattern =
-                call(
-                        BuiltInFunctionDefinitions.LIKE,
-                        field(0, STRING()),
-                        literal("123%456", STRING()));
+        // starts pattern with '[^]' as wildcard
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal(
+                                                        "[^a-z]%",
+                                                        STRING())) // matches "[^a-z](?s:.*)"
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal(
+                                                        "[^1xyz]%",
+                                                        STRING())) // matches "[^1xyz](?s:.*)"
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
-        assertThatThrownBy(() -> middlePattern.accept(CONVERTER))
+        // starts pattern like 'abc%xyz' or 'abc_xyz'
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal("abc%xyz", STRING()))
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal("abc_xyz", STRING()))
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        // starts pattern like 'abc%xyz' or 'abc_xyz' with '%' or '_' to escape
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal(
+                                                        "=%abc=%%xyz=_",
+                                                        STRING()), // matches "%abc%(?s:.*)xyz_"
+                                                literal("=", STRING()))
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal(
+                                                        "abc=%%xyz",
+                                                        STRING()), // matches "abc%(?s:.*)xyz"
+                                                literal("=", STRING()))
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal(
+                                                        "abc=%_xyz",
+                                                        STRING()), // matches "abc%.xyz"
+                                                literal("=", STRING()))
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal(
+                                                        "abc=_%xyz",
+                                                        STRING()), // matches "abc_(?s:.*)xyz"
+                                                literal("=", STRING()))
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal(
+                                                        "abc=__xyz",
+                                                        STRING()), // matches "abc_.xyz"
+                                                literal("=", STRING()))
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+    }
+
+    @Test
+    public void testUnsupportedEndsPatternForLike() {
+        // ends pattern with '%' as wildcard
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal("%456", STRING())) // matches "(?s:.*)456"
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        // ends pattern with '_' as wildcard
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal("_456", STRING())) // matches ".456"
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        // ends pattern with '[]' as wildcard
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal("_[456]", STRING())) // matches ".[456]"
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal(
+                                                        "%[h-m]",
+                                                        STRING())) // matches "(?s:.*)[h-m]"
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        // ends pattern with '[^]' as wildcard
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal(
+                                                        "%[^h-m]",
+                                                        STRING())) // matches "(?s:.*)[^h-m]"
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal("_[^xyz]", STRING())) // matches ".[^xyz]"
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        // ends pattern escape wildcard '%'
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal(
+                                                        "%=%456",
+                                                        STRING()), // matches "(?s:.*)%456"
+                                                literal("=", STRING()))
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal(
+                                                        "%=_456",
+                                                        STRING()), // matches "(?s:.*)_456"
+                                                literal("=", STRING()))
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        // ends pattern escape wildcard '_'
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal("_=_456", STRING()), // matches "._456"
+                                                literal("=", STRING()))
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+    }
+
+    @Test
+    public void testUnsupportedEqualsPatternForLike() {
+        // equals pattern
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal("123456", STRING()))
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        // equals pattern escape '%'
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal("12=%45", STRING()), // equals "12%45"
+                                                literal("=", STRING()))
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        // equals pattern escape '_'
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal("12=_45", STRING()), // equals "12_45"
+                                                literal("=", STRING()))
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+    }
+
+    @Test
+    public void testUnsupportedMiddlePatternForLike() {
+        // middle pattern with '%' as wildcard
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal("%345%", STRING()))
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        // middle pattern with '_' as wildcard
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal("_345_", STRING()))
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        // middle pattern with both '%' and '_' as wildcard
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal("_345%", STRING())) // matches ".345(?s:.*)"
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal("%345_", STRING())) // matches "(?s:.*)345."
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        // middle pattern with '[]' as wildcard
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal(
+                                                        "%[a-c]_",
+                                                        STRING())) // matches "(?s:.*)[a-c]."
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        // middle pattern with '[^]' as wildcard
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal(
+                                                        "%[^abc]_",
+                                                        STRING())) // matches "(?s:.*)[^abc]."
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        // middle pattern escape '%'
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal(
+                                                        "%34=%5%",
+                                                        STRING()), // matches "(?s:.*)34%5(.*)"
+                                                literal("=", STRING()))
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        // middle pattern escape '_'
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal(
+                                                        "%34=_5%",
+                                                        STRING()), // matches "(?s:.*)34_5(.*)"
+                                                literal("=", STRING()))
+                                        .accept(CONVERTER))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
     }
 

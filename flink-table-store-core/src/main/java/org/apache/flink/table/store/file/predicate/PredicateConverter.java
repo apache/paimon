@@ -31,7 +31,7 @@ import org.apache.flink.table.functions.SqlLikeUtils;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.LogicalTypeRoot;
+import org.apache.flink.table.types.logical.LogicalTypeFamily;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
@@ -51,8 +51,13 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
 
     public static final PredicateConverter CONVERTER = new PredicateConverter();
 
-    /** simple LIKE patterns for 'abc%' or 'abc_'. */
-    private static final Pattern BEGIN_PATTERN = Pattern.compile("([^%_]+)[%_]");
+    /** Java regex pattern for LIKE patterns as 'abc%'. */
+    private static final Pattern SUPPORTED_JAVA_BEGIN_PATTERN1 =
+            Pattern.compile("^([^\\[.*\\]])+\\Q(?s:.*)\\E$");
+
+    /** Java regex pattern for LIKE patterns as 'abc_'. */
+    private static final Pattern SUPPORTED_JAVA_BEGIN_PATTERN2 =
+            Pattern.compile("^([^\\[.*\\]])+\\Q.\\E$");
 
     @Nullable
     public Predicate fromMap(Map<String, String> map, RowType rowType) {
@@ -105,8 +110,12 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         } else if (func == BuiltInFunctionDefinitions.LIKE) {
             FieldReferenceExpression fieldRefExpr =
                     extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
-            if (fieldRefExpr.getOutputDataType().getLogicalType().getTypeRoot()
-                    == LogicalTypeRoot.VARCHAR) {
+            if (fieldRefExpr
+                    .getOutputDataType()
+                    .getLogicalType()
+                    .getTypeRoot()
+                    .getFamilies()
+                    .contains(LogicalTypeFamily.CHARACTER_STRING)) {
                 String sqlPattern =
                         extractLiteral(fieldRefExpr.getOutputDataType(), children.get(1))
                                 .orElseThrow(UnsupportedExpression::new)
@@ -119,24 +128,19 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                                         .orElseThrow(UnsupportedExpression::new)
                                         .value()
                                         .toString();
-                if (escape == null) {
-                    Matcher matcher = BEGIN_PATTERN.matcher(sqlPattern);
-                    if (matcher.matches()) {
-                        return new StartsWith(
-                                fieldRefExpr.getFieldIndex(),
-                                matcher.group(1),
-                                sqlPattern.endsWith("_"));
-                    }
-                } else {
-                    String regexPattern = SqlLikeUtils.sqlToRegexLike(sqlPattern, escape);
-                    boolean matchOneCharacter = regexPattern.endsWith(".");
-                    if (matchOneCharacter) {
-                        regexPattern = regexPattern.substring(0, regexPattern.length() - 1);
-                    } else if (regexPattern.endsWith("(?s:.*)")) {
-                        regexPattern = regexPattern.substring(0, regexPattern.length() - 7);
-                    }
+                String regexPattern = SqlLikeUtils.sqlToRegexLike(sqlPattern, escape);
+                Matcher matcher1 = SUPPORTED_JAVA_BEGIN_PATTERN1.matcher(regexPattern);
+                Matcher matcher2 = SUPPORTED_JAVA_BEGIN_PATTERN2.matcher(regexPattern);
+                if (matcher1.matches()) {
                     return new StartsWith(
-                            fieldRefExpr.getFieldIndex(), regexPattern, matchOneCharacter);
+                            fieldRefExpr.getFieldIndex(),
+                            regexPattern.substring(0, regexPattern.length() - 7),
+                            false);
+                } else if (matcher2.matches()) {
+                    return new StartsWith(
+                            fieldRefExpr.getFieldIndex(),
+                            regexPattern.substring(0, regexPattern.length() - 1),
+                            true);
                 }
             }
         }
