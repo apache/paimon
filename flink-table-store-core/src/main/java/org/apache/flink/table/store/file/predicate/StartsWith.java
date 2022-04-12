@@ -28,21 +28,23 @@ public class StartsWith implements Predicate {
 
     private final int index;
 
-    private final String startsWith;
+    private final Literal patternLiteral;
 
     private final boolean matchOneCharacter;
 
-    public StartsWith(int index, String startsWith, boolean matchOneCharacter) {
+    public StartsWith(int index, Literal patternLiteral, boolean matchOneCharacter) {
         this.index = index;
-        this.startsWith = startsWith;
+        this.patternLiteral = patternLiteral;
         this.matchOneCharacter = matchOneCharacter;
     }
 
     @Override
     public boolean test(Object[] values) {
         BinaryStringData field = (BinaryStringData) values[index];
-        if (field != null && field.startsWith(BinaryStringData.fromString(startsWith))) {
-            return !matchOneCharacter || field.numChars() - startsWith.length() == 1;
+        if (field != null && field.startsWith((BinaryStringData) patternLiteral.value())) {
+            return !matchOneCharacter
+                    || field.numChars() - ((BinaryStringData) patternLiteral.value()).numChars()
+                            == 1;
         }
         return false;
     }
@@ -55,7 +57,7 @@ public class StartsWith implements Predicate {
         }
         BinaryStringData min = (BinaryStringData) stats.minValue();
         BinaryStringData max = (BinaryStringData) stats.maxValue();
-        BinaryStringData pattern = BinaryStringData.fromString(startsWith);
+        BinaryStringData pattern = (BinaryStringData) patternLiteral.value();
         return (min.startsWith(pattern) || min.compareTo(pattern) <= 0)
                 && (max.startsWith(pattern) || max.compareTo(pattern) >= 0);
     }

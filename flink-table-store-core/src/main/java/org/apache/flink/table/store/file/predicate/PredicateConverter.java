@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.predicate;
 
+import org.apache.flink.table.data.binary.BinaryStringData;
 import org.apache.flink.table.expressions.CallExpression;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.expressions.ExpressionVisitor;
@@ -33,6 +34,7 @@ import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.LogicalTypeFamily;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.logical.VarCharType;
 
 import javax.annotation.Nullable;
 
@@ -113,9 +115,7 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             if (fieldRefExpr
                     .getOutputDataType()
                     .getLogicalType()
-                    .getTypeRoot()
-                    .getFamilies()
-                    .contains(LogicalTypeFamily.CHARACTER_STRING)) {
+                    .is(LogicalTypeFamily.CHARACTER_STRING)) {
                 String sqlPattern =
                         extractLiteral(fieldRefExpr.getOutputDataType(), children.get(1))
                                 .orElseThrow(UnsupportedExpression::new)
@@ -134,12 +134,18 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                 if (matcher1.matches()) {
                     return new StartsWith(
                             fieldRefExpr.getFieldIndex(),
-                            regexPattern.substring(0, regexPattern.length() - 7),
+                            new Literal(
+                                    VarCharType.STRING_TYPE,
+                                    BinaryStringData.fromString(
+                                            regexPattern.substring(0, regexPattern.length() - 7))),
                             false);
                 } else if (matcher2.matches()) {
                     return new StartsWith(
                             fieldRefExpr.getFieldIndex(),
-                            regexPattern.substring(0, regexPattern.length() - 1),
+                            new Literal(
+                                    VarCharType.STRING_TYPE,
+                                    BinaryStringData.fromString(
+                                            regexPattern.substring(0, regexPattern.length() - 1))),
                             true);
                 }
             }
