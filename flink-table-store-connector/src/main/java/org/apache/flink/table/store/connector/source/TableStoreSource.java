@@ -206,8 +206,7 @@ public class TableStoreSource
                         .orElse(null);
         // remaining filters should add partition filters which are not supported yet
         fieldFilters.addAll(
-                partitionFilters.stream()
-                        .map(PredicateConverter::convert)
+                partitionStream
                         .filter(Either::isRight)
                         .map(Either::right)
                         .collect(Collectors.toList()));
