@@ -30,23 +30,15 @@ public class StartsWith implements Predicate {
 
     private final Literal patternLiteral;
 
-    private final boolean matchOneCharacter;
-
-    public StartsWith(int index, Literal patternLiteral, boolean matchOneCharacter) {
+    public StartsWith(int index, Literal patternLiteral) {
         this.index = index;
         this.patternLiteral = patternLiteral;
-        this.matchOneCharacter = matchOneCharacter;
     }
 
     @Override
     public boolean test(Object[] values) {
         BinaryStringData field = (BinaryStringData) values[index];
-        if (field != null && field.startsWith((BinaryStringData) patternLiteral.value())) {
-            return !matchOneCharacter
-                    || field.numChars() - ((BinaryStringData) patternLiteral.value()).numChars()
-                            == 1;
-        }
-        return false;
+        return field != null && field.startsWith((BinaryStringData) patternLiteral.value());
     }
 
     @Override

@@ -35,6 +35,7 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.LogicalTypeFamily;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.types.Either;
 
 import javax.annotation.Nullable;
 
@@ -53,13 +54,8 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
 
     public static final PredicateConverter CONVERTER = new PredicateConverter();
 
-    /** Java regex pattern for LIKE patterns as 'abc%'. */
-    private static final Pattern SUPPORTED_JAVA_BEGIN_PATTERN1 =
-            Pattern.compile("^([^\\[.*\\]])+\\Q(?s:.*)\\E$");
-
-    /** Java regex pattern for LIKE patterns as 'abc_'. */
-    private static final Pattern SUPPORTED_JAVA_BEGIN_PATTERN2 =
-            Pattern.compile("^([^\\[.*\\]])+\\Q.\\E$");
+    /** Accepts simple LIKE patterns like "abc%". */
+    private static final Pattern BEGIN_PATTERN = Pattern.compile("([^%]+)%");
 
     @Nullable
     public Predicate fromMap(Map<String, String> map, RowType rowType) {
@@ -128,25 +124,67 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                                         .orElseThrow(UnsupportedExpression::new)
                                         .value()
                                         .toString();
-                String regexPattern = SqlLikeUtils.sqlToRegexLike(sqlPattern, escape);
-                Matcher matcher1 = SUPPORTED_JAVA_BEGIN_PATTERN1.matcher(regexPattern);
-                Matcher matcher2 = SUPPORTED_JAVA_BEGIN_PATTERN2.matcher(regexPattern);
-                if (matcher1.matches()) {
-                    return new StartsWith(
-                            fieldRefExpr.getFieldIndex(),
-                            new Literal(
-                                    VarCharType.STRING_TYPE,
-                                    BinaryStringData.fromString(
-                                            regexPattern.substring(0, regexPattern.length() - 7))),
-                            false);
-                } else if (matcher2.matches()) {
-                    return new StartsWith(
-                            fieldRefExpr.getFieldIndex(),
-                            new Literal(
-                                    VarCharType.STRING_TYPE,
-                                    BinaryStringData.fromString(
-                                            regexPattern.substring(0, regexPattern.length() - 1))),
-                            true);
+                String escapedSqlPattern = sqlPattern;
+                boolean allowQuick = false;
+                if (escape == null && !sqlPattern.contains("_")) {
+                    allowQuick = true;
+                } else if (escape != null) {
+                    if (escape.length() != 1) {
+                        throw SqlLikeUtils.invalidEscapeCharacter(escape);
+                    }
+                    char escapeChar = escape.charAt(0);
+                    boolean matched = true;
+                    int i = 0;
+                    StringBuilder sb = new StringBuilder();
+                    while (i < sqlPattern.length() && matched) {
+                        char c = sqlPattern.charAt(i);
+                        if (c == escapeChar) {
+                            if (i == (sqlPattern.length() - 1)) {
+                                throw SqlLikeUtils.invalidEscapeSequence(sqlPattern, i);
+                            }
+                            char nextChar = sqlPattern.charAt(i + 1);
+                            if (nextChar == '%') {
+                                matched = false;
+                            } else if ((nextChar == '_') || (nextChar == escapeChar)) {
+                                sb.append(nextChar);
+                                i += 1;
+                            } else {
+                                throw SqlLikeUtils.invalidEscapeSequence(sqlPattern, i);
+                            }
+                        } else if (c == '_') {
+                            matched = false;
+                        } else {
+                            sb.append(c);
+                        }
+                        i = i + 1;
+                    }
+                    if (matched) {
+                        allowQuick = true;
+                        escapedSqlPattern = sb.toString();
+                    }
+                }
+                if (allowQuick) {
+                    Matcher beginMatcher = BEGIN_PATTERN.matcher(escapedSqlPattern);
+                    if (beginMatcher.matches()) {
+                        return new StartsWith(
+                                fieldRefExpr.getFieldIndex(),
+                                new Literal(
+                                        VarCharType.STRING_TYPE,
+                                        BinaryStringData.fromString(beginMatcher.group(1))));
+                    }
+                } else {
+                    String regexPattern = SqlLikeUtils.sqlToRegexLike(sqlPattern, escape);
+                    if (!regexPattern.startsWith(".")
+                            && !regexPattern.startsWith("(?s:.*)")
+                            && regexPattern.endsWith("(?s:.*)")) {
+                        return new StartsWith(
+                                fieldRefExpr.getFieldIndex(),
+                                new Literal(
+                                        VarCharType.STRING_TYPE,
+                                        BinaryStringData.fromString(
+                                                regexPattern.substring(
+                                                        0, regexPattern.length() - 7))));
+                    }
                 }
             }
         }
@@ -267,14 +305,19 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         throw new RuntimeException("Unsupported expression: " + expression.asSummaryString());
     }
 
-    @Nullable
-    public static Predicate convert(List<ResolvedExpression> filters) {
-        return filters != null
-                ? filters.stream()
-                        .map(filter -> filter.accept(PredicateConverter.CONVERTER))
-                        .reduce(And::new)
-                        .orElse(null)
-                : null;
+    /**
+     * Try best to convert a {@link ResolvedExpression} to {@link Predicate}. If it is unsupported,
+     * send it back.
+     *
+     * @param filter a resolved expression
+     * @return {@link Predicate} if no exception thrown, or else the filter itself.
+     */
+    public static Either<Predicate, ResolvedExpression> convert(ResolvedExpression filter) {
+        try {
+            return Either.Left(filter.accept(PredicateConverter.CONVERTER));
+        } catch (UnsupportedExpression e) {
+            return Either.Right(filter);
+        }
     }
 
     /** Encounter an unsupported expression, the caller can choose to ignore this filter branch. */

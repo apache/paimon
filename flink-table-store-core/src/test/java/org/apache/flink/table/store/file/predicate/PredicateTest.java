@@ -354,47 +354,13 @@ public class PredicateTest {
 
     @Test
     public void testUnsupportedStartsPatternForLike() {
-        // starts pattern with '[]' as wildcard
+        // starts pattern with '_' as wildcard
         assertThatThrownBy(
                         () ->
                                 call(
                                                 BuiltInFunctionDefinitions.LIKE,
                                                 field(0, STRING()),
-                                                literal(
-                                                        "[a-z]%",
-                                                        STRING())) // matches "[a-z](?s:.*)"
-                                        .accept(CONVERTER))
-                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
-        assertThatThrownBy(
-                        () ->
-                                call(
-                                                BuiltInFunctionDefinitions.LIKE,
-                                                field(0, STRING()),
-                                                literal(
-                                                        "[1xyz]%",
-                                                        STRING())) // matches "[1xyz](?s:.*)"
-                                        .accept(CONVERTER))
-                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
-
-        // starts pattern with '[^]' as wildcard
-        assertThatThrownBy(
-                        () ->
-                                call(
-                                                BuiltInFunctionDefinitions.LIKE,
-                                                field(0, STRING()),
-                                                literal(
-                                                        "[^a-z]%",
-                                                        STRING())) // matches "[^a-z](?s:.*)"
-                                        .accept(CONVERTER))
-                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
-        assertThatThrownBy(
-                        () ->
-                                call(
-                                                BuiltInFunctionDefinitions.LIKE,
-                                                field(0, STRING()),
-                                                literal(
-                                                        "[^1xyz]%",
-                                                        STRING())) // matches "[^1xyz](?s:.*)"
+                                                literal("abc_", STRING()))
                                         .accept(CONVERTER))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
@@ -790,40 +756,10 @@ public class PredicateTest {
                 call(
                         BuiltInFunctionDefinitions.LIKE,
                         field(0, STRING()),
-                        literal("abc_", STRING()));
-
-        List<Tuple2<Object[], Boolean>> objects2 =
-                Arrays.asList(
-                        Tuple2.of(new Object[] {null}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("a")}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("ab")}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("abcde")}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("abc_%")}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("abc")}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("abc_%")}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("abcd")}, true),
-                        Tuple2.of(new Object[] {StringData.fromString("abc_")}, true));
-
-        List<Tuple3<Long, FieldStats[], Boolean>> fieldStats2 =
-                Collections.singletonList(
-                        Tuple3.of(
-                                3L,
-                                new FieldStats[] {
-                                    new FieldStats(
-                                            StringData.fromString("abc"),
-                                            StringData.fromString("abc_"),
-                                            1L)
-                                },
-                                true));
-
-        CallExpression expr3 =
-                call(
-                        BuiltInFunctionDefinitions.LIKE,
-                        field(0, STRING()),
                         literal("test=_%", STRING()),
                         literal("=", STRING()));
 
-        List<Tuple2<Object[], Boolean>> objects3 =
+        List<Tuple2<Object[], Boolean>> objects2 =
                 Arrays.asList(
                         Tuple2.of(new Object[] {null}, false),
                         Tuple2.of(new Object[] {StringData.fromString("test%")}, false),
@@ -831,7 +767,7 @@ public class PredicateTest {
                         Tuple2.of(new Object[] {StringData.fromString("test_%")}, true),
                         Tuple2.of(new Object[] {StringData.fromString("test__")}, true));
 
-        List<Tuple3<Long, FieldStats[], Boolean>> fieldStats3 =
+        List<Tuple3<Long, FieldStats[], Boolean>> fieldStats2 =
                 Collections.singletonList(
                         Tuple3.of(
                                 3L,
@@ -843,22 +779,22 @@ public class PredicateTest {
                                 },
                                 true));
 
-        CallExpression expr4 =
+        CallExpression expr3 =
                 call(
                         BuiltInFunctionDefinitions.LIKE,
                         field(0, STRING()),
-                        literal("=%_", STRING()),
+                        literal("=%%", STRING()),
                         literal("=", STRING()));
 
-        List<Tuple2<Object[], Boolean>> objects4 =
+        List<Tuple2<Object[], Boolean>> objects3 =
                 Arrays.asList(
                         Tuple2.of(new Object[] {null}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("%")}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("%123")}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("%")}, true),
+                        Tuple2.of(new Object[] {StringData.fromString("%123")}, true),
                         Tuple2.of(new Object[] {StringData.fromString("%%")}, true),
                         Tuple2.of(new Object[] {StringData.fromString("%_")}, true));
 
-        List<Tuple3<Long, FieldStats[], Boolean>> fieldStats4 =
+        List<Tuple3<Long, FieldStats[], Boolean>> fieldStats3 =
                 Collections.singletonList(
                         Tuple3.of(
                                 3L,
@@ -870,11 +806,65 @@ public class PredicateTest {
                                 },
                                 true));
 
+        // currently, SQL wildcards '[]' and '[^]' are deemed as normal characters in Flink
+        CallExpression expr4 =
+                call(
+                        BuiltInFunctionDefinitions.LIKE,
+                        field(0, STRING()),
+                        literal("[a-c]xyz%", STRING()));
+
+        List<Tuple2<Object[], Boolean>> objects4 =
+                Arrays.asList(
+                        Tuple2.of(new Object[] {null}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("axyz")}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("bxyz")}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("cxyz")}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("[a-c]xyz")}, true));
+
+        List<Tuple3<Long, FieldStats[], Boolean>> fieldStats4 =
+                Collections.singletonList(
+                        Tuple3.of(
+                                3L,
+                                new FieldStats[] {
+                                    new FieldStats(
+                                            StringData.fromString("[a-c]xyz"),
+                                            StringData.fromString("[a-c]xyzz"),
+                                            1L)
+                                },
+                                true));
+
+        CallExpression expr5 =
+                call(
+                        BuiltInFunctionDefinitions.LIKE,
+                        field(0, STRING()),
+                        literal("[^a-d]xyz%", STRING()));
+
+        List<Tuple2<Object[], Boolean>> objects5 =
+                Arrays.asList(
+                        Tuple2.of(new Object[] {null}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("exyz")}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("fxyz")}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("axyz")}, false),
+                        Tuple2.of(new Object[] {StringData.fromString("[^a-d]xyz")}, true));
+
+        List<Tuple3<Long, FieldStats[], Boolean>> fieldStats5 =
+                Collections.singletonList(
+                        Tuple3.of(
+                                3L,
+                                new FieldStats[] {
+                                    new FieldStats(
+                                            StringData.fromString("[^a-d]xyz"),
+                                            StringData.fromString("[^a-d]xyzz"),
+                                            1L)
+                                },
+                                true));
+
         return Stream.of(
                 Arguments.of(Tuple3.of(expr1, objects1, fieldStats1)),
                 Arguments.of(Tuple3.of(expr2, objects2, fieldStats2)),
                 Arguments.of(Tuple3.of(expr3, objects3, fieldStats3)),
-                Arguments.of(Tuple3.of(expr4, objects4, fieldStats4)));
+                Arguments.of(Tuple3.of(expr4, objects4, fieldStats4)),
+                Arguments.of(Tuple3.of(expr5, objects5, fieldStats5)));
     }
 
     private byte[] writeObject(Literal literal) throws IOException {

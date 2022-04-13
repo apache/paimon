@@ -39,17 +39,21 @@ import org.apache.flink.table.expressions.TypeLiteralExpression;
 import org.apache.flink.table.expressions.ValueLiteralExpression;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.store.connector.TableStore;
+import org.apache.flink.table.store.file.predicate.And;
+import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateConverter;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.types.Either;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.SCAN_PARALLELISM;
 import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
@@ -71,8 +75,8 @@ public class TableStoreSource
     private final DynamicTableFactory.Context logStoreContext;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
-    private List<ResolvedExpression> partitionFilters = new ArrayList<>();
-    private List<ResolvedExpression> fieldFilters = new ArrayList<>();
+    @Nullable private Predicate partitionPredicate;
+    @Nullable private Predicate fieldPredicate;
     @Nullable private int[][] projectFields;
 
     public TableStoreSource(
@@ -142,8 +146,8 @@ public class TableStoreSource
                         .withContinuousMode(streaming)
                         .withLogSourceProvider(logSourceProvider)
                         .withProjection(projectFields)
-                        .withPartitionPredicate(PredicateConverter.convert(partitionFilters))
-                        .withFieldPredicate(PredicateConverter.convert(fieldFilters))
+                        .withPartitionPredicate(partitionPredicate)
+                        .withFieldPredicate(fieldPredicate)
                         .withParallelism(tableStore.options().get(SCAN_PARALLELISM));
 
         return new DataStreamScanProvider() {
@@ -164,8 +168,8 @@ public class TableStoreSource
     public DynamicTableSource copy() {
         TableStoreSource copied =
                 new TableStoreSource(tableStore, streaming, logStoreContext, logStoreTableFactory);
-        copied.partitionFilters = new ArrayList<>(partitionFilters);
-        copied.fieldFilters = new ArrayList<>(fieldFilters);
+        copied.partitionPredicate = partitionPredicate;
+        copied.fieldPredicate = fieldPredicate;
         copied.projectFields = projectFields;
         return copied;
     }
@@ -177,11 +181,36 @@ public class TableStoreSource
 
     @Override
     public Result applyFilters(List<ResolvedExpression> filters) {
+        List<ResolvedExpression> partitionFilters = new ArrayList<>();
+        List<ResolvedExpression> fieldFilters = new ArrayList<>();
+
         if (tableStore.partitioned()) {
-            classifyFilters(filters);
+            classifyFilters(filters, partitionFilters, fieldFilters);
         } else {
             fieldFilters = filters;
         }
+        fieldPredicate =
+                fieldFilters.stream()
+                        .map(PredicateConverter::convert)
+                        .filter(Either::isLeft)
+                        .map(Either::left)
+                        .reduce(And::new)
+                        .orElse(null);
+        Stream<Either<Predicate, ResolvedExpression>> partitionStream =
+                partitionFilters.stream().map(PredicateConverter::convert);
+        partitionPredicate =
+                partitionStream
+                        .filter(Either::isLeft)
+                        .map(Either::left)
+                        .reduce(And::new)
+                        .orElse(null);
+        // remaining filters should add partition filters which are not supported yet
+        fieldFilters.addAll(
+                partitionFilters.stream()
+                        .map(PredicateConverter::convert)
+                        .filter(Either::isRight)
+                        .map(Either::right)
+                        .collect(Collectors.toList()));
         return Result.of(
                 filters, streaming && logStoreTableFactory != null ? filters : fieldFilters);
     }
@@ -196,7 +225,10 @@ public class TableStoreSource
         this.projectFields = projectedFields;
     }
 
-    private void classifyFilters(List<ResolvedExpression> filters) {
+    private void classifyFilters(
+            List<ResolvedExpression> filters,
+            List<ResolvedExpression> partitionFilters,
+            List<ResolvedExpression> fieldFilters) {
         List<String> fieldNames = tableStore.fieldNames();
         List<String> partitionKeys = tableStore.partitionKeys();
         PartitionIndexVisitor visitor =
