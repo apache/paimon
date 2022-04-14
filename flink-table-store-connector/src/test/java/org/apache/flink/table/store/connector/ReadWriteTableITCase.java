@@ -35,6 +35,7 @@ import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.runtime.connector.sink.SinkRuntimeProviderContext;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
+import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -50,6 +51,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
@@ -110,7 +112,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                         tEnv,
                         managedTable,
                         Collections.emptyMap(),
-                        "dt = '2022-01-02'",
+                        "dt IN ('2022-01-02')",
                         Arrays.asList(
                                 // part = 2022-01-01
                                 changelogRow("+I", "Euro", 100L, "2022-01-02"),
@@ -127,7 +129,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                 true, true, "dt <> '2022-01-02'", Collections.emptyList(), expected);
 
         collectAndCheckBatchReadWrite(
-                true, true, "dt = '2022-01-01'", Collections.emptyList(), expected);
+                true, true, "dt IN ('2022-01-01')", Collections.emptyList(), expected);
 
         // test field filter
         collectAndCheckBatchReadWrite(
@@ -211,7 +213,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                         streamTableEnv,
                         managedTable,
                         Collections.emptyMap(),
-                        null,
+                        "dt IN ('2022-01-01', '2022-01-02')",
                         Arrays.asList(
                                 // part = 2022-01-01
                                 changelogRow("+I", "Euro", 90L, "2022-01-01"),
@@ -323,7 +325,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
         collectAndCheckBatchReadWrite(
                 false,
                 true,
-                "currency = 'Yen'",
+                "currency IN ('Yen')",
                 Collections.singletonList("rate"),
                 Collections.singletonList(changelogRow("+I", 1L)));
     }
@@ -1222,6 +1224,188 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                 BlockingIterator.of(tEnv.executeSql("select * from managed_table").collect());
         assertThat(iterator.collect(1, 5, TimeUnit.SECONDS))
                 .containsOnly(changelogRow("+I", 1, "abc"));
+    }
+
+    @Test
+    public void testLike() throws Exception {
+        rootPath = TEMPORARY_FOLDER.newFolder().getPath();
+        tEnv = StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
+        List<Row> input =
+                Arrays.asList(
+                        changelogRow("+I", 1, "test_1"),
+                        changelogRow("+I", 2, "test_2"),
+                        changelogRow("+I", 1, "test_%"),
+                        changelogRow("+I", 2, "test%2"),
+                        changelogRow("+I", 3, "university"),
+                        changelogRow("+I", 4, "very"),
+                        changelogRow("+I", 5, "yield"));
+        String id = registerData(input);
+        UUID randomSourceId = UUID.randomUUID();
+        tEnv.executeSql(
+                String.format(
+                        "create table `helper_source_%s` (f0 int, f1 string) with ("
+                                + "'connector' = 'values', "
+                                + "'bounded' = 'true', "
+                                + "'data-id' = '%s')",
+                        randomSourceId, id));
+
+        UUID randomSinkId = UUID.randomUUID();
+        tEnv.executeSql(
+                String.format(
+                        "create table `managed_table_%s` with ("
+                                + "'%s' = '%s'"
+                                + ") like `helper_source_%s` "
+                                + "(excluding options)",
+                        randomSinkId, FileStoreOptions.PATH.key(), rootPath, randomSourceId));
+
+        // insert multiple times
+        tEnv.executeSql(
+                        String.format(
+                                "insert into `managed_table_%s` select * from `helper_source_%s`",
+                                randomSinkId, randomSourceId))
+                .await();
+
+        tEnv.executeSql(
+                        String.format(
+                                "insert into `managed_table_%s` values (7, 'villa'), (8, 'tests'), (20, 'test_123')",
+                                randomSinkId))
+                .await();
+
+        tEnv.executeSql(
+                        "insert into `managed_table_"
+                                + randomSinkId
+                                + "` values (9, 'valley'), (10, 'tested'), (100, 'test%fff')")
+                .await();
+
+        collectAndCheck(
+                tEnv,
+                "managed_table_" + randomSinkId,
+                Collections.emptyMap(),
+                "f1 like 'test%'",
+                Arrays.asList(
+                        changelogRow("+I", 1, "test_1"),
+                        changelogRow("+I", 2, "test_2"),
+                        changelogRow("+I", 1, "test_%"),
+                        changelogRow("+I", 2, "test%2"),
+                        changelogRow("+I", 8, "tests"),
+                        changelogRow("+I", 10, "tested"),
+                        changelogRow("+I", 20, "test_123")));
+        collectAndCheck(
+                tEnv,
+                "managed_table_" + randomSinkId,
+                Collections.emptyMap(),
+                "f1 like 'v%'",
+                Arrays.asList(
+                        changelogRow("+I", 4, "very"),
+                        changelogRow("+I", 7, "villa"),
+                        changelogRow("+I", 9, "valley")));
+        collectAndCheck(
+                tEnv,
+                "managed_table_" + randomSinkId,
+                Collections.emptyMap(),
+                "f1 like 'test=_%' escape '='",
+                Arrays.asList(
+                        changelogRow("+I", 1, "test_1"),
+                        changelogRow("+I", 2, "test_2"),
+                        changelogRow("+I", 1, "test_%"),
+                        changelogRow("+I", 20, "test_123")));
+        collectAndCheck(
+                tEnv,
+                "managed_table_" + randomSinkId,
+                Collections.emptyMap(),
+                "f1 like 'test=__' escape '='",
+                Arrays.asList(
+                        changelogRow("+I", 1, "test_1"),
+                        changelogRow("+I", 2, "test_2"),
+                        changelogRow("+I", 1, "test_%")));
+        collectAndCheck(
+                tEnv,
+                "managed_table_" + randomSinkId,
+                Collections.emptyMap(),
+                "f1 like 'test$%%' escape '$'",
+                Arrays.asList(
+                        changelogRow("+I", 2, "test%2"), changelogRow("+I", 100, "test%fff")));
+    }
+
+    @Test
+    public void testIn() throws Exception {
+        rootPath = TEMPORARY_FOLDER.newFolder().getPath();
+        tEnv = StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
+        List<Row> input =
+                Arrays.asList(
+                        changelogRow("+I", 1, "aaa"),
+                        changelogRow("+I", 2, "bbb"),
+                        changelogRow("+I", 3, "ccc"),
+                        changelogRow("+I", 4, "ddd"),
+                        changelogRow("+I", 5, "eee"),
+                        changelogRow("+I", 6, "aaa"),
+                        changelogRow("+I", 7, "bbb"),
+                        changelogRow("+I", 8, "ccc"),
+                        changelogRow("+I", 9, "ddd"),
+                        changelogRow("+I", 10, "eee"),
+                        changelogRow("+I", 11, "aaa"),
+                        changelogRow("+I", 12, "bbb"),
+                        changelogRow("+I", 13, "ccc"),
+                        changelogRow("+I", 14, "ddd"),
+                        changelogRow("+I", 15, "eee"),
+                        changelogRow("+I", 16, "aaa"),
+                        changelogRow("+I", 17, "bbb"),
+                        changelogRow("+I", 18, "ccc"),
+                        changelogRow("+I", 19, "ddd"),
+                        changelogRow("+I", 20, "eee"),
+                        changelogRow("+I", 21, "fff"));
+
+        String id = registerData(input);
+        UUID randomSourceId = UUID.randomUUID();
+        tEnv.executeSql(
+                String.format(
+                        "create table `helper_source_%s` (f0 int, f1 string) with ("
+                                + "'connector' = 'values', "
+                                + "'bounded' = 'true', "
+                                + "'data-id' = '%s')",
+                        randomSourceId, id));
+
+        UUID randomSinkId = UUID.randomUUID();
+        tEnv.executeSql(
+                String.format(
+                        "create table `managed_table_%s` with ("
+                                + "'%s' = '%s'"
+                                + ") like `helper_source_%s` "
+                                + "(excluding options)",
+                        randomSinkId, FileStoreOptions.PATH.key(), rootPath, randomSourceId));
+        tEnv.executeSql(
+                        String.format(
+                                "insert into `managed_table_%s` select * from `helper_source_%s`",
+                                randomSinkId, randomSourceId))
+                .await();
+
+        collectAndCheck(
+                tEnv,
+                "managed_table_" + randomSinkId,
+                Collections.emptyMap(),
+                "f0 in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, "
+                        + "11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21)",
+                input);
+
+        collectAndCheck(
+                tEnv,
+                "managed_table_" + randomSinkId,
+                Collections.emptyMap(),
+                "f1 in ('aaa', 'bbb', 'ccc', 'ddd', 'eee', 'fff')",
+                input);
+    }
+
+    @Test
+    public void testUnsupportedPredicate() throws Exception {
+        // test unsupported filter
+        collectAndCheckBatchReadWrite(
+                true,
+                true,
+                "currency similar to 'Euro'",
+                Collections.emptyList(),
+                Arrays.asList(
+                        changelogRow("+I", "Euro", 114L, "2022-01-01"),
+                        changelogRow("+I", "Euro", 119L, "2022-01-02")));
     }
 
     // ------------------------ Tools ----------------------------------
