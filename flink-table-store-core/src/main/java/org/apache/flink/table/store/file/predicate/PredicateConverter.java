@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.predicate;
 
+import org.apache.flink.table.data.binary.BinaryStringData;
 import org.apache.flink.table.expressions.CallExpression;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.expressions.ExpressionVisitor;
@@ -27,10 +28,13 @@ import org.apache.flink.table.expressions.TypeLiteralExpression;
 import org.apache.flink.table.expressions.ValueLiteralExpression;
 import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
 import org.apache.flink.table.functions.FunctionDefinition;
+import org.apache.flink.table.functions.SqlLikeUtils;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.LogicalTypeFamily;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.logical.VarCharType;
 
 import javax.annotation.Nullable;
 
@@ -38,6 +42,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiFunction;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.apache.flink.table.data.conversion.DataStructureConverters.getConverter;
 import static org.apache.flink.table.types.logical.utils.LogicalTypeCasts.supportsImplicitCast;
@@ -46,6 +52,9 @@ import static org.apache.flink.table.types.logical.utils.LogicalTypeCasts.suppor
 public class PredicateConverter implements ExpressionVisitor<Predicate> {
 
     public static final PredicateConverter CONVERTER = new PredicateConverter();
+
+    /** Accepts simple LIKE patterns like "abc%". */
+    private static final Pattern BEGIN_PATTERN = Pattern.compile("([^%]+)%");
 
     @Nullable
     public Predicate fromMap(Map<String, String> map, RowType rowType) {
@@ -95,9 +104,78 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                     .map(FieldReferenceExpression::getFieldIndex)
                     .map(IsNotNull::new)
                     .orElseThrow(UnsupportedExpression::new);
+        } else if (func == BuiltInFunctionDefinitions.LIKE) {
+            FieldReferenceExpression fieldRefExpr =
+                    extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
+            if (fieldRefExpr
+                    .getOutputDataType()
+                    .getLogicalType()
+                    .is(LogicalTypeFamily.CHARACTER_STRING)) {
+                String sqlPattern =
+                        extractLiteral(fieldRefExpr.getOutputDataType(), children.get(1))
+                                .orElseThrow(UnsupportedExpression::new)
+                                .value()
+                                .toString();
+                String escape =
+                        children.size() <= 2
+                                ? null
+                                : extractLiteral(fieldRefExpr.getOutputDataType(), children.get(2))
+                                        .orElseThrow(UnsupportedExpression::new)
+                                        .value()
+                                        .toString();
+                String escapedSqlPattern = sqlPattern;
+                boolean allowQuick = false;
+                if (escape == null && !sqlPattern.contains("_")) {
+                    allowQuick = true;
+                } else if (escape != null) {
+                    if (escape.length() != 1) {
+                        throw SqlLikeUtils.invalidEscapeCharacter(escape);
+                    }
+                    char escapeChar = escape.charAt(0);
+                    boolean matched = true;
+                    int i = 0;
+                    StringBuilder sb = new StringBuilder();
+                    while (i < sqlPattern.length() && matched) {
+                        char c = sqlPattern.charAt(i);
+                        if (c == escapeChar) {
+                            if (i == (sqlPattern.length() - 1)) {
+                                throw SqlLikeUtils.invalidEscapeSequence(sqlPattern, i);
+                            }
+                            char nextChar = sqlPattern.charAt(i + 1);
+                            if (nextChar == '%') {
+                                matched = false;
+                            } else if ((nextChar == '_') || (nextChar == escapeChar)) {
+                                sb.append(nextChar);
+                                i += 1;
+                            } else {
+                                throw SqlLikeUtils.invalidEscapeSequence(sqlPattern, i);
+                            }
+                        } else if (c == '_') {
+                            matched = false;
+                        } else {
+                            sb.append(c);
+                        }
+                        i = i + 1;
+                    }
+                    if (matched) {
+                        allowQuick = true;
+                        escapedSqlPattern = sb.toString();
+                    }
+                }
+                if (allowQuick) {
+                    Matcher beginMatcher = BEGIN_PATTERN.matcher(escapedSqlPattern);
+                    if (beginMatcher.matches()) {
+                        return new StartsWith(
+                                fieldRefExpr.getFieldIndex(),
+                                new Literal(
+                                        VarCharType.STRING_TYPE,
+                                        BinaryStringData.fromString(beginMatcher.group(1))));
+                    }
+                }
+            }
         }
 
-        // TODO is_xxx, between_xxx, like, similar, in, not_in, not?
+        // TODO is_xxx, between_xxx, similar, in, not_in, not?
 
         throw new UnsupportedExpression();
     }
@@ -213,14 +291,18 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         throw new RuntimeException("Unsupported expression: " + expression.asSummaryString());
     }
 
-    @Nullable
-    public static Predicate convert(List<ResolvedExpression> filters) {
-        return filters != null
-                ? filters.stream()
-                        .map(filter -> filter.accept(PredicateConverter.CONVERTER))
-                        .reduce(And::new)
-                        .orElse(null)
-                : null;
+    /**
+     * Try best to convert a {@link ResolvedExpression} to {@link Predicate}.
+     *
+     * @param filter a resolved expression
+     * @return {@link Predicate} if no {@link UnsupportedExpression} thrown.
+     */
+    public static Optional<Predicate> convert(ResolvedExpression filter) {
+        try {
+            return Optional.ofNullable(filter.accept(PredicateConverter.CONVERTER));
+        } catch (UnsupportedExpression e) {
+            return Optional.empty();
+        }
     }
 
     /** Encounter an unsupported expression, the caller can choose to ignore this filter branch. */
