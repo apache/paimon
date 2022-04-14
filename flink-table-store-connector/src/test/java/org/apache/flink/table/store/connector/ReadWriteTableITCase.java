@@ -185,16 +185,6 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                         changelogRow("+I", 114L), // US Dollar
                         changelogRow("+I", 114L) // Euro
                         ));
-
-        // test unsupported filter
-        collectAndCheckBatchReadWrite(
-                true,
-                true,
-                "currency similar to 'Euro'",
-                Collections.emptyList(),
-                Arrays.asList(
-                        changelogRow("+I", "Euro", 114L, "2022-01-01"),
-                        changelogRow("+I", "Euro", 119L, "2022-01-02")));
     }
 
     @Test
@@ -1403,6 +1393,19 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                 Collections.emptyMap(),
                 "f1 in ('aaa', 'bbb', 'ccc', 'ddd', 'eee', 'fff')",
                 input);
+    }
+
+    @Test
+    public void testUnsupportedPredicate() throws Exception {
+        // test unsupported filter
+        collectAndCheckBatchReadWrite(
+                true,
+                true,
+                "currency similar to 'Euro'",
+                Collections.emptyList(),
+                Arrays.asList(
+                        changelogRow("+I", "Euro", 114L, "2022-01-01"),
+                        changelogRow("+I", "Euro", 119L, "2022-01-02")));
     }
 
     // ------------------------ Tools ----------------------------------

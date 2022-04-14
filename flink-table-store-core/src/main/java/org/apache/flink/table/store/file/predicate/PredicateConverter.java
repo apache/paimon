@@ -35,7 +35,6 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.LogicalTypeFamily;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
-import org.apache.flink.types.Either;
 
 import javax.annotation.Nullable;
 
@@ -306,17 +305,16 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
     }
 
     /**
-     * Try best to convert a {@link ResolvedExpression} to {@link Predicate}. If it is unsupported,
-     * send it back.
+     * Try best to convert a {@link ResolvedExpression} to {@link Predicate}.
      *
      * @param filter a resolved expression
-     * @return {@link Predicate} if no exception thrown, or else the filter itself.
+     * @return {@link Predicate} if no {@link UnsupportedExpression} thrown.
      */
-    public static Either<Predicate, ResolvedExpression> convert(ResolvedExpression filter) {
+    public static Optional<Predicate> convert(ResolvedExpression filter) {
         try {
-            return Either.Left(filter.accept(PredicateConverter.CONVERTER));
+            return Optional.ofNullable(filter.accept(PredicateConverter.CONVERTER));
         } catch (UnsupportedExpression e) {
-            return Either.Right(filter);
+            return Optional.empty();
         }
     }
 

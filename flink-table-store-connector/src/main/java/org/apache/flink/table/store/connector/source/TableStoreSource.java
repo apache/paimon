@@ -46,14 +46,13 @@ import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.types.Either;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.SCAN_PARALLELISM;
 import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
@@ -181,37 +180,29 @@ public class TableStoreSource
 
     @Override
     public Result applyFilters(List<ResolvedExpression> filters) {
-        List<ResolvedExpression> partitionFilters = new ArrayList<>();
-        List<ResolvedExpression> fieldFilters = new ArrayList<>();
-
-        if (tableStore.partitioned()) {
-            classifyFilters(filters, partitionFilters, fieldFilters);
-        } else {
-            fieldFilters = filters;
+        List<Predicate> partitionPredicates = new ArrayList<>();
+        List<Predicate> fieldPredicates = new ArrayList<>();
+        List<ResolvedExpression> notAcceptedFilters = new ArrayList<>();
+        for (ResolvedExpression filter : filters) {
+            Optional<ResolvedExpression> optionalPartPredicate = extractPartitionFilter(filter);
+            if (optionalPartPredicate.isPresent()) {
+                ResolvedExpression partitionFilter = optionalPartPredicate.get();
+                Optional<Predicate> partitionPredicate =
+                        PredicateConverter.convert(partitionFilter);
+                if (partitionPredicate.isPresent()) {
+                    partitionPredicates.add(partitionPredicate.get());
+                } else {
+                    notAcceptedFilters.add(partitionFilter);
+                }
+            } else {
+                notAcceptedFilters.add(filter);
+                PredicateConverter.convert(filter).ifPresent(fieldPredicates::add);
+            }
         }
-        fieldPredicate =
-                fieldFilters.stream()
-                        .map(PredicateConverter::convert)
-                        .filter(Either::isLeft)
-                        .map(Either::left)
-                        .reduce(And::new)
-                        .orElse(null);
-        Stream<Either<Predicate, ResolvedExpression>> partitionStream =
-                partitionFilters.stream().map(PredicateConverter::convert);
-        partitionPredicate =
-                partitionStream
-                        .filter(Either::isLeft)
-                        .map(Either::left)
-                        .reduce(And::new)
-                        .orElse(null);
-        // remaining filters should add partition filters which are not supported yet
-        fieldFilters.addAll(
-                partitionStream
-                        .filter(Either::isRight)
-                        .map(Either::right)
-                        .collect(Collectors.toList()));
+        partitionPredicate = partitionPredicates.stream().reduce(And::new).orElse(null);
+        fieldPredicate = fieldPredicates.stream().reduce(And::new).orElse(null);
         return Result.of(
-                filters, streaming && logStoreTableFactory != null ? filters : fieldFilters);
+                filters, streaming && logStoreTableFactory != null ? filters : notAcceptedFilters);
     }
 
     @Override
@@ -224,23 +215,17 @@ public class TableStoreSource
         this.projectFields = projectedFields;
     }
 
-    private void classifyFilters(
-            List<ResolvedExpression> filters,
-            List<ResolvedExpression> partitionFilters,
-            List<ResolvedExpression> fieldFilters) {
+    private Optional<ResolvedExpression> extractPartitionFilter(ResolvedExpression filter) {
         List<String> fieldNames = tableStore.fieldNames();
         List<String> partitionKeys = tableStore.partitionKeys();
         PartitionIndexVisitor visitor =
                 new PartitionIndexVisitor(
                         fieldNames.stream().mapToInt(partitionKeys::indexOf).toArray());
-        filters.forEach(
-                filter -> {
-                    try {
-                        partitionFilters.add(filter.accept(visitor));
-                    } catch (FoundFieldReference e) {
-                        fieldFilters.add(filter);
-                    }
-                });
+        try {
+            return Optional.of(filter.accept(visitor));
+        } catch (FoundFieldReference e) {
+            return Optional.empty();
+        }
     }
 
     private static class PartitionIndexVisitor implements ExpressionVisitor<ResolvedExpression> {
