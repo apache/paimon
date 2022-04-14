@@ -32,7 +32,7 @@ public class MergeTreeOptions {
     public static final ConfigOption<MemorySize> WRITE_BUFFER_SIZE =
             ConfigOptions.key("write-buffer-size")
                     .memoryType()
-                    .defaultValue(MemorySize.parse("64 mb"))
+                    .defaultValue(MemorySize.parse("128 mb"))
                     .withDescription(
                             "Amount of data to build up in memory before converting to a sorted on-disk file.");
 
