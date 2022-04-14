@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.expressions.CallExpression;
@@ -55,6 +53,7 @@ import java.io.ObjectOutputStream;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import static org.apache.flink.table.api.DataTypes.STRING;
@@ -324,15 +323,23 @@ public class PredicateTest {
     @MethodSource("provideLikeExpressions")
     @ParameterizedTest
     public void testStartsWith(
-            Tuple3<
-                            CallExpression,
-                            List<Tuple2<Object[], Boolean>>,
-                            List<Tuple3<Long, FieldStats[], Boolean>>>
-                    param) {
-        Predicate predicate = param.f0.accept(CONVERTER);
-        param.f1.forEach(tuple -> assertThat(predicate.test(tuple.f0)).isEqualTo(tuple.f1));
-        param.f2.forEach(
-                triple -> assertThat(predicate.test(triple.f0, triple.f1)).isEqualTo(triple.f2));
+            CallExpression callExpression,
+            List<Object[]> valuesList,
+            List<Boolean> expectedForValues,
+            List<Long> rowCountList,
+            List<FieldStats[]> statsList,
+            List<Boolean> expectedForStats) {
+        Predicate predicate = callExpression.accept(CONVERTER);
+        IntStream.range(0, valuesList.size())
+                .forEach(
+                        i ->
+                                assertThat(predicate.test(valuesList.get(i)))
+                                        .isEqualTo(expectedForValues.get(i)));
+        IntStream.range(0, rowCountList.size())
+                .forEach(
+                        i ->
+                                assertThat(predicate.test(rowCountList.get(i), statsList.get(i)))
+                                        .isEqualTo(expectedForStats.get(i)));
     }
 
     @Test
@@ -435,6 +442,17 @@ public class PredicateTest {
                                                 literal(
                                                         "abc=__xyz",
                                                         STRING()), // matches "abc_.xyz"
+                                                literal("=", STRING()))
+                                        .accept(CONVERTER))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        // starts pattern with wildcard '%' at the beginning to escape
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.LIKE,
+                                                field(0, STRING()),
+                                                literal("=%%", STRING()), // matches "%(?s:.*)"
                                                 literal("=", STRING()))
                                         .accept(CONVERTER))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
@@ -717,40 +735,35 @@ public class PredicateTest {
                         BuiltInFunctionDefinitions.LIKE,
                         field(0, STRING()),
                         literal("abd%", STRING()));
-        List<Tuple2<Object[], Boolean>> objects1 =
+        List<Object[]> valuesList1 =
                 Arrays.asList(
-                        Tuple2.of(new Object[] {null}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("a")}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("ab")}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("abd")}, true),
-                        Tuple2.of(new Object[] {StringData.fromString("abd%")}, true),
-                        Tuple2.of(new Object[] {StringData.fromString("abd1")}, true),
-                        Tuple2.of(new Object[] {StringData.fromString("abde@")}, true),
-                        Tuple2.of(new Object[] {StringData.fromString("abd_")}, true),
-                        Tuple2.of(new Object[] {StringData.fromString("abd_%")}, true));
-
-        List<Tuple3<Long, FieldStats[], Boolean>> fieldStats1 =
+                        new Object[] {null},
+                        new Object[] {StringData.fromString("a")},
+                        new Object[] {StringData.fromString("ab")},
+                        new Object[] {StringData.fromString("abd")},
+                        new Object[] {StringData.fromString("abd%")},
+                        new Object[] {StringData.fromString("abd1")},
+                        new Object[] {StringData.fromString("abde@")},
+                        new Object[] {StringData.fromString("abd_")},
+                        new Object[] {StringData.fromString("abd_%")});
+        List<Boolean> expectedForValues1 =
+                Arrays.asList(false, false, false, true, true, true, true, true, true);
+        List<Long> rowCountList1 = Arrays.asList(0L, 3L, 3L, 3L);
+        List<FieldStats[]> statsList1 =
                 Arrays.asList(
-                        Tuple3.of(0L, new FieldStats[] {new FieldStats(null, null, 0L)}, false),
-                        Tuple3.of(3L, new FieldStats[] {new FieldStats(null, null, 3L)}, false),
-                        Tuple3.of(
-                                3L,
-                                new FieldStats[] {
-                                    new FieldStats(
-                                            StringData.fromString("ab"),
-                                            StringData.fromString("abc123"),
-                                            1L)
-                                },
-                                false),
-                        Tuple3.of(
-                                3L,
-                                new FieldStats[] {
-                                    new FieldStats(
-                                            StringData.fromString("abc"),
-                                            StringData.fromString("abe"),
-                                            1L)
-                                },
-                                true));
+                        new FieldStats[] {new FieldStats(null, null, 0L)},
+                        new FieldStats[] {new FieldStats(null, null, 3L)},
+                        new FieldStats[] {
+                            new FieldStats(
+                                    StringData.fromString("ab"),
+                                    StringData.fromString("abc123"),
+                                    1L)
+                        },
+                        new FieldStats[] {
+                            new FieldStats(
+                                    StringData.fromString("abc"), StringData.fromString("abe"), 1L)
+                        });
+        List<Boolean> expectedForStats1 = Arrays.asList(false, false, false, true);
 
         CallExpression expr2 =
                 call(
@@ -758,113 +771,100 @@ public class PredicateTest {
                         field(0, STRING()),
                         literal("test=_%", STRING()),
                         literal("=", STRING()));
-
-        List<Tuple2<Object[], Boolean>> objects2 =
+        List<Object[]> valuesList2 =
                 Arrays.asList(
-                        Tuple2.of(new Object[] {null}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("test%")}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("test_123")}, true),
-                        Tuple2.of(new Object[] {StringData.fromString("test_%")}, true),
-                        Tuple2.of(new Object[] {StringData.fromString("test__")}, true));
-
-        List<Tuple3<Long, FieldStats[], Boolean>> fieldStats2 =
+                        new Object[] {StringData.fromString("test%")},
+                        new Object[] {StringData.fromString("test_123")},
+                        new Object[] {StringData.fromString("test_%")},
+                        new Object[] {StringData.fromString("test__")});
+        List<Boolean> expectedForValues2 = Arrays.asList(false, true, true, true);
+        List<Long> rowCountList2 = Collections.singletonList(3L);
+        List<FieldStats[]> statsList2 =
                 Collections.singletonList(
-                        Tuple3.of(
-                                3L,
-                                new FieldStats[] {
-                                    new FieldStats(
-                                            StringData.fromString("test_123"),
-                                            StringData.fromString("test_789"),
-                                            0L)
-                                },
-                                true));
+                        new FieldStats[] {
+                            new FieldStats(
+                                    StringData.fromString("test_123"),
+                                    StringData.fromString("test_789"),
+                                    0L)
+                        });
+        List<Boolean> expectedForStats2 = Collections.singletonList(true);
 
+        // currently, SQL wildcards '[]' and '[^]' are deemed as normal characters in Flink
         CallExpression expr3 =
                 call(
                         BuiltInFunctionDefinitions.LIKE,
                         field(0, STRING()),
-                        literal("=%%", STRING()),
-                        literal("=", STRING()));
-
-        List<Tuple2<Object[], Boolean>> objects3 =
+                        literal("[a-c]xyz%", STRING()));
+        List<Object[]> valuesList3 =
                 Arrays.asList(
-                        Tuple2.of(new Object[] {null}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("%")}, true),
-                        Tuple2.of(new Object[] {StringData.fromString("%123")}, true),
-                        Tuple2.of(new Object[] {StringData.fromString("%%")}, true),
-                        Tuple2.of(new Object[] {StringData.fromString("%_")}, true));
-
-        List<Tuple3<Long, FieldStats[], Boolean>> fieldStats3 =
+                        new Object[] {StringData.fromString("axyz")},
+                        new Object[] {StringData.fromString("bxyz")},
+                        new Object[] {StringData.fromString("cxyz")},
+                        new Object[] {StringData.fromString("[a-c]xyz")});
+        List<Boolean> expectedForValues3 = Arrays.asList(false, false, false, true);
+        List<Long> rowCountList3 = Collections.singletonList(3L);
+        List<FieldStats[]> statsList3 =
                 Collections.singletonList(
-                        Tuple3.of(
-                                3L,
-                                new FieldStats[] {
-                                    new FieldStats(
-                                            StringData.fromString("%"),
-                                            StringData.fromString("%_"),
-                                            0L)
-                                },
-                                true));
+                        new FieldStats[] {
+                            new FieldStats(
+                                    StringData.fromString("[a-c]xyz"),
+                                    StringData.fromString("[a-c]xyzz"),
+                                    0L)
+                        });
+        List<Boolean> expectedForStats3 = Collections.singletonList(true);
 
-        // currently, SQL wildcards '[]' and '[^]' are deemed as normal characters in Flink
         CallExpression expr4 =
                 call(
                         BuiltInFunctionDefinitions.LIKE,
                         field(0, STRING()),
-                        literal("[a-c]xyz%", STRING()));
-
-        List<Tuple2<Object[], Boolean>> objects4 =
-                Arrays.asList(
-                        Tuple2.of(new Object[] {null}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("axyz")}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("bxyz")}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("cxyz")}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("[a-c]xyz")}, true));
-
-        List<Tuple3<Long, FieldStats[], Boolean>> fieldStats4 =
-                Collections.singletonList(
-                        Tuple3.of(
-                                3L,
-                                new FieldStats[] {
-                                    new FieldStats(
-                                            StringData.fromString("[a-c]xyz"),
-                                            StringData.fromString("[a-c]xyzz"),
-                                            1L)
-                                },
-                                true));
-
-        CallExpression expr5 =
-                call(
-                        BuiltInFunctionDefinitions.LIKE,
-                        field(0, STRING()),
                         literal("[^a-d]xyz%", STRING()));
-
-        List<Tuple2<Object[], Boolean>> objects5 =
+        List<Object[]> valuesList4 =
                 Arrays.asList(
-                        Tuple2.of(new Object[] {null}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("exyz")}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("fxyz")}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("axyz")}, false),
-                        Tuple2.of(new Object[] {StringData.fromString("[^a-d]xyz")}, true));
-
-        List<Tuple3<Long, FieldStats[], Boolean>> fieldStats5 =
+                        new Object[] {StringData.fromString("exyz")},
+                        new Object[] {StringData.fromString("fxyz")},
+                        new Object[] {StringData.fromString("axyz")},
+                        new Object[] {StringData.fromString("[^a-d]xyz")});
+        List<Boolean> expectedForValues4 = Arrays.asList(false, false, false, true);
+        List<Long> rowCountList4 = Collections.singletonList(3L);
+        List<FieldStats[]> statsList4 =
                 Collections.singletonList(
-                        Tuple3.of(
-                                3L,
-                                new FieldStats[] {
-                                    new FieldStats(
-                                            StringData.fromString("[^a-d]xyz"),
-                                            StringData.fromString("[^a-d]xyzz"),
-                                            1L)
-                                },
-                                true));
+                        new FieldStats[] {
+                            new FieldStats(
+                                    StringData.fromString("[^a-d]xyz"),
+                                    StringData.fromString("[^a-d]xyzz"),
+                                    1L)
+                        });
+        List<Boolean> expectedForStats4 = Collections.singletonList(true);
 
         return Stream.of(
-                Arguments.of(Tuple3.of(expr1, objects1, fieldStats1)),
-                Arguments.of(Tuple3.of(expr2, objects2, fieldStats2)),
-                Arguments.of(Tuple3.of(expr3, objects3, fieldStats3)),
-                Arguments.of(Tuple3.of(expr4, objects4, fieldStats4)),
-                Arguments.of(Tuple3.of(expr5, objects5, fieldStats5)));
+                Arguments.of(
+                        expr1,
+                        valuesList1,
+                        expectedForValues1,
+                        rowCountList1,
+                        statsList1,
+                        expectedForStats1),
+                Arguments.of(
+                        expr2,
+                        valuesList2,
+                        expectedForValues2,
+                        rowCountList2,
+                        statsList2,
+                        expectedForStats2),
+                Arguments.of(
+                        expr3,
+                        valuesList3,
+                        expectedForValues3,
+                        rowCountList3,
+                        statsList3,
+                        expectedForStats3),
+                Arguments.of(
+                        expr4,
+                        valuesList4,
+                        expectedForValues4,
+                        rowCountList4,
+                        statsList4,
+                        expectedForStats4));
     }
 
     private byte[] writeObject(Literal literal) throws IOException {

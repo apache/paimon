@@ -171,19 +171,6 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                                         VarCharType.STRING_TYPE,
                                         BinaryStringData.fromString(beginMatcher.group(1))));
                     }
-                } else {
-                    String regexPattern = SqlLikeUtils.sqlToRegexLike(sqlPattern, escape);
-                    if (!regexPattern.startsWith(".")
-                            && !regexPattern.startsWith("(?s:.*)")
-                            && regexPattern.endsWith("(?s:.*)")) {
-                        return new StartsWith(
-                                fieldRefExpr.getFieldIndex(),
-                                new Literal(
-                                        VarCharType.STRING_TYPE,
-                                        BinaryStringData.fromString(
-                                                regexPattern.substring(
-                                                        0, regexPattern.length() - 7))));
-                    }
                 }
             }
         }
