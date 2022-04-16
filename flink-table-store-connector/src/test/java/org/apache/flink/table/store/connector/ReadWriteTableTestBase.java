@@ -421,17 +421,25 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
     }
 
     protected static StreamExecutionEnvironment buildStreamEnv() {
+        return buildStreamEnv(2);
+    }
+
+    protected static StreamExecutionEnvironment buildStreamEnv(int parallelism) {
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
         env.enableCheckpointing(100);
-        env.setParallelism(2);
+        env.setParallelism(parallelism);
         return env;
     }
 
     protected static StreamExecutionEnvironment buildBatchEnv() {
+        return buildBatchEnv(2);
+    }
+
+    protected static StreamExecutionEnvironment buildBatchEnv(int parallelism) {
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        env.setParallelism(2);
+        env.setParallelism(parallelism);
         return env;
     }
 
