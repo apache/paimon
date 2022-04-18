@@ -160,8 +160,8 @@ under the License.
                                     <pattern>org.apache.flink.connector</pattern>
                                     <shadedPattern>org.apache.flink.table.store.shaded.org.apache.flink.connector</shadedPattern>
                                     <excludes>
-                                        <exclude>org.apache.flink.connector.base.*</exclude>
-                                        <exclude>org.apache.flink.connector.file.*</exclude>
+                                        <exclude>org.apache.flink.connector.base.**</exclude>
+                                        <exclude>org.apache.flink.connector.file.**</exclude>
                                     </excludes>
                                 </relocation>
                                 <relocation>
