@@ -1,4 +1,4 @@
-name: Java 8 Build
+name: End to End Tests
 
 on: [push, pull_request]
 
@@ -14,4 +14,6 @@ jobs:
         with:
           java-version: 1.8
       - name: Build
-        run: mvn clean install -pl '!flink-table-store-e2e-tests'
+        run: mvn clean install -DskipTests
+      - name: Test
+        run: mvn test -pl flink-table-store-e2e-tests
