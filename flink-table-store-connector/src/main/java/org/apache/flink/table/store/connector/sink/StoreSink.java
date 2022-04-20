@@ -29,6 +29,7 @@ import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.connector.sink.global.GlobalCommittingSink;
 import org.apache.flink.table.store.file.FileStore;
+import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.operation.Lock;
@@ -58,6 +59,8 @@ public class StoreSink<WriterStateT, LogCommT>
 
     private final FileStore fileStore;
 
+    private final WriteMode writeMode;
+
     private final int[] partitions;
 
     private final int[] primaryKeys;
@@ -75,6 +78,7 @@ public class StoreSink<WriterStateT, LogCommT>
     public StoreSink(
             ObjectIdentifier tableIdentifier,
             FileStore fileStore,
+            WriteMode writeMode,
             int[] partitions,
             int[] primaryKeys,
             int[] logPrimaryKeys,
@@ -84,6 +88,7 @@ public class StoreSink<WriterStateT, LogCommT>
             @Nullable LogSinkProvider logSinkProvider) {
         this.tableIdentifier = tableIdentifier;
         this.fileStore = fileStore;
+        this.writeMode = writeMode;
         this.partitions = partitions;
         this.primaryKeys = primaryKeys;
         this.logPrimaryKeys = logPrimaryKeys;
@@ -122,6 +127,7 @@ public class StoreSink<WriterStateT, LogCommT>
                         partitions,
                         primaryKeys,
                         logPrimaryKeys),
+                writeMode,
                 overwritePartition != null,
                 logWriter,
                 logCallback);

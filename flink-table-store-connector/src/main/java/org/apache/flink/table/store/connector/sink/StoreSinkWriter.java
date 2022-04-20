@@ -25,12 +25,16 @@ import org.apache.flink.api.connector.sink2.TwoPhaseCommittingSink.Precommitting
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.store.log.LogWriteCallback;
 import org.apache.flink.table.store.sink.SinkRecord;
 import org.apache.flink.table.store.sink.SinkRecordConverter;
+import org.apache.flink.types.RowKind;
+import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.concurrent.ExecutorThreadFactory;
 
 import javax.annotation.Nullable;
@@ -52,10 +56,13 @@ public class StoreSinkWriter<WriterStateT>
         implements StatefulSinkWriter<RowData, WriterStateT>,
                 PrecommittingSinkWriter<RowData, Committable> {
 
+    private static final BinaryRowData DUMMY_KEY = BinaryRowDataUtil.EMPTY_ROW;
+
     private final FileStoreWrite fileStoreWrite;
 
     private final SinkRecordConverter recordConverter;
 
+    private final WriteMode writeMode;
     private final boolean overwrite;
 
     @Nullable private final SinkWriter<SinkRecord> logWriter;
@@ -69,11 +76,13 @@ public class StoreSinkWriter<WriterStateT>
     public StoreSinkWriter(
             FileStoreWrite fileStoreWrite,
             SinkRecordConverter recordConverter,
+            WriteMode writeMode,
             boolean overwrite,
             @Nullable SinkWriter<SinkRecord> logWriter,
             @Nullable LogWriteCallback logCallback) {
         this.fileStoreWrite = fileStoreWrite;
         this.recordConverter = recordConverter;
+        this.writeMode = writeMode;
         this.overwrite = overwrite;
         this.logWriter = logWriter;
         this.logCallback = logCallback;
@@ -116,6 +125,15 @@ public class StoreSinkWriter<WriterStateT>
     }
 
     private void writeToFileStore(RecordWriter writer, SinkRecord record) throws Exception {
+        if (writeMode == WriteMode.APPEND_ONLY) {
+            Preconditions.checkState(
+                    record.row().getRowKind() == RowKind.INSERT,
+                    "Append only writer can not accept row with RowKind %s",
+                    record.row().getRowKind());
+            writer.write(ValueKind.ADD, DUMMY_KEY, record.row());
+            return;
+        }
+
         switch (record.row().getRowKind()) {
             case INSERT:
             case UPDATE_AFTER:

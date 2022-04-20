@@ -27,6 +27,7 @@ import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
@@ -87,6 +88,7 @@ public class FileStoreSourceTest {
         FileStoreSource source =
                 new FileStoreSource(
                         fileStore,
+                        WriteMode.CHANGE_LOG,
                         !hasPk,
                         true,
                         Duration.ofSeconds(1).toMillis(),
@@ -146,6 +148,7 @@ public class FileStoreSourceTest {
         return new FileStoreImpl(
                 "/fake/path",
                 new FileStoreOptions(new Configuration()),
+                WriteMode.CHANGE_LOG,
                 user,
                 partitionType,
                 keyType,

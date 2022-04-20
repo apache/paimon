@@ -25,6 +25,7 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
@@ -48,7 +49,6 @@ import static java.util.Collections.singletonList;
 
 /** Util class to read and write data for source tests. */
 public class TestDataReadWrite {
-
     private static final RowType KEY_TYPE =
             new RowType(singletonList(new RowType.RowField("k", new BigIntType())));
     private static final RowType VALUE_TYPE =
@@ -73,6 +73,7 @@ public class TestDataReadWrite {
 
     public FileStoreRead createRead() {
         return new FileStoreReadImpl(
+                WriteMode.CHANGE_LOG,
                 KEY_TYPE,
                 VALUE_TYPE,
                 COMPARATOR,
@@ -97,6 +98,7 @@ public class TestDataReadWrite {
     public RecordWriter createMergeTreeWriter(BinaryRowData partition, int bucket) {
         MergeTreeOptions options = new MergeTreeOptions(new Configuration());
         return new FileStoreWriteImpl(
+                        WriteMode.CHANGE_LOG,
                         KEY_TYPE,
                         VALUE_TYPE,
                         () -> COMPARATOR,

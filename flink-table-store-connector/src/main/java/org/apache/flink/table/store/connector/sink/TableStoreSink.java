@@ -43,6 +43,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.SINK_PARALLELISM;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.WRITE_MODE;
 import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
 
 /** Table sink to create {@link StoreSink}. */
@@ -140,6 +141,7 @@ public class TableStoreSink
                                 .withLogSinkProvider(finalLogSinkProvider)
                                 .withOverwritePartition(overwrite ? staticPartitions : null)
                                 .withParallelism(tableStore.options().get(SINK_PARALLELISM))
+                                .withWriteMode(tableStore.options().get(WRITE_MODE))
                                 .build();
     }
 

@@ -47,6 +47,7 @@ import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.FileStoreOptions.MergeEngine;
+import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.log.LogOptions.LogStartupMode;
 import org.apache.flink.table.store.log.LogSinkProvider;
@@ -75,6 +76,7 @@ import static org.apache.flink.table.store.log.LogOptions.SCAN;
 /** A table store api to create source and sink. */
 @Experimental
 public class TableStore {
+    private static final RowType EMPTY_KEY_TYPE = RowType.of();
 
     private final Configuration options;
 
@@ -169,9 +171,24 @@ public class TableStore {
         return options.get(MERGE_ENGINE);
     }
 
-    private FileStore buildFileStore() {
+    private FileStore buildAppendOnlyStore() {
+        FileStoreOptions fileStoreOptions = new FileStoreOptions(options);
+
+        return new FileStoreImpl(
+                fileStoreOptions.path(tableIdentifier).toString(),
+                fileStoreOptions,
+                WriteMode.APPEND_ONLY,
+                user,
+                TypeUtils.project(type, partitions),
+                EMPTY_KEY_TYPE,
+                type,
+                null);
+    }
+
+    private FileStore buildLSMStore() {
         RowType partitionType = TypeUtils.project(type, partitions);
         FileStoreOptions fileStoreOptions = new FileStoreOptions(options);
+
         if (primaryKeys.length == 0) {
             return FileStoreImpl.createWithValueCount(
                     fileStoreOptions.path(tableIdentifier).toString(),
@@ -188,6 +205,21 @@ public class TableStore {
                     TypeUtils.project(type, primaryKeys),
                     type,
                     mergeEngine());
+        }
+    }
+
+    private FileStore buildFileStore() {
+        WriteMode writeMode = options.get(TableStoreFactoryOptions.WRITE_MODE);
+
+        switch (writeMode) {
+            case CHANGE_LOG:
+                return buildLSMStore();
+
+            case APPEND_ONLY:
+                return buildAppendOnlyStore();
+
+            default:
+                throw new UnsupportedOperationException("Unknown write mode: " + writeMode);
         }
     }
 
@@ -280,11 +312,31 @@ public class TableStore {
             return options.get(CONTINUOUS_DISCOVERY_INTERVAL).toMillis();
         }
 
+        private boolean getValueCountMode(WriteMode writeMode) {
+            // Decide the value count mode based on the write mode and primary key definitions.
+            boolean valueCountMode;
+            switch (writeMode) {
+                case APPEND_ONLY:
+                    valueCountMode = false;
+                    break;
+
+                case CHANGE_LOG:
+                    valueCountMode = primaryKeys.length == 0;
+                    break;
+
+                default:
+                    throw new UnsupportedOperationException("Unknown write mode: " + writeMode);
+            }
+            return valueCountMode;
+        }
+
         private FileStoreSource buildFileSource(
-                boolean isContinuous, boolean continuousScanLatest) {
+                boolean isContinuous, WriteMode writeMode, boolean continuousScanLatest) {
+
             return new FileStoreSource(
                     buildFileStore(),
-                    primaryKeys.length == 0,
+                    writeMode,
+                    getValueCountMode(writeMode),
                     isContinuous,
                     discoveryIntervalMills(),
                     continuousScanLatest,
@@ -295,6 +347,7 @@ public class TableStore {
         }
 
         private Source<RowData, ?, ?> buildSource() {
+            WriteMode writeMode = options.get(TableStoreFactoryOptions.WRITE_MODE);
             if (isContinuous) {
                 if (primaryKeys.length > 0 && mergeEngine() == PARTIAL_UPDATE) {
                     throw new ValidationException(
@@ -303,20 +356,20 @@ public class TableStore {
 
                 LogStartupMode startupMode = logOptions().get(SCAN);
                 if (logSourceProvider == null) {
-                    return buildFileSource(true, startupMode == LogStartupMode.LATEST);
+                    return buildFileSource(true, writeMode, startupMode == LogStartupMode.LATEST);
                 } else {
                     if (startupMode != LogStartupMode.FULL) {
                         return logSourceProvider.createSource(null);
                     }
                     return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
-                                    buildFileSource(false, false))
+                                    buildFileSource(false, writeMode, false))
                             .addSource(
                                     new LogHybridSourceFactory(logSourceProvider),
                                     Boundedness.CONTINUOUS_UNBOUNDED)
                             .build();
                 }
             } else {
-                return buildFileSource(false, false);
+                return buildFileSource(false, writeMode, false);
             }
         }
 
@@ -357,6 +410,8 @@ public class TableStore {
 
         @Nullable private Integer parallelism;
 
+        private WriteMode writeMode = WriteMode.CHANGE_LOG;
+
         public SinkBuilder withInput(DataStream<RowData> input) {
             this.input = input;
             return this;
@@ -382,6 +437,11 @@ public class TableStore {
             return this;
         }
 
+        public SinkBuilder withWriteMode(WriteMode writeMode) {
+            this.writeMode = writeMode;
+            return this;
+        }
+
         public DataStreamSink<?> build() {
             FileStore fileStore = buildFileStore();
             int numBucket = options.get(BUCKET);
@@ -399,6 +459,7 @@ public class TableStore {
                     new StoreSink<>(
                             tableIdentifier,
                             fileStore,
+                            writeMode,
                             partitions,
                             primaryKeys,
                             logPrimaryKeys,

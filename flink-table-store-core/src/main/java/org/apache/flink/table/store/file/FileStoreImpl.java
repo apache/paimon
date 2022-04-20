@@ -48,6 +48,7 @@ import java.util.stream.Collectors;
 public class FileStoreImpl implements FileStore {
 
     private final String tablePath;
+    private final WriteMode writeMode;
     private final FileStoreOptions options;
     private final String user;
     private final RowType partitionType;
@@ -59,6 +60,7 @@ public class FileStoreImpl implements FileStore {
     public FileStoreImpl(
             String tablePath,
             FileStoreOptions options,
+            WriteMode writeMode,
             String user,
             RowType partitionType,
             RowType keyType,
@@ -66,6 +68,7 @@ public class FileStoreImpl implements FileStore {
             MergeFunction mergeFunction) {
         this.tablePath = tablePath;
         this.options = options;
+        this.writeMode = writeMode;
         this.user = user;
         this.partitionType = partitionType;
         this.keyType = keyType;
@@ -102,6 +105,7 @@ public class FileStoreImpl implements FileStore {
     @Override
     public FileStoreWriteImpl newWrite() {
         return new FileStoreWriteImpl(
+                writeMode,
                 keyType,
                 valueType,
                 this::newKeyComparator,
@@ -115,6 +119,7 @@ public class FileStoreImpl implements FileStore {
     @Override
     public FileStoreReadImpl newRead() {
         return new FileStoreReadImpl(
+                writeMode,
                 keyType,
                 valueType,
                 newKeyComparator(),
@@ -213,7 +218,14 @@ public class FileStoreImpl implements FileStore {
         }
 
         return new FileStoreImpl(
-                tablePath, options, user, partitionType, keyType, rowType, mergeFunction);
+                tablePath,
+                options,
+                WriteMode.CHANGE_LOG,
+                user,
+                partitionType,
+                keyType,
+                rowType,
+                mergeFunction);
     }
 
     public static FileStoreImpl createWithValueCount(
@@ -227,6 +239,13 @@ public class FileStoreImpl implements FileStore {
                         new LogicalType[] {new BigIntType(false)}, new String[] {"_VALUE_COUNT"});
         MergeFunction mergeFunction = new ValueCountMergeFunction();
         return new FileStoreImpl(
-                tablePath, options, user, partitionType, rowType, countType, mergeFunction);
+                tablePath,
+                options,
+                WriteMode.CHANGE_LOG,
+                user,
+                partitionType,
+                rowType,
+                countType,
+                mergeFunction);
     }
 }

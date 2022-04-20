@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileReader;
 import org.apache.flink.table.store.file.format.FileFormat;
@@ -30,6 +31,7 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -40,13 +42,15 @@ import java.util.List;
 public class FileStoreReadImpl implements FileStoreRead {
 
     private final DataFileReader.Factory dataFileReaderFactory;
+    private final WriteMode writeMode;
     private final Comparator<RowData> keyComparator;
     private final MergeFunction mergeFunction;
 
     private boolean keyProjected;
-    private boolean dropDelete = true;
+    private boolean dropDelete;
 
     public FileStoreReadImpl(
+            WriteMode writeMode,
             RowType keyType,
             RowType valueType,
             Comparator<RowData> keyComparator,
@@ -55,10 +59,12 @@ public class FileStoreReadImpl implements FileStoreRead {
             FileStorePathFactory pathFactory) {
         this.dataFileReaderFactory =
                 new DataFileReader.Factory(keyType, valueType, fileFormat, pathFactory);
+        this.writeMode = writeMode;
         this.keyComparator = keyComparator;
         this.mergeFunction = mergeFunction;
 
         this.keyProjected = false;
+        this.dropDelete = writeMode != WriteMode.APPEND_ONLY;
     }
 
     @Override
@@ -83,6 +89,34 @@ public class FileStoreReadImpl implements FileStoreRead {
     @Override
     public RecordReader createReader(BinaryRowData partition, int bucket, List<DataFileMeta> files)
             throws IOException {
+        switch (writeMode) {
+            case APPEND_ONLY:
+                return createAppendOnlyReader(partition, bucket, files);
+
+            case CHANGE_LOG:
+                return createLSMReader(partition, bucket, files);
+
+            default:
+                throw new UnsupportedOperationException("Unknown write mode: " + writeMode);
+        }
+    }
+
+    private RecordReader createAppendOnlyReader(
+            BinaryRowData partition, int bucket, List<DataFileMeta> files) throws IOException {
+        Preconditions.checkArgument(
+                !dropDelete, "Cannot drop delete message for append-only table.");
+
+        DataFileReader dataFileReader = dataFileReaderFactory.create(partition, bucket);
+        List<ConcatRecordReader.ReaderSupplier> suppliers = new ArrayList<>();
+        for (DataFileMeta file : files) {
+            suppliers.add(() -> dataFileReader.read(file.fileName()));
+        }
+
+        return ConcatRecordReader.create(suppliers);
+    }
+
+    private RecordReader createLSMReader(
+            BinaryRowData partition, int bucket, List<DataFileMeta> files) throws IOException {
         DataFileReader dataFileReader = dataFileReaderFactory.create(partition, bucket);
         if (keyProjected) {
             // key projection has been applied, so data file readers will not return key-values in

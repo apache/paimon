@@ -24,6 +24,7 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.connector.sink.TestFileStore.TestRecordWriter;
+import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.BigIntType;
@@ -120,6 +121,7 @@ public class StoreSinkTest {
                 new StoreSink<>(
                         identifier,
                         fileStore,
+                        WriteMode.CHANGE_LOG,
                         partitions,
                         primaryKeys,
                         primaryKeys,
@@ -251,6 +253,7 @@ public class StoreSinkTest {
         return new StoreSink<>(
                 identifier,
                 fileStore,
+                WriteMode.CHANGE_LOG,
                 partitions,
                 primaryKeys,
                 primaryKeys,

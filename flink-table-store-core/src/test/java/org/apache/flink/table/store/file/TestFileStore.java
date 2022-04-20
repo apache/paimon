@@ -114,6 +114,7 @@ public class TestFileStore extends FileStoreImpl {
         super(
                 options.path(ObjectIdentifier.of("catalog", "database", "table")).toString(),
                 options,
+                WriteMode.CHANGE_LOG,
                 UUID.randomUUID().toString(),
                 partitionType,
                 keyType,
