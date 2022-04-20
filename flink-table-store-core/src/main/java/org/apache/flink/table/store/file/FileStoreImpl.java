@@ -146,7 +146,11 @@ public class FileStoreImpl implements FileStore {
     @Override
     public FileStoreScanImpl newScan() {
         return new FileStoreScanImpl(
-                partitionType, pathFactory(), manifestFileFactory(), manifestListFactory());
+                partitionType,
+                pathFactory(),
+                manifestFileFactory(),
+                manifestListFactory(),
+                options.bucket());
     }
 
     @Override
