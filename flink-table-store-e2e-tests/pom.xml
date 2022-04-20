@@ -109,5 +109,15 @@ under the License.
                 </configuration>
             </plugin>
         </plugins>
+        <resources>
+            <resource>
+                <directory>src/test/resources</directory>
+                <filtering>false</filtering>
+            </resource>
+            <resource>
+                <directory>src/test/resources-filtered</directory>
+                <filtering>true</filtering>
+            </resource>
+        </resources>
     </build>
 </project>

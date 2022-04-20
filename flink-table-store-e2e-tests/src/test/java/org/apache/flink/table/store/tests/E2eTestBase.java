@@ -34,11 +34,13 @@ import org.testcontainers.containers.output.OutputFrame;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.utility.MountableFile;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -56,8 +58,20 @@ public abstract class E2eTestBase {
     // ------------------------------------------------------------------------------------------
     // Flink Variables
     // ------------------------------------------------------------------------------------------
-    // TODO change image tag to official flink image after 1.15 is released
-    private static final String FLINK_IMAGE_TAG = "tsreaper/flink-test:1.15-SNAPSHOT";
+    private static final String FLINK_IMAGE_TAG;
+
+    static {
+        Properties properties = new Properties();
+        try {
+            properties.load(
+                    E2eTestBase.class.getClassLoader().getResourceAsStream("project.properties"));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        // TODO change image tag to official flink image after 1.15 is released
+        FLINK_IMAGE_TAG = "tsreaper/flink-test:" + properties.getProperty("flink.version");
+    }
+
     private static final String INTER_CONTAINER_JM_ALIAS = "jobmanager";
     private static final String INTER_CONTAINER_TM_ALIAS = "taskmanager";
     private static final int JOB_MANAGER_REST_PORT = 8081;
