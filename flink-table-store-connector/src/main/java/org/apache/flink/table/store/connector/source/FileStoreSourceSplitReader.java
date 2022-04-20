@@ -31,7 +31,9 @@ import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.utils.ProjectedRowData;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
+import org.apache.flink.table.store.file.utils.AppendOnlyRowDataSupplier;
 import org.apache.flink.table.store.file.utils.PrimaryKeyRowDataSupplier;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.ValueCountRowDataSupplier;
@@ -50,6 +52,7 @@ public class FileStoreSourceSplitReader
         implements SplitReader<RecordAndPosition<RowData>, FileStoreSourceSplit> {
 
     private final FileStoreRead fileStoreRead;
+    private final WriteMode writeMode;
     private final boolean valueCountMode;
     @Nullable private final int[][] valueCountModeProjects;
 
@@ -64,18 +67,21 @@ public class FileStoreSourceSplitReader
 
     @VisibleForTesting
     public FileStoreSourceSplitReader(FileStoreRead fileStoreRead, boolean valueCountMode) {
-        this(fileStoreRead, valueCountMode, null);
+        this(fileStoreRead, WriteMode.CHANGE_LOG, valueCountMode, null);
     }
 
     public FileStoreSourceSplitReader(
             FileStoreRead fileStoreRead,
+            WriteMode writeMode,
             boolean valueCountMode,
             @Nullable int[][] valueCountModeProjects) {
         this.fileStoreRead = fileStoreRead;
+        this.writeMode = writeMode;
         this.valueCountMode = valueCountMode;
         this.valueCountModeProjects = valueCountModeProjects;
         this.splits = new LinkedList<>();
         this.pool = new Pool<>(1);
+
         this.pool.add(new FileStoreRecordIterator());
     }
 
@@ -203,10 +209,21 @@ public class FileStoreSourceSplitReader
                         .orElse(null);
 
         private FileStoreRecordIterator() {
-            this.rowDataSupplier =
-                    valueCountMode
-                            ? new ValueCountRowDataSupplier(this::nextKeyValue)
-                            : new PrimaryKeyRowDataSupplier(this::nextKeyValue);
+            switch (writeMode) {
+                case APPEND_ONLY:
+                    this.rowDataSupplier = new AppendOnlyRowDataSupplier(this::nextKeyValue);
+                    break;
+
+                case CHANGE_LOG:
+                    this.rowDataSupplier =
+                            valueCountMode
+                                    ? new ValueCountRowDataSupplier(this::nextKeyValue)
+                                    : new PrimaryKeyRowDataSupplier(this::nextKeyValue);
+                    break;
+
+                default:
+                    throw new UnsupportedOperationException("Unknown write mode: " + writeMode);
+            }
         }
 
         public FileStoreRecordIterator replace(RecordReader.RecordIterator iterator) {

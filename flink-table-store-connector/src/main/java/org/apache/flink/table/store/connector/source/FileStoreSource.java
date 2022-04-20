@@ -28,6 +28,7 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -48,6 +49,8 @@ public class FileStoreSource
     private static final long serialVersionUID = 1L;
 
     private final FileStore fileStore;
+
+    private final WriteMode writeMode;
 
     private final boolean valueCountMode;
 
@@ -71,6 +74,7 @@ public class FileStoreSource
 
     public FileStoreSource(
             FileStore fileStore,
+            WriteMode writeMode,
             boolean valueCountMode,
             boolean isContinuous,
             long discoveryInterval,
@@ -80,6 +84,7 @@ public class FileStoreSource
             @Nullable Predicate fieldPredicate,
             @Nullable PartitionedManifestMeta specifiedPartManifests) {
         this.fileStore = fileStore;
+        this.writeMode = writeMode;
         this.valueCountMode = valueCountMode;
         this.isContinuous = isContinuous;
         this.discoveryInterval = discoveryInterval;
@@ -113,12 +118,17 @@ public class FileStoreSource
                 } else {
                     valueCountModeProjects = projectedFields;
                 }
-            } else {
+            } else if (writeMode == WriteMode.APPEND_ONLY) {
+                // Append-only table will have a dummy empty row as the key, and use the whole row
+                // as the value. So it should use the value projection.
+                read.withValueProjection(projectedFields);
+            } else if (writeMode == WriteMode.CHANGE_LOG) {
                 read.withValueProjection(projectedFields);
             }
         }
 
-        return new FileStoreSourceReader(context, read, valueCountMode, valueCountModeProjects);
+        return new FileStoreSourceReader(
+                writeMode, context, read, valueCountMode, valueCountModeProjects);
     }
 
     @Override
