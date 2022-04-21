@@ -262,8 +262,9 @@ The value fields are updated to the latest data one by one
 under the same primary key, but null values are not overwritten.
 
 For example, the inputs: 
-- 1, 23.0, 10,   NULL
-- 1, NULL, 20,   'This is a book'
-- 1, 25.2, NULL, NULL
+- <1, 23.0, 10,   NULL>
+- <1, NULL, 20,   'This is a book'>
+- <1, 25.2, NULL, NULL>
 
-Output: <1, 25.2, 20, 'This is a book'>
+Output: 
+- <1, 25.2, 20, 'This is a book'>

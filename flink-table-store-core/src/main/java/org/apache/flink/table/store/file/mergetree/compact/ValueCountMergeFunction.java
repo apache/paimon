@@ -31,6 +31,8 @@ import static org.apache.flink.util.Preconditions.checkArgument;
  */
 public class ValueCountMergeFunction implements MergeFunction {
 
+    private static final long serialVersionUID = 1L;
+
     private long total;
 
     @Override

@@ -29,13 +29,15 @@ import javax.annotation.Nullable;
  */
 public class PartialUpdateMergeFunction implements MergeFunction {
 
+    private static final long serialVersionUID = 1L;
+
     private final RowData.FieldGetter[] getters;
+
+    private transient GenericRowData row;
 
     public PartialUpdateMergeFunction(RowData.FieldGetter[] getters) {
         this.getters = getters;
     }
-
-    private transient GenericRowData row;
 
     @Override
     public void reset() {
