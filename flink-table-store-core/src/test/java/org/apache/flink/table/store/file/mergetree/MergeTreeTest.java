@@ -265,7 +265,8 @@ public class MergeTreeTest {
                 comparator,
                 new DeduplicateMergeFunction(),
                 sstFileWriter,
-                options.commitForceCompact);
+                options.commitForceCompact,
+                options.numSortedRunStopTrigger);
     }
 
     private CompactManager createCompactManager(

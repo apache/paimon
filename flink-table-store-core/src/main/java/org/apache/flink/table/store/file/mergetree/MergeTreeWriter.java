@@ -37,7 +37,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
 /** A {@link RecordWriter} to write records and generate {@link Increment}. */
@@ -57,6 +56,8 @@ public class MergeTreeWriter implements RecordWriter {
 
     private final boolean commitForceCompact;
 
+    private final int numSortedRunStopTrigger;
+
     private final LinkedHashSet<SstFileMeta> newFiles;
 
     private final LinkedHashMap<String, SstFileMeta> compactBefore;
@@ -73,7 +74,8 @@ public class MergeTreeWriter implements RecordWriter {
             Comparator<RowData> keyComparator,
             MergeFunction mergeFunction,
             SstFileWriter sstFileWriter,
-            boolean commitForceCompact) {
+            boolean commitForceCompact,
+            int numSortedRunStopTrigger) {
         this.memTable = memTable;
         this.compactManager = compactManager;
         this.levels = levels;
@@ -82,6 +84,7 @@ public class MergeTreeWriter implements RecordWriter {
         this.mergeFunction = mergeFunction;
         this.sstFileWriter = sstFileWriter;
         this.commitForceCompact = commitForceCompact;
+        this.numSortedRunStopTrigger = numSortedRunStopTrigger;
         this.newFiles = new LinkedHashSet<>();
         this.compactBefore = new LinkedHashMap<>();
         this.compactAfter = new LinkedHashSet<>();
@@ -111,7 +114,10 @@ public class MergeTreeWriter implements RecordWriter {
 
     private void flush() throws Exception {
         if (memTable.size() > 0) {
-            finishCompaction();
+            if (levels.numberOfSortedRuns() > numSortedRunStopTrigger) {
+                // stop writing, wait for compaction finished
+                finishCompaction(true);
+            }
             Iterator<KeyValue> iterator = memTable.iterator(keyComparator, mergeFunction);
             List<SstFileMeta> files =
                     sstFileWriter.write(CloseableIterator.adapterForIterator(iterator), 0);
@@ -126,14 +132,14 @@ public class MergeTreeWriter implements RecordWriter {
     public Increment prepareCommit() throws Exception {
         flush();
         if (commitForceCompact) {
-            finishCompaction();
+            finishCompaction(true);
         }
         return drainIncrement();
     }
 
     @Override
     public void sync() throws Exception {
-        finishCompaction();
+        finishCompaction(true);
     }
 
     private Increment drainIncrement() {
@@ -169,12 +175,15 @@ public class MergeTreeWriter implements RecordWriter {
         compactAfter.addAll(result.after());
     }
 
-    private void submitCompaction() {
-        compactManager.submitCompaction(levels);
+    private void submitCompaction() throws Exception {
+        finishCompaction(false);
+        if (compactManager.isCompactionFinished()) {
+            compactManager.submitCompaction(levels);
+        }
     }
 
-    private void finishCompaction() throws ExecutionException, InterruptedException {
-        Optional<CompactManager.CompactResult> result = compactManager.finishCompaction(levels);
+    private void finishCompaction(boolean blocking) throws Exception {
+        Optional<CompactManager.CompactResult> result = compactManager.finishCompaction(levels, blocking);
         result.ifPresent(this::updateCompactResult);
     }
 

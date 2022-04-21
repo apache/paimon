@@ -127,7 +127,8 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                 keyComparator,
                 mergeFunction.copy(),
                 sstFileWriter,
-                options.commitForceCompact);
+                options.commitForceCompact,
+                options.numSortedRunStopTrigger);
     }
 
     private CompactManager createCompactManager(

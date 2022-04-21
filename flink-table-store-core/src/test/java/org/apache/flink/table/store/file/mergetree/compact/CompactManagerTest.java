@@ -197,7 +197,7 @@ public class CompactManagerTest {
                 new CompactManager(
                         service, strategy, comparator, 2, testRewriter(expectedDropDelete));
         manager.submitCompaction(levels);
-        manager.finishCompaction(levels);
+        manager.finishCompaction(levels, true);
         List<LevelMinMax> outputs =
                 levels.allFiles().stream().map(LevelMinMax::new).collect(Collectors.toList());
         assertThat(outputs).isEqualTo(expected);

@@ -56,6 +56,12 @@ public class MergeTreeOptions {
                             "The max sorted run number. Includes level0 files (one file one sorted run) and "
                                     + "high-level runs (one level one sorted run).");
 
+    public static final ConfigOption<Integer> NUM_SORTED_RUNS_STOP_TRIGGER =
+            ConfigOptions.key("num-sorted-run.stop-trigger")
+                    .intType()
+                    .defaultValue(10)
+                    .withDescription("The number of sorted-runs that trigger the stopping of writes.s");
+
     public static final ConfigOption<Integer> NUM_LEVELS =
             ConfigOptions.key("num-levels")
                     .intType()
@@ -94,6 +100,8 @@ public class MergeTreeOptions {
 
     public final int numSortedRunMax;
 
+    public final int numSortedRunStopTrigger;
+
     public final int numLevels;
 
     public final boolean commitForceCompact;
@@ -107,6 +115,7 @@ public class MergeTreeOptions {
             long pageSize,
             long targetFileSize,
             int numSortedRunMax,
+            int numSortedRunStopTrigger,
             Integer numLevels,
             boolean commitForceCompact,
             int maxSizeAmplificationPercent,
@@ -115,6 +124,7 @@ public class MergeTreeOptions {
         this.pageSize = pageSize;
         this.targetFileSize = targetFileSize;
         this.numSortedRunMax = numSortedRunMax;
+        this.numSortedRunStopTrigger = numSortedRunStopTrigger;
         // By default, this ensures that the compaction does not fall to level 0, but at least to
         // level 1
         this.numLevels = numLevels == null ? numSortedRunMax + 1 : numLevels;
@@ -129,6 +139,7 @@ public class MergeTreeOptions {
                 config.get(PAGE_SIZE).getBytes(),
                 config.get(TARGET_FILE_SIZE).getBytes(),
                 config.get(NUM_SORTED_RUNS_MAX),
+                config.get(NUM_SORTED_RUNS_STOP_TRIGGER),
                 config.get(NUM_LEVELS),
                 config.get(COMMIT_FORCE_COMPACT),
                 config.get(COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT),
@@ -141,6 +152,7 @@ public class MergeTreeOptions {
         allOptions.add(PAGE_SIZE);
         allOptions.add(TARGET_FILE_SIZE);
         allOptions.add(NUM_SORTED_RUNS_MAX);
+        allOptions.add(NUM_SORTED_RUNS_STOP_TRIGGER);
         allOptions.add(NUM_LEVELS);
         allOptions.add(COMMIT_FORCE_COMPACT);
         allOptions.add(COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT);
