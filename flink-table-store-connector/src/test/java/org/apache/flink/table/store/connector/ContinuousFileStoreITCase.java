@@ -18,50 +18,26 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.api.EnvironmentSettings;
-import org.apache.flink.table.api.TableEnvironment;
-import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
-import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.types.Row;
 
-import org.junit.Before;
 import org.junit.Test;
 
-import java.io.IOException;
-import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 
-import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
-import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
-import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** SQL ITCase for continuous file store. */
-public class ContinuousFileStoreITCase extends AbstractTestBase {
+public class ContinuousFileStoreITCase extends FileStoreTableITCase {
 
-    private TableEnvironment bEnv;
-    private TableEnvironment sEnv;
-
-    @Before
-    public void before() throws IOException {
-        bEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
-        sEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inStreamingMode().build());
-        sEnv.getConfig().getConfiguration().set(CHECKPOINTING_INTERVAL, Duration.ofMillis(100));
-        String path = TEMPORARY_FOLDER.newFolder().toURI().toString();
-        prepareEnv(bEnv, path);
-        prepareEnv(sEnv, path);
-    }
-
-    private void prepareEnv(TableEnvironment env, String path) {
-        Configuration config = env.getConfig().getConfiguration();
-        config.set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 2);
-        config.setString(TABLE_STORE_PREFIX + PATH.key(), path);
-        env.executeSql("CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING)");
-        env.executeSql(
+    @Override
+    protected List<String> ddl() {
+        return Arrays.asList(
+                "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING)",
                 "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)");
     }
 
