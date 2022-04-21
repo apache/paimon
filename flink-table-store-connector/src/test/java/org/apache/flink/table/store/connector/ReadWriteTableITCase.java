@@ -65,6 +65,7 @@ import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.SC
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.SINK_PARALLELISM;
 import static org.apache.flink.table.store.connector.TableStoreTestBase.createResolvedTable;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for managed table dml. */
 public class ReadWriteTableITCase extends ReadWriteTableTestBase {
@@ -1406,6 +1407,65 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                 Arrays.asList(
                         changelogRow("+I", "Euro", 114L, "2022-01-01"),
                         changelogRow("+I", "Euro", 119L, "2022-01-02")));
+    }
+
+    @Test
+    public void testChangeBucketNumber() throws Exception {
+        rootPath = TEMPORARY_FOLDER.newFolder().getPath();
+        tEnv = StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE IF NOT EXISTS rates (\n"
+                                + "currency STRING,\n"
+                                + " rate BIGINT\n"
+                                + ") WITH (\n"
+                                + " 'bucket' = '2',\n"
+                                + " 'path' = '%s'\n"
+                                + ")",
+                        rootPath));
+        tEnv.executeSql("INSERT INTO rates VALUES('US Dollar', 102)").await();
+
+        // increase bucket num from 2 to 3
+        tEnv.executeSql("ALTER TABLE rates SET ('bucket' = '3')");
+        assertThatThrownBy(
+                        () -> tEnv.executeSql("INSERT INTO rates VALUES('US Dollar', 102)").await())
+                .hasRootCauseInstanceOf(IllegalStateException.class)
+                .hasRootCauseMessage(
+                        "Bucket number has been changed. Manifest might be corrupted.");
+        assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM rates").await())
+                .hasRootCauseInstanceOf(IllegalStateException.class)
+                .hasRootCauseMessage(
+                        "Bucket number has been changed. Manifest might be corrupted.");
+
+        // decrease bucket num from 3 to 1
+        tEnv.executeSql("ALTER TABLE rates RESET ('bucket')");
+        assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM rates").await())
+                .hasRootCauseInstanceOf(IllegalStateException.class)
+                .hasRootCauseMessage(
+                        "Bucket number has been changed. Manifest might be corrupted.");
+    }
+
+    @Test
+    public void testSuccessiveWriteAndRead() throws Exception {
+        String managedTable =
+                collectAndCheckBatchReadWrite(false, false, null, Collections.emptyList(), rates());
+        // write rates() twice
+        tEnv.executeSql(
+                        String.format(
+                                "INSERT INTO `%s`"
+                                        + " VALUES ('US Dollar', 102),\n"
+                                        + "('Euro', 114),\n"
+                                        + "('Yen', 1),\n"
+                                        + "('Euro', 114),\n"
+                                        + "('Euro', 119)",
+                                managedTable))
+                .await();
+        collectAndCheck(
+                tEnv,
+                managedTable,
+                Collections.emptyMap(),
+                "currency = 'Yen'",
+                Collections.nCopies(2, changelogRow("+I", "Yen", 1L)));
     }
 
     // ------------------------ Tools ----------------------------------
