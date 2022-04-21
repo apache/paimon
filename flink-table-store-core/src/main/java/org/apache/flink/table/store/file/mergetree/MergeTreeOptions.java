@@ -125,7 +125,7 @@ public class MergeTreeOptions {
         this.pageSize = pageSize;
         this.targetFileSize = targetFileSize;
         this.numSortedRunMax = numSortedRunMax;
-        this.numSortedRunStopTrigger = numSortedRunStopTrigger;
+        this.numSortedRunStopTrigger = Math.max(numSortedRunMax, numSortedRunStopTrigger);
         // By default, this ensures that the compaction does not fall to level 0, but at least to
         // level 1
         this.numLevels = numLevels == null ? numSortedRunMax + 1 : numLevels;
