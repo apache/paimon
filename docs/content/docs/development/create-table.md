@@ -250,6 +250,14 @@ CREATE TABLE MyTable (
 );
 ```
 
+{{< hint info >}}
+__Note:__ Partial update is only supported for table with primary key.
+{{< /hint >}}
+
+{{< hint info >}}
+__Note:__ Partial update is not supported for streaming consuming.
+{{< /hint >}}
+
 The value fields are updated to the latest data one by one
 under the same primary key, but null values are not overwritten.
 
