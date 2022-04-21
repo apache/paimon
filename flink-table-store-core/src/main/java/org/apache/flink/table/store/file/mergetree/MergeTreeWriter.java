@@ -183,7 +183,8 @@ public class MergeTreeWriter implements RecordWriter {
     }
 
     private void finishCompaction(boolean blocking) throws Exception {
-        Optional<CompactManager.CompactResult> result = compactManager.finishCompaction(levels, blocking);
+        Optional<CompactManager.CompactResult> result =
+                compactManager.finishCompaction(levels, blocking);
         result.ifPresent(this::updateCompactResult);
     }
 

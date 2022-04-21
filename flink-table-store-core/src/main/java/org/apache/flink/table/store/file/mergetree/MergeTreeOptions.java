@@ -60,7 +60,8 @@ public class MergeTreeOptions {
             ConfigOptions.key("num-sorted-run.stop-trigger")
                     .intType()
                     .defaultValue(10)
-                    .withDescription("The number of sorted-runs that trigger the stopping of writes.");
+                    .withDescription(
+                            "The number of sorted-runs that trigger the stopping of writes.");
 
     public static final ConfigOption<Integer> NUM_LEVELS =
             ConfigOptions.key("num-levels")
