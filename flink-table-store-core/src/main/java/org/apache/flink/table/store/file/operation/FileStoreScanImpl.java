@@ -57,6 +57,7 @@ public class FileStoreScanImpl implements FileStoreScan {
     private final FileStorePathFactory pathFactory;
     private final ManifestFile.Factory manifestFileFactory;
     private final ManifestList manifestList;
+    private final int numOfBuckets;
 
     private Predicate partitionFilter;
     private Predicate keyFilter;
@@ -71,11 +72,13 @@ public class FileStoreScanImpl implements FileStoreScan {
             RowType partitionType,
             FileStorePathFactory pathFactory,
             ManifestFile.Factory manifestFileFactory,
-            ManifestList.Factory manifestListFactory) {
+            ManifestList.Factory manifestListFactory,
+            int numOfBuckets) {
         this.partitionConverter = new RowDataToObjectArrayConverter(partitionType);
         this.pathFactory = pathFactory;
         this.manifestFileFactory = manifestFileFactory;
         this.manifestList = manifestListFactory.create();
+        this.numOfBuckets = numOfBuckets;
     }
 
     @Override
@@ -215,6 +218,9 @@ public class FileStoreScanImpl implements FileStoreScan {
         Map<ManifestEntry.Identifier, ManifestEntry> map = new HashMap<>();
         for (ManifestEntry entry : entries) {
             ManifestEntry.Identifier identifier = entry.identifier();
+            Preconditions.checkState(
+                    entry.totalBuckets() == numOfBuckets,
+                    "Bucket number has been changed. Manifest might be corrupted.");
             switch (entry.kind()) {
                 case ADD:
                     Preconditions.checkState(
@@ -261,6 +267,11 @@ public class FileStoreScanImpl implements FileStoreScan {
     }
 
     private boolean filterManifestEntry(ManifestEntry entry) {
+        if (specifiedBucket != null) {
+            Preconditions.checkState(
+                    specifiedBucket < entry.totalBuckets(),
+                    "Bucket number has been changed. Manifest might be corrupted.");
+        }
         return (partitionFilter == null
                         || partitionFilter.test(partitionConverter.convert(entry.partition())))
                 && (keyFilter == null
