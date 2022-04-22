@@ -21,7 +21,10 @@ package org.apache.flink.table.store.file;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.DescribedEnum;
 import org.apache.flink.configuration.MemorySize;
+import org.apache.flink.configuration.description.Description;
+import org.apache.flink.configuration.description.InlineElement;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.store.file.format.FileFormat;
@@ -35,6 +38,8 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
+import static org.apache.flink.configuration.description.TextElement.text;
+import static org.apache.flink.table.store.utils.OptionsUtils.formatEnumOption;
 
 /** Options for {@link FileStore}. */
 public class FileStoreOptions implements Serializable {
@@ -110,6 +115,19 @@ public class FileStoreOptions implements Serializable {
                     .durationType()
                     .defaultValue(Duration.ofSeconds(1))
                     .withDescription("The discovery interval of continuous reading.");
+
+    public static final ConfigOption<MergeEngine> MERGE_ENGINE =
+            ConfigOptions.key("merge-engine")
+                    .enumType(MergeEngine.class)
+                    .defaultValue(MergeEngine.DEDUPLICATE)
+                    .withDescription(
+                            Description.builder()
+                                    .text("Specifies the merge engine for table with primary key.")
+                                    .linebreak()
+                                    .list(
+                                            formatEnumOption(MergeEngine.DEDUPLICATE),
+                                            formatEnumOption(MergeEngine.PARTIAL_UPDATE))
+                                    .build());
 
     private final Configuration options;
 
@@ -206,5 +224,30 @@ public class FileStoreOptions implements Serializable {
 
     public int manifestMergeMinCount() {
         return options.get(MANIFEST_MERGE_MIN_COUNT);
+    }
+
+    /** Specifies the merge engine for table with primary key. */
+    public enum MergeEngine implements DescribedEnum {
+        DEDUPLICATE("deduplicate", "De-duplicate and keep the last row."),
+
+        PARTIAL_UPDATE("partial-update", "Partial update non-null fields.");
+
+        private final String value;
+        private final String description;
+
+        MergeEngine(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
     }
 }
