@@ -28,6 +28,8 @@ import javax.annotation.Nullable;
  */
 public class DeduplicateMergeFunction implements MergeFunction {
 
+    private static final long serialVersionUID = 1L;
+
     private RowData latestValue;
 
     @Override

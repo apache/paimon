@@ -233,3 +233,38 @@ The two methods do not behave in the same way when querying.
 Use approach one if you have a large number of filtered queries
 with only `user_id`, and use approach two if you have a large
 number of filtered queries with only `catalog_id`.
+
+## Partial Update
+
+You can configure partial update from options:
+
+```sql
+CREATE TABLE MyTable (
+  product_id BIGINT,
+  price DOUBLE,
+  number BIGINT,
+  detail STRING,
+  PRIMARY KEY (product_id) NOT ENFORCED
+) WITH (
+  'merge-engine' = 'partial-update'
+);
+```
+
+{{< hint info >}}
+__Note:__ Partial update is only supported for table with primary key.
+{{< /hint >}}
+
+{{< hint info >}}
+__Note:__ Partial update is not supported for streaming consuming.
+{{< /hint >}}
+
+The value fields are updated to the latest data one by one
+under the same primary key, but null values are not overwritten.
+
+For example, the inputs: 
+- <1, 23.0, 10,   NULL>
+- <1, NULL, 20,   'This is a book'>
+- <1, 25.2, NULL, NULL>
+
+Output: 
+- <1, 25.2, 20, 'This is a book'>

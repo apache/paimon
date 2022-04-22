@@ -23,41 +23,46 @@ import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
 
-import static org.apache.flink.util.Preconditions.checkArgument;
-
 /**
- * A {@link MergeFunction} where key is the full record and value is a count which represents number
- * of records of the exact same fields.
+ * A {@link MergeFunction} where key is primary key (unique) and value is the partial record, update
+ * non-null fields on merge.
  */
-public class ValueCountMergeFunction implements MergeFunction {
+public class PartialUpdateMergeFunction implements MergeFunction {
 
     private static final long serialVersionUID = 1L;
 
-    private long total;
+    private final RowData.FieldGetter[] getters;
+
+    private transient GenericRowData row;
+
+    public PartialUpdateMergeFunction(RowData.FieldGetter[] getters) {
+        this.getters = getters;
+    }
 
     @Override
     public void reset() {
-        total = 0;
+        this.row = new GenericRowData(getters.length);
     }
 
     @Override
     public void add(RowData value) {
-        total += count(value);
+        for (int i = 0; i < getters.length; i++) {
+            Object field = getters[i].getFieldOrNull(value);
+            if (field != null) {
+                row.setField(i, field);
+            }
+        }
     }
 
     @Override
     @Nullable
     public RowData getValue() {
-        return total == 0 ? null : GenericRowData.of(total);
+        return row;
     }
 
     @Override
     public MergeFunction copy() {
-        return new ValueCountMergeFunction();
-    }
-
-    private long count(RowData value) {
-        checkArgument(!value.isNullAt(0), "Value count should not be null.");
-        return value.getLong(0);
+        // RowData.FieldGetter is thread safe
+        return new PartialUpdateMergeFunction(getters);
     }
 }
