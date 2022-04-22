@@ -31,6 +31,7 @@ import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
+import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.CatalogLock;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.Projection;
@@ -44,8 +45,10 @@ import org.apache.flink.table.store.connector.source.LogHybridSourceFactory;
 import org.apache.flink.table.store.connector.source.StaticFileStoreSplitEnumerator;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreImpl;
+import org.apache.flink.table.store.file.FileStoreOptions.MergeEngine;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.log.LogOptions.LogStartupMode;
@@ -68,6 +71,8 @@ import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
+import static org.apache.flink.table.store.file.FileStoreOptions.MERGE_ENGINE;
+import static org.apache.flink.table.store.file.FileStoreOptions.MergeEngine.PARTIAL_UPDATE;
 import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 import static org.apache.flink.table.store.log.LogOptions.SCAN;
 
@@ -164,6 +169,10 @@ public class TableStore {
         return new SinkBuilder();
     }
 
+    private MergeEngine mergeEngine() {
+        return options.get(MERGE_ENGINE);
+    }
+
     private FileStore buildFileStore() {
         RowType partitionType = TypeUtils.project(type, partitions);
         RowType keyType;
@@ -190,7 +199,23 @@ public class TableStore {
                                                             f.getDescription().orElse(null)))
                                     .collect(Collectors.toList()));
             valueType = type;
-            mergeFunction = new DeduplicateMergeFunction();
+
+            switch (mergeEngine()) {
+                case DEDUPLICATE:
+                    mergeFunction = new DeduplicateMergeFunction();
+                    break;
+                case PARTIAL_UPDATE:
+                    List<LogicalType> fieldTypes = type.getChildren();
+                    RowData.FieldGetter[] fieldGetters = new RowData.FieldGetter[fieldTypes.size()];
+                    for (int i = 0; i < fieldTypes.size(); i++) {
+                        fieldGetters[i] = RowData.createFieldGetter(fieldTypes.get(i), i);
+                    }
+                    mergeFunction = new PartialUpdateMergeFunction(fieldGetters);
+                    break;
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unsupported merge engine: " + mergeEngine());
+            }
         }
         return new FileStoreImpl(
                 tableIdentifier, options, user, partitionType, keyType, valueType, mergeFunction);
@@ -300,6 +325,11 @@ public class TableStore {
 
         private Source<RowData, ?, ?> buildSource() {
             if (isContinuous) {
+                if (primaryKeys.length > 0 && mergeEngine() == PARTIAL_UPDATE) {
+                    throw new ValidationException(
+                            "Partial update continuous reading is not supported.");
+                }
+
                 LogStartupMode startupMode = logOptions().get(SCAN);
                 if (logSourceProvider == null) {
                     return buildFileSource(true, startupMode == LogStartupMode.LATEST);
