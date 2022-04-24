@@ -40,8 +40,7 @@ public class FileStorePathFactoryTest {
 
     @Test
     public void testManifestPaths() {
-        FileStorePathFactory pathFactory =
-                new FileStorePathFactory(new Path(tempDir.toString()), 1);
+        FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(tempDir.toString()));
         String uuid = pathFactory.uuid();
 
         for (int i = 0; i < 20; i++) {
@@ -68,8 +67,7 @@ public class FileStorePathFactoryTest {
 
     @Test
     public void testSnapshotPath() {
-        FileStorePathFactory pathFactory =
-                new FileStorePathFactory(new Path(tempDir.toString()), 1);
+        FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(tempDir.toString()));
         for (int i = 0; i < 20; i++) {
             assertThat(pathFactory.toSnapshotPath(i))
                     .isEqualTo(new Path(tempDir.toString() + "/snapshot/snapshot-" + i));
@@ -78,8 +76,7 @@ public class FileStorePathFactoryTest {
 
     @Test
     public void testCreateSstPathFactoryNoPartition() {
-        FileStorePathFactory pathFactory =
-                new FileStorePathFactory(new Path(tempDir.toString()), 1);
+        FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(tempDir.toString()));
         SstPathFactory sstPathFactory = pathFactory.createSstPathFactory(new BinaryRowData(0), 123);
         assertThat(sstPathFactory.toPath("my-sst-file-name"))
                 .isEqualTo(new Path(tempDir.toString() + "/bucket-123/my-sst-file-name"));
@@ -93,8 +90,7 @@ public class FileStorePathFactoryTest {
                         RowType.of(
                                 new LogicalType[] {new VarCharType(10), new IntType()},
                                 new String[] {"dt", "hr"}),
-                        "default",
-                        1);
+                        "default");
 
         assertPartition("20211224", 16, pathFactory, "/dt=20211224/hr=16");
         assertPartition("20211224", null, pathFactory, "/dt=20211224/hr=default");

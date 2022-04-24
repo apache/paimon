@@ -91,12 +91,12 @@ public class FileStoreCommitTest {
 
         assertThat(latest.getFileSystem().exists(latest)).isTrue();
 
-        Long latestId = SnapshotFinder.findLatest(snapshotDir, 1);
+        Long latestId = SnapshotFinder.findLatest(snapshotDir);
 
         // remove latest hint file
         latest.getFileSystem().delete(latest, false);
 
-        assertThat(SnapshotFinder.findLatest(snapshotDir, 1)).isEqualTo(latestId);
+        assertThat(SnapshotFinder.findLatest(snapshotDir)).isEqualTo(latestId);
     }
 
     @Test

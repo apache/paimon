@@ -198,7 +198,7 @@ public class SstFileTest {
     }
 
     private SstFileWriter createSstFileWriter(String path, String format) {
-        FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(path), 1);
+        FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(path));
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         return new SstFileWriter.Factory(
                         TestKeyValueGenerator.KEY_TYPE,
@@ -214,7 +214,7 @@ public class SstFileTest {
 
     private SstFileReader createSstFileReader(
             String path, String format, int[][] keyProjection, int[][] valueProjection) {
-        FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(path), 1);
+        FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(path));
         SstFileReader.Factory factory =
                 new SstFileReader.Factory(
                         TestKeyValueGenerator.KEY_TYPE,

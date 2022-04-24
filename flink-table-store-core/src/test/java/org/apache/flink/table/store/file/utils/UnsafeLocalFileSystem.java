@@ -25,15 +25,17 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.fs.local.LocalFileStatus;
 import org.apache.flink.core.fs.local.LocalFileSystem;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 
-/**
- * A modified {@link LocalFileSystem} to test {@link
- * org.apache.flink.table.store.file.FileStoreOptions#SNAPSHOT_DISCOVERY_MAX_RETRY}.
- */
+/** A modified {@link LocalFileSystem} to test {@link FileUtils#safelyListFileStatus(Path)}. */
 public class UnsafeLocalFileSystem extends LocalFileSystem {
+
+    private static final Logger LOG = LoggerFactory.getLogger(UnsafeLocalFileSystem.class);
 
     public static final Object SHARED_LOCK = new Object();
     public static final String SCHEME = "unsafe";
@@ -58,11 +60,15 @@ public class UnsafeLocalFileSystem extends LocalFileSystem {
             final String[] names = localf.list();
 
             try {
-                // notify list complete, start to wait
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Complete listing file status, ready for notify and wait");
+                }
                 SHARED_LOCK.notifyAll();
                 SHARED_LOCK.wait();
             } catch (InterruptedException ignored) {
-                // resume to get file status
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Continue to get file status");
+                }
             }
             if (names == null) {
                 return null;

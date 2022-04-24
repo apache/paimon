@@ -84,7 +84,7 @@ public class MergeTreeTest {
 
     @BeforeEach
     public void beforeEach() throws IOException {
-        pathFactory = new FileStorePathFactory(new Path(tempDir.toString()), 1);
+        pathFactory = new FileStorePathFactory(new Path(tempDir.toString()));
         comparator = Comparator.comparingInt(o -> o.getInt(0));
         recreateMergeTree(1024 * 1024);
         Path bucketDir = sstFileWriter.pathFactory().toPath("ignore").getParent();

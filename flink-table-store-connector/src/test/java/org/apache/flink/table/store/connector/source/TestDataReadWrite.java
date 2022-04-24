@@ -67,7 +67,7 @@ public class TestDataReadWrite {
                         "avro",
                         new Configuration());
         this.pathFactory =
-                new FileStorePathFactory(new Path(root), RowType.of(new IntType()), "default", 1);
+                new FileStorePathFactory(new Path(root), RowType.of(new IntType()), "default");
         this.service = service;
     }
 

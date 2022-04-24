@@ -55,8 +55,6 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     private final int numRetainedMin;
     // snapshots exceeding any constraint will be expired
     private final int numRetainedMax;
-    // max retry times to discover the earliest snapshot
-    private final int maxRetry;
     private final long millisRetained;
 
     private final FileStorePathFactory pathFactory;
@@ -68,14 +66,12 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     public FileStoreExpireImpl(
             int numRetainedMin,
             int numRetainedMax,
-            int maxRetry,
             long millisRetained,
             FileStorePathFactory pathFactory,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory) {
         this.numRetainedMin = numRetainedMin;
         this.numRetainedMax = numRetainedMax;
-        this.maxRetry = maxRetry;
         this.millisRetained = millisRetained;
         this.pathFactory = pathFactory;
         this.manifestFile = manifestFileFactory.create();
@@ -100,7 +96,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
         Long earliest;
         try {
-            earliest = SnapshotFinder.findEarliest(pathFactory.snapshotDirectory(), maxRetry);
+            earliest = SnapshotFinder.findEarliest(pathFactory.snapshotDirectory());
         } catch (IOException e) {
             throw new RuntimeException("Failed to find earliest snapshot id", e);
         }

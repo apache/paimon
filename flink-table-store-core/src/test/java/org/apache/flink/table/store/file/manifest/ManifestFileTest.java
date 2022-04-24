@@ -94,7 +94,7 @@ public class ManifestFileTest {
     private ManifestFile createManifestFile(String path) {
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
-                        new Path(path), TestKeyValueGenerator.PARTITION_TYPE, "default", 1);
+                        new Path(path), TestKeyValueGenerator.PARTITION_TYPE, "default");
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         return new ManifestFile.Factory(
                         TestKeyValueGenerator.PARTITION_TYPE,

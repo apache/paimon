@@ -146,7 +146,7 @@ public class ManifestFileMetaTest {
                         KEY_TYPE,
                         ROW_TYPE,
                         avro,
-                        new FileStorePathFactory(new Path(path), PARTITION_TYPE, "default", 1),
+                        new FileStorePathFactory(new Path(path), PARTITION_TYPE, "default"),
                         Long.MAX_VALUE)
                 .create();
     }

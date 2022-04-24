@@ -26,7 +26,6 @@ import org.apache.flink.core.fs.Path;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.UUID;
 import java.util.function.BinaryOperator;
@@ -42,7 +41,7 @@ public class SnapshotFinder {
 
     public static final String LATEST = "LATEST";
 
-    public static Long findLatest(Path snapshotDir, int maxRetry) throws IOException {
+    public static Long findLatest(Path snapshotDir) throws IOException {
         FileSystem fs = snapshotDir.getFileSystem();
         if (!fs.exists(snapshotDir)) {
             return null;
@@ -57,10 +56,10 @@ public class SnapshotFinder {
             }
         }
 
-        return findByListFiles(snapshotDir, Math::max, maxRetry);
+        return findByListFiles(snapshotDir, Math::max);
     }
 
-    public static Long findEarliest(Path snapshotDir, int maxRetry) throws IOException {
+    public static Long findEarliest(Path snapshotDir) throws IOException {
         FileSystem fs = snapshotDir.getFileSystem();
         if (!fs.exists(snapshotDir)) {
             return null;
@@ -72,7 +71,7 @@ public class SnapshotFinder {
             return snapshotId;
         }
 
-        return findByListFiles(snapshotDir, Math::min, maxRetry);
+        return findByListFiles(snapshotDir, Math::min);
     }
 
     @VisibleForTesting
@@ -84,28 +83,9 @@ public class SnapshotFinder {
         return null;
     }
 
-    @VisibleForTesting
-    static Long findByListFiles(Path snapshotDir, BinaryOperator<Long> reducer, int maxRetry)
+    private static Long findByListFiles(Path snapshotDir, BinaryOperator<Long> reducer)
             throws IOException {
-        int retry = 0;
-        FileStatus[] statuses = null;
-        while (retry <= maxRetry) {
-            try {
-                statuses = snapshotDir.getFileSystem().listStatus(snapshotDir);
-                break;
-            } catch (FileNotFoundException e) {
-                // retry again to avoid concurrency issue, until FLINK-25453 is fixed
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug(
-                            "{} {}",
-                            e.getMessage(),
-                            retry < maxRetry
-                                    ? "And will retry again."
-                                    : String.format("And exceeds max retry %d.", maxRetry));
-                }
-            }
-            retry++;
-        }
+        FileStatus[] statuses = FileUtils.safelyListFileStatus(snapshotDir);
 
         if (statuses == null) {
             throw new RuntimeException(

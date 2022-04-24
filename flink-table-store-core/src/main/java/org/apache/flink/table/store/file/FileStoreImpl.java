@@ -71,10 +71,7 @@ public class FileStoreImpl implements FileStore {
     @VisibleForTesting
     public FileStorePathFactory pathFactory() {
         return new FileStorePathFactory(
-                options.path(tableIdentifier),
-                partitionType,
-                options.partitionDefaultName(),
-                options.snapshotDiscoveryMaxRetry());
+                options.path(tableIdentifier), partitionType, options.partitionDefaultName());
     }
 
     @VisibleForTesting
@@ -140,7 +137,6 @@ public class FileStoreImpl implements FileStore {
         return new FileStoreExpireImpl(
                 options.snapshotNumRetainMin(),
                 options.snapshotNumRetainMax(),
-                options.snapshotDiscoveryMaxRetry(),
                 options.snapshotTimeRetain().toMillis(),
                 pathFactory(),
                 manifestFileFactory(),
