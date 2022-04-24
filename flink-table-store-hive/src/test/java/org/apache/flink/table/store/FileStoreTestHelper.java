@@ -71,6 +71,7 @@ public class FileStoreTestHelper {
         this.store =
                 new FileStoreImpl(
                         options.path(oi).toString(),
+                        0,
                         options,
                         UUID.randomUUID().toString(),
                         partitionType,

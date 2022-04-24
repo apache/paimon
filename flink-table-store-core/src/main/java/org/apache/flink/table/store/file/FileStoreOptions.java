@@ -146,6 +146,10 @@ public class FileStoreOptions implements Serializable {
         return allOptions;
     }
 
+    public FileStoreOptions(Map<String, String> options) {
+        this(Configuration.fromMap(options));
+    }
+
     public FileStoreOptions(Configuration options) {
         this.options = options;
         // TODO validate all keys

@@ -39,14 +39,19 @@ import org.apache.flink.table.store.connector.source.TableStoreSource;
 import org.apache.flink.table.store.connector.utils.TableConfigUtils;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
+import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.log.LogOptions.LogChangelogMode;
 import org.apache.flink.table.store.log.LogOptions.LogConsistency;
 import org.apache.flink.table.store.log.LogOptions.LogStartupMode;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -106,6 +111,19 @@ public class TableStoreFactory
             path.getFileSystem().mkdirs(path);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+
+        // update schema
+        Path tablePath =
+                new FileStoreOptions(context.getCatalogTable().getOptions())
+                        .path(context.getObjectIdentifier());
+        // TODO pass lock
+        try {
+            new SchemaManager(tablePath).commitNewVersion(newUpdateSchema(context));
+        } catch (IllegalStateException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
 
         createOptionalLogStoreFactory(context)
@@ -239,26 +257,56 @@ public class TableStoreFactory
                                 Map.Entry::getValue));
     }
 
-    @VisibleForTesting
-    TableStore buildTableStore(Context context) {
+    private UpdateSchema newUpdateSchema(Context context) {
         ResolvedCatalogTable catalogTable = context.getCatalogTable();
         ResolvedSchema schema = catalogTable.getResolvedSchema();
         RowType rowType = (RowType) schema.toPhysicalRowDataType().getLogicalType();
-        List<String> partitionKeys = catalogTable.getPartitionKeys();
-        int[] pkIndex = new int[0];
+        List<String> primaryKeys = new ArrayList<>();
         if (schema.getPrimaryKey().isPresent()) {
-            pkIndex =
-                    schema.getPrimaryKey().get().getColumns().stream()
-                            .mapToInt(rowType.getFieldNames()::indexOf)
-                            .toArray();
+            primaryKeys = schema.getPrimaryKey().get().getColumns();
         }
-        return new TableStore(Configuration.fromMap(catalogTable.getOptions()))
-                .withTableIdentifier(context.getObjectIdentifier())
-                .withSchema(rowType)
-                .withPrimaryKeys(pkIndex)
-                .withPartitions(
-                        partitionKeys.stream()
-                                .mapToInt(rowType.getFieldNames()::indexOf)
-                                .toArray());
+
+        return new UpdateSchema(
+                rowType, catalogTable.getPartitionKeys(), primaryKeys, catalogTable.getOptions());
+    }
+
+    @VisibleForTesting
+    TableStore buildTableStore(Context context) {
+        TableStore store =
+                new TableStore(
+                        context.getObjectIdentifier(),
+                        Configuration.fromMap(context.getCatalogTable().getOptions()));
+
+        Schema schema = store.schema();
+
+        UpdateSchema updateSchema = newUpdateSchema(context);
+
+        RowType rowType = updateSchema.rowType();
+        List<String> partitionKeys = updateSchema.partitionKeys();
+        List<String> primaryKeys = updateSchema.primaryKeys();
+
+        // compare fields to ignore isNullable for row type
+        Preconditions.checkArgument(
+                schema.logicalRowType().getFields().equals(rowType.getFields()),
+                "Flink schema and store schema are not the same, "
+                        + "store schema is %s, Flink schema is %s",
+                schema.logicalRowType(),
+                rowType);
+
+        Preconditions.checkArgument(
+                schema.partitionKeys().equals(partitionKeys),
+                "Flink partitionKeys and store partitionKeys are not the same, "
+                        + "store partitionKeys is %s, Flink partitionKeys is %s",
+                schema.partitionKeys(),
+                partitionKeys);
+
+        Preconditions.checkArgument(
+                schema.primaryKeys().equals(primaryKeys),
+                "Flink primaryKeys and store primaryKeys are not the same, "
+                        + "store primaryKeys is %s, Flink primaryKeys is %s",
+                schema.primaryKeys(),
+                primaryKeys);
+
+        return store;
     }
 }

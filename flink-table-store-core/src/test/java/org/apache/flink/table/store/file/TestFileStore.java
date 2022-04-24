@@ -113,6 +113,7 @@ public class TestFileStore extends FileStoreImpl {
             MergeFunction mergeFunction) {
         super(
                 options.path(ObjectIdentifier.of("catalog", "database", "table")).toString(),
+                0L,
                 options,
                 UUID.randomUUID().toString(),
                 partitionType,

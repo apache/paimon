@@ -73,6 +73,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreCommitImpl.class);
 
+    private final long schemaId;
     private final String commitUser;
     private final RowType partitionType;
     private final RowDataToObjectArrayConverter partitionObjectConverter;
@@ -87,6 +88,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Nullable private Lock lock;
 
     public FileStoreCommitImpl(
+            long schemaId,
             String commitUser,
             RowType partitionType,
             FileStorePathFactory pathFactory,
@@ -96,6 +98,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             int numBucket,
             MemorySize manifestTargetSize,
             int manifestMergeMinCount) {
+        this.schemaId = schemaId;
         this.commitUser = commitUser;
         this.partitionType = partitionType;
         this.partitionObjectConverter = new RowDataToObjectArrayConverter(partitionType);
@@ -367,6 +370,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             newSnapshot =
                     new Snapshot(
                             newSnapshotId,
+                            schemaId,
                             previousChangesListName,
                             newChangesListName,
                             commitUser,

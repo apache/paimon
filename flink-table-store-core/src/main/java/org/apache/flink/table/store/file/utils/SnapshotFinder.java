@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 
@@ -29,6 +28,8 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.UUID;
 import java.util.function.BinaryOperator;
+
+import static org.apache.flink.table.store.file.utils.FileUtils.listVersionedFiles;
 
 /** Find latest and earliest snapshot. */
 public class SnapshotFinder {
@@ -85,26 +86,7 @@ public class SnapshotFinder {
 
     private static Long findByListFiles(Path snapshotDir, BinaryOperator<Long> reducer)
             throws IOException {
-        FileStatus[] statuses = FileUtils.safelyListFileStatus(snapshotDir);
-
-        if (statuses == null) {
-            throw new RuntimeException(
-                    "The return value is null of the listStatus for the snapshot directory.");
-        }
-
-        Long result = null;
-        for (FileStatus status : statuses) {
-            String fileName = status.getPath().getName();
-            if (fileName.startsWith(SNAPSHOT_PREFIX)) {
-                try {
-                    long id = Long.parseLong(fileName.substring(SNAPSHOT_PREFIX.length()));
-                    result = result == null ? id : reducer.apply(result, id);
-                } catch (NumberFormatException e) {
-                    throw new RuntimeException("Invalid snapshot file name found " + fileName, e);
-                }
-            }
-        }
-        return result;
+        return listVersionedFiles(snapshotDir, SNAPSHOT_PREFIX).reduce(reducer).orElse(null);
     }
 
     public static void commitLatestHint(Path snapshotDir, long snapshotId) throws IOException {

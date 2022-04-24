@@ -46,6 +46,7 @@ import org.junit.Test;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -1196,7 +1197,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
     }
 
     @Test
-    public void testSinkParallelism() {
+    public void testSinkParallelism() throws IOException {
         testSinkParallelism(null, env.getParallelism());
         testSinkParallelism(23, 23);
     }
@@ -1573,13 +1574,17 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
         return stream.getParallelism();
     }
 
-    private void testSinkParallelism(Integer configParallelism, int expectedParallelism) {
+    private void testSinkParallelism(Integer configParallelism, int expectedParallelism)
+            throws IOException {
         // 1. create a mock table sink
         Map<String, String> options = new HashMap<>();
         options.put(FileStoreOptions.PATH.key(), "/fake/path");
         if (configParallelism != null) {
             options.put(SINK_PARALLELISM.key(), configParallelism.toString());
         }
+        options.put(
+                "path",
+                TEMPORARY_FOLDER.newFolder(UUID.randomUUID().toString()).toURI().toString());
 
         DynamicTableFactory.Context context =
                 new FactoryUtil.DefaultDynamicTableContext(
@@ -1595,6 +1600,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                         new Configuration(),
                         Thread.currentThread().getContextClassLoader(),
                         false);
+        new TableStoreFactory().onCreateTable(context, false);
         DynamicTableSink tableSink = new TableStoreFactory().createDynamicTableSink(context);
         assertThat(tableSink).isInstanceOf(TableStoreSink.class);
 

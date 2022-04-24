@@ -20,6 +20,7 @@ package org.apache.flink.table.store.connector;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -33,6 +34,9 @@ import org.apache.flink.table.runtime.typeutils.InternalSerializers;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.connector.sink.StoreSink;
 import org.apache.flink.table.store.connector.source.FileStoreSource;
+import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.types.logical.IntType;
@@ -59,11 +63,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.FILE_FORMAT;
 import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
+import static org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for {@link FileStoreSource} and {@link StoreSink}. */
@@ -100,12 +106,9 @@ public class FileStoreITCase extends AbstractTestBase {
 
     private final StreamExecutionEnvironment env;
 
-    private final TableStore store;
-
     public FileStoreITCase(boolean isBatch) throws IOException {
         this.isBatch = isBatch;
         this.env = isBatch ? buildBatchEnv() : buildStreamEnv();
-        this.store = buildTableStore(isBatch, TEMPORARY_FOLDER);
     }
 
     @Parameterized.Parameters(name = "isBatch-{0}")
@@ -119,7 +122,7 @@ public class FileStoreITCase extends AbstractTestBase {
 
     @Test
     public void testPartitioned() throws Exception {
-        store.withPrimaryKeys(new int[] {1, 2}).withPartitions(new int[] {1});
+        TableStore store = buildTableStore(new int[] {1}, new int[] {1, 2});
 
         // write
         store.sinkBuilder().withInput(buildTestSource(env, isBatch)).build();
@@ -138,7 +141,7 @@ public class FileStoreITCase extends AbstractTestBase {
 
     @Test
     public void testNonPartitioned() throws Exception {
-        store.withPartitions(new int[0]);
+        TableStore store = buildTableStore(new int[0], new int[] {2});
 
         // write
         store.sinkBuilder().withInput(buildTestSource(env, isBatch)).build();
@@ -155,7 +158,8 @@ public class FileStoreITCase extends AbstractTestBase {
     @Test
     public void testOverwrite() throws Exception {
         Assume.assumeTrue(isBatch);
-        store.withPrimaryKeys(new int[] {1, 2}).withPartitions(new int[] {1});
+
+        TableStore store = buildTableStore(new int[] {1}, new int[] {1, 2});
 
         // write
         store.sinkBuilder().withInput(buildTestSource(env, isBatch)).build();
@@ -195,7 +199,7 @@ public class FileStoreITCase extends AbstractTestBase {
 
     @Test
     public void testPartitionedNonKey() throws Exception {
-        store.withPrimaryKeys(new int[0]).withPartitions(new int[] {1});
+        TableStore store = buildTableStore(new int[] {1}, new int[0]);
 
         // write
         store.sinkBuilder().withInput(buildTestSource(env, isBatch)).build();
@@ -216,16 +220,15 @@ public class FileStoreITCase extends AbstractTestBase {
 
     @Test
     public void testKeyedProjection() throws Exception {
-        testProjection();
+        testProjection(buildTableStore(new int[0], new int[] {2}));
     }
 
     @Test
     public void testNonKeyedProjection() throws Exception {
-        store.withPrimaryKeys(new int[0]);
-        testProjection();
+        testProjection(buildTableStore(new int[0], new int[0]));
     }
 
-    private void testProjection() throws Exception {
+    private void testProjection(TableStore store) throws Exception {
         // write
         store.sinkBuilder().withInput(buildTestSource(env, isBatch)).build();
         env.execute();
@@ -248,7 +251,7 @@ public class FileStoreITCase extends AbstractTestBase {
 
         // assert
         Row[] expected = new Row[] {Row.of("p2", 1), Row.of("p1", 2), Row.of("p2", 5)};
-        if (store.primaryKeys().isEmpty()) {
+        if (store.trimmedPrimaryKeys().isEmpty()) {
             // in streaming mode, expect origin data X 2 (FiniteTestSource)
             Stream<RowData> expectedStream =
                     isBatch
@@ -265,17 +268,15 @@ public class FileStoreITCase extends AbstractTestBase {
 
     @Test
     public void testContinuous() throws Exception {
-        store.withPrimaryKeys(new int[] {2});
-        innerTestContinuous();
+        innerTestContinuous(buildTableStore(new int[0], new int[] {2}));
     }
 
     @Test
     public void testContinuousWithoutPK() throws Exception {
-        store.withPrimaryKeys(new int[0]);
-        innerTestContinuous();
+        innerTestContinuous(buildTableStore(new int[0], new int[0]));
     }
 
-    private void innerTestContinuous() throws Exception {
+    private void innerTestContinuous(TableStore store) throws Exception {
         Assume.assumeFalse(isBatch);
 
         BlockingIterator<RowData, Row> iterator =
@@ -289,6 +290,7 @@ public class FileStoreITCase extends AbstractTestBase {
         Thread.sleep(ThreadLocalRandom.current().nextInt(1000));
 
         sinkAndValidate(
+                store,
                 Arrays.asList(
                         srcRow(RowKind.INSERT, 1, "p1", 1), srcRow(RowKind.INSERT, 2, "p2", 2)),
                 iterator,
@@ -296,6 +298,7 @@ public class FileStoreITCase extends AbstractTestBase {
                 Row.ofKind(RowKind.INSERT, 2, "p2", 2));
 
         sinkAndValidate(
+                store,
                 Arrays.asList(
                         srcRow(RowKind.DELETE, 1, "p1", 1), srcRow(RowKind.INSERT, 3, "p3", 3)),
                 iterator,
@@ -304,7 +307,10 @@ public class FileStoreITCase extends AbstractTestBase {
     }
 
     private void sinkAndValidate(
-            List<RowData> src, BlockingIterator<RowData, Row> iterator, Row... expected)
+            TableStore store,
+            List<RowData> src,
+            BlockingIterator<RowData, Row> iterator,
+            Row... expected)
             throws Exception {
         if (isBatch) {
             throw new UnsupportedOperationException();
@@ -314,6 +320,10 @@ public class FileStoreITCase extends AbstractTestBase {
         store.sinkBuilder().withInput(source).build();
         env.execute();
         assertThat(iterator.collect(expected.length)).containsExactlyInAnyOrder(expected);
+    }
+
+    public TableStore buildTableStore(int[] partitions, int[] primaryKey) throws Exception {
+        return buildTableStore(isBatch, TEMPORARY_FOLDER, partitions, primaryKey);
     }
 
     private static RowData srcRow(RowKind kind, int v, String p, int k) {
@@ -335,12 +345,24 @@ public class FileStoreITCase extends AbstractTestBase {
         return env;
     }
 
-    public static TableStore buildTableStore(boolean noFail, TemporaryFolder temporaryFolder)
-            throws IOException {
-        return new TableStore(buildConfiguration(noFail, temporaryFolder.newFolder()))
-                .withSchema(TABLE_TYPE)
-                .withPrimaryKeys(new int[] {2})
-                .withTableIdentifier(ObjectIdentifier.of("catalog", "db", "t"));
+    public static TableStore buildTableStore(
+            boolean noFail, TemporaryFolder temporaryFolder, int[] partitions, int[] primaryKey)
+            throws Exception {
+        ObjectIdentifier identifier = ObjectIdentifier.of("catalog", "db", "t");
+        Configuration options = buildConfiguration(noFail, temporaryFolder.newFolder());
+        Path tablePath = new FileStoreOptions(options).path(identifier);
+        new SchemaManager(tablePath)
+                .commitNewVersion(
+                        new UpdateSchema(
+                                TABLE_TYPE,
+                                Arrays.stream(partitions)
+                                        .mapToObj(i -> TABLE_TYPE.getFieldNames().get(i))
+                                        .collect(Collectors.toList()),
+                                Arrays.stream(primaryKey)
+                                        .mapToObj(i -> TABLE_TYPE.getFieldNames().get(i))
+                                        .collect(Collectors.toList()),
+                                options.toMap()));
+        return retryArtificialException(() -> new TableStore(identifier, options));
     }
 
     public static Configuration buildConfiguration(boolean noFail, File folder) {
