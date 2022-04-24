@@ -123,10 +123,11 @@ public class TestFileStore extends FileStoreImpl {
     }
 
     public FileStoreExpireImpl newExpire(
-            int numRetainedMin, int numRetainedMax, long millisRetained) {
+            int numRetainedMin, int numRetainedMax, int maxRetry, long millisRetained) {
         return new FileStoreExpireImpl(
                 numRetainedMin,
                 numRetainedMax,
+                maxRetry,
                 millisRetained,
                 pathFactory(),
                 manifestFileFactory(),
@@ -324,12 +325,12 @@ public class TestFileStore extends FileStoreImpl {
         if (actualFiles.remove(earliest)) {
             long earliestId = SnapshotFinder.readHint(snapshotDir, SnapshotFinder.EARLIEST);
             earliest.getFileSystem().delete(earliest, false);
-            assertThat(earliestId <= SnapshotFinder.findEarliest(snapshotDir)).isTrue();
+            assertThat(earliestId <= SnapshotFinder.findEarliest(snapshotDir, 1)).isTrue();
         }
         if (actualFiles.remove(latest)) {
             long latestId = SnapshotFinder.readHint(snapshotDir, SnapshotFinder.LATEST);
             latest.getFileSystem().delete(latest, false);
-            assertThat(latestId <= SnapshotFinder.findLatest(snapshotDir)).isTrue();
+            assertThat(latestId <= SnapshotFinder.findLatest(snapshotDir, 1)).isTrue();
         }
         actualFiles.remove(latest);
 

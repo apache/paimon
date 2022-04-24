@@ -48,16 +48,22 @@ public class FileStorePathFactory {
     private final Path root;
     private final String uuid;
     private final RowDataPartitionComputer partitionComputer;
+    private final int maxRetry;
 
     private final AtomicInteger manifestFileCount;
     private final AtomicInteger manifestListCount;
 
-    public FileStorePathFactory(Path root) {
-        this(root, RowType.of(), FileSystemConnectorOptions.PARTITION_DEFAULT_NAME.defaultValue());
+    public FileStorePathFactory(Path root, int maxRetry) {
+        this(
+                root,
+                RowType.of(),
+                FileSystemConnectorOptions.PARTITION_DEFAULT_NAME.defaultValue(),
+                maxRetry);
     }
 
     // for tables without partition, partitionType should be a row type with 0 columns (not null)
-    public FileStorePathFactory(Path root, RowType partitionType, String defaultPartValue) {
+    public FileStorePathFactory(
+            Path root, RowType partitionType, String defaultPartValue, int maxRetry) {
         this.root = root;
         this.uuid = UUID.randomUUID().toString();
 
@@ -73,6 +79,7 @@ public class FileStorePathFactory {
 
         this.manifestFileCount = new AtomicInteger(0);
         this.manifestListCount = new AtomicInteger(0);
+        this.maxRetry = maxRetry;
     }
 
     public Path newManifestFile() {
@@ -124,7 +131,7 @@ public class FileStorePathFactory {
     @Nullable
     public Long latestSnapshotId() {
         try {
-            return SnapshotFinder.findLatest(snapshotDirectory());
+            return SnapshotFinder.findLatest(snapshotDirectory(), maxRetry);
         } catch (IOException e) {
             throw new RuntimeException("Failed to find latest snapshot id", e);
         }

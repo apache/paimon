@@ -105,6 +105,13 @@ public class FileStoreOptions implements Serializable {
                     .defaultValue(Duration.ofHours(1))
                     .withDescription("The maximum time of completed snapshots to retain.");
 
+    public static final ConfigOption<Integer> SNAPSHOT_DISCOVERY_MAX_RETRY =
+            ConfigOptions.key("snapshot.discovery.max-retry")
+                    .intType()
+                    .defaultValue(3)
+                    .withDescription(
+                            "The maximum retry times for discovering earliest or latest snapshot.");
+
     public static final ConfigOption<Duration> CONTINUOUS_DISCOVERY_INTERVAL =
             ConfigOptions.key("continuous.discovery-interval")
                     .durationType()
@@ -125,6 +132,7 @@ public class FileStoreOptions implements Serializable {
         allOptions.add(SNAPSHOT_NUM_RETAINED_MIN);
         allOptions.add(SNAPSHOT_NUM_RETAINED_MAX);
         allOptions.add(SNAPSHOT_TIME_RETAINED);
+        allOptions.add(SNAPSHOT_DISCOVERY_MAX_RETRY);
         return allOptions;
     }
 
@@ -139,6 +147,9 @@ public class FileStoreOptions implements Serializable {
                 SNAPSHOT_NUM_RETAINED_MIN.key()
                         + " should not be larger than "
                         + SNAPSHOT_NUM_RETAINED_MAX.key());
+        Preconditions.checkArgument(
+                snapshotDiscoveryMaxRetry() >= 0,
+                SNAPSHOT_DISCOVERY_MAX_RETRY.key() + "should be at least 0");
     }
 
     public int bucket() {
@@ -198,6 +209,10 @@ public class FileStoreOptions implements Serializable {
 
     public int snapshotNumRetainMax() {
         return options.get(SNAPSHOT_NUM_RETAINED_MAX);
+    }
+
+    public int snapshotDiscoveryMaxRetry() {
+        return options.get(SNAPSHOT_DISCOVERY_MAX_RETRY);
     }
 
     public Duration snapshotTimeRetain() {
