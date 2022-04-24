@@ -25,6 +25,7 @@ import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.util.Utils;
 import org.apache.flink.core.fs.FSDataInputStream;
 import org.apache.flink.core.fs.FSDataOutputStream;
+import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
@@ -32,7 +33,10 @@ import org.apache.flink.table.data.RowData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.BufferedReader;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
@@ -46,6 +50,7 @@ import java.util.concurrent.ForkJoinWorkerThread;
 public class FileUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileUtils.class);
+    private static final int LIST_MAX_RETRY = 30;
 
     public static final Configuration DEFAULT_READER_CONFIG = new Configuration();
 
@@ -122,5 +127,26 @@ public class FileUtils {
         } catch (IOException e) {
             LOG.warn("Exception occurs when deleting file " + file, e);
         }
+    }
+
+    @Nullable
+    public static FileStatus[] safelyListFileStatus(Path file) throws IOException {
+        int retry = 1;
+        FileStatus[] statuses = null;
+        while (retry <= LIST_MAX_RETRY) {
+            try {
+                statuses = file.getFileSystem().listStatus(file);
+                break;
+            } catch (FileNotFoundException e) {
+                // retry again to avoid concurrency issue, until FLINK-25453 is fixed
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug(
+                            "Failed to list file status, and {}",
+                            retry < LIST_MAX_RETRY - 1 ? "will retry again" : " exceeds max retry");
+                }
+                retry++;
+            }
+        }
+        return statuses;
     }
 }

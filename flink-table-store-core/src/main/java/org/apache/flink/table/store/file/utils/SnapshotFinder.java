@@ -85,7 +85,8 @@ public class SnapshotFinder {
 
     private static Long findByListFiles(Path snapshotDir, BinaryOperator<Long> reducer)
             throws IOException {
-        FileStatus[] statuses = snapshotDir.getFileSystem().listStatus(snapshotDir);
+        FileStatus[] statuses = FileUtils.safelyListFileStatus(snapshotDir);
+
         if (statuses == null) {
             throw new RuntimeException(
                     "The return value is null of the listStatus for the snapshot directory.");
