@@ -226,6 +226,6 @@ public class AppendOnlyWriterTest {
                         Thread.currentThread().getContextClassLoader(), AVRO, new Configuration());
 
         return new AppendOnlyWriter(
-                fileFormat, targetFileSize, writeSchema, maxSeqNum, pathFactory);
+                0, fileFormat, targetFileSize, writeSchema, maxSeqNum, pathFactory);
     }
 }

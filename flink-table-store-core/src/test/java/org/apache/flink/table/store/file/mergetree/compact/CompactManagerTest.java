@@ -214,6 +214,7 @@ public class CompactManagerTest {
                 null,
                 0,
                 maxSequence,
+                0,
                 level);
     }
 

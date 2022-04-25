@@ -29,6 +29,7 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.store.table.sink.SinkRecord;
@@ -48,7 +49,8 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
 
     private final FileStoreImpl store;
 
-    ChangelogValueCountFileStoreTable(String name, Schema schema, String user) {
+    ChangelogValueCountFileStoreTable(
+            String name, SchemaManager schemaManager, Schema schema, String user) {
         super(name, schema);
         RowType countType =
                 RowType.of(
@@ -56,6 +58,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
         MergeFunction mergeFunction = new ValueCountMergeFunction();
         this.store =
                 new FileStoreImpl(
+                        schemaManager,
                         schema.id(),
                         new FileStoreOptions(schema.options()),
                         WriteMode.CHANGE_LOG,

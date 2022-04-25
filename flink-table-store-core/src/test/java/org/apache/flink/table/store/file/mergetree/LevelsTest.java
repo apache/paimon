@@ -62,6 +62,6 @@ public class LevelsTest {
     }
 
     public static DataFileMeta newFile(int level) {
-        return new DataFileMeta("", 0, 1, row(0), row(0), null, null, 0, 1, level);
+        return new DataFileMeta("", 0, 1, row(0), row(0), null, null, 0, 1, 0, level);
     }
 }

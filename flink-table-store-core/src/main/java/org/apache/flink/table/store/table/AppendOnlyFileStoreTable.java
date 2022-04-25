@@ -27,6 +27,7 @@ import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.store.table.sink.SinkRecord;
@@ -46,10 +47,11 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     private final FileStoreImpl store;
 
-    AppendOnlyFileStoreTable(String name, Schema schema, String user) {
+    AppendOnlyFileStoreTable(String name, SchemaManager schemaManager, Schema schema, String user) {
         super(name, schema);
         this.store =
                 new FileStoreImpl(
+                        schemaManager,
                         schema.id(),
                         new FileStoreOptions(schema.options()),
                         WriteMode.APPEND_ONLY,

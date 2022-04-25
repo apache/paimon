@@ -129,6 +129,7 @@ public class FileStoreSourceSplitGeneratorTest {
                         StatsTestUtils.newEmptyTableStats(), // not used
                         0, // not used
                         0, // not used
+                        0, // not used
                         0 // not used
                         ));
     }

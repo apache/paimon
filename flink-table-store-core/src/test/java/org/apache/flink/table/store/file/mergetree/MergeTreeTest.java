@@ -37,6 +37,7 @@ import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
@@ -74,6 +75,7 @@ public class MergeTreeTest {
 
     @TempDir java.nio.file.Path tempDir;
     private static ExecutorService service;
+    private Path path;
     private FileStorePathFactory pathFactory;
     private Comparator<RowData> comparator;
 
@@ -84,7 +86,8 @@ public class MergeTreeTest {
 
     @BeforeEach
     public void beforeEach() throws IOException {
-        pathFactory = new FileStorePathFactory(new Path(tempDir.toString()));
+        path = new Path(tempDir.toString());
+        pathFactory = new FileStorePathFactory(path);
         comparator = Comparator.comparingInt(o -> o.getInt(0));
         recreateMergeTree(1024 * 1024);
         Path bucketDir = dataFileWriter.pathFactory().toPath("ignore").getParent();
@@ -101,10 +104,17 @@ public class MergeTreeTest {
         RowType valueType = new RowType(singletonList(new RowType.RowField("v", new IntType())));
         FileFormat flushingAvro = new FlushingFileFormat("avro");
         dataFileReader =
-                new DataFileReader.Factory(keyType, valueType, flushingAvro, pathFactory)
+                new DataFileReader.Factory(
+                                new SchemaManager(path),
+                                0,
+                                keyType,
+                                valueType,
+                                flushingAvro,
+                                pathFactory)
                         .create(BinaryRowDataUtil.EMPTY_ROW, 0);
         dataFileWriter =
                 new DataFileWriter.Factory(
+                                0,
                                 keyType,
                                 valueType,
                                 flushingAvro,

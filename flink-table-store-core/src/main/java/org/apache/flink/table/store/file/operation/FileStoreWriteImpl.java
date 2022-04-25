@@ -37,6 +37,7 @@ import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
 import org.apache.flink.table.store.file.mergetree.compact.CompactUnit;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -58,6 +59,8 @@ import java.util.function.Supplier;
 public class FileStoreWriteImpl implements FileStoreWrite {
 
     private final WriteMode writeMode;
+    private final SchemaManager schemaManager;
+    private final long schemaId;
     private final RowType valueType;
     private final DataFileReader.Factory dataFileReaderFactory;
     private final DataFileWriter.Factory dataFileWriterFactory;
@@ -71,6 +74,8 @@ public class FileStoreWriteImpl implements FileStoreWrite {
 
     public FileStoreWriteImpl(
             WriteMode writeMode,
+            SchemaManager schemaManager,
+            long schemaId,
             RowType keyType,
             RowType valueType,
             Supplier<Comparator<RowData>> keyComparatorSupplier,
@@ -80,12 +85,20 @@ public class FileStoreWriteImpl implements FileStoreWrite {
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             MergeTreeOptions options) {
+        this.schemaManager = schemaManager;
+        this.schemaId = schemaId;
         this.valueType = valueType;
         this.dataFileReaderFactory =
-                new DataFileReader.Factory(keyType, valueType, fileFormat, pathFactory);
+                new DataFileReader.Factory(
+                        schemaManager, schemaId, keyType, valueType, fileFormat, pathFactory);
         this.dataFileWriterFactory =
                 new DataFileWriter.Factory(
-                        keyType, valueType, fileFormat, pathFactory, options.targetFileSize);
+                        schemaId,
+                        keyType,
+                        valueType,
+                        fileFormat,
+                        pathFactory,
+                        options.targetFileSize);
         this.writeMode = writeMode;
         this.fileFormat = fileFormat;
         this.keyComparatorSupplier = keyComparatorSupplier;
@@ -121,7 +134,12 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                                 .orElse(-1L);
 
                 return new AppendOnlyWriter(
-                        fileFormat, options.targetFileSize, valueType, maxSeqNum, factory);
+                        schemaId,
+                        fileFormat,
+                        options.targetFileSize,
+                        valueType,
+                        maxSeqNum,
+                        factory);
 
             case CHANGE_LOG:
                 if (latestSnapshotId == null) {

@@ -25,6 +25,7 @@ import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.format.FileFormat;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.stats.FieldStatsCollector;
 import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -53,6 +54,8 @@ public class ManifestFile {
 
     private static final Logger LOG = LoggerFactory.getLogger(ManifestFile.class);
 
+    private final SchemaManager schemaManager;
+    private final long schemaId;
     private final RowType partitionType;
     private final ManifestEntrySerializer serializer;
     private final BulkFormat<RowData, FileSourceSplit> readerFactory;
@@ -61,6 +64,8 @@ public class ManifestFile {
     private final FileWriter.Factory<ManifestEntry, Metric> fileWriterFactory;
 
     private ManifestFile(
+            SchemaManager schemaManager,
+            long schemaId,
             RowType partitionType,
             RowType entryType,
             ManifestEntrySerializer serializer,
@@ -69,6 +74,8 @@ public class ManifestFile {
             FileStatsExtractor fileStatsExtractor,
             FileStorePathFactory pathFactory,
             long suggestedFileSize) {
+        this.schemaManager = schemaManager;
+        this.schemaId = schemaId;
         this.partitionType = partitionType;
         this.serializer = serializer;
         this.readerFactory = readerFactory;
@@ -160,7 +167,8 @@ public class ManifestFile {
                     path.getFileSystem().getFileStatus(path).getLen(),
                     numAddedFiles,
                     numDeletedFiles,
-                    partitionStatsCollector.extract());
+                    partitionStatsCollector.extract(),
+                    schemaId);
         }
     }
 
@@ -193,16 +201,22 @@ public class ManifestFile {
      */
     public static class Factory {
 
+        private final SchemaManager schemaManager;
+        private final long schemaId;
         private final RowType partitionType;
         private final FileFormat fileFormat;
         private final FileStorePathFactory pathFactory;
         private final long suggestedFileSize;
 
         public Factory(
+                SchemaManager schemaManager,
+                long schemaId,
                 RowType partitionType,
                 FileFormat fileFormat,
                 FileStorePathFactory pathFactory,
                 long suggestedFileSize) {
+            this.schemaManager = schemaManager;
+            this.schemaId = schemaId;
             this.partitionType = partitionType;
             this.fileFormat = fileFormat;
             this.pathFactory = pathFactory;
@@ -212,6 +226,8 @@ public class ManifestFile {
         public ManifestFile create() {
             RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.schema());
             return new ManifestFile(
+                    schemaManager,
+                    schemaId,
                     partitionType,
                     entryType,
                     new ManifestEntrySerializer(),

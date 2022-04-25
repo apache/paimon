@@ -26,6 +26,7 @@ import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.Map;
@@ -37,22 +38,14 @@ import java.util.stream.Collectors;
 import static org.apache.flink.table.store.file.utils.FileUtils.listVersionedFiles;
 
 /** Schema Manager to manage schema versions. */
-public class SchemaManager {
+public class SchemaManager implements Serializable {
 
     private static final String SCHEMA_PREFIX = "schema-";
 
     private final Path tableRoot;
 
-    /** Default no lock. */
-    private Lock lock = Callable::call;
-
     public SchemaManager(Path tableRoot) {
         this.tableRoot = tableRoot;
-    }
-
-    public SchemaManager withLock(Lock lock) {
-        this.lock = lock;
-        return this;
     }
 
     /** @return latest schema. */
@@ -83,6 +76,11 @@ public class SchemaManager {
 
     /** Create a new schema from {@link UpdateSchema}. */
     public Schema commitNewVersion(UpdateSchema updateSchema) throws Exception {
+        return commitNewVersion(Callable::call, updateSchema);
+    }
+
+    /** Create a new schema from {@link UpdateSchema}. */
+    public Schema commitNewVersion(Lock lock, UpdateSchema updateSchema) throws Exception {
         RowType rowType = updateSchema.rowType();
         List<String> partitionKeys = updateSchema.partitionKeys();
         List<String> primaryKeys = updateSchema.primaryKeys();

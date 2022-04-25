@@ -96,6 +96,7 @@ public class ManifestCommittableSerializerTest {
                 newTableStats(0, 1),
                 0,
                 1,
+                0,
                 level);
     }
 }
