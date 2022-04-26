@@ -48,12 +48,12 @@ public class MergeTreeOptions {
                     .defaultValue(MemorySize.ofMebiBytes(128))
                     .withDescription("Target size of a file.");
 
-    public static final ConfigOption<Integer> NUM_SORTED_RUNS_MAX =
-            ConfigOptions.key("num-sorted-run.max")
+    public static final ConfigOption<Integer> NUM_SORTED_RUNS_COMPACTION_TRIGGER =
+            ConfigOptions.key("num-sorted-run.compaction-trigger")
                     .intType()
                     .defaultValue(5)
                     .withDescription(
-                            "The max sorted run number. Includes level0 files (one file one sorted run) and "
+                            "The sorted run number to trigger compaction. Includes level0 files (one file one sorted run) and "
                                     + "high-level runs (one level one sorted run).");
 
     public static final ConfigOption<Integer> NUM_SORTED_RUNS_STOP_TRIGGER =
@@ -99,7 +99,7 @@ public class MergeTreeOptions {
 
     public final long targetFileSize;
 
-    public final int numSortedRunMax;
+    public final int numSortedRunCompactionTrigger;
 
     public final int numSortedRunStopTrigger;
 
@@ -115,7 +115,7 @@ public class MergeTreeOptions {
             long writeBufferSize,
             long pageSize,
             long targetFileSize,
-            int numSortedRunMax,
+            int numSortedRunCompactionTrigger,
             int numSortedRunStopTrigger,
             Integer numLevels,
             boolean commitForceCompact,
@@ -124,11 +124,11 @@ public class MergeTreeOptions {
         this.writeBufferSize = writeBufferSize;
         this.pageSize = pageSize;
         this.targetFileSize = targetFileSize;
-        this.numSortedRunMax = numSortedRunMax;
-        this.numSortedRunStopTrigger = Math.max(numSortedRunMax, numSortedRunStopTrigger);
+        this.numSortedRunCompactionTrigger = numSortedRunCompactionTrigger;
+        this.numSortedRunStopTrigger = Math.max(numSortedRunCompactionTrigger, numSortedRunStopTrigger);
         // By default, this ensures that the compaction does not fall to level 0, but at least to
         // level 1
-        this.numLevels = numLevels == null ? numSortedRunMax + 1 : numLevels;
+        this.numLevels = numLevels == null ? numSortedRunCompactionTrigger + 1 : numLevels;
         this.commitForceCompact = commitForceCompact;
         this.maxSizeAmplificationPercent = maxSizeAmplificationPercent;
         this.sizeRatio = sizeRatio;
@@ -139,7 +139,7 @@ public class MergeTreeOptions {
                 config.get(WRITE_BUFFER_SIZE).getBytes(),
                 config.get(PAGE_SIZE).getBytes(),
                 config.get(TARGET_FILE_SIZE).getBytes(),
-                config.get(NUM_SORTED_RUNS_MAX),
+                config.get(NUM_SORTED_RUNS_COMPACTION_TRIGGER),
                 config.get(NUM_SORTED_RUNS_STOP_TRIGGER),
                 config.get(NUM_LEVELS),
                 config.get(COMMIT_FORCE_COMPACT),
@@ -152,7 +152,7 @@ public class MergeTreeOptions {
         allOptions.add(WRITE_BUFFER_SIZE);
         allOptions.add(PAGE_SIZE);
         allOptions.add(TARGET_FILE_SIZE);
-        allOptions.add(NUM_SORTED_RUNS_MAX);
+        allOptions.add(NUM_SORTED_RUNS_COMPACTION_TRIGGER);
         allOptions.add(NUM_SORTED_RUNS_STOP_TRIGGER);
         allOptions.add(NUM_LEVELS);
         allOptions.add(COMMIT_FORCE_COMPACT);

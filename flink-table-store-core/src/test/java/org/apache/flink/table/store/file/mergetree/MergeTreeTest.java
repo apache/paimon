@@ -275,7 +275,7 @@ public class MergeTreeTest {
                 new UniversalCompaction(
                         options.maxSizeAmplificationPercent,
                         options.sizeRatio,
-                        options.numSortedRunMax);
+                        options.numSortedRunCompactionTrigger);
         CompactManager.Rewriter rewriter =
                 (outputLevel, dropDelete, sections) ->
                         sstFileWriter.write(

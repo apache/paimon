@@ -137,7 +137,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                 new UniversalCompaction(
                         options.maxSizeAmplificationPercent,
                         options.sizeRatio,
-                        options.numSortedRunMax);
+                        options.numSortedRunCompactionTrigger);
         SstFileWriter sstFileWriter = sstFileWriterFactory.create(partition, bucket);
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
         CompactManager.Rewriter rewriter =
