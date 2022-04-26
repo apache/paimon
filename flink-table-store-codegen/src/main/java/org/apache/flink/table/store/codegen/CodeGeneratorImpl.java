@@ -23,7 +23,7 @@ import org.apache.flink.table.planner.codegen.CodeGeneratorContext;
 import org.apache.flink.table.planner.codegen.ProjectionCodeGenerator;
 import org.apache.flink.table.planner.codegen.sort.ComparatorCodeGenerator;
 import org.apache.flink.table.planner.codegen.sort.SortCodeGenerator;
-import org.apache.flink.table.planner.plan.utils.SortUtil;
+import org.apache.flink.table.planner.plan.nodes.exec.spec.SortSpec;
 import org.apache.flink.table.runtime.generated.GeneratedNormalizedKeyComputer;
 import org.apache.flink.table.runtime.generated.GeneratedProjection;
 import org.apache.flink.table.runtime.generated.GeneratedRecordComparator;
@@ -32,7 +32,6 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.List;
-import java.util.stream.IntStream;
 
 /** Default implementation of {@link CodeGenerator}. */
 public class CodeGeneratorImpl implements CodeGenerator {
@@ -51,8 +50,7 @@ public class CodeGeneratorImpl implements CodeGenerator {
         return new SortCodeGenerator(
                         tableConfig,
                         RowType.of(fieldTypes.toArray(new LogicalType[0])),
-                        SortUtil.getAscendingSortSpec(
-                                IntStream.range(0, fieldTypes.size()).toArray()))
+                        getAscendingSortSpec(fieldTypes.size()))
                 .generateNormalizedKeyComputer(name);
     }
 
@@ -63,6 +61,15 @@ public class CodeGeneratorImpl implements CodeGenerator {
                 tableConfig,
                 name,
                 RowType.of(fieldTypes.toArray(new LogicalType[0])),
-                SortUtil.getAscendingSortSpec(IntStream.range(0, fieldTypes.size()).toArray()));
+                getAscendingSortSpec(fieldTypes.size()));
+    }
+
+    private SortSpec getAscendingSortSpec(int numFields) {
+        SortSpec.SortSpecBuilder builder = SortSpec.builder();
+        for (int i = 0; i < numFields; i++) {
+            // Flink's default null collation is NullCollation.LOW, see FlinkPlannerImpl
+            builder.addField(i, true, false);
+        }
+        return builder.build();
     }
 }
