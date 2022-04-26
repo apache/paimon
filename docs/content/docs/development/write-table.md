@@ -229,7 +229,7 @@ The following parameters determine when to stop writing:
     <tr>
       <td><h5>num-sorted-run.stop-trigger</h5></td>
       <td>No</td>
-      <td style="word-wrap: break-word;">5</td>
+      <td style="word-wrap: break-word;">10</td>
       <td>Integer</td>
       <td>The number of sorted-runs that trigger the stopping of writes.</td>
     </tr>
