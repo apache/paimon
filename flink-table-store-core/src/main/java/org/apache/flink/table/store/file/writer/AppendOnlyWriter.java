@@ -27,7 +27,7 @@ import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.Increment;
-import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsCollector;
 import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.store.file.utils.FileUtils;
@@ -150,9 +150,9 @@ public class AppendOnlyWriter implements RecordWriter {
 
         @Override
         protected DataFileMeta createFileMeta(Path path) throws IOException {
-            FieldStats[] stats;
+            BinaryTableStats stats;
             if (fileStatsExtractor != null) {
-                stats = fileStatsExtractor.extract(path);
+                stats = fieldStatsCollector.toBinary(fileStatsExtractor.extract(path));
             } else {
                 stats = fieldStatsCollector.extract();
             }

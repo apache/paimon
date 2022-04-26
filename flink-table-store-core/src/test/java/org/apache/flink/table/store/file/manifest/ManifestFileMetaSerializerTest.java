@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.manifest;
 
-import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.utils.ObjectSerializer;
 import org.apache.flink.table.store.file.utils.ObjectSerializerTestBase;
 
@@ -34,7 +33,7 @@ public class ManifestFileMetaSerializerTest extends ObjectSerializerTestBase<Man
 
     @Override
     protected ObjectSerializer<ManifestFileMeta> serializer() {
-        return new ManifestFileMetaSerializer(TestKeyValueGenerator.PARTITION_TYPE);
+        return new ManifestFileMetaSerializer();
     }
 
     @Override

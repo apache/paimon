@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.manifest;
 
-import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -26,7 +26,6 @@ import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,14 +38,14 @@ public class ManifestFileMeta {
     private final long fileSize;
     private final long numAddedFiles;
     private final long numDeletedFiles;
-    private final FieldStats[] partitionStats;
+    private final BinaryTableStats partitionStats;
 
     public ManifestFileMeta(
             String fileName,
             long fileSize,
             long numAddedFiles,
             long numDeletedFiles,
-            FieldStats[] partitionStats) {
+            BinaryTableStats partitionStats) {
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.numAddedFiles = numAddedFiles;
@@ -70,19 +69,17 @@ public class ManifestFileMeta {
         return numDeletedFiles;
     }
 
-    public FieldStats[] partitionStats() {
+    public BinaryTableStats partitionStats() {
         return partitionStats;
     }
 
-    public static RowType schema(RowType partitionType) {
+    public static RowType schema() {
         List<RowType.RowField> fields = new ArrayList<>();
         fields.add(new RowType.RowField("_FILE_NAME", new VarCharType(false, Integer.MAX_VALUE)));
         fields.add(new RowType.RowField("_FILE_SIZE", new BigIntType(false)));
         fields.add(new RowType.RowField("_NUM_ADDED_FILES", new BigIntType(false)));
         fields.add(new RowType.RowField("_NUM_DELETED_FILES", new BigIntType(false)));
-        fields.add(
-                new RowType.RowField(
-                        "_PARTITION_STATS", FieldStatsArraySerializer.schema(partitionType)));
+        fields.add(new RowType.RowField("_PARTITION_STATS", FieldStatsArraySerializer.schema()));
         return new RowType(fields);
     }
 
@@ -96,30 +93,19 @@ public class ManifestFileMeta {
                 && fileSize == that.fileSize
                 && numAddedFiles == that.numAddedFiles
                 && numDeletedFiles == that.numDeletedFiles
-                && Arrays.equals(partitionStats, that.partitionStats);
+                && Objects.equals(partitionStats, that.partitionStats);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(
-                fileName,
-                fileSize,
-                numAddedFiles,
-                numDeletedFiles,
-                // by default, hash code of arrays are computed by reference, not by content.
-                // so we must use Arrays.hashCode to hash by content.
-                Arrays.hashCode(partitionStats));
+        return Objects.hash(fileName, fileSize, numAddedFiles, numDeletedFiles, partitionStats);
     }
 
     @Override
     public String toString() {
         return String.format(
                 "{%s, %d, %d, %d, %s}",
-                fileName,
-                fileSize,
-                numAddedFiles,
-                numDeletedFiles,
-                Arrays.toString(partitionStats));
+                fileName, fileSize, numAddedFiles, numDeletedFiles, partitionStats);
     }
 
     /**

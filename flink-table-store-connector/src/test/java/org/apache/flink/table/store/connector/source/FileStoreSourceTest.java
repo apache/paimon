@@ -32,6 +32,7 @@ import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunct
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.PartitionedManifestMeta;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.DoubleType;
@@ -81,12 +82,7 @@ public class FileStoreSourceTest {
                 specified ? buildManifestEntries(hasPk, partitioned) : null;
         PartitionedManifestMeta partitionedManifestMeta =
                 specified
-                        ? new PartitionedManifestMeta(
-                                specifiedSnapshotId,
-                                specifiedManifestEntries,
-                                getPartitionType(partitioned).getFieldCount(),
-                                getKeyType(hasPk),
-                                getValueType(hasPk))
+                        ? new PartitionedManifestMeta(specifiedSnapshotId, specifiedManifestEntries)
                         : null;
         FileStoreSource source =
                 new FileStoreSource(
@@ -244,18 +240,19 @@ public class FileStoreSourceTest {
                 new FieldStats(
                         hasPk ? null : keyMin.getString(3), hasPk ? null : keyMax.getString(3), 0);
         long count = new Random().nextLong();
-        return new DataFileMeta(
-                "data-" + UUID.randomUUID(),
-                new Random().nextInt(100),
-                new Random().nextInt(100),
-                keyMin,
-                keyMax,
+
+        FieldStatsArraySerializer keyStatsSer = new FieldStatsArraySerializer(getKeyType(hasPk));
+        FieldStatsArraySerializer valueStatsSer =
+                new FieldStatsArraySerializer(getValueType(hasPk));
+
+        FieldStats[] keyStats =
                 hasPk
                         ? new FieldStats[] {k0Stats, k1Stats}
                         : new FieldStats[] {
                             k0Stats, k1Stats,
                             v0Status, v1Status
-                        },
+                        };
+        FieldStats[] valueStats =
                 hasPk
                         ? new FieldStats[] {
                             k0Stats, k1Stats,
@@ -263,7 +260,15 @@ public class FileStoreSourceTest {
                         }
                         : new FieldStats[] {
                             new FieldStats(count, count + new Random().nextInt(100), 0)
-                        },
+                        };
+        return new DataFileMeta(
+                "data-" + UUID.randomUUID(),
+                new Random().nextInt(100),
+                new Random().nextInt(100),
+                keyMin,
+                keyMax,
+                keyStatsSer.toBinary(keyStats),
+                valueStatsSer.toBinary(valueStats),
                 seqNumber,
                 seqNumber + new Random().nextInt(100),
                 new Random().nextInt(4));

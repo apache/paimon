@@ -19,8 +19,6 @@
 package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.table.store.file.mergetree.Increment;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
 
 import org.junit.jupiter.api.Test;
 
@@ -35,11 +33,7 @@ public class FileCommittableSerializerTest {
 
     @Test
     public void test() throws IOException {
-        FileCommittableSerializer serializer =
-                new FileCommittableSerializer(
-                        RowType.of(new IntType()),
-                        RowType.of(new IntType()),
-                        RowType.of(new IntType()));
+        FileCommittableSerializer serializer = new FileCommittableSerializer();
         Increment increment = randomIncrement();
         FileCommittable committable = new FileCommittable(row(0), 1, increment);
         FileCommittable newCommittable =

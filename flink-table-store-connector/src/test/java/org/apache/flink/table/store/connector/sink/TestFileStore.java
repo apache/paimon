@@ -31,7 +31,7 @@ import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.operation.Lock;
-import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -46,6 +46,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
+import static org.apache.flink.table.store.file.stats.StatsTestUtils.newEmptyTableStats;
 
 /** Test {@link FileStore}. */
 public class TestFileStore implements FileStore {
@@ -194,14 +195,8 @@ public class TestFileStore implements FileStore {
                                                     0,
                                                     null,
                                                     null,
-                                                    new FieldStats[] {
-                                                        new FieldStats(null, null, 0)
-                                                    },
-                                                    new FieldStats[] {
-                                                        new FieldStats(null, null, 0),
-                                                        new FieldStats(null, null, 0),
-                                                        new FieldStats(null, null, 0)
-                                                    },
+                                                    StatsTestUtils.newEmptyTableStats(),
+                                                    newEmptyTableStats(3),
                                                     0,
                                                     0,
                                                     0))

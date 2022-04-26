@@ -21,10 +21,8 @@ package org.apache.flink.table.store.file.utils;
 import org.apache.flink.core.memory.DataInputViewStreamWrapper;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileMetaSerializer;
-import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
@@ -32,11 +30,13 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+
+import static org.apache.flink.table.store.file.utils.SerializationUtils.deserializeBinaryRow;
+import static org.apache.flink.table.store.file.utils.SerializationUtils.serializeBinaryRow;
 
 /** Manifest entries per partitioned with the corresponding snapshot id. */
 public class PartitionedManifestMeta implements Serializable {
@@ -49,24 +49,14 @@ public class PartitionedManifestMeta implements Serializable {
     /** The manifest entries collected at planning phase when manual compaction is triggered. */
     private transient Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> manifestEntries;
 
-    private final int partFieldCount;
-    private final RowType keyType;
-    private final RowType valueType;
-
     public PartitionedManifestMeta(
             Long snapshotId,
-            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> specifiedManifestEntries,
-            int partFieldCount,
-            RowType keyType,
-            RowType valueType) {
+            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> specifiedManifestEntries) {
         Preconditions.checkNotNull(snapshotId, "Specified snapshot should not be null.");
         Preconditions.checkNotNull(
                 specifiedManifestEntries, "Specified manifest entries should not be null.");
         this.snapshotId = snapshotId;
         this.manifestEntries = specifiedManifestEntries;
-        this.partFieldCount = partFieldCount;
-        this.keyType = keyType;
-        this.valueType = valueType;
     }
 
     public Long getSnapshotId() {
@@ -80,13 +70,12 @@ public class PartitionedManifestMeta implements Serializable {
     private void writeObject(ObjectOutputStream out) throws IOException {
         out.defaultWriteObject();
 
-        BinaryRowDataSerializer partSerializer = new BinaryRowDataSerializer(partFieldCount);
-        DataFileMetaSerializer metaSerializer = new DataFileMetaSerializer(keyType, valueType);
+        DataFileMetaSerializer metaSerializer = new DataFileMetaSerializer();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
         view.writeInt(manifestEntries.size());
         for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> partEntry :
                 manifestEntries.entrySet()) {
-            partSerializer.serialize(partEntry.getKey(), view);
+            serializeBinaryRow(partEntry.getKey(), view);
             Map<Integer, List<DataFileMeta>> bucketEntry = partEntry.getValue();
             view.writeInt(bucketEntry.size());
             for (Map.Entry<Integer, List<DataFileMeta>> entry : bucketEntry.entrySet()) {
@@ -103,26 +92,21 @@ public class PartitionedManifestMeta implements Serializable {
         in.defaultReadObject();
 
         manifestEntries = new HashMap<>();
-        BinaryRowDataSerializer partSerializer = new BinaryRowDataSerializer(partFieldCount);
-        DataFileMetaSerializer metaSerializer = new DataFileMetaSerializer(keyType, valueType);
+        DataFileMetaSerializer metaSerializer = new DataFileMetaSerializer();
         DataInputViewStreamWrapper view = new DataInputViewStreamWrapper(in);
         int partitionNum = view.readInt();
         for (int i = 0; i < partitionNum; i++) {
-            BinaryRowData partition = partSerializer.deserialize(view);
+            BinaryRowData partition = deserializeBinaryRow(view);
             Map<Integer, List<DataFileMeta>> bucketEntry = new HashMap<>();
             int bucketNum = view.readInt();
             for (int j = 0; j < bucketNum; j++) {
                 int bucket = view.readInt();
                 int entryNum = view.readInt();
-                if (entryNum == 0) {
-                    bucketEntry.put(bucket, Collections.emptyList());
-                } else {
-                    List<DataFileMeta> metas = new ArrayList<>();
-                    for (int k = 0; k < entryNum; k++) {
-                        metas.add(metaSerializer.deserialize(view));
-                    }
-                    bucketEntry.put(bucket, metas);
+                List<DataFileMeta> metas = new ArrayList<>();
+                for (int k = 0; k < entryNum; k++) {
+                    metas.add(metaSerializer.deserialize(view));
                 }
+                bucketEntry.put(bucket, metas);
             }
             manifestEntries.put(partition, bucketEntry);
         }
@@ -137,15 +121,11 @@ public class PartitionedManifestMeta implements Serializable {
             return false;
         }
         PartitionedManifestMeta that = (PartitionedManifestMeta) o;
-        return partFieldCount == that.partFieldCount
-                && snapshotId.equals(that.snapshotId)
-                && manifestEntries.equals(that.manifestEntries)
-                && keyType.equals(that.keyType)
-                && valueType.equals(that.valueType);
+        return snapshotId.equals(that.snapshotId) && manifestEntries.equals(that.manifestEntries);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(snapshotId, manifestEntries, partFieldCount, keyType, valueType);
+        return Objects.hash(snapshotId, manifestEntries);
     }
 }

@@ -115,10 +115,9 @@ public class ManifestList {
         }
 
         public ManifestList create() {
-            RowType metaType =
-                    VersionedObjectSerializer.versionType(ManifestFileMeta.schema(partitionType));
+            RowType metaType = VersionedObjectSerializer.versionType(ManifestFileMeta.schema());
             return new ManifestList(
-                    new ManifestFileMetaSerializer(partitionType),
+                    new ManifestFileMetaSerializer(),
                     fileFormat.createReaderFactory(metaType),
                     fileFormat.createWriterFactory(metaType),
                     pathFactory);

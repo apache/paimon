@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
@@ -61,8 +60,6 @@ public class FileStoreScanTest {
     @BeforeEach
     public void beforeEach() throws IOException {
         gen = new TestKeyValueGenerator();
-        Path root = new Path(tempDir.toString());
-        root.getFileSystem().mkdirs(new Path(root + "/snapshot"));
         store =
                 TestFileStore.create(
                         "avro",

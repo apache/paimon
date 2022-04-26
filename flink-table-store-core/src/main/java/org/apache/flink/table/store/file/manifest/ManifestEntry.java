@@ -29,6 +29,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+import static org.apache.flink.table.store.file.utils.SerializationUtils.newBytesType;
+
 /** Entry of a manifest file, representing an addition / deletion of a data file. */
 public class ManifestEntry {
 
@@ -76,13 +78,13 @@ public class ManifestEntry {
         return new Identifier(partition, bucket, file.level(), file.fileName());
     }
 
-    public static RowType schema(RowType partitionType, RowType keyType, RowType valueType) {
+    public static RowType schema() {
         List<RowType.RowField> fields = new ArrayList<>();
         fields.add(new RowType.RowField("_KIND", new TinyIntType(false)));
-        fields.add(new RowType.RowField("_PARTITION", partitionType));
+        fields.add(new RowType.RowField("_PARTITION", newBytesType(false)));
         fields.add(new RowType.RowField("_BUCKET", new IntType(false)));
         fields.add(new RowType.RowField("_TOTAL_BUCKETS", new IntType(false)));
-        fields.add(new RowType.RowField("_FILE", DataFileMeta.schema(keyType, valueType)));
+        fields.add(new RowType.RowField("_FILE", DataFileMeta.schema()));
         return new RowType(fields);
     }
 

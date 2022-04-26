@@ -206,13 +206,11 @@ public class StoreSink<WriterStateT, LogCommT>
 
     @Override
     public ManifestCommittableSerializer getGlobalCommittableSerializer() {
-        return new ManifestCommittableSerializer(
-                fileStore.partitionType(), fileStore.keyType(), fileStore.valueType());
+        return new ManifestCommittableSerializer();
     }
 
     private FileCommittableSerializer fileCommitSerializer() {
-        return new FileCommittableSerializer(
-                fileStore.partitionType(), fileStore.keyType(), fileStore.valueType());
+        return new FileCommittableSerializer();
     }
 
     private static class NoOutputSerializer<T> implements SimpleVersionedSerializer<T> {

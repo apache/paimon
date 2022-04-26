@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.data;
 
-import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.utils.ObjectSerializerTestBase;
 
 /** Tests for {@link DataFileMetaSerializer}. */
@@ -28,8 +27,7 @@ public class DataFileMetaSerializerTest extends ObjectSerializerTestBase<DataFil
 
     @Override
     protected DataFileMetaSerializer serializer() {
-        return new DataFileMetaSerializer(
-                TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.ROW_TYPE);
+        return new DataFileMetaSerializer();
     }
 
     @Override

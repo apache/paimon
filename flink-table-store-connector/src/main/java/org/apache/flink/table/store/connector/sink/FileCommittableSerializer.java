@@ -21,23 +21,22 @@ package org.apache.flink.table.store.connector.sink;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
-import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.store.file.data.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.mergetree.Increment;
-import org.apache.flink.table.types.logical.RowType;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
+import static org.apache.flink.table.store.file.utils.SerializationUtils.deserializeBinaryRow;
+import static org.apache.flink.table.store.file.utils.SerializationUtils.serializeBinaryRow;
+
 /** {@link SimpleVersionedSerializer} for {@link FileCommittable}. */
 public class FileCommittableSerializer implements SimpleVersionedSerializer<FileCommittable> {
 
-    private final BinaryRowDataSerializer partSerializer;
     private final DataFileMetaSerializer dataFileSerializer;
 
-    public FileCommittableSerializer(RowType partitionType, RowType keyType, RowType valueType) {
-        this.partSerializer = new BinaryRowDataSerializer(partitionType.getFieldCount());
-        this.dataFileSerializer = new DataFileMetaSerializer(keyType, valueType);
+    public FileCommittableSerializer() {
+        this.dataFileSerializer = new DataFileMetaSerializer();
     }
 
     @Override
@@ -49,7 +48,7 @@ public class FileCommittableSerializer implements SimpleVersionedSerializer<File
     public byte[] serialize(FileCommittable obj) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
-        partSerializer.serialize(obj.partition(), view);
+        serializeBinaryRow(obj.partition(), view);
         view.writeInt(obj.bucket());
         dataFileSerializer.serializeList(obj.increment().newFiles(), view);
         dataFileSerializer.serializeList(obj.increment().compactBefore(), view);
@@ -61,7 +60,7 @@ public class FileCommittableSerializer implements SimpleVersionedSerializer<File
     public FileCommittable deserialize(int version, byte[] serialized) throws IOException {
         DataInputDeserializer view = new DataInputDeserializer(serialized);
         return new FileCommittable(
-                partSerializer.deserialize(view),
+                deserializeBinaryRow(view),
                 view.readInt(),
                 new Increment(
                         dataFileSerializer.deserializeList(view),

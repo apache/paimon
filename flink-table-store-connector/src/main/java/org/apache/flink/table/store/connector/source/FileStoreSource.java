@@ -193,8 +193,7 @@ public class FileStoreSource
 
     @Override
     public FileStoreSourceSplitSerializer getSplitSerializer() {
-        return new FileStoreSourceSplitSerializer(
-                fileStore.partitionType(), fileStore.keyType(), fileStore.valueType());
+        return new FileStoreSourceSplitSerializer();
     }
 
     @Override
