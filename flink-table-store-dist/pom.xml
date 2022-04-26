@@ -81,20 +81,6 @@ under the License.
             <artifactId>flink-sql-connector-kafka</artifactId>
             <version>${flink.version}</version>
         </dependency>
-
-        <!-- default formats -->
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-sql-avro</artifactId>
-            <version>${flink.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-sql-orc</artifactId>
-            <version>${flink.version}</version>
-        </dependency>
     </dependencies>
 
     <build>
@@ -121,8 +107,6 @@ under the License.
                                     <include>org.apache.flink:flink-connector-base</include>
                                     <include>org.apache.flink:flink-connector-files</include>
                                     <include>org.apache.flink:flink-sql-connector-kafka</include>
-                                    <include>org.apache.flink:flink-sql-avro</include>
-                                    <include>org.apache.flink:flink-sql-orc</include>
                                 </includes>
                             </artifactSet>
                             <filters>
@@ -143,18 +127,6 @@ under the License.
                                         <exclude>META-INF/services/**</exclude>
                                     </excludes>
                                 </filter>
-                                <filter>
-                                    <artifact>org.apache.flink:flink-sql-avro</artifact>
-                                    <excludes>
-                                        <exclude>META-INF/services/**</exclude>
-                                    </excludes>
-                                </filter>
-                                <filter>
-                                    <artifact>org.apache.flink:flink-sql-orc</artifact>
-                                    <excludes>
-                                        <exclude>META-INF/services/**</exclude>
-                                    </excludes>
-                                </filter>
                                 <!-- Another copy of the Apache license, which we don't need. -->
                                 <filter>
                                     <artifact>*</artifact>
@@ -171,42 +143,6 @@ under the License.
                                 <relocation>
                                     <pattern>org.apache.flink.kafka</pattern>
                                     <shadedPattern>org.apache.flink.table.store.shaded.org.apache.flink.kafka</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.apache.flink.avro</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.flink.avro</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.apache.flink.orc</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.flink.orc</shadedPattern>
-                                </relocation>
-                                <!--
-                                flink-sql-orc module does not shade its dependencies, so we shade here.
-                                See maven-shade-plugin usage of flink-sql-orc for detailed dependency list.
-                                -->
-                                <relocation>
-                                    <pattern>org.apache.orc</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.orc</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.apache.hive</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hive</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.apache.hadoop.hive</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.hive</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>io.airlift</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.io.airlift</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.apache.commons</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.commons</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>com.google.protobuf</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.com.google.protobuf</shadedPattern>
                                 </relocation>
                                 <!--
                                 flink-sql-connector-kafka contains shaded kafka classes.
