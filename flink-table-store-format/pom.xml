@@ -64,9 +64,37 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
+            <artifactId>flink-sql-avro</artifactId>
+            <version>${flink.version}</version>
+            <scope>runtime</scope>
+            <optional>true</optional>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
             <artifactId>flink-orc</artifactId>
             <version>${flink.version}</version>
             <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-sql-orc</artifactId>
+            <version>${flink.version}</version>
+            <scope>runtime</scope>
+            <optional>true</optional>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
@@ -163,4 +191,94 @@ under the License.
             </exclusions>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>shade-flink</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <artifactSet>
+                                <includes combine.children="append">
+                                    <include>org.apache.flink:flink-sql-avro</include>
+                                    <include>org.apache.flink:flink-sql-orc</include>
+                                </includes>
+                            </artifactSet>
+                            <filters>
+                                <!--
+                                Throw away all META-INF/services,
+                                otherwise if user has the same format/connector jar in the classpath,
+                                FactoryUtil will complain about multiple matching factories.
+                                -->
+                                <filter>
+                                    <artifact>org.apache.flink:flink-sql-avro</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/services/**</exclude>
+                                    </excludes>
+                                </filter>
+                                <filter>
+                                    <artifact>org.apache.flink:flink-sql-orc</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/services/**</exclude>
+                                    </excludes>
+                                </filter>
+                                <!-- Another copy of the Apache license, which we don't need. -->
+                                <filter>
+                                    <artifact>*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/LICENSE.txt</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <relocations>
+                                <relocation>
+                                    <pattern>org.apache.flink.avro</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.flink.avro</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.flink.orc</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.flink.orc</shadedPattern>
+                                </relocation>
+                                <!--
+                                flink-sql-orc module does not shade its dependencies, so we shade here.
+                                See maven-shade-plugin usage of flink-sql-orc for detailed dependency list.
+                                -->
+                                <relocation>
+                                    <pattern>org.apache.orc</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.orc</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.hive</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hive</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.hadoop.hive</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.hive</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>io.airlift</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.io.airlift</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.commons</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.commons</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>com.google.protobuf</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.com.google.protobuf</shadedPattern>
+                                </relocation>
+                            </relocations>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

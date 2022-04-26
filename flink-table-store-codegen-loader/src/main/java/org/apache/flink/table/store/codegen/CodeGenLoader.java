@@ -43,12 +43,6 @@ import java.util.stream.Stream;
 /** Copied and modified from the flink-table-planner-loader module. */
 class CodeGenLoader {
 
-    /**
-     * The name of the table planner dependency jar, bundled with flink-table-planner-loader module
-     * artifact.
-     */
-    static final String FLINK_TABLE_PLANNER_FAT_JAR = "flink-table-planner.jar";
-
     static final String FLINK_TABLE_STORE_CODEGEN_FAT_JAR = "flink-table-store-codegen.jar";
 
     private static final String[] OWNER_CLASSPATH =
@@ -84,20 +78,6 @@ class CodeGenLoader {
             final Path tmpDirectory =
                     Paths.get(ConfigurationUtils.parseTempDirectories(new Configuration())[0]);
             Files.createDirectories(tmpDirectory);
-
-            Path plannerJar =
-                    extractResource(
-                            FLINK_TABLE_PLANNER_FAT_JAR,
-                            flinkClassLoader,
-                            tmpDirectory,
-                            "Flink table planner could not be found.\n"
-                                    + "If you're running a test, please add the following dependency to your pom.xml.\n"
-                                    + "<dependency>\n"
-                                    + "    <groupId>org.apache.flink</groupId>\n"
-                                    + "    <artifactId>flink-table-planner-loader</artifactId>\n"
-                                    + "    <version>${flink.version}</version>\n"
-                                    + "    <scope>test</scope>\n"
-                                    + "</dependency>");
             Path delegateJar =
                     extractResource(
                             FLINK_TABLE_STORE_CODEGEN_FAT_JAR,
@@ -106,10 +86,9 @@ class CodeGenLoader {
                             "Flink table store codegen could not be found.\n"
                                     + "If you're running a test, please make sure you've built the codegen modules by running\n"
                                     + "mvn clean package -pl flink-table-store-codegen,flink-table-store-codegen-loader -DskipTests");
-
             this.submoduleClassLoader =
                     new ComponentClassLoader(
-                            new URL[] {plannerJar.toUri().toURL(), delegateJar.toUri().toURL()},
+                            new URL[] {delegateJar.toUri().toURL()},
                             flinkClassLoader,
                             OWNER_CLASSPATH,
                             COMPONENT_CLASSPATH,
