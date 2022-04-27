@@ -99,7 +99,7 @@ public class FileStoreImpl implements FileStore {
         return new FileStoreWriteImpl(
                 keyType,
                 valueType,
-                newKeyComparator(),
+                this::newKeyComparator,
                 mergeFunction,
                 options.fileFormat(),
                 pathFactory(),

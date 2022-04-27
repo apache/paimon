@@ -43,6 +43,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /** Default implementation of {@link FileStoreWrite}. */
@@ -50,7 +51,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
 
     private final SstFileReader.Factory sstFileReaderFactory;
     private final SstFileWriter.Factory sstFileWriterFactory;
-    private final Comparator<RowData> keyComparator;
+    private final Supplier<Comparator<RowData>> keyComparatorSupplier;
     private final MergeFunction mergeFunction;
     private final FileStorePathFactory pathFactory;
     private final FileStoreScan scan;
@@ -59,7 +60,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
     public FileStoreWriteImpl(
             RowType keyType,
             RowType valueType,
-            Comparator<RowData> keyComparator,
+            Supplier<Comparator<RowData>> keyComparatorSupplier,
             MergeFunction mergeFunction,
             FileFormat fileFormat,
             FileStorePathFactory pathFactory,
@@ -70,7 +71,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
         this.sstFileWriterFactory =
                 new SstFileWriter.Factory(
                         keyType, valueType, fileFormat, pathFactory, options.targetFileSize);
-        this.keyComparator = keyComparator;
+        this.keyComparatorSupplier = keyComparatorSupplier;
         this.mergeFunction = mergeFunction;
         this.pathFactory = pathFactory;
         this.scan = scan;
@@ -113,6 +114,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                         .max(Long::compare)
                         .orElse(-1L);
         SstFileWriter sstFileWriter = sstFileWriterFactory.create(partition, bucket);
+        Comparator<RowData> keyComparator = keyComparatorSupplier.get();
         return new MergeTreeWriter(
                 new SortBufferMemTable(
                         sstFileWriter.keyType(),
@@ -125,7 +127,8 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                 keyComparator,
                 mergeFunction.copy(),
                 sstFileWriter,
-                options.commitForceCompact);
+                options.commitForceCompact,
+                options.numSortedRunStopTrigger);
     }
 
     private CompactManager createCompactManager(
@@ -134,8 +137,9 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                 new UniversalCompaction(
                         options.maxSizeAmplificationPercent,
                         options.sizeRatio,
-                        options.numSortedRunMax);
+                        options.numSortedRunCompactionTrigger);
         SstFileWriter sstFileWriter = sstFileWriterFactory.create(partition, bucket);
+        Comparator<RowData> keyComparator = keyComparatorSupplier.get();
         CompactManager.Rewriter rewriter =
                 (outputLevel, dropDelete, sections) ->
                         sstFileWriter.write(

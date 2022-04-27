@@ -99,7 +99,7 @@ public class TestDataReadWrite {
         return new FileStoreWriteImpl(
                         KEY_TYPE,
                         VALUE_TYPE,
-                        COMPARATOR,
+                        () -> COMPARATOR,
                         new DeduplicateMergeFunction(),
                         avro,
                         pathFactory,
