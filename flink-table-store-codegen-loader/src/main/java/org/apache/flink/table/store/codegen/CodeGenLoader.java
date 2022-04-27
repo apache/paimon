@@ -41,7 +41,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /** Copied and modified from the flink-table-planner-loader module. */
-class CodeGenLoader {
+public class CodeGenLoader {
 
     static final String FLINK_TABLE_STORE_CODEGEN_FAT_JAR = "flink-table-store-codegen.jar";
 
