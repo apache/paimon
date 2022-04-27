@@ -72,6 +72,16 @@ public class Levels {
         return levels.size() + 1;
     }
 
+    public int numberOfSortedRuns() {
+        int numberOfSortedRuns = level0.size();
+        for (SortedRun run : levels) {
+            if (run.nonEmpty()) {
+                numberOfSortedRuns++;
+            }
+        }
+        return numberOfSortedRuns;
+    }
+
     /** @return the highest non-empty level or -1 if all levels empty. */
     public int nonEmptyHighestLevel() {
         int i;
