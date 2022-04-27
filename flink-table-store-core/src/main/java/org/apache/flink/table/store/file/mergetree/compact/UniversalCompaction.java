@@ -41,12 +41,12 @@ public class UniversalCompaction implements CompactStrategy {
 
     private final int maxSizeAmp;
     private final int sizeRatio;
-    private final int maxRunNum;
+    private final int numRunCompactionTrigger;
 
-    public UniversalCompaction(int maxSizeAmp, int sizeRatio, int maxRunNum) {
+    public UniversalCompaction(int maxSizeAmp, int sizeRatio, int numRunCompactionTrigger) {
         this.maxSizeAmp = maxSizeAmp;
         this.sizeRatio = sizeRatio;
-        this.maxRunNum = maxRunNum;
+        this.numRunCompactionTrigger = numRunCompactionTrigger;
     }
 
     @Override
@@ -72,9 +72,9 @@ public class UniversalCompaction implements CompactStrategy {
         }
 
         // 3 checking for file num
-        if (runs.size() > maxRunNum) {
+        if (runs.size() > numRunCompactionTrigger) {
             // compacting for file num
-            int candidateCount = runs.size() - maxRunNum + 1;
+            int candidateCount = runs.size() - numRunCompactionTrigger + 1;
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Universal compaction due to file num");
             }
@@ -86,7 +86,7 @@ public class UniversalCompaction implements CompactStrategy {
 
     @VisibleForTesting
     CompactUnit pickForSizeAmp(int maxLevel, List<LevelSortedRun> runs) {
-        if (runs.size() < maxRunNum) {
+        if (runs.size() < numRunCompactionTrigger) {
             return null;
         }
 
@@ -108,7 +108,7 @@ public class UniversalCompaction implements CompactStrategy {
 
     @VisibleForTesting
     CompactUnit pickForSizeRatio(int maxLevel, List<LevelSortedRun> runs) {
-        if (runs.size() < maxRunNum) {
+        if (runs.size() < numRunCompactionTrigger) {
             return null;
         }
 

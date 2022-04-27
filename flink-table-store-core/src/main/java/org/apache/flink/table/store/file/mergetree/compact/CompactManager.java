@@ -68,6 +68,10 @@ public class CompactManager {
         this.rewriter = rewriter;
     }
 
+    public boolean isCompactionFinished() {
+        return taskFuture == null;
+    }
+
     /** Submit a new compaction task. */
     public void submitCompaction(Levels levels) {
         if (taskFuture != null) {
@@ -121,13 +125,15 @@ public class CompactManager {
     }
 
     /** Finish current task, and update result files to {@link Levels}. */
-    public Optional<CompactResult> finishCompaction(Levels levels)
+    public Optional<CompactResult> finishCompaction(Levels levels, boolean blocking)
             throws ExecutionException, InterruptedException {
         if (taskFuture != null) {
-            CompactResult result = taskFuture.get();
-            levels.update(result.before(), result.after());
-            taskFuture = null;
-            return Optional.of(result);
+            if (blocking || taskFuture.isDone()) {
+                CompactResult result = taskFuture.get();
+                levels.update(result.before(), result.after());
+                taskFuture = null;
+                return Optional.of(result);
+            }
         }
         return Optional.empty();
     }

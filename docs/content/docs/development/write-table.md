@@ -183,22 +183,58 @@ following parameters control this tradeoff:
     </thead>
     <tbody>
     <tr>
-      <td><h5>num-sorted-run.max</h5></td>
+      <td><h5>num-sorted-run.compaction-trigger</h5></td>
       <td>No</td>
       <td style="word-wrap: break-word;">5</td>
       <td>Integer</td>
-      <td>The max sorted run number. Includes level0 files (one file one sorted run) and high-level runs (one level one sorted run).</td>
+      <td>The sorted run number to trigger compaction. Includes level0 files (one file one sorted run) and high-level runs (one level one sorted run).</td>
     </tr>
     </tbody>
 </table>
 
-- The larger `num-sorted-run.max`, the less merge cost when updating data, which
+The compaction-trigger determines the frequency of compaction. The smaller the number of
+sorted run, the more compaction occurs, and the larger the number of sorted run, the less compaction occurs.
+
+- The larger `num-sorted-run.compaction-trigger`, the less merge cost when updating data, which
   can avoid many invalid merges. However, if this value is too large, more memory 
   will be needed when merging files because each FileReader will take up a lot of
   memory.
 
-- The smaller `num-sorted-run.max`, the better performance when querying, fewer
+- The smaller `num-sorted-run.compaction-trigger`, the better performance when querying, fewer
   files will be merged.
+
+## Write Stalls
+
+The Writer automatically maintains the structure of the LSM, which means that there
+will be asynchronous threads constantly compaction, but if write speed is faster than the
+compaction speed, write stalls may occur. Writing will be stopping.
+
+If we don't limit writing, we will have the following problems:
+- Increasing space scaling, which can lead to running out of disk space.
+- Increasing read amplification, which greatly reduces read performance.
+
+The following parameters determine when to stop writing:
+
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 20%">Option</th>
+      <th class="text-center" style="width: 5%">Required</th>
+      <th class="text-center" style="width: 5%">Default</th>
+      <th class="text-center" style="width: 10%">Type</th>
+      <th class="text-center" style="width: 60%">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><h5>num-sorted-run.stop-trigger</h5></td>
+      <td>No</td>
+      <td style="word-wrap: break-word;">10</td>
+      <td>Integer</td>
+      <td>The number of sorted-runs that trigger the stopping of writes.</td>
+    </tr>
+    </tbody>
+</table>
 
 ## Memory
 
@@ -207,5 +243,5 @@ There are three main places in the Table Store's sink writer that take up memory
   bucket, and this memory value can be adjustable by the `write-buffer-size`
   option (default 64 MB).
 - The memory consumed by compaction for reading files, it can be adjusted by the
-  `num-sorted-run.max` option to change the maximum number of files to be merged.
+  `num-sorted-run.compaction-trigger` option to change the maximum number of files to be merged.
 - The memory consumed by writing file, which is not adjustable.
