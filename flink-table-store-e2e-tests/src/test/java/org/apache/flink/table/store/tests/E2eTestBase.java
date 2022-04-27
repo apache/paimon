@@ -68,7 +68,8 @@ public abstract class E2eTestBase {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        FLINK_IMAGE_TAG = "amd64/flink:" + properties.getProperty("flink.version");
+        // TODO change image tag to official flink image after 1.15 is released
+        FLINK_IMAGE_TAG = "tsreaper/flink-test:1.15-SNAPSHOT";
     }
 
     private static final String INTER_CONTAINER_JM_ALIAS = "jobmanager";
