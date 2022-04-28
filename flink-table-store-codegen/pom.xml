@@ -85,11 +85,8 @@ under the License.
                                 <filter>
                                     <artifact>org.apache.flink:flink-table-planner_${scala.binary.version}</artifact>
                                     <includes>
-                                        <include>org/apache/flink/table/planner/codegen/**</include>
-                                        <include>org/apache/flink/table/planner/plan/nodes/exec/spec/SortSpec**</include>
-                                        <include>org/apache/calcite/rex/**</include>
-                                        <include>org/apache/calcite/rel/**</include>
-                                        <include>org/apache/calcite/sql/**</include>
+                                        <include>org/apache/flink/table/planner/**</include>
+                                        <include>org/apache/calcite/**</include>
                                         <include>scala/**</include>
                                     </includes>
                                 </filter>
