@@ -26,7 +26,7 @@ import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.types.RowKind;
 
@@ -92,7 +92,7 @@ public class FileStoreSourceSplitReaderTest {
                 new FileStoreSourceSplitReader(rw.createRead(), valueCountMode);
 
         List<Tuple2<Long, Long>> input = kvs();
-        List<SstFileMeta> files = rw.writeFiles(row(1), 0, input);
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
 
         assignSplit(reader, new FileStoreSourceSplit("id1", row(1), 0, files, skip));
 
@@ -139,7 +139,7 @@ public class FileStoreSourceSplitReaderTest {
             writer.write(ValueKind.ADD, GenericRowData.of(tuple2.f0), GenericRowData.of(tuple2.f1));
         }
         writer.write(ValueKind.DELETE, GenericRowData.of(222L), GenericRowData.of(333L));
-        List<SstFileMeta> files = writer.prepareCommit().newFiles();
+        List<DataFileMeta> files = writer.prepareCommit().newFiles();
         writer.close();
 
         assignSplit(reader, new FileStoreSourceSplit("id1", row(1), 0, files));
@@ -166,10 +166,10 @@ public class FileStoreSourceSplitReaderTest {
         FileStoreSourceSplitReader reader = new FileStoreSourceSplitReader(rw.createRead(), false);
 
         List<Tuple2<Long, Long>> input1 = kvs();
-        List<SstFileMeta> files = rw.writeFiles(row(1), 0, input1);
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input1);
 
         List<Tuple2<Long, Long>> input2 = kvs(6);
-        List<SstFileMeta> files2 = rw.writeFiles(row(1), 0, input2);
+        List<DataFileMeta> files2 = rw.writeFiles(row(1), 0, input2);
         files.addAll(files2);
 
         assignSplit(reader, new FileStoreSourceSplit("id1", row(1), 0, files));
@@ -202,7 +202,7 @@ public class FileStoreSourceSplitReaderTest {
         FileStoreSourceSplitReader reader = new FileStoreSourceSplitReader(rw.createRead(), false);
 
         List<Tuple2<Long, Long>> input = kvs();
-        List<SstFileMeta> files = rw.writeFiles(row(1), 0, input);
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
 
         assignSplit(reader, new FileStoreSourceSplit("id1", row(1), 0, files, 3));
 
@@ -228,10 +228,10 @@ public class FileStoreSourceSplitReaderTest {
         FileStoreSourceSplitReader reader = new FileStoreSourceSplitReader(rw.createRead(), false);
 
         List<Tuple2<Long, Long>> input1 = kvs();
-        List<SstFileMeta> files = rw.writeFiles(row(1), 0, input1);
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input1);
 
         List<Tuple2<Long, Long>> input2 = kvs(6);
-        List<SstFileMeta> files2 = rw.writeFiles(row(1), 0, input2);
+        List<DataFileMeta> files2 = rw.writeFiles(row(1), 0, input2);
         files.addAll(files2);
 
         assignSplit(reader, new FileStoreSourceSplit("id1", row(1), 0, files, 7));
@@ -259,11 +259,11 @@ public class FileStoreSourceSplitReaderTest {
         FileStoreSourceSplitReader reader = new FileStoreSourceSplitReader(rw.createRead(), false);
 
         List<Tuple2<Long, Long>> input1 = kvs();
-        List<SstFileMeta> files1 = rw.writeFiles(row(1), 0, input1);
+        List<DataFileMeta> files1 = rw.writeFiles(row(1), 0, input1);
         assignSplit(reader, new FileStoreSourceSplit("id1", row(1), 0, files1));
 
         List<Tuple2<Long, Long>> input2 = kvs();
-        List<SstFileMeta> files2 = rw.writeFiles(row(2), 1, input2);
+        List<DataFileMeta> files2 = rw.writeFiles(row(2), 1, input2);
         assignSplit(reader, new FileStoreSourceSplit("id2", row(2), 1, files2));
 
         RecordsWithSplitIds<RecordAndPosition<RowData>> records = reader.fetch();

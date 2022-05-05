@@ -20,7 +20,7 @@ package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.api.connector.source.SourceSplit;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 
 import java.util.List;
 import java.util.Objects;
@@ -35,12 +35,12 @@ public class FileStoreSourceSplit implements SourceSplit {
 
     private final int bucket;
 
-    private final List<SstFileMeta> files;
+    private final List<DataFileMeta> files;
 
     private final long recordsToSkip;
 
     public FileStoreSourceSplit(
-            String id, BinaryRowData partition, int bucket, List<SstFileMeta> files) {
+            String id, BinaryRowData partition, int bucket, List<DataFileMeta> files) {
         this(id, partition, bucket, files, 0);
     }
 
@@ -48,7 +48,7 @@ public class FileStoreSourceSplit implements SourceSplit {
             String id,
             BinaryRowData partition,
             int bucket,
-            List<SstFileMeta> files,
+            List<DataFileMeta> files,
             long recordsToSkip) {
         this.id = id;
         this.partition = partition;
@@ -65,7 +65,7 @@ public class FileStoreSourceSplit implements SourceSplit {
         return bucket;
     }
 
-    public List<SstFileMeta> files() {
+    public List<DataFileMeta> files() {
         return files;
     }
 

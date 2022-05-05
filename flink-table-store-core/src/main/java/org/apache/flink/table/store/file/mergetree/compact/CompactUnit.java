@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.LevelSortedRun;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -29,17 +29,17 @@ interface CompactUnit {
 
     int outputLevel();
 
-    List<SstFileMeta> files();
+    List<DataFileMeta> files();
 
     static CompactUnit fromLevelRuns(int outputLevel, List<LevelSortedRun> runs) {
-        List<SstFileMeta> files = new ArrayList<>();
+        List<DataFileMeta> files = new ArrayList<>();
         for (LevelSortedRun run : runs) {
             files.addAll(run.run().files());
         }
         return fromFiles(outputLevel, files);
     }
 
-    static CompactUnit fromFiles(int outputLevel, List<SstFileMeta> files) {
+    static CompactUnit fromFiles(int outputLevel, List<DataFileMeta> files) {
         return new CompactUnit() {
             @Override
             public int outputLevel() {
@@ -47,7 +47,7 @@ interface CompactUnit {
             }
 
             @Override
-            public List<SstFileMeta> files() {
+            public List<DataFileMeta> files() {
                 return files;
             }
         };

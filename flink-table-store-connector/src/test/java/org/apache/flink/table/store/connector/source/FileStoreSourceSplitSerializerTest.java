@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.core.io.SimpleVersionedSerialization;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.stats.FieldStats;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -73,8 +73,8 @@ public class FileStoreSourceSplitSerializerTest {
     //  test utils
     // ------------------------------------------------------------------------
 
-    public static SstFileMeta newFile(int level) {
-        return new SstFileMeta(
+    public static DataFileMeta newFile(int level) {
+        return new DataFileMeta(
                 "",
                 0,
                 1,

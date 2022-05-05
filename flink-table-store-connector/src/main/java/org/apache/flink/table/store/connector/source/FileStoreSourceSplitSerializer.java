@@ -22,7 +22,7 @@ import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMetaSerializer;
+import org.apache.flink.table.store.file.data.DataFileMetaSerializer;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.io.ByteArrayOutputStream;
@@ -33,12 +33,12 @@ public class FileStoreSourceSplitSerializer
         implements SimpleVersionedSerializer<FileStoreSourceSplit> {
 
     private final BinaryRowDataSerializer partSerializer;
-    private final SstFileMetaSerializer sstSerializer;
+    private final DataFileMetaSerializer dataFileSerializer;
 
     public FileStoreSourceSplitSerializer(
             RowType partitionType, RowType keyType, RowType valueType) {
         this.partSerializer = new BinaryRowDataSerializer(partitionType.getFieldCount());
-        this.sstSerializer = new SstFileMetaSerializer(keyType, valueType);
+        this.dataFileSerializer = new DataFileMetaSerializer(keyType, valueType);
     }
 
     @Override
@@ -53,7 +53,7 @@ public class FileStoreSourceSplitSerializer
         view.writeUTF(split.splitId());
         partSerializer.serialize(split.partition(), view);
         view.writeInt(split.bucket());
-        sstSerializer.serializeList(split.files(), view);
+        dataFileSerializer.serializeList(split.files(), view);
         view.writeLong(split.recordsToSkip());
         return out.toByteArray();
     }
@@ -65,7 +65,7 @@ public class FileStoreSourceSplitSerializer
                 view.readUTF(),
                 partSerializer.deserialize(view),
                 view.readInt(),
-                sstSerializer.deserializeList(view),
+                dataFileSerializer.deserializeList(view),
                 view.readLong());
     }
 }

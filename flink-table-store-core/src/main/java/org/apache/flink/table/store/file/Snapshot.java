@@ -174,7 +174,7 @@ public class Snapshot {
         /** Changes flushed from the mem table. */
         APPEND,
 
-        /** Changes by compacting existing sst files. */
+        /** Changes by compacting existing data files. */
         COMPACT,
 
         /** Changes that clear up the whole partition and then add new records. */

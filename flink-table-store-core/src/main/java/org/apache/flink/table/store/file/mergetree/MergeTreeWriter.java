@@ -22,10 +22,10 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.data.DataFileWriter;
 import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileWriter;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.util.CloseableIterator;
 
@@ -52,17 +52,17 @@ public class MergeTreeWriter implements RecordWriter {
 
     private final MergeFunction mergeFunction;
 
-    private final SstFileWriter sstFileWriter;
+    private final DataFileWriter dataFileWriter;
 
     private final boolean commitForceCompact;
 
     private final int numSortedRunStopTrigger;
 
-    private final LinkedHashSet<SstFileMeta> newFiles;
+    private final LinkedHashSet<DataFileMeta> newFiles;
 
-    private final LinkedHashMap<String, SstFileMeta> compactBefore;
+    private final LinkedHashMap<String, DataFileMeta> compactBefore;
 
-    private final LinkedHashSet<SstFileMeta> compactAfter;
+    private final LinkedHashSet<DataFileMeta> compactAfter;
 
     private long newSequenceNumber;
 
@@ -73,7 +73,7 @@ public class MergeTreeWriter implements RecordWriter {
             long maxSequenceNumber,
             Comparator<RowData> keyComparator,
             MergeFunction mergeFunction,
-            SstFileWriter sstFileWriter,
+            DataFileWriter dataFileWriter,
             boolean commitForceCompact,
             int numSortedRunStopTrigger) {
         this.memTable = memTable;
@@ -82,7 +82,7 @@ public class MergeTreeWriter implements RecordWriter {
         this.newSequenceNumber = maxSequenceNumber + 1;
         this.keyComparator = keyComparator;
         this.mergeFunction = mergeFunction;
-        this.sstFileWriter = sstFileWriter;
+        this.dataFileWriter = dataFileWriter;
         this.commitForceCompact = commitForceCompact;
         this.numSortedRunStopTrigger = numSortedRunStopTrigger;
         this.newFiles = new LinkedHashSet<>();
@@ -119,8 +119,8 @@ public class MergeTreeWriter implements RecordWriter {
                 finishCompaction(true);
             }
             Iterator<KeyValue> iterator = memTable.iterator(keyComparator, mergeFunction);
-            List<SstFileMeta> files =
-                    sstFileWriter.write(CloseableIterator.adapterForIterator(iterator), 0);
+            List<DataFileMeta> files =
+                    dataFileWriter.write(CloseableIterator.adapterForIterator(iterator), 0);
             newFiles.addAll(files);
             files.forEach(levels::addLevel0File);
             memTable.clear();
@@ -156,8 +156,8 @@ public class MergeTreeWriter implements RecordWriter {
 
     private void updateCompactResult(CompactManager.CompactResult result) {
         Set<String> afterFiles =
-                result.after().stream().map(SstFileMeta::fileName).collect(Collectors.toSet());
-        for (SstFileMeta file : result.before()) {
+                result.after().stream().map(DataFileMeta::fileName).collect(Collectors.toSet());
+        for (DataFileMeta file : result.before()) {
             if (compactAfter.remove(file)) {
                 // This is an intermediate file (not a new data file), which is no longer needed
                 // after compaction and can be deleted directly, but upgrade file is required by
@@ -166,7 +166,7 @@ public class MergeTreeWriter implements RecordWriter {
                 // 2. This file is not the input of upgraded.
                 if (!compactBefore.containsKey(file.fileName())
                         && !afterFiles.contains(file.fileName())) {
-                    sstFileWriter.delete(file);
+                    dataFileWriter.delete(file);
                 }
             } else {
                 compactBefore.put(file.fileName(), file);
@@ -189,19 +189,19 @@ public class MergeTreeWriter implements RecordWriter {
     }
 
     @Override
-    public List<SstFileMeta> close() throws Exception {
+    public List<DataFileMeta> close() throws Exception {
         sync();
         // delete temporary files
-        List<SstFileMeta> delete = new ArrayList<>(newFiles);
-        for (SstFileMeta file : compactAfter) {
+        List<DataFileMeta> delete = new ArrayList<>(newFiles);
+        for (DataFileMeta file : compactAfter) {
             // upgrade file is required by previous snapshot, so we should ensure that this file is
             // not the output of upgraded.
             if (!compactBefore.containsKey(file.fileName())) {
                 delete.add(file);
             }
         }
-        for (SstFileMeta file : delete) {
-            sstFileWriter.delete(file);
+        for (DataFileMeta file : delete) {
+            dataFileWriter.delete(file);
         }
         newFiles.clear();
         compactAfter.clear();

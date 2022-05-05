@@ -44,7 +44,7 @@ public class FieldStatsArraySerializerTest extends ObjectSerializerTestBase<Fiel
         }
         FieldStats[] result = collector.extract();
 
-        // as stated in SstFile.RollingFile#finish, field stats are not collected currently so
+        // as stated in RollingFile.Writer#finish, field stats are not collected currently so
         // min/max values are all nulls
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int numFieldsNotCollected = random.nextInt(result.length + 1);

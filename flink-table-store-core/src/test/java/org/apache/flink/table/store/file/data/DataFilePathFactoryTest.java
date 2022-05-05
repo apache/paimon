@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.mergetree.sst;
+package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.core.fs.Path;
 
@@ -25,28 +25,29 @@ import org.junit.jupiter.api.io.TempDir;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link SstPathFactory}. */
-public class SstPathFactoryTest {
+/** Tests for {@link DataFilePathFactory}. */
+public class DataFilePathFactoryTest {
 
     @TempDir java.nio.file.Path tempDir;
 
     @Test
     public void testNoPartition() {
-        SstPathFactory pathFactory = new SstPathFactory(new Path(tempDir.toString()), "", 123);
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(new Path(tempDir.toString()), "", 123);
         String uuid = pathFactory.uuid();
 
         for (int i = 0; i < 20; i++) {
             assertThat(pathFactory.newPath())
-                    .isEqualTo(new Path(tempDir.toString() + "/bucket-123/sst-" + uuid + "-" + i));
+                    .isEqualTo(new Path(tempDir.toString() + "/bucket-123/data-" + uuid + "-" + i));
         }
-        assertThat(pathFactory.toPath("my-sst-file-name"))
-                .isEqualTo(new Path(tempDir.toString() + "/bucket-123/my-sst-file-name"));
+        assertThat(pathFactory.toPath("my-data-file-name"))
+                .isEqualTo(new Path(tempDir.toString() + "/bucket-123/my-data-file-name"));
     }
 
     @Test
     public void testWithPartition() {
-        SstPathFactory pathFactory =
-                new SstPathFactory(new Path(tempDir.toString()), "dt=20211224", 123);
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(new Path(tempDir.toString()), "dt=20211224", 123);
         String uuid = pathFactory.uuid();
 
         for (int i = 0; i < 20; i++) {
@@ -54,13 +55,13 @@ public class SstPathFactoryTest {
                     .isEqualTo(
                             new Path(
                                     tempDir.toString()
-                                            + "/dt=20211224/bucket-123/sst-"
+                                            + "/dt=20211224/bucket-123/data-"
                                             + uuid
                                             + "-"
                                             + i));
         }
-        assertThat(pathFactory.toPath("my-sst-file-name"))
+        assertThat(pathFactory.toPath("my-data-file-name"))
                 .isEqualTo(
-                        new Path(tempDir.toString() + "/dt=20211224/bucket-123/my-sst-file-name"));
+                        new Path(tempDir.toString() + "/dt=20211224/bucket-123/my-data-file-name"));
     }
 }

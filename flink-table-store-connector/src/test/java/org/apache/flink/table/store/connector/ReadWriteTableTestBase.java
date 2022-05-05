@@ -78,7 +78,7 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
         assertThat(Paths.get(rootPath, relativeFilePath, "snapshot")).exists();
         // check manifest file path
         assertThat(Paths.get(rootPath, relativeFilePath, "manifest")).exists();
-        // check sst file path
+        // check data file path
         if (partitionList == null) {
             // at least exists bucket-0
             assertThat(Paths.get(rootPath, relativeFilePath, "bucket-0")).exists();

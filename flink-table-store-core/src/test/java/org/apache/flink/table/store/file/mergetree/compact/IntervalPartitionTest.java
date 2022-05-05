@@ -21,8 +21,8 @@ package org.apache.flink.table.store.file.mergetree.compact;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
 import org.apache.flink.table.runtime.generated.RecordComparator;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.stats.FieldStats;
 
 import org.junit.jupiter.api.RepeatedTest;
@@ -142,8 +142,8 @@ public class IntervalPartitionTest {
         return sortedRuns;
     }
 
-    private List<SstFileMeta> parseMetas(String in) {
-        List<SstFileMeta> metas = new ArrayList<>();
+    private List<DataFileMeta> parseMetas(String in) {
+        List<DataFileMeta> metas = new ArrayList<>();
         Pattern pattern = Pattern.compile("\\[(\\d+?), (\\d+?)]");
         Matcher matcher = pattern.matcher(in);
         while (matcher.find()) {
@@ -155,7 +155,7 @@ public class IntervalPartitionTest {
         return metas;
     }
 
-    private SstFileMeta makeInterval(int left, int right) {
+    private DataFileMeta makeInterval(int left, int right) {
         BinaryRowData minKey = new BinaryRowData(1);
         BinaryRowWriter minWriter = new BinaryRowWriter(minKey);
         minWriter.writeInt(0, left);
@@ -165,7 +165,7 @@ public class IntervalPartitionTest {
         maxWriter.writeInt(0, right);
         maxWriter.complete();
 
-        return new SstFileMeta(
+        return new DataFileMeta(
                 "DUMMY",
                 100,
                 25,

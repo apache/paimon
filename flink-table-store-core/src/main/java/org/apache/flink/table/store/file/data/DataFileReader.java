@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.mergetree.sst;
+package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
@@ -38,23 +38,23 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 
 /**
- * Reads {@link KeyValue}s from sst files.
+ * Reads {@link KeyValue}s from data files.
  *
- * <p>NOTE: Sst files store records ordered by keys without projections. If key projections are
- * applied the produced iterator is no longer ordered.
+ * <p>NOTE: If the key exists, the data is sorted according to the key and the key projection will
+ * cause the orderliness of the data to fail.
  */
-public class SstFileReader {
+public class DataFileReader {
 
     private final RowType keyType;
     private final RowType valueType;
     private final BulkFormat<RowData, FileSourceSplit> readerFactory;
-    private final SstPathFactory pathFactory;
+    private final DataFilePathFactory pathFactory;
 
-    private SstFileReader(
+    private DataFileReader(
             RowType keyType,
             RowType valueType,
             BulkFormat<RowData, FileSourceSplit> readerFactory,
-            SstPathFactory pathFactory) {
+            DataFilePathFactory pathFactory) {
         this.keyType = keyType;
         this.valueType = valueType;
         this.readerFactory = readerFactory;
@@ -62,15 +62,15 @@ public class SstFileReader {
     }
 
     public RecordReader read(String fileName) throws IOException {
-        return new SstFileRecordReader(pathFactory.toPath(fileName));
+        return new DataFileRecordReader(pathFactory.toPath(fileName));
     }
 
-    private class SstFileRecordReader implements RecordReader {
+    private class DataFileRecordReader implements RecordReader {
 
         private final BulkFormat.Reader<RowData> reader;
         private final KeyValueSerializer serializer;
 
-        private SstFileRecordReader(Path path) throws IOException {
+        private DataFileRecordReader(Path path) throws IOException {
             long fileSize = FileUtils.getFileSize(path);
             FileSourceSplit split = new FileSourceSplit("ignore", path, 0, fileSize, 0, fileSize);
             this.reader = readerFactory.createReader(FileUtils.DEFAULT_READER_CONFIG, split);
@@ -81,7 +81,7 @@ public class SstFileReader {
         @Override
         public RecordIterator readBatch() throws IOException {
             BulkFormat.RecordIterator<RowData> iterator = reader.readBatch();
-            return iterator == null ? null : new SstFileRecordIterator(iterator, serializer);
+            return iterator == null ? null : new DataFileRecordIterator(iterator, serializer);
         }
 
         @Override
@@ -90,12 +90,12 @@ public class SstFileReader {
         }
     }
 
-    private static class SstFileRecordIterator implements RecordReader.RecordIterator {
+    private static class DataFileRecordIterator implements RecordReader.RecordIterator {
 
         private final BulkFormat.RecordIterator<RowData> iterator;
         private final KeyValueSerializer serializer;
 
-        private SstFileRecordIterator(
+        private DataFileRecordIterator(
                 BulkFormat.RecordIterator<RowData> iterator, KeyValueSerializer serializer) {
             this.iterator = iterator;
             this.serializer = serializer;
@@ -113,7 +113,7 @@ public class SstFileReader {
         }
     }
 
-    /** Creates {@link SstFileReader}. */
+    /** Creates {@link DataFileReader}. */
     public static class Factory {
 
         private final RowType keyType;
@@ -153,15 +153,15 @@ public class SstFileReader {
             return this;
         }
 
-        public SstFileReader create(BinaryRowData partition, int bucket) {
+        public DataFileReader create(BinaryRowData partition, int bucket) {
             RowType recordType = KeyValue.schema(keyType, valueType);
             int[][] projection =
                     KeyValue.project(keyProjection, valueProjection, keyType.getFieldCount());
-            return new SstFileReader(
+            return new DataFileReader(
                     projectedKeyType,
                     projectedValueType,
                     fileFormat.createReaderFactory(recordType, projection),
-                    pathFactory.createSstPathFactory(partition, bucket));
+                    pathFactory.createDataFilePathFactory(partition, bucket));
         }
 
         private void applyProjection() {

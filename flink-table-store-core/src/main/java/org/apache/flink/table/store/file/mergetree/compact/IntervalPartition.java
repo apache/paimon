@@ -20,8 +20,8 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -29,13 +29,13 @@ import java.util.List;
 import java.util.PriorityQueue;
 import java.util.stream.Collectors;
 
-/** Algorithm to partition several sst files into the minimum number of {@link SortedRun}s. */
+/** Algorithm to partition several data files into the minimum number of {@link SortedRun}s. */
 public class IntervalPartition {
 
-    private final List<SstFileMeta> files;
+    private final List<DataFileMeta> files;
     private final Comparator<RowData> keyComparator;
 
-    public IntervalPartition(List<SstFileMeta> inputFiles, Comparator<RowData> keyComparator) {
+    public IntervalPartition(List<DataFileMeta> inputFiles, Comparator<RowData> keyComparator) {
         this.files = new ArrayList<>(inputFiles);
         this.files.sort(
                 (o1, o2) -> {
@@ -66,10 +66,10 @@ public class IntervalPartition {
      */
     public List<List<SortedRun>> partition() {
         List<List<SortedRun>> result = new ArrayList<>();
-        List<SstFileMeta> section = new ArrayList<>();
+        List<DataFileMeta> section = new ArrayList<>();
         BinaryRowData bound = null;
 
-        for (SstFileMeta meta : files) {
+        for (DataFileMeta meta : files) {
             if (!section.isEmpty() && keyComparator.compare(meta.minKey(), bound) > 0) {
                 // larger than current right bound, conclude current section and create a new one
                 result.add(partition(section));
@@ -90,30 +90,30 @@ public class IntervalPartition {
         return result;
     }
 
-    private List<SortedRun> partition(List<SstFileMeta> metas) {
-        PriorityQueue<List<SstFileMeta>> queue =
+    private List<SortedRun> partition(List<DataFileMeta> metas) {
+        PriorityQueue<List<DataFileMeta>> queue =
                 new PriorityQueue<>(
                         (o1, o2) ->
-                                // sort by max key of the last sst file
+                                // sort by max key of the last data file
                                 keyComparator.compare(
                                         o1.get(o1.size() - 1).maxKey(),
                                         o2.get(o2.size() - 1).maxKey()));
         // create the initial partition
-        List<SstFileMeta> firstRun = new ArrayList<>();
+        List<DataFileMeta> firstRun = new ArrayList<>();
         firstRun.add(metas.get(0));
         queue.add(firstRun);
 
         for (int i = 1; i < metas.size(); i++) {
-            SstFileMeta meta = metas.get(i);
+            DataFileMeta meta = metas.get(i);
             // any file list whose max key < meta.minKey() is sufficient,
             // for convenience we pick the smallest
-            List<SstFileMeta> top = queue.poll();
+            List<DataFileMeta> top = queue.poll();
             if (keyComparator.compare(meta.minKey(), top.get(top.size() - 1).maxKey()) > 0) {
                 // append current file to an existing partition
                 top.add(meta);
             } else {
                 // create a new partition
-                List<SstFileMeta> newRun = new ArrayList<>();
+                List<DataFileMeta> newRun = new ArrayList<>();
                 newRun.add(meta);
                 queue.add(newRun);
             }

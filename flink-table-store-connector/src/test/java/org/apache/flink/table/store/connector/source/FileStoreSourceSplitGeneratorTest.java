@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.stats.FieldStats;
 
@@ -94,7 +94,7 @@ public class FileStoreSourceSplitGeneratorTest {
         assertThat(split.splitId()).isEqualTo(splitId);
         assertThat(split.partition().getInt(0)).isEqualTo(part);
         assertThat(split.bucket()).isEqualTo(bucket);
-        assertThat(split.files().stream().map(SstFileMeta::fileName).collect(Collectors.toList()))
+        assertThat(split.files().stream().map(DataFileMeta::fileName).collect(Collectors.toList()))
                 .isEqualTo(files);
     }
 
@@ -104,7 +104,7 @@ public class FileStoreSourceSplitGeneratorTest {
                 row(partition), // not used
                 bucket, // not used
                 0, // not used
-                new SstFileMeta(
+                new DataFileMeta(
                         fileName,
                         0, // not used
                         0, // not used

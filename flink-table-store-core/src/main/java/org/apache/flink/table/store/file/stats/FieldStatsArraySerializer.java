@@ -83,7 +83,7 @@ public class FieldStatsArraySerializer extends ObjectSerializer<FieldStats[]> {
     }
 
     private static RowType toAllFieldsNullableRowType(RowType rowType) {
-        // as stated in SstFile.RollingFile#finish, field stats are not collected currently so
+        // as stated in RollingFile.Writer#finish, field stats are not collected currently so
         // min/max values are all nulls
         return RowType.of(
                 rowType.getFields().stream()

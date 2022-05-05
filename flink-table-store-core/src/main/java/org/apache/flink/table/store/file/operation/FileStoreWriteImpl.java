@@ -20,6 +20,9 @@ package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.data.DataFileReader;
+import org.apache.flink.table.store.file.data.DataFileWriter;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.mergetree.Levels;
@@ -31,9 +34,6 @@ import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileReader;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileWriter;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
@@ -49,8 +49,8 @@ import java.util.stream.Collectors;
 /** Default implementation of {@link FileStoreWrite}. */
 public class FileStoreWriteImpl implements FileStoreWrite {
 
-    private final SstFileReader.Factory sstFileReaderFactory;
-    private final SstFileWriter.Factory sstFileWriterFactory;
+    private final DataFileReader.Factory dataFileReaderFactory;
+    private final DataFileWriter.Factory dataFileWriterFactory;
     private final Supplier<Comparator<RowData>> keyComparatorSupplier;
     private final MergeFunction mergeFunction;
     private final FileStorePathFactory pathFactory;
@@ -66,10 +66,10 @@ public class FileStoreWriteImpl implements FileStoreWrite {
             FileStorePathFactory pathFactory,
             FileStoreScan scan,
             MergeTreeOptions options) {
-        this.sstFileReaderFactory =
-                new SstFileReader.Factory(keyType, valueType, fileFormat, pathFactory);
-        this.sstFileWriterFactory =
-                new SstFileWriter.Factory(
+        this.dataFileReaderFactory =
+                new DataFileReader.Factory(keyType, valueType, fileFormat, pathFactory);
+        this.dataFileWriterFactory =
+                new DataFileWriter.Factory(
                         keyType, valueType, fileFormat, pathFactory, options.targetFileSize);
         this.keyComparatorSupplier = keyComparatorSupplier;
         this.mergeFunction = mergeFunction;
@@ -106,19 +106,19 @@ public class FileStoreWriteImpl implements FileStoreWrite {
     private RecordWriter createMergeTreeWriter(
             BinaryRowData partition,
             int bucket,
-            List<SstFileMeta> restoreFiles,
+            List<DataFileMeta> restoreFiles,
             ExecutorService compactExecutor) {
         long maxSequenceNumber =
                 restoreFiles.stream()
-                        .map(SstFileMeta::maxSequenceNumber)
+                        .map(DataFileMeta::maxSequenceNumber)
                         .max(Long::compare)
                         .orElse(-1L);
-        SstFileWriter sstFileWriter = sstFileWriterFactory.create(partition, bucket);
+        DataFileWriter dataFileWriter = dataFileWriterFactory.create(partition, bucket);
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
         return new MergeTreeWriter(
                 new SortBufferMemTable(
-                        sstFileWriter.keyType(),
-                        sstFileWriter.valueType(),
+                        dataFileWriter.keyType(),
+                        dataFileWriter.valueType(),
                         options.writeBufferSize,
                         options.pageSize),
                 createCompactManager(partition, bucket, compactExecutor),
@@ -126,7 +126,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                 maxSequenceNumber,
                 keyComparator,
                 mergeFunction.copy(),
-                sstFileWriter,
+                dataFileWriter,
                 options.commitForceCompact,
                 options.numSortedRunStopTrigger);
     }
@@ -138,16 +138,16 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                         options.maxSizeAmplificationPercent,
                         options.sizeRatio,
                         options.numSortedRunCompactionTrigger);
-        SstFileWriter sstFileWriter = sstFileWriterFactory.create(partition, bucket);
+        DataFileWriter dataFileWriter = dataFileWriterFactory.create(partition, bucket);
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
         CompactManager.Rewriter rewriter =
                 (outputLevel, dropDelete, sections) ->
-                        sstFileWriter.write(
+                        dataFileWriter.write(
                                 new RecordReaderIterator(
                                         new MergeTreeReader(
                                                 sections,
                                                 dropDelete,
-                                                sstFileReaderFactory.create(partition, bucket),
+                                                dataFileReaderFactory.create(partition, bucket),
                                                 keyComparator,
                                                 mergeFunction.copy())),
                                 outputLevel);

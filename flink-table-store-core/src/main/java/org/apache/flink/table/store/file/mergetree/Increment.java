@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree;
 
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 
 import java.util.Collections;
 import java.util.List;
@@ -35,30 +35,30 @@ import java.util.Objects;
  */
 public class Increment {
 
-    private final List<SstFileMeta> newFiles;
+    private final List<DataFileMeta> newFiles;
 
-    private final List<SstFileMeta> compactBefore;
+    private final List<DataFileMeta> compactBefore;
 
-    private final List<SstFileMeta> compactAfter;
+    private final List<DataFileMeta> compactAfter;
 
     public Increment(
-            List<SstFileMeta> newFiles,
-            List<SstFileMeta> beCompacted,
-            List<SstFileMeta> compacted) {
+            List<DataFileMeta> newFiles,
+            List<DataFileMeta> beCompacted,
+            List<DataFileMeta> compacted) {
         this.newFiles = Collections.unmodifiableList(newFiles);
         this.compactBefore = Collections.unmodifiableList(beCompacted);
         this.compactAfter = Collections.unmodifiableList(compacted);
     }
 
-    public List<SstFileMeta> newFiles() {
+    public List<DataFileMeta> newFiles() {
         return newFiles;
     }
 
-    public List<SstFileMeta> compactBefore() {
+    public List<DataFileMeta> compactBefore() {
         return compactBefore;
     }
 
-    public List<SstFileMeta> compactAfter() {
+    public List<DataFileMeta> compactAfter() {
         return compactAfter;
     }
 
