@@ -84,17 +84,6 @@ public class MergeTreeOptions {
                             "The size amplification is defined as the amount (in percentage) of additional storage "
                                     + "needed to store a single byte of data in the merge tree.");
 
-    public static final ConfigOption<Boolean> COMPACTION_RESCALE_BUCKET =
-            ConfigOptions.key("compact.rescale-bucket")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "Specify the behavior for compaction. Set value to true "
-                                    + "will lead compaction to reorganize data files "
-                                    + "according to the bucket number from table schema. "
-                                    + "By default, compaction does not adjust the bucket number "
-                                    + "of a partition/table.");
-
     public static final ConfigOption<Integer> COMPACTION_SIZE_RATIO =
             ConfigOptions.key("compaction.size-ratio")
                     .intType()
@@ -122,8 +111,6 @@ public class MergeTreeOptions {
 
     public final int sizeRatio;
 
-    public final boolean rescaleBucket;
-
     public MergeTreeOptions(
             long writeBufferSize,
             long pageSize,
@@ -133,8 +120,7 @@ public class MergeTreeOptions {
             Integer numLevels,
             boolean commitForceCompact,
             int maxSizeAmplificationPercent,
-            int sizeRatio,
-            boolean rescaleBucket) {
+            int sizeRatio) {
         this.writeBufferSize = writeBufferSize;
         this.pageSize = pageSize;
         this.targetFileSize = targetFileSize;
@@ -147,7 +133,6 @@ public class MergeTreeOptions {
         this.commitForceCompact = commitForceCompact;
         this.maxSizeAmplificationPercent = maxSizeAmplificationPercent;
         this.sizeRatio = sizeRatio;
-        this.rescaleBucket = rescaleBucket;
     }
 
     public MergeTreeOptions(ReadableConfig config) {
@@ -160,8 +145,7 @@ public class MergeTreeOptions {
                 config.get(NUM_LEVELS),
                 config.get(COMMIT_FORCE_COMPACT),
                 config.get(COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT),
-                config.get(COMPACTION_SIZE_RATIO),
-                config.get(COMPACTION_RESCALE_BUCKET));
+                config.get(COMPACTION_SIZE_RATIO));
     }
 
     public static Set<ConfigOption<?>> allOptions() {
@@ -174,7 +158,6 @@ public class MergeTreeOptions {
         allOptions.add(NUM_LEVELS);
         allOptions.add(COMMIT_FORCE_COMPACT);
         allOptions.add(COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT);
-        allOptions.add(COMPACTION_RESCALE_BUCKET);
         allOptions.add(COMPACTION_SIZE_RATIO);
         return allOptions;
     }
