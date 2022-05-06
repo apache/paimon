@@ -122,7 +122,7 @@ public class FileStoreOptions implements Serializable {
                     .defaultValue(MergeEngine.DEDUPLICATE)
                     .withDescription(
                             Description.builder()
-                                    .text("Specifies the merge engine for table with primary key.")
+                                    .text("Specify the merge engine for table with primary key.")
                                     .linebreak()
                                     .list(
                                             formatEnumOption(MergeEngine.DEDUPLICATE),

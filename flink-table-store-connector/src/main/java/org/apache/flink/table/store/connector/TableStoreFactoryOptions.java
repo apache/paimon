@@ -28,6 +28,17 @@ import java.util.Set;
 /** Options for {@link TableStoreFactory}. */
 public class TableStoreFactoryOptions {
 
+    public static final ConfigOption<Boolean> COMPACTION_RESCALE_BUCKET =
+            ConfigOptions.key("compaction.rescale-bucket")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Specify the behavior for compaction. Set value to true "
+                                    + "will lead compaction to reorganize data files "
+                                    + "according to the bucket number from table schema. "
+                                    + "By default, compaction does not adjust the bucket number "
+                                    + "of a partition/table.");
+
     public static final ConfigOption<String> LOG_SYSTEM =
             ConfigOptions.key("log.system")
                     .stringType()
@@ -47,6 +58,7 @@ public class TableStoreFactoryOptions {
 
     public static Set<ConfigOption<?>> allOptions() {
         Set<ConfigOption<?>> allOptions = new HashSet<>();
+        allOptions.add(COMPACTION_RESCALE_BUCKET);
         allOptions.add(LOG_SYSTEM);
         allOptions.add(SINK_PARALLELISM);
         allOptions.add(SCAN_PARALLELISM);
