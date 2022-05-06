@@ -20,8 +20,8 @@ package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.Increment;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 
 import java.util.List;
 
@@ -53,5 +53,5 @@ public interface RecordWriter {
      *
      * @return Deleted files.
      */
-    List<SstFileMeta> close() throws Exception;
+    List<DataFileMeta> close() throws Exception;
 }

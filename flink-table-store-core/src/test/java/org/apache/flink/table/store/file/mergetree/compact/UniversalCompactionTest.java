@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.LevelSortedRun;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 
 import org.junit.jupiter.api.Test;
 
@@ -51,19 +51,19 @@ public class UniversalCompactionTest {
         // by size amplification
         Optional<CompactUnit> pick = compaction.pick(3, level0(1, 2, 3, 3));
         assertThat(pick.isPresent()).isTrue();
-        long[] results = pick.get().files().stream().mapToLong(SstFileMeta::fileSize).toArray();
+        long[] results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
         assertThat(results).isEqualTo(new long[] {1, 2, 3, 3});
 
         // by size ratio
         pick = compaction.pick(3, level0(1, 1, 1, 50));
         assertThat(pick.isPresent()).isTrue();
-        results = pick.get().files().stream().mapToLong(SstFileMeta::fileSize).toArray();
+        results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
         assertThat(results).isEqualTo(new long[] {1, 1, 1});
 
         // by file num
         pick = compaction.pick(3, level0(1, 2, 3, 50));
         assertThat(pick.isPresent()).isTrue();
-        results = pick.get().files().stream().mapToLong(SstFileMeta::fileSize).toArray();
+        results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
         // 3 should be in the candidate, by size ratio after picking by file num
         assertThat(results).isEqualTo(new long[] {1, 2, 3});
     }
@@ -182,7 +182,10 @@ public class UniversalCompactionTest {
         CompactUnit unit = compaction.pickForSizeAmp(3, level0(sizes));
         if (unit != null) {
             return new long[] {
-                unit.files().stream().mapToLong(SstFileMeta::fileSize).reduce(Long::sum).getAsLong()
+                unit.files().stream()
+                        .mapToLong(DataFileMeta::fileSize)
+                        .reduce(Long::sum)
+                        .getAsLong()
             };
         }
         return sizes;
@@ -196,7 +199,7 @@ public class UniversalCompactionTest {
         CompactUnit unit = compaction.pickForSizeRatio(3, level0(sizes));
         if (unit != null) {
             List<Long> compact =
-                    unit.files().stream().map(SstFileMeta::fileSize).collect(Collectors.toList());
+                    unit.files().stream().map(DataFileMeta::fileSize).collect(Collectors.toList());
             List<Long> result = new ArrayList<>();
             for (long size : sizes) {
                 result.add(size);
@@ -223,7 +226,7 @@ public class UniversalCompactionTest {
         return runs;
     }
 
-    private SstFileMeta file(long size) {
-        return new SstFileMeta("", size, 1, null, null, null, null, 0, 0, 0);
+    private DataFileMeta file(long size) {
+        return new DataFileMeta("", size, 1, null, null, null, null, 0, 0, 0);
     }
 }

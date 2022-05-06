@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.TinyIntType;
@@ -29,7 +29,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/** Entry of a manifest file, representing an addition / deletion of a SST file. */
+/** Entry of a manifest file, representing an addition / deletion of a data file. */
 public class ManifestEntry {
 
     private final ValueKind kind;
@@ -37,14 +37,14 @@ public class ManifestEntry {
     private final BinaryRowData partition;
     private final int bucket;
     private final int totalBuckets;
-    private final SstFileMeta file;
+    private final DataFileMeta file;
 
     public ManifestEntry(
             ValueKind kind,
             BinaryRowData partition,
             int bucket,
             int totalBuckets,
-            SstFileMeta file) {
+            DataFileMeta file) {
         this.kind = kind;
         this.partition = partition;
         this.bucket = bucket;
@@ -68,7 +68,7 @@ public class ManifestEntry {
         return totalBuckets;
     }
 
-    public SstFileMeta file() {
+    public DataFileMeta file() {
         return file;
     }
 
@@ -82,7 +82,7 @@ public class ManifestEntry {
         fields.add(new RowType.RowField("_PARTITION", partitionType));
         fields.add(new RowType.RowField("_BUCKET", new IntType(false)));
         fields.add(new RowType.RowField("_TOTAL_BUCKETS", new IntType(false)));
-        fields.add(new RowType.RowField("_FILE", SstFileMeta.schema(keyType, valueType)));
+        fields.add(new RowType.RowField("_FILE", DataFileMeta.schema(keyType, valueType)));
         return new RowType(fields);
     }
 
@@ -110,7 +110,7 @@ public class ManifestEntry {
     }
 
     /**
-     * The same {@link Identifier} indicates that the {@link ManifestEntry} refers to the same sst
+     * The same {@link Identifier} indicates that the {@link ManifestEntry} refers to the same data
      * file.
      */
     public static class Identifier {

@@ -22,7 +22,7 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMetaSerializer;
+import org.apache.flink.table.store.file.data.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -32,12 +32,12 @@ public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestE
     private static final long serialVersionUID = 1L;
 
     private final RowDataSerializer partitionSerializer;
-    private final SstFileMetaSerializer sstFileMetaSerializer;
+    private final DataFileMetaSerializer dataFileMetaSerializer;
 
     public ManifestEntrySerializer(RowType partitionType, RowType keyType, RowType valueType) {
         super(ManifestEntry.schema(partitionType, keyType, valueType));
         this.partitionSerializer = new RowDataSerializer(partitionType);
-        this.sstFileMetaSerializer = new SstFileMetaSerializer(keyType, valueType);
+        this.dataFileMetaSerializer = new DataFileMetaSerializer(keyType, valueType);
     }
 
     @Override
@@ -52,7 +52,7 @@ public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestE
         row.setField(1, entry.partition());
         row.setField(2, entry.bucket());
         row.setField(3, entry.totalBuckets());
-        row.setField(4, sstFileMetaSerializer.toRow(entry.file()));
+        row.setField(4, dataFileMetaSerializer.toRow(entry.file()));
         return row;
     }
 
@@ -68,6 +68,6 @@ public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestE
                         .copy(),
                 row.getInt(2),
                 row.getInt(3),
-                sstFileMetaSerializer.fromRow(row.getRow(4, sstFileMetaSerializer.numFields())));
+                dataFileMetaSerializer.fromRow(row.getRow(4, dataFileMetaSerializer.numFields())));
     }
 }

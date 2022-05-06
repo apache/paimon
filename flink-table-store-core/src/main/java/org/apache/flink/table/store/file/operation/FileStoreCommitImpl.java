@@ -24,12 +24,12 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateConverter;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -287,11 +287,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private List<ManifestEntry> collectChanges(
-            Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> map, ValueKind kind) {
+            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> map, ValueKind kind) {
         List<ManifestEntry> changes = new ArrayList<>();
-        for (Map.Entry<BinaryRowData, Map<Integer, List<SstFileMeta>>> entryWithPartition :
+        for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> entryWithPartition :
                 map.entrySet()) {
-            for (Map.Entry<Integer, List<SstFileMeta>> entryWithBucket :
+            for (Map.Entry<Integer, List<DataFileMeta>> entryWithBucket :
                     entryWithPartition.getValue().entrySet()) {
                 changes.addAll(
                         entryWithBucket.getValue().stream()

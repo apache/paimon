@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.mergetree.sst;
+package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
@@ -51,37 +51,37 @@ import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link SstFileReader} and {@link SstFileWriter}. */
-public class SstFileTest {
+/** Tests for {@link DataFileReader} and {@link DataFileWriter}. */
+public class DataFileTest {
 
-    private final SstTestDataGenerator gen =
-            SstTestDataGenerator.builder().memTableCapacity(20).build();
+    private final DataFileTestDataGenerator gen =
+            DataFileTestDataGenerator.builder().memTableCapacity(20).build();
 
     @TempDir java.nio.file.Path tempDir;
 
     @RepeatedTest(10)
-    public void testWriteAndReadSstFileWithStatsCollectingRollingFile() throws Exception {
-        testWriteAndReadSstFileImpl("avro");
+    public void testWriteAndReadDataFileWithStatsCollectingRollingFile() throws Exception {
+        testWriteAndReadDataFileImpl("avro");
     }
 
     @RepeatedTest(10)
-    public void testWriteAndReadSstFileWithFileExtractingRollingFile() throws Exception {
-        testWriteAndReadSstFileImpl("avro-extract");
+    public void testWriteAndReadDataFileWithFileExtractingRollingFile() throws Exception {
+        testWriteAndReadDataFileImpl("avro-extract");
     }
 
-    private void testWriteAndReadSstFileImpl(String format) throws Exception {
-        SstTestDataGenerator.Data data = gen.next();
-        SstFileWriter writer = createSstFileWriter(tempDir.toString(), format);
-        SstFileMetaSerializer serializer =
-                new SstFileMetaSerializer(
+    private void testWriteAndReadDataFileImpl(String format) throws Exception {
+        DataFileTestDataGenerator.Data data = gen.next();
+        DataFileWriter writer = createDataFileWriter(tempDir.toString(), format);
+        DataFileMetaSerializer serializer =
+                new DataFileMetaSerializer(
                         TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.ROW_TYPE);
 
-        List<SstFileMeta> actualMetas =
+        List<DataFileMeta> actualMetas =
                 writer.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
 
         checkRollingFiles(data.meta, actualMetas, writer.suggestedFileSize());
 
-        SstFileReader reader = createSstFileReader(tempDir.toString(), format, null, null);
+        DataFileReader reader = createDataFileReader(tempDir.toString(), format, null, null);
         assertData(
                 data,
                 actualMetas,
@@ -95,9 +95,9 @@ public class SstFileTest {
     @RepeatedTest(10)
     public void testCleanUpForException() throws IOException {
         FailingAtomicRenameFileSystem.get().reset(1, 10);
-        SstTestDataGenerator.Data data = gen.next();
-        SstFileWriter writer =
-                createSstFileWriter(
+        DataFileTestDataGenerator.Data data = gen.next();
+        DataFileWriter writer =
+                createDataFileWriter(
                         FailingAtomicRenameFileSystem.getFailingPath(tempDir.toString()), "avro");
 
         try {
@@ -116,17 +116,17 @@ public class SstFileTest {
 
     @Test
     public void testKeyProjection() throws Exception {
-        SstTestDataGenerator.Data data = gen.next();
-        SstFileWriter sstFileWriter = createSstFileWriter(tempDir.toString(), "avro");
-        SstFileMetaSerializer serializer =
-                new SstFileMetaSerializer(
+        DataFileTestDataGenerator.Data data = gen.next();
+        DataFileWriter dataFileWriter = createDataFileWriter(tempDir.toString(), "avro");
+        DataFileMetaSerializer serializer =
+                new DataFileMetaSerializer(
                         TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.ROW_TYPE);
-        List<SstFileMeta> actualMetas =
-                sstFileWriter.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
+        List<DataFileMeta> actualMetas =
+                dataFileWriter.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
 
         // projection: (shopId, orderId) -> (orderId)
-        SstFileReader sstFileReader =
-                createSstFileReader(tempDir.toString(), "avro", new int[][] {new int[] {1}}, null);
+        DataFileReader fileReader =
+                createDataFileReader(tempDir.toString(), "avro", new int[][] {new int[] {1}}, null);
         RowType projectedKeyType =
                 RowType.of(new LogicalType[] {new BigIntType(false)}, new String[] {"key_orderId"});
         RowDataSerializer projectedKeySerializer = new RowDataSerializer(projectedKeyType);
@@ -136,7 +136,7 @@ public class SstFileTest {
                 projectedKeySerializer,
                 TestKeyValueGenerator.ROW_SERIALIZER,
                 serializer,
-                sstFileReader,
+                fileReader,
                 kv ->
                         new KeyValue()
                                 .replace(
@@ -148,19 +148,19 @@ public class SstFileTest {
 
     @Test
     public void testValueProjection() throws Exception {
-        SstTestDataGenerator.Data data = gen.next();
-        SstFileWriter sstFileWriter = createSstFileWriter(tempDir.toString(), "avro");
-        SstFileMetaSerializer serializer =
-                new SstFileMetaSerializer(
+        DataFileTestDataGenerator.Data data = gen.next();
+        DataFileWriter dataFileWriter = createDataFileWriter(tempDir.toString(), "avro");
+        DataFileMetaSerializer serializer =
+                new DataFileMetaSerializer(
                         TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.ROW_TYPE);
-        List<SstFileMeta> actualMetas =
-                sstFileWriter.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
+        List<DataFileMeta> actualMetas =
+                dataFileWriter.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
 
         // projection:
         // (dt, hr, shopId, orderId, itemId, priceAmount, comment) ->
         // (shopId, itemId, dt, hr)
-        SstFileReader sstFileReader =
-                createSstFileReader(
+        DataFileReader fileReader =
+                createDataFileReader(
                         tempDir.toString(),
                         "avro",
                         null,
@@ -181,7 +181,7 @@ public class SstFileTest {
                 TestKeyValueGenerator.KEY_SERIALIZER,
                 projectedValueSerializer,
                 serializer,
-                sstFileReader,
+                fileReader,
                 kv ->
                         new KeyValue()
                                 .replace(
@@ -197,10 +197,10 @@ public class SstFileTest {
                                                 kv.value().getInt(1))));
     }
 
-    private SstFileWriter createSstFileWriter(String path, String format) {
+    private DataFileWriter createDataFileWriter(String path, String format) {
         FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(path));
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
-        return new SstFileWriter.Factory(
+        return new DataFileWriter.Factory(
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.ROW_TYPE,
                         // normal format will buffer changes in memory and we can't determine
@@ -212,11 +212,11 @@ public class SstFileTest {
                 .create(BinaryRowDataUtil.EMPTY_ROW, 0);
     }
 
-    private SstFileReader createSstFileReader(
+    private DataFileReader createDataFileReader(
             String path, String format, int[][] keyProjection, int[][] valueProjection) {
         FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(path));
-        SstFileReader.Factory factory =
-                new SstFileReader.Factory(
+        DataFileReader.Factory factory =
+                new DataFileReader.Factory(
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.ROW_TYPE,
                         new FlushingFileFormat(format),
@@ -231,19 +231,19 @@ public class SstFileTest {
     }
 
     private void assertData(
-            SstTestDataGenerator.Data data,
-            List<SstFileMeta> actualMetas,
+            DataFileTestDataGenerator.Data data,
+            List<DataFileMeta> actualMetas,
             RowDataSerializer keySerializer,
             RowDataSerializer projectedValueSerializer,
-            SstFileMetaSerializer sstFileMetaSerializer,
-            SstFileReader sstFileReader,
+            DataFileMetaSerializer dataFileMetaSerializer,
+            DataFileReader fileReader,
             Function<KeyValue, KeyValue> toExpectedKv)
             throws Exception {
         Iterator<KeyValue> expectedIterator = data.content.iterator();
-        for (SstFileMeta meta : actualMetas) {
-            // check the contents of sst file
+        for (DataFileMeta meta : actualMetas) {
+            // check the contents of data file
             CloseableIterator<KeyValue> actualKvsIterator =
-                    new RecordReaderIterator(sstFileReader.read(meta.fileName()));
+                    new RecordReaderIterator(fileReader.read(meta.fileName()));
             while (actualKvsIterator.hasNext()) {
                 assertThat(expectedIterator.hasNext()).isTrue();
                 KeyValue actualKv = actualKvsIterator.next();
@@ -257,22 +257,22 @@ public class SstFileTest {
             }
             actualKvsIterator.close();
 
-            // check that each sst file meta is serializable
-            assertThat(sstFileMetaSerializer.fromRow(sstFileMetaSerializer.toRow(meta)))
+            // check that each data file meta is serializable
+            assertThat(dataFileMetaSerializer.fromRow(dataFileMetaSerializer.toRow(meta)))
                     .isEqualTo(meta);
         }
         assertThat(expectedIterator.hasNext()).isFalse();
     }
 
     private void checkRollingFiles(
-            SstFileMeta expected, List<SstFileMeta> actual, long suggestedFileSize) {
+            DataFileMeta expected, List<DataFileMeta> actual, long suggestedFileSize) {
         // all but last file should be no smaller than suggestedFileSize
         for (int i = 0; i + 1 < actual.size(); i++) {
             assertThat(actual.get(i).fileSize() >= suggestedFileSize).isTrue();
         }
 
         // expected.rowCount == sum(rowCount)
-        assertThat(actual.stream().mapToLong(SstFileMeta::rowCount).sum())
+        assertThat(actual.stream().mapToLong(DataFileMeta::rowCount).sum())
                 .isEqualTo(expected.rowCount());
 
         // expected.minKey == firstFile.minKey
@@ -294,15 +294,15 @@ public class SstFileTest {
         }
 
         // expected.minSequenceNumber == min(minSequenceNumber)
-        assertThat(actual.stream().mapToLong(SstFileMeta::minSequenceNumber).min().orElse(-1))
+        assertThat(actual.stream().mapToLong(DataFileMeta::minSequenceNumber).min().orElse(-1))
                 .isEqualTo(expected.minSequenceNumber());
 
         // expected.maxSequenceNumber == max(maxSequenceNumber)
-        assertThat(actual.stream().mapToLong(SstFileMeta::maxSequenceNumber).max().orElse(-1))
+        assertThat(actual.stream().mapToLong(DataFileMeta::maxSequenceNumber).max().orElse(-1))
                 .isEqualTo(expected.maxSequenceNumber());
 
         // expected.level == eachFile.level
-        for (SstFileMeta meta : actual) {
+        for (DataFileMeta meta : actual) {
             assertThat(meta.level()).isEqualTo(expected.level());
         }
     }

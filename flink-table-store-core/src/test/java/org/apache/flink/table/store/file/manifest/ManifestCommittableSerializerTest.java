@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.Increment;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.stats.FieldStats;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -88,9 +88,9 @@ public class ManifestCommittableSerializerTest {
                 Arrays.asList(newFile(ID.incrementAndGet(), 0), newFile(ID.incrementAndGet(), 0)));
     }
 
-    public static SstFileMeta newFile(int name, int level) {
+    public static DataFileMeta newFile(int name, int level) {
         FieldStats[] stats = new FieldStats[] {new FieldStats(0, 1, 0)};
-        return new SstFileMeta(
+        return new DataFileMeta(
                 String.valueOf(name), 0, 1, row(0), row(0), stats, stats, 0, 1, level);
     }
 }

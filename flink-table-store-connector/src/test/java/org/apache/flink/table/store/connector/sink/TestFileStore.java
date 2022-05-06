@@ -22,9 +22,9 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.mergetree.Increment;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.FileStoreExpire;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
@@ -184,11 +184,11 @@ public class TestFileStore implements FileStore {
 
         @Override
         public Increment prepareCommit() {
-            List<SstFileMeta> newFiles =
+            List<DataFileMeta> newFiles =
                     records.stream()
                             .map(
                                     s ->
-                                            new SstFileMeta(
+                                            new DataFileMeta(
                                                     s,
                                                     0,
                                                     0,
@@ -215,7 +215,7 @@ public class TestFileStore implements FileStore {
         }
 
         @Override
-        public List<SstFileMeta> close() {
+        public List<DataFileMeta> close() {
             closed = true;
             return Collections.emptyList();
         }
@@ -260,7 +260,7 @@ public class TestFileStore implements FileStore {
                                                                         bucket,
                                                                         k -> new ArrayList<>());
                                                 files.stream()
-                                                        .map(SstFileMeta::fileName)
+                                                        .map(DataFileMeta::fileName)
                                                         .forEach(committed::add);
                                             }));
         }

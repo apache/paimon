@@ -124,7 +124,7 @@ public class ManifestFileMeta {
 
     /**
      * Merge several {@link ManifestFileMeta}s. {@link ManifestEntry}s representing first adding and
-     * then deleting the same sst file will cancel each other.
+     * then deleting the same data file will cancel each other.
      *
      * <p>NOTE: This method is atomic.
      */
@@ -203,7 +203,7 @@ public class ManifestFileMeta {
                     map.put(identifier, entry);
                     break;
                 case DELETE:
-                    // each sst file will only be added once and deleted once,
+                    // each dataFile will only be added once and deleted once,
                     // if we know that it is added before then both add and delete entry can be
                     // removed because there won't be further operations on this file,
                     // otherwise we have to keep the delete entry because the add entry must be

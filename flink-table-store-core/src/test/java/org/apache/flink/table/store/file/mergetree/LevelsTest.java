@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 
 import org.junit.jupiter.api.Test;
 
@@ -61,7 +61,7 @@ public class LevelsTest {
         assertThat(levels.nonEmptyHighestLevel()).isEqualTo(2);
     }
 
-    public static SstFileMeta newFile(int level) {
-        return new SstFileMeta("", 0, 1, row(0), row(0), null, null, 0, 1, level);
+    public static DataFileMeta newFile(int level) {
+        return new DataFileMeta("", 0, 1, row(0), row(0), null, null, 0, 1, level);
     }
 }

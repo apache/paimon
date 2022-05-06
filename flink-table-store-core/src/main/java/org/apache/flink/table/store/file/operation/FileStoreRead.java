@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.utils.RecordReader;
 
 import java.io.IOException;
@@ -49,6 +49,6 @@ public interface FileStoreRead {
      *       reader is guaranteed to be ordered by keys and does not contain duplicated keys.
      * </ul>
      */
-    RecordReader createReader(BinaryRowData partition, int bucket, List<SstFileMeta> files)
+    RecordReader createReader(BinaryRowData partition, int bucket, List<DataFileMeta> files)
             throws IOException;
 }

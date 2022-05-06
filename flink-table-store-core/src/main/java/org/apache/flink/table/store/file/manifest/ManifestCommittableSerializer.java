@@ -23,8 +23,8 @@ import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMetaSerializer;
+import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.data.DataFileMetaSerializer;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.io.ByteArrayOutputStream;
@@ -39,12 +39,12 @@ public class ManifestCommittableSerializer
         implements SimpleVersionedSerializer<ManifestCommittable> {
 
     private final BinaryRowDataSerializer partSerializer;
-    private final SstFileMetaSerializer sstSerializer;
+    private final DataFileMetaSerializer dataFileSerializer;
 
     public ManifestCommittableSerializer(
             RowType partitionType, RowType keyType, RowType valueType) {
         this.partSerializer = new BinaryRowDataSerializer(partitionType.getFieldCount());
-        this.sstSerializer = new SstFileMetaSerializer(keyType, valueType);
+        this.dataFileSerializer = new DataFileMetaSerializer(keyType, valueType);
     }
 
     @Override
@@ -84,38 +84,38 @@ public class ManifestCommittableSerializer
 
     private void serializeFiles(
             DataOutputViewStreamWrapper view,
-            Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> files)
+            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> files)
             throws IOException {
         view.writeInt(files.size());
-        for (Map.Entry<BinaryRowData, Map<Integer, List<SstFileMeta>>> entry : files.entrySet()) {
+        for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> entry : files.entrySet()) {
             partSerializer.serialize(entry.getKey(), view);
             view.writeInt(entry.getValue().size());
-            for (Map.Entry<Integer, List<SstFileMeta>> bucketEntry : entry.getValue().entrySet()) {
+            for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry : entry.getValue().entrySet()) {
                 view.writeInt(bucketEntry.getKey());
                 view.writeInt(bucketEntry.getValue().size());
-                for (SstFileMeta file : bucketEntry.getValue()) {
-                    sstSerializer.serialize(file, view);
+                for (DataFileMeta file : bucketEntry.getValue()) {
+                    dataFileSerializer.serialize(file, view);
                 }
             }
         }
     }
 
-    private Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> deserializeFiles(
+    private Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> deserializeFiles(
             DataInputDeserializer view) throws IOException {
         int partNumber = view.readInt();
-        Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> files = new HashMap<>();
+        Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> files = new HashMap<>();
         for (int i = 0; i < partNumber; i++) {
             BinaryRowData part = partSerializer.deserialize(view);
             int bucketNumber = view.readInt();
-            Map<Integer, List<SstFileMeta>> bucketMap = new HashMap<>();
+            Map<Integer, List<DataFileMeta>> bucketMap = new HashMap<>();
             files.put(part, bucketMap);
             for (int j = 0; j < bucketNumber; j++) {
                 int bucket = view.readInt();
                 int fileNumber = view.readInt();
-                List<SstFileMeta> fileMetas = new ArrayList<>();
+                List<DataFileMeta> fileMetas = new ArrayList<>();
                 bucketMap.put(bucket, fileMetas);
                 for (int k = 0; k < fileNumber; k++) {
-                    fileMetas.add(sstSerializer.deserialize(view));
+                    fileMetas.add(dataFileSerializer.deserialize(view));
                 }
             }
         }

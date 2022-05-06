@@ -21,9 +21,9 @@ package org.apache.flink.table.store.file.mergetree.compact;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.Levels;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -187,7 +187,7 @@ public class CompactManagerTest {
             CompactStrategy strategy,
             boolean expectedDropDelete)
             throws ExecutionException, InterruptedException {
-        List<SstFileMeta> files = new ArrayList<>();
+        List<DataFileMeta> files = new ArrayList<>();
         for (int i = 0; i < inputs.size(); i++) {
             LevelMinMax minMax = inputs.get(i);
             files.add(minMax.toFile(i));
@@ -203,8 +203,8 @@ public class CompactManagerTest {
         assertThat(outputs).isEqualTo(expected);
     }
 
-    private static SstFileMeta newFile(int level, int minKey, int maxKey, long maxSequence) {
-        return new SstFileMeta(
+    private static DataFileMeta newFile(int level, int minKey, int maxKey, long maxSequence) {
+        return new DataFileMeta(
                 "",
                 maxKey - minKey + 1,
                 1,
@@ -237,7 +237,7 @@ public class CompactManagerTest {
             long maxSequence = 0;
             for (List<SortedRun> section : sections) {
                 for (SortedRun run : section) {
-                    for (SstFileMeta file : run.files()) {
+                    for (DataFileMeta file : run.files()) {
                         int min = file.minKey().getInt(0);
                         int max = file.maxKey().getInt(0);
                         if (min < minKey) {
@@ -262,7 +262,7 @@ public class CompactManagerTest {
         private final int min;
         private final int max;
 
-        private LevelMinMax(SstFileMeta file) {
+        private LevelMinMax(DataFileMeta file) {
             this.level = file.level();
             this.min = file.minKey().getInt(0);
             this.max = file.maxKey().getInt(0);
@@ -274,7 +274,7 @@ public class CompactManagerTest {
             this.max = max;
         }
 
-        private SstFileMeta toFile(long maxSequence) {
+        private DataFileMeta toFile(long maxSequence) {
             return newFile(level, min, max, maxSequence);
         }
 

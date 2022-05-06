@@ -25,10 +25,10 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreReadImpl;
 import org.apache.flink.table.store.file.operation.FileStoreWriteImpl;
@@ -81,7 +81,7 @@ public class TestDataReadWrite {
                 pathFactory);
     }
 
-    public List<SstFileMeta> writeFiles(
+    public List<DataFileMeta> writeFiles(
             BinaryRowData partition, int bucket, List<Tuple2<Long, Long>> kvs) throws Exception {
         Preconditions.checkNotNull(
                 service, "ExecutorService must be provided if writeFiles is needed");
@@ -89,7 +89,7 @@ public class TestDataReadWrite {
         for (Tuple2<Long, Long> tuple2 : kvs) {
             writer.write(ValueKind.ADD, GenericRowData.of(tuple2.f0), GenericRowData.of(tuple2.f1));
         }
-        List<SstFileMeta> files = writer.prepareCommit().newFiles();
+        List<DataFileMeta> files = writer.prepareCommit().newFiles();
         writer.close();
         return new ArrayList<>(files);
     }

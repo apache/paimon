@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.util.Preconditions;
 
 import java.util.Collections;
@@ -35,14 +35,14 @@ import java.util.stream.Collectors;
  */
 public class SortedRun {
 
-    private final List<SstFileMeta> files;
+    private final List<DataFileMeta> files;
 
     private final long totalSize;
 
-    private SortedRun(List<SstFileMeta> files) {
+    private SortedRun(List<DataFileMeta> files) {
         this.files = Collections.unmodifiableList(files);
         long totalSize = 0L;
-        for (SstFileMeta file : files) {
+        for (DataFileMeta file : files) {
             totalSize += file.fileSize();
         }
         this.totalSize = totalSize;
@@ -52,23 +52,23 @@ public class SortedRun {
         return new SortedRun(Collections.emptyList());
     }
 
-    public static SortedRun fromSingle(SstFileMeta file) {
+    public static SortedRun fromSingle(DataFileMeta file) {
         return new SortedRun(Collections.singletonList(file));
     }
 
-    public static SortedRun fromSorted(List<SstFileMeta> sortedFiles) {
+    public static SortedRun fromSorted(List<DataFileMeta> sortedFiles) {
         return new SortedRun(sortedFiles);
     }
 
     public static SortedRun fromUnsorted(
-            List<SstFileMeta> unsortedFiles, Comparator<RowData> keyComparator) {
+            List<DataFileMeta> unsortedFiles, Comparator<RowData> keyComparator) {
         unsortedFiles.sort((o1, o2) -> keyComparator.compare(o1.minKey(), o2.minKey()));
         SortedRun run = new SortedRun(unsortedFiles);
         run.validate(keyComparator);
         return run;
     }
 
-    public List<SstFileMeta> files() {
+    public List<DataFileMeta> files() {
         return files;
     }
 
@@ -106,7 +106,7 @@ public class SortedRun {
     @Override
     public String toString() {
         return "["
-                + files.stream().map(SstFileMeta::toString).collect(Collectors.joining(", "))
+                + files.stream().map(DataFileMeta::toString).collect(Collectors.joining(", "))
                 + "]";
     }
 }

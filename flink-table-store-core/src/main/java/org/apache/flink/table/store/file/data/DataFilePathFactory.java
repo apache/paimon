@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.mergetree.sst;
+package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.fs.Path;
@@ -26,16 +26,16 @@ import javax.annotation.concurrent.ThreadSafe;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** Factory which produces new {@link Path}s for sst files. */
+/** Factory which produces new {@link Path}s for data files. */
 @ThreadSafe
-public class SstPathFactory {
+public class DataFilePathFactory {
 
     private final Path bucketDir;
     private final String uuid;
 
     private final AtomicInteger pathCount;
 
-    public SstPathFactory(Path root, String partition, int bucket) {
+    public DataFilePathFactory(Path root, String partition, int bucket) {
         this.bucketDir = new Path(root + "/" + partition + "/bucket-" + bucket);
         this.uuid = UUID.randomUUID().toString();
 
@@ -43,7 +43,7 @@ public class SstPathFactory {
     }
 
     public Path newPath() {
-        return new Path(bucketDir + "/sst-" + uuid + "-" + pathCount.getAndIncrement());
+        return new Path(bucketDir + "/data-" + uuid + "-" + pathCount.getAndIncrement());
     }
 
     public Path toPath(String fileName) {

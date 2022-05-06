@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.mergetree.sst;
+package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.BulkWriter;
@@ -45,24 +45,24 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-/** Writes {@link KeyValue}s into sst files. */
-public class SstFileWriter {
+/** Writes {@link KeyValue}s into data files. */
+public class DataFileWriter {
 
-    private static final Logger LOG = LoggerFactory.getLogger(SstFileWriter.class);
+    private static final Logger LOG = LoggerFactory.getLogger(DataFileWriter.class);
 
     private final RowType keyType;
     private final RowType valueType;
     private final BulkWriter.Factory<RowData> writerFactory;
     private final FileStatsExtractor fileStatsExtractor;
-    private final SstPathFactory pathFactory;
+    private final DataFilePathFactory pathFactory;
     private final long suggestedFileSize;
 
-    private SstFileWriter(
+    private DataFileWriter(
             RowType keyType,
             RowType valueType,
             BulkWriter.Factory<RowData> writerFactory,
             FileStatsExtractor fileStatsExtractor,
-            SstPathFactory pathFactory,
+            DataFilePathFactory pathFactory,
             long suggestedFileSize) {
         this.keyType = keyType;
         this.valueType = valueType;
@@ -86,27 +86,27 @@ public class SstFileWriter {
     }
 
     @VisibleForTesting
-    public SstPathFactory pathFactory() {
+    public DataFilePathFactory pathFactory() {
         return pathFactory;
     }
 
     /**
-     * Write several {@link KeyValue}s into an sst file of a given level.
+     * Write several {@link KeyValue}s into an data file of a given level.
      *
      * <p>NOTE: This method is atomic.
      */
-    public List<SstFileMeta> write(CloseableIterator<KeyValue> iterator, int level)
+    public List<DataFileMeta> write(CloseableIterator<KeyValue> iterator, int level)
             throws Exception {
-        SstRollingFile rollingFile =
+        DataRollingFile rollingFile =
                 fileStatsExtractor == null
                         ? new StatsCollectingRollingFile(level)
                         : new FileExtractingRollingFile(level);
-        List<SstFileMeta> result = new ArrayList<>();
+        List<DataFileMeta> result = new ArrayList<>();
         List<Path> filesToCleanUp = new ArrayList<>();
         try {
             rollingFile.write(iterator, result, filesToCleanUp);
         } catch (Throwable e) {
-            LOG.warn("Exception occurs when writing sst files. Cleaning up.", e);
+            LOG.warn("Exception occurs when writing data files. Cleaning up.", e);
             for (Path path : filesToCleanUp) {
                 FileUtils.deleteOrWarn(path);
             }
@@ -117,11 +117,11 @@ public class SstFileWriter {
         return result;
     }
 
-    public void delete(SstFileMeta file) {
+    public void delete(DataFileMeta file) {
         FileUtils.deleteOrWarn(pathFactory.toPath(file.fileName()));
     }
 
-    private abstract class SstRollingFile extends RollingFile<KeyValue, SstFileMeta> {
+    private abstract class DataRollingFile extends RollingFile<KeyValue, DataFileMeta> {
 
         private final int level;
         private final KeyValueSerializer serializer;
@@ -133,9 +133,9 @@ public class SstFileWriter {
         private long minSequenceNumber;
         private long maxSequenceNumber;
 
-        private SstRollingFile(int level) {
-            // each level 0 sst file is a sorted run,
-            // we must not write rolling files for level 0 ssts
+        private DataRollingFile(int level) {
+            // each level 0 data file is a sorted run,
+            // we must not write rolling files for level 0 data files
             // otherwise we cannot reduce the number of sorted runs when compacting
             super(level == 0 ? Long.MAX_VALUE : suggestedFileSize);
             this.level = level;
@@ -157,7 +157,7 @@ public class SstFileWriter {
         @Override
         protected RowData toRowData(KeyValue kv) {
             if (LOG.isDebugEnabled()) {
-                LOG.debug("Writing key-value to sst file, kv: " + kv.toString(keyType, valueType));
+                LOG.debug("Writing key-value to data file, kv: " + kv.toString(keyType, valueType));
             }
 
             rowCount++;
@@ -172,10 +172,10 @@ public class SstFileWriter {
         }
 
         @Override
-        protected SstFileMeta collectFile(Path path) throws IOException {
+        protected DataFileMeta collectFile(Path path) throws IOException {
             KeyAndValueStats stats = extractStats(path);
-            SstFileMeta result =
-                    new SstFileMeta(
+            DataFileMeta result =
+                    new DataFileMeta(
                             path.getName(),
                             FileUtils.getFileSize(path),
                             rowCount,
@@ -201,7 +201,7 @@ public class SstFileWriter {
         protected abstract KeyAndValueStats extractStats(Path path);
     }
 
-    private class FileExtractingRollingFile extends SstRollingFile {
+    private class FileExtractingRollingFile extends DataRollingFile {
 
         private FileExtractingRollingFile(int level) {
             super(level);
@@ -223,7 +223,7 @@ public class SstFileWriter {
         }
     }
 
-    private class StatsCollectingRollingFile extends SstRollingFile {
+    private class StatsCollectingRollingFile extends DataRollingFile {
 
         private FieldStatsCollector keyStatsCollector;
         private FieldStatsCollector valueStatsCollector;
@@ -263,7 +263,7 @@ public class SstFileWriter {
         }
     }
 
-    /** Creates {@link SstFileWriter}. */
+    /** Creates {@link DataFileWriter}. */
     public static class Factory {
 
         private final RowType keyType;
@@ -285,14 +285,14 @@ public class SstFileWriter {
             this.suggestedFileSize = suggestedFileSize;
         }
 
-        public SstFileWriter create(BinaryRowData partition, int bucket) {
+        public DataFileWriter create(BinaryRowData partition, int bucket) {
             RowType recordType = KeyValue.schema(keyType, valueType);
-            return new SstFileWriter(
+            return new DataFileWriter(
                     keyType,
                     valueType,
                     fileFormat.createWriterFactory(recordType),
                     fileFormat.createStatsExtractor(recordType).orElse(null),
-                    pathFactory.createSstPathFactory(partition, bucket),
+                    pathFactory.createDataFilePathFactory(partition, bucket),
                     suggestedFileSize);
         }
     }

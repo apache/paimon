@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.mergetree.sst;
+package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
@@ -26,8 +26,8 @@ import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.ObjectSerializer;
 import org.apache.flink.table.types.logical.RowType;
 
-/** Serializer for {@link SstFileMeta}. */
-public class SstFileMetaSerializer extends ObjectSerializer<SstFileMeta> {
+/** Serializer for {@link DataFileMeta}. */
+public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
 
     private static final long serialVersionUID = 1L;
 
@@ -35,15 +35,15 @@ public class SstFileMetaSerializer extends ObjectSerializer<SstFileMeta> {
     private final FieldStatsArraySerializer keyStatsArraySerializer;
     private final FieldStatsArraySerializer valueStatsArraySerializer;
 
-    public SstFileMetaSerializer(RowType keyType, RowType valueType) {
-        super(SstFileMeta.schema(keyType, valueType));
+    public DataFileMetaSerializer(RowType keyType, RowType valueType) {
+        super(DataFileMeta.schema(keyType, valueType));
         this.keySerializer = new RowDataSerializer(keyType);
         this.keyStatsArraySerializer = new FieldStatsArraySerializer(keyType);
         this.valueStatsArraySerializer = new FieldStatsArraySerializer(valueType);
     }
 
     @Override
-    public RowData toRow(SstFileMeta meta) {
+    public RowData toRow(DataFileMeta meta) {
         return GenericRowData.of(
                 StringData.fromString(meta.fileName()),
                 meta.fileSize(),
@@ -58,9 +58,9 @@ public class SstFileMetaSerializer extends ObjectSerializer<SstFileMeta> {
     }
 
     @Override
-    public SstFileMeta fromRow(RowData row) {
+    public DataFileMeta fromRow(RowData row) {
         int keyFieldCount = keySerializer.getArity();
-        return new SstFileMeta(
+        return new DataFileMeta(
                 row.getString(0).toString(),
                 row.getLong(1),
                 row.getLong(2),
