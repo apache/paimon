@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -37,28 +37,28 @@ public class Levels {
 
     private final Comparator<RowData> keyComparator;
 
-    private final TreeSet<SstFileMeta> level0;
+    private final TreeSet<DataFileMeta> level0;
 
     private final List<SortedRun> levels;
 
-    public Levels(Comparator<RowData> keyComparator, List<SstFileMeta> inputFiles, int numLevels) {
+    public Levels(Comparator<RowData> keyComparator, List<DataFileMeta> inputFiles, int numLevels) {
         this.keyComparator = keyComparator;
         checkArgument(numLevels > 1, "levels must be at least 2.");
         this.level0 =
-                new TreeSet<>(Comparator.comparing(SstFileMeta::maxSequenceNumber).reversed());
+                new TreeSet<>(Comparator.comparing(DataFileMeta::maxSequenceNumber).reversed());
         this.levels = new ArrayList<>();
         for (int i = 1; i < numLevels; i++) {
             levels.add(SortedRun.empty());
         }
 
-        Map<Integer, List<SstFileMeta>> levelMap = new HashMap<>();
-        for (SstFileMeta file : inputFiles) {
+        Map<Integer, List<DataFileMeta>> levelMap = new HashMap<>();
+        for (DataFileMeta file : inputFiles) {
             levelMap.computeIfAbsent(file.level(), level -> new ArrayList<>()).add(file);
         }
         levelMap.forEach((level, files) -> updateLevel(level, emptyList(), files));
     }
 
-    public void addLevel0File(SstFileMeta file) {
+    public void addLevel0File(DataFileMeta file) {
         checkArgument(file.level() == 0);
         level0.add(file);
     }
@@ -93,8 +93,8 @@ public class Levels {
         return level0.isEmpty() ? -1 : 0;
     }
 
-    public List<SstFileMeta> allFiles() {
-        List<SstFileMeta> files = new ArrayList<>();
+    public List<DataFileMeta> allFiles() {
+        List<DataFileMeta> files = new ArrayList<>();
         List<LevelSortedRun> runs = levelSortedRuns();
         for (LevelSortedRun run : runs) {
             files.addAll(run.run().files());
@@ -114,9 +114,9 @@ public class Levels {
         return runs;
     }
 
-    public void update(List<SstFileMeta> before, List<SstFileMeta> after) {
-        Map<Integer, List<SstFileMeta>> groupedBefore = groupByLevel(before);
-        Map<Integer, List<SstFileMeta>> groupedAfter = groupByLevel(after);
+    public void update(List<DataFileMeta> before, List<DataFileMeta> after) {
+        Map<Integer, List<DataFileMeta>> groupedBefore = groupByLevel(before);
+        Map<Integer, List<DataFileMeta>> groupedAfter = groupByLevel(after);
         for (int i = 0; i < numberOfLevels(); i++) {
             updateLevel(
                     i,
@@ -125,7 +125,7 @@ public class Levels {
         }
     }
 
-    private void updateLevel(int level, List<SstFileMeta> before, List<SstFileMeta> after) {
+    private void updateLevel(int level, List<DataFileMeta> before, List<DataFileMeta> after) {
         if (before.isEmpty() && after.isEmpty()) {
             return;
         }
@@ -134,15 +134,15 @@ public class Levels {
             before.forEach(level0::remove);
             level0.addAll(after);
         } else {
-            List<SstFileMeta> files = new ArrayList<>(runOfLevel(level).files());
+            List<DataFileMeta> files = new ArrayList<>(runOfLevel(level).files());
             files.removeAll(before);
             files.addAll(after);
             levels.set(level - 1, SortedRun.fromUnsorted(files, keyComparator));
         }
     }
 
-    private Map<Integer, List<SstFileMeta>> groupByLevel(List<SstFileMeta> files) {
+    private Map<Integer, List<DataFileMeta>> groupByLevel(List<DataFileMeta> files) {
         return files.stream()
-                .collect(Collectors.groupingBy(SstFileMeta::level, Collectors.toList()));
+                .collect(Collectors.groupingBy(DataFileMeta::level, Collectors.toList()));
     }
 }

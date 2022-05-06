@@ -16,24 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.mergetree.sst;
+package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.utils.ObjectSerializerTestBase;
 
-/** Tests for {@link SstFileMetaSerializer}. */
-public class SstFileMetaSerializerTest extends ObjectSerializerTestBase<SstFileMeta> {
+/** Tests for {@link DataFileMetaSerializer}. */
+public class DataFileMetaSerializerTest extends ObjectSerializerTestBase<DataFileMeta> {
 
-    private final SstTestDataGenerator gen = SstTestDataGenerator.builder().build();
+    private final DataFileTestDataGenerator gen = DataFileTestDataGenerator.builder().build();
 
     @Override
-    protected SstFileMetaSerializer serializer() {
-        return new SstFileMetaSerializer(
+    protected DataFileMetaSerializer serializer() {
+        return new DataFileMetaSerializer(
                 TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.ROW_TYPE);
     }
 
     @Override
-    protected SstFileMeta object() {
+    protected DataFileMeta object() {
         return gen.next().meta;
     }
 }

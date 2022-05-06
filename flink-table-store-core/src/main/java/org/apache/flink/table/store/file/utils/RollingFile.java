@@ -104,7 +104,7 @@ public abstract class RollingFile<R, F> {
             this.writer = newWriter(out);
 
             if (LOG.isDebugEnabled()) {
-                LOG.debug("Create new rolling file " + path.toString());
+                LOG.debug("Create new rolling file " + path);
             }
         }
 

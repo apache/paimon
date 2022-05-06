@@ -22,7 +22,7 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
-import org.apache.flink.table.store.file.mergetree.sst.SstPathFactory;
+import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -75,15 +75,16 @@ public class FileStorePathFactoryTest {
     }
 
     @Test
-    public void testCreateSstPathFactoryNoPartition() {
+    public void testCreateDataFilePathFactoryNoPartition() {
         FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(tempDir.toString()));
-        SstPathFactory sstPathFactory = pathFactory.createSstPathFactory(new BinaryRowData(0), 123);
-        assertThat(sstPathFactory.toPath("my-sst-file-name"))
-                .isEqualTo(new Path(tempDir.toString() + "/bucket-123/my-sst-file-name"));
+        DataFilePathFactory dataFilePathFactory =
+                pathFactory.createDataFilePathFactory(new BinaryRowData(0), 123);
+        assertThat(dataFilePathFactory.toPath("my-data-file-name"))
+                .isEqualTo(new Path(tempDir.toString() + "/bucket-123/my-data-file-name"));
     }
 
     @Test
-    public void testCreateSstPathFactoryWithPartition() {
+    public void testCreateDataFilePathFactoryWithPartition() {
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
                         new Path(tempDir.toString()),
@@ -113,9 +114,10 @@ public class FileStorePathFactoryTest {
             writer.setNullAt(1);
         }
         writer.complete();
-        SstPathFactory sstPathFactory = pathFactory.createSstPathFactory(partition, 123);
-        assertThat(sstPathFactory.toPath("my-sst-file-name"))
+        DataFilePathFactory dataFilePathFactory =
+                pathFactory.createDataFilePathFactory(partition, 123);
+        assertThat(dataFilePathFactory.toPath("my-data-file-name"))
                 .isEqualTo(
-                        new Path(tempDir.toString() + expected + "/bucket-123/my-sst-file-name"));
+                        new Path(tempDir.toString() + expected + "/bucket-123/my-data-file-name"));
     }
 }

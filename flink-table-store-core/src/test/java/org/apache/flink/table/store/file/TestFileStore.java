@@ -24,6 +24,7 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
@@ -31,7 +32,6 @@ import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.FileStoreExpireImpl;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
@@ -256,7 +256,7 @@ public class TestFileStore extends FileStoreImpl {
             }
         }
 
-        Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> filesPerPartitionAndBucket =
+        Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> filesPerPartitionAndBucket =
                 new HashMap<>();
         for (ManifestEntry entry : entries) {
             filesPerPartitionAndBucket
@@ -267,9 +267,9 @@ public class TestFileStore extends FileStoreImpl {
 
         List<KeyValue> kvs = new ArrayList<>();
         FileStoreRead read = newRead();
-        for (Map.Entry<BinaryRowData, Map<Integer, List<SstFileMeta>>> entryWithPartition :
+        for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> entryWithPartition :
                 filesPerPartitionAndBucket.entrySet()) {
-            for (Map.Entry<Integer, List<SstFileMeta>> entryWithBucket :
+            for (Map.Entry<Integer, List<DataFileMeta>> entryWithBucket :
                     entryWithPartition.getValue().entrySet()) {
                 RecordReaderIterator iterator =
                         new RecordReaderIterator(
@@ -340,8 +340,8 @@ public class TestFileStore extends FileStoreImpl {
         FileStorePathFactory pathFactory = pathFactory();
         ManifestList manifestList = manifestListFactory().create();
         FileStoreScan scan = newScan();
-        FileStorePathFactory.SstPathFactoryCache sstPathFactoryCache =
-                new FileStorePathFactory.SstPathFactoryCache(pathFactory);
+        FileStorePathFactory.DataFilePathFactoryCache dataFilePathFactoryCache =
+                new FileStorePathFactory.DataFilePathFactoryCache(pathFactory);
 
         Long latestSnapshotId = pathFactory.latestSnapshotId();
         if (latestSnapshotId == null) {
@@ -377,12 +377,12 @@ public class TestFileStore extends FileStoreImpl {
             List<ManifestFileMeta> manifests = snapshot.readAllManifests(manifestList);
             manifests.forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
 
-            // sst
+            // data file
             List<ManifestEntry> entries = scan.withManifestList(manifests).plan().files();
             for (ManifestEntry entry : entries) {
                 result.add(
-                        sstPathFactoryCache
-                                .getSstPathFactory(entry.partition(), entry.bucket())
+                        dataFilePathFactoryCache
+                                .getDataFilePathFactory(entry.partition(), entry.bucket())
                                 .toPath(entry.file().fileName()));
             }
         }

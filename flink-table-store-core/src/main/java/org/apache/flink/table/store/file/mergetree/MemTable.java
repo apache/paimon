@@ -29,7 +29,7 @@ import java.util.Iterator;
 
 /**
  * Append only memory table for storing key-values. When it is full, it will be flushed to disk and
- * form an SST file.
+ * form a data file.
  */
 public interface MemTable {
 

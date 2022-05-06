@@ -20,11 +20,11 @@ package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
-import org.apache.flink.table.store.file.mergetree.sst.SstPathFactory;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.SnapshotFinder;
@@ -167,34 +167,34 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                     "Snapshot expire range is [" + beginInclusiveId + ", " + endExclusiveId + ")");
         }
 
-        // delete sst files
-        FileStorePathFactory.SstPathFactoryCache sstPathFactoryCache =
-                new FileStorePathFactory.SstPathFactoryCache(pathFactory);
-        // deleted sst files in a snapshot are not used by that snapshot, so the range of id should
+        // delete data files
+        FileStorePathFactory.DataFilePathFactoryCache dataFilePathFactoryCache =
+                new FileStorePathFactory.DataFilePathFactoryCache(pathFactory);
+        // deleted data files in a snapshot are not used by that snapshot, so the range of id should
         // be (beginInclusiveId, endExclusiveId]
         for (long id = beginInclusiveId + 1; id <= endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
-                LOG.debug("Ready to delete sst files in snapshot #" + id);
+                LOG.debug("Ready to delete data files in snapshot #" + id);
             }
 
             Snapshot toExpire = Snapshot.fromPath(pathFactory.toSnapshotPath(id));
             List<ManifestFileMeta> deltaManifests = manifestList.read(toExpire.deltaManifestList());
 
-            // we cannot delete an sst file directly when we meet a DELETE entry, because that
+            // we cannot delete a data file directly when we meet a DELETE entry, because that
             // file might be upgraded
-            Set<Path> sstToDelete = new HashSet<>();
+            Set<Path> dataFileToDelete = new HashSet<>();
             for (ManifestFileMeta meta : deltaManifests) {
                 for (ManifestEntry entry : manifestFile.read(meta.fileName())) {
-                    SstPathFactory sstPathFactory =
-                            sstPathFactoryCache.getSstPathFactory(
+                    DataFilePathFactory dataFilePathFactory =
+                            dataFilePathFactoryCache.getDataFilePathFactory(
                                     entry.partition(), entry.bucket());
-                    Path sstPath = sstPathFactory.toPath(entry.file().fileName());
+                    Path dataFilePath = dataFilePathFactory.toPath(entry.file().fileName());
                     switch (entry.kind()) {
                         case ADD:
-                            sstToDelete.remove(sstPath);
+                            dataFileToDelete.remove(dataFilePath);
                             break;
                         case DELETE:
-                            sstToDelete.add(sstPath);
+                            dataFileToDelete.add(dataFilePath);
                             break;
                         default:
                             throw new UnsupportedOperationException(
@@ -202,8 +202,8 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                     }
                 }
             }
-            for (Path sst : sstToDelete) {
-                FileUtils.deleteOrWarn(sst);
+            for (Path dataFile : dataFileToDelete) {
+                FileUtils.deleteOrWarn(dataFile);
             }
         }
 

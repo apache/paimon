@@ -23,7 +23,7 @@ import org.apache.flink.connector.file.table.FileSystemConnectorOptions;
 import org.apache.flink.connector.file.table.RowDataPartitionComputer;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.mergetree.sst.SstPathFactory;
+import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.utils.LogicalTypeDataTypeConverter;
@@ -105,8 +105,8 @@ public class FileStorePathFactory {
         return new Path(root + "/snapshot/." + SNAPSHOT_PREFIX + id + "-" + UUID.randomUUID());
     }
 
-    public SstPathFactory createSstPathFactory(BinaryRowData partition, int bucket) {
-        return new SstPathFactory(root, getPartitionString(partition), bucket);
+    public DataFilePathFactory createDataFilePathFactory(BinaryRowData partition, int bucket) {
+        return new DataFilePathFactory(root, getPartitionString(partition), bucket);
     }
 
     /** IMPORTANT: This method is NOT THREAD SAFE. */
@@ -135,24 +135,25 @@ public class FileStorePathFactory {
         return uuid;
     }
 
-    /** Cache for storing {@link SstPathFactory}s. */
-    public static class SstPathFactoryCache {
+    /** Cache for storing {@link DataFilePathFactory}s. */
+    public static class DataFilePathFactoryCache {
 
         private final FileStorePathFactory pathFactory;
-        private final Map<BinaryRowData, Map<Integer, SstPathFactory>> cache;
+        private final Map<BinaryRowData, Map<Integer, DataFilePathFactory>> cache;
 
-        public SstPathFactoryCache(FileStorePathFactory pathFactory) {
+        public DataFilePathFactoryCache(FileStorePathFactory pathFactory) {
             this.pathFactory = pathFactory;
             this.cache = new HashMap<>();
         }
 
-        public SstPathFactory getSstPathFactory(BinaryRowData partition, int bucket) {
+        public DataFilePathFactory getDataFilePathFactory(BinaryRowData partition, int bucket) {
             return cache.compute(partition, (p, m) -> m == null ? new HashMap<>() : m)
                     .compute(
                             bucket,
                             (b, f) ->
                                     f == null
-                                            ? pathFactory.createSstPathFactory(partition, bucket)
+                                            ? pathFactory.createDataFilePathFactory(
+                                                    partition, bucket)
                                             : f);
         }
     }

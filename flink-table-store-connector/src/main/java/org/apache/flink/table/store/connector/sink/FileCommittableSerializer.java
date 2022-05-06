@@ -22,8 +22,8 @@ import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
+import org.apache.flink.table.store.file.data.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.mergetree.Increment;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMetaSerializer;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.io.ByteArrayOutputStream;
@@ -33,11 +33,11 @@ import java.io.IOException;
 public class FileCommittableSerializer implements SimpleVersionedSerializer<FileCommittable> {
 
     private final BinaryRowDataSerializer partSerializer;
-    private final SstFileMetaSerializer sstSerializer;
+    private final DataFileMetaSerializer dataFileSerializer;
 
     public FileCommittableSerializer(RowType partitionType, RowType keyType, RowType valueType) {
         this.partSerializer = new BinaryRowDataSerializer(partitionType.getFieldCount());
-        this.sstSerializer = new SstFileMetaSerializer(keyType, valueType);
+        this.dataFileSerializer = new DataFileMetaSerializer(keyType, valueType);
     }
 
     @Override
@@ -51,9 +51,9 @@ public class FileCommittableSerializer implements SimpleVersionedSerializer<File
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
         partSerializer.serialize(obj.partition(), view);
         view.writeInt(obj.bucket());
-        sstSerializer.serializeList(obj.increment().newFiles(), view);
-        sstSerializer.serializeList(obj.increment().compactBefore(), view);
-        sstSerializer.serializeList(obj.increment().compactAfter(), view);
+        dataFileSerializer.serializeList(obj.increment().newFiles(), view);
+        dataFileSerializer.serializeList(obj.increment().compactBefore(), view);
+        dataFileSerializer.serializeList(obj.increment().compactAfter(), view);
         return out.toByteArray();
     }
 
@@ -64,8 +64,8 @@ public class FileCommittableSerializer implements SimpleVersionedSerializer<File
                 partSerializer.deserialize(view),
                 view.readInt(),
                 new Increment(
-                        sstSerializer.deserializeList(view),
-                        sstSerializer.deserializeList(view),
-                        sstSerializer.deserializeList(view)));
+                        dataFileSerializer.deserializeList(view),
+                        dataFileSerializer.deserializeList(view),
+                        dataFileSerializer.deserializeList(view)));
     }
 }

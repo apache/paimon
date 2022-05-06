@@ -19,9 +19,9 @@
 package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.Levels;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -142,7 +142,7 @@ public class CompactManager {
     @FunctionalInterface
     public interface Rewriter {
 
-        List<SstFileMeta> rewrite(
+        List<DataFileMeta> rewrite(
                 int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
                 throws Exception;
     }
@@ -150,9 +150,9 @@ public class CompactManager {
     /** Result of compaction. */
     public interface CompactResult {
 
-        List<SstFileMeta> before();
+        List<DataFileMeta> before();
 
-        List<SstFileMeta> after();
+        List<DataFileMeta> after();
     }
 
     // --------------------------------------------------------------------------------------------
@@ -194,8 +194,8 @@ public class CompactManager {
             long startMillis = System.currentTimeMillis();
 
             List<List<SortedRun>> candidate = new ArrayList<>();
-            List<SstFileMeta> before = new ArrayList<>();
-            List<SstFileMeta> after = new ArrayList<>();
+            List<DataFileMeta> before = new ArrayList<>();
+            List<DataFileMeta> after = new ArrayList<>();
 
             // Checking the order and compacting adjacent and contiguous files
             // Note: can't skip an intermediate file to compact, this will destroy the overall
@@ -209,7 +209,7 @@ public class CompactManager {
                     // We can just upgrade the large file and just change the level instead of
                     // rewriting it
                     // But for small files, we will try to compact it
-                    for (SstFileMeta file : run.files()) {
+                    for (DataFileMeta file : run.files()) {
                         if (file.fileSize() < minFileSize) {
                             // Smaller files are rewritten along with the previous files
                             candidate.add(singletonList(SortedRun.fromSingle(file)));
@@ -239,7 +239,8 @@ public class CompactManager {
             return result(before, after);
         }
 
-        private void upgrade(SstFileMeta file, List<SstFileMeta> before, List<SstFileMeta> after) {
+        private void upgrade(
+                DataFileMeta file, List<DataFileMeta> before, List<DataFileMeta> after) {
             if (file.level() != outputLevel) {
                 before.add(file);
                 after.add(file.upgrade(outputLevel));
@@ -248,7 +249,9 @@ public class CompactManager {
         }
 
         private void rewrite(
-                List<List<SortedRun>> candidate, List<SstFileMeta> before, List<SstFileMeta> after)
+                List<List<SortedRun>> candidate,
+                List<DataFileMeta> before,
+                List<DataFileMeta> after)
                 throws Exception {
             if (candidate.isEmpty()) {
                 return;
@@ -258,7 +261,7 @@ public class CompactManager {
                 if (section.size() == 0) {
                     return;
                 } else if (section.size() == 1) {
-                    for (SstFileMeta file : section.get(0).files()) {
+                    for (DataFileMeta file : section.get(0).files()) {
                         upgrade(file, before, after);
                     }
                     candidate.clear();
@@ -272,25 +275,25 @@ public class CompactManager {
                                         before.addAll(run.files());
                                         rewriteInputSize +=
                                                 run.files().stream()
-                                                        .mapToLong(SstFileMeta::fileSize)
+                                                        .mapToLong(DataFileMeta::fileSize)
                                                         .sum();
                                         rewriteFilesNum += run.files().size();
                                     }));
-            List<SstFileMeta> result = rewriter.rewrite(outputLevel, dropDelete, candidate);
+            List<DataFileMeta> result = rewriter.rewrite(outputLevel, dropDelete, candidate);
             after.addAll(result);
-            rewriteOutputSize += result.stream().mapToLong(SstFileMeta::fileSize).sum();
+            rewriteOutputSize += result.stream().mapToLong(DataFileMeta::fileSize).sum();
             candidate.clear();
         }
 
-        private CompactResult result(List<SstFileMeta> before, List<SstFileMeta> after) {
+        private CompactResult result(List<DataFileMeta> before, List<DataFileMeta> after) {
             return new CompactResult() {
                 @Override
-                public List<SstFileMeta> before() {
+                public List<DataFileMeta> before() {
                     return before;
                 }
 
                 @Override
-                public List<SstFileMeta> after() {
+                public List<DataFileMeta> after() {
                     return after;
                 }
             };

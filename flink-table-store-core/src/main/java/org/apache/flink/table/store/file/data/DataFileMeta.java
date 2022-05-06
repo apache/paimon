@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.mergetree.sst;
+package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.stats.FieldStats;
@@ -33,8 +33,8 @@ import java.util.Objects;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
 
-/** Metadata of a SST file. */
-public class SstFileMeta {
+/** Metadata of a data file. */
+public class DataFileMeta {
 
     private final String fileName;
     private final long fileSize;
@@ -49,7 +49,7 @@ public class SstFileMeta {
     private final long maxSequenceNumber;
     private final int level;
 
-    public SstFileMeta(
+    public DataFileMeta(
             String fileName,
             long fileSize,
             long rowCount,
@@ -114,9 +114,9 @@ public class SstFileMeta {
         return level;
     }
 
-    public SstFileMeta upgrade(int newLevel) {
+    public DataFileMeta upgrade(int newLevel) {
         checkArgument(newLevel > this.level);
-        return new SstFileMeta(
+        return new DataFileMeta(
                 fileName,
                 fileSize,
                 rowCount,
@@ -131,10 +131,10 @@ public class SstFileMeta {
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof SstFileMeta)) {
+        if (!(o instanceof DataFileMeta)) {
             return false;
         }
-        SstFileMeta that = (SstFileMeta) o;
+        DataFileMeta that = (DataFileMeta) o;
         return Objects.equals(fileName, that.fileName)
                 && fileSize == that.fileSize
                 && rowCount == that.rowCount

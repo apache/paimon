@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.mergetree.sst;
+package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
@@ -29,8 +29,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** Random {@link SstFileMeta} generator. */
-public class SstTestDataGenerator {
+/** Random {@link DataFileMeta} generator. */
+public class DataFileTestDataGenerator {
 
     private final int numBuckets;
     private final int memTableCapacity;
@@ -38,7 +38,7 @@ public class SstTestDataGenerator {
     private final List<Map<BinaryRowData, List<KeyValue>>> memTables;
     private final TestKeyValueGenerator gen;
 
-    private SstTestDataGenerator(int numBuckets, int memTableCapacity) {
+    private DataFileTestDataGenerator(int numBuckets, int memTableCapacity) {
         this.numBuckets = numBuckets;
         this.memTableCapacity = memTableCapacity;
 
@@ -60,7 +60,7 @@ public class SstTestDataGenerator {
             memTable.add(kv);
 
             if (memTable.size() >= memTableCapacity) {
-                List<Data> result = createSstFiles(memTable, 0, partition, bucket);
+                List<Data> result = createDataFiles(memTable, 0, partition, bucket);
                 memTable.clear();
                 assert result.size() == 1;
                 return result.get(0);
@@ -68,7 +68,7 @@ public class SstTestDataGenerator {
         }
     }
 
-    public List<Data> createSstFiles(
+    public List<Data> createDataFiles(
             List<KeyValue> kvs, int level, BinaryRowData partition, int bucket) {
         gen.sort(kvs);
         List<KeyValue> combined = new ArrayList<>();
@@ -88,7 +88,7 @@ public class SstTestDataGenerator {
         List<Data> result = new ArrayList<>();
         for (int i = 0; i < combined.size(); i += capacity) {
             result.add(
-                    createSstFile(
+                    createDataFile(
                             combined.subList(i, Math.min(i + capacity, combined.size())),
                             level,
                             partition,
@@ -97,7 +97,8 @@ public class SstTestDataGenerator {
         return result;
     }
 
-    private Data createSstFile(List<KeyValue> kvs, int level, BinaryRowData partition, int bucket) {
+    private Data createDataFile(
+            List<KeyValue> kvs, int level, BinaryRowData partition, int bucket) {
         FieldStatsCollector keyStatsCollector =
                 new FieldStatsCollector(TestKeyValueGenerator.KEY_TYPE);
         FieldStatsCollector valueStatsCollector =
@@ -126,8 +127,8 @@ public class SstTestDataGenerator {
         return new Data(
                 partition,
                 bucket,
-                new SstFileMeta(
-                        "sst-" + UUID.randomUUID(),
+                new DataFileMeta(
+                        "data-" + UUID.randomUUID(),
                         totalSize,
                         kvs.size(),
                         minKey,
@@ -140,15 +141,15 @@ public class SstTestDataGenerator {
                 kvs);
     }
 
-    /** An in-memory SST file. */
+    /** An in-memory data file. */
     public static class Data {
         public final BinaryRowData partition;
         public final int bucket;
-        public final SstFileMeta meta;
+        public final DataFileMeta meta;
         public final List<KeyValue> content;
 
         private Data(
-                BinaryRowData partition, int bucket, SstFileMeta meta, List<KeyValue> content) {
+                BinaryRowData partition, int bucket, DataFileMeta meta, List<KeyValue> content) {
             this.partition = partition;
             this.bucket = bucket;
             this.meta = meta;
@@ -160,7 +161,7 @@ public class SstTestDataGenerator {
         return new Builder();
     }
 
-    /** Builder for {@link SstTestDataGenerator}. */
+    /** Builder for {@link DataFileTestDataGenerator}. */
     public static class Builder {
         private int numBuckets = 3;
         private int memTableCapacity = 3;
@@ -175,8 +176,8 @@ public class SstTestDataGenerator {
             return this;
         }
 
-        public SstTestDataGenerator build() {
-            return new SstTestDataGenerator(numBuckets, memTableCapacity);
+        public DataFileTestDataGenerator build() {
+            return new DataFileTestDataGenerator(numBuckets, memTableCapacity);
         }
     }
 }

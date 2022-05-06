@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.Increment;
-import org.apache.flink.table.store.file.mergetree.sst.SstFileMeta;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -33,9 +33,9 @@ public class ManifestCommittable {
 
     private final String identifier;
     private final Map<Integer, Long> logOffsets;
-    private final Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> newFiles;
-    private final Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> compactBefore;
-    private final Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> compactAfter;
+    private final Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> newFiles;
+    private final Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> compactBefore;
+    private final Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> compactAfter;
 
     public ManifestCommittable(String identifier) {
         this.identifier = identifier;
@@ -48,9 +48,9 @@ public class ManifestCommittable {
     public ManifestCommittable(
             String identifier,
             Map<Integer, Long> logOffsets,
-            Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> newFiles,
-            Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> compactBefore,
-            Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> compactAfter) {
+            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> newFiles,
+            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> compactBefore,
+            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> compactAfter) {
         this.identifier = identifier;
         this.logOffsets = logOffsets;
         this.newFiles = newFiles;
@@ -74,10 +74,10 @@ public class ManifestCommittable {
     }
 
     private static void addFiles(
-            Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> map,
+            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> map,
             BinaryRowData partition,
             int bucket,
-            List<SstFileMeta> files) {
+            List<DataFileMeta> files) {
         map.computeIfAbsent(partition, k -> new HashMap<>())
                 .computeIfAbsent(bucket, k -> new ArrayList<>())
                 .addAll(files);
@@ -91,15 +91,15 @@ public class ManifestCommittable {
         return logOffsets;
     }
 
-    public Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> newFiles() {
+    public Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> newFiles() {
         return newFiles;
     }
 
-    public Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> compactBefore() {
+    public Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> compactBefore() {
         return compactBefore;
     }
 
-    public Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> compactAfter() {
+    public Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> compactAfter() {
         return compactAfter;
     }
 
@@ -140,19 +140,20 @@ public class ManifestCommittable {
                 + '}';
     }
 
-    private static String filesToString(Map<BinaryRowData, Map<Integer, List<SstFileMeta>>> files) {
+    private static String filesToString(
+            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> files) {
         StringBuilder builder = new StringBuilder();
-        for (Map.Entry<BinaryRowData, Map<Integer, List<SstFileMeta>>> entryWithPartition :
+        for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> entryWithPartition :
                 files.entrySet()) {
-            for (Map.Entry<Integer, List<SstFileMeta>> entryWithBucket :
+            for (Map.Entry<Integer, List<DataFileMeta>> entryWithBucket :
                     entryWithPartition.getValue().entrySet()) {
-                for (SstFileMeta sst : entryWithBucket.getValue()) {
+                for (DataFileMeta dataFile : entryWithBucket.getValue()) {
                     builder.append("  * partition: ")
                             .append(entryWithPartition.getKey())
                             .append(", bucket: ")
                             .append(entryWithBucket.getKey())
                             .append(", file: ")
-                            .append(sst.fileName())
+                            .append(dataFile.fileName())
                             .append("\n");
                 }
             }

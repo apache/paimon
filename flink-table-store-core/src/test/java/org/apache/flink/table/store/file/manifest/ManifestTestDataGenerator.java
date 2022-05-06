@@ -22,7 +22,7 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.mergetree.sst.SstTestDataGenerator;
+import org.apache.flink.table.store.file.data.DataFileTestDataGenerator;
 import org.apache.flink.table.store.file.stats.FieldStatsCollector;
 import org.apache.flink.util.Preconditions;
 
@@ -39,8 +39,8 @@ public class ManifestTestDataGenerator {
     private static final int LEVEL_CAPACITY = 3;
 
     private final int numBuckets;
-    private final List<Map<BinaryRowData, List<List<SstTestDataGenerator.Data>>>> levels;
-    private final SstTestDataGenerator gen;
+    private final List<Map<BinaryRowData, List<List<DataFileTestDataGenerator.Data>>>> levels;
+    private final DataFileTestDataGenerator gen;
 
     private final LinkedList<ManifestEntry> bufferedResults;
 
@@ -51,7 +51,7 @@ public class ManifestTestDataGenerator {
             levels.add(new HashMap<>());
         }
         this.gen =
-                SstTestDataGenerator.builder()
+                DataFileTestDataGenerator.builder()
                         .numBuckets(numBuckets)
                         .memTableCapacity(memTableCapacity)
                         .build();
@@ -64,11 +64,11 @@ public class ManifestTestDataGenerator {
             return bufferedResults.poll();
         }
 
-        SstTestDataGenerator.Data file = gen.next();
-        List<List<SstTestDataGenerator.Data>> bucketLevels =
+        DataFileTestDataGenerator.Data file = gen.next();
+        List<List<DataFileTestDataGenerator.Data>> bucketLevels =
                 levels.get(file.bucket).computeIfAbsent(file.partition, k -> new ArrayList<>());
         ensureCapacity(bucketLevels, file.meta.level());
-        List<SstTestDataGenerator.Data> level = bucketLevels.get(file.meta.level());
+        List<DataFileTestDataGenerator.Data> level = bucketLevels.get(file.meta.level());
         level.add(file);
         bufferedResults.push(
                 new ManifestEntry(
@@ -106,17 +106,18 @@ public class ManifestTestDataGenerator {
 
     private void mergeLevelsIfNeeded(BinaryRowData partition, int bucket) {
         // this method uses a very simple merging strategy just for producing valid data
-        List<List<SstTestDataGenerator.Data>> bucketLevels = levels.get(bucket).get(partition);
+        List<List<DataFileTestDataGenerator.Data>> bucketLevels = levels.get(bucket).get(partition);
         int lastModifiedLevel = 0;
         while (bucketLevels.get(lastModifiedLevel).size() > LEVEL_CAPACITY) {
 
-            // remove all sst files in the current and next level
+            // remove all data files in the current and next level
             ensureCapacity(bucketLevels, lastModifiedLevel + 1);
-            List<SstTestDataGenerator.Data> currentLevel = bucketLevels.get(lastModifiedLevel);
-            List<SstTestDataGenerator.Data> nextLevel = bucketLevels.get(lastModifiedLevel + 1);
+            List<DataFileTestDataGenerator.Data> currentLevel = bucketLevels.get(lastModifiedLevel);
+            List<DataFileTestDataGenerator.Data> nextLevel =
+                    bucketLevels.get(lastModifiedLevel + 1);
             List<KeyValue> kvs = new ArrayList<>();
 
-            for (SstTestDataGenerator.Data file : currentLevel) {
+            for (DataFileTestDataGenerator.Data file : currentLevel) {
                 bufferedResults.push(
                         new ManifestEntry(
                                 ValueKind.DELETE, partition, bucket, numBuckets, file.meta));
@@ -124,7 +125,7 @@ public class ManifestTestDataGenerator {
             }
             currentLevel.clear();
 
-            for (SstTestDataGenerator.Data file : nextLevel) {
+            for (DataFileTestDataGenerator.Data file : nextLevel) {
                 bufferedResults.push(
                         new ManifestEntry(
                                 ValueKind.DELETE, partition, bucket, numBuckets, file.meta));
@@ -132,11 +133,11 @@ public class ManifestTestDataGenerator {
             }
             nextLevel.clear();
 
-            // add back merged sst files
-            List<SstTestDataGenerator.Data> merged =
-                    gen.createSstFiles(kvs, lastModifiedLevel + 1, partition, bucket);
+            // add back merged data files
+            List<DataFileTestDataGenerator.Data> merged =
+                    gen.createDataFiles(kvs, lastModifiedLevel + 1, partition, bucket);
             nextLevel.addAll(merged);
-            for (SstTestDataGenerator.Data file : nextLevel) {
+            for (DataFileTestDataGenerator.Data file : nextLevel) {
                 bufferedResults.push(
                         new ManifestEntry(ValueKind.ADD, partition, bucket, numBuckets, file.meta));
             }
@@ -145,7 +146,7 @@ public class ManifestTestDataGenerator {
         }
     }
 
-    private void ensureCapacity(List<List<SstTestDataGenerator.Data>> list, int capacity) {
+    private void ensureCapacity(List<List<DataFileTestDataGenerator.Data>> list, int capacity) {
         while (list.size() <= capacity) {
             list.add(new ArrayList<>());
         }
