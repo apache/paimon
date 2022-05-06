@@ -92,6 +92,17 @@ public class FileStoreOptions implements Serializable {
                             "The default partition name in case the dynamic partition"
                                     + " column value is null/empty string.");
 
+    public static final ConfigOption<Boolean> COMPACTION_RESCALE_BUCKET =
+            key("compact.rescale-bucket")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Specify the behavior for compaction. Set value to true "
+                                    + "will lead compaction to reorganize data files "
+                                    + "according to the bucket number read from catalog meta. "
+                                    + "By default, compaction will use the bucket number read "
+                                    + "from manifest meta.");
+
     public static final ConfigOption<Integer> SNAPSHOT_NUM_RETAINED_MIN =
             ConfigOptions.key("snapshot.num-retained.min")
                     .intType()
@@ -122,7 +133,7 @@ public class FileStoreOptions implements Serializable {
                     .defaultValue(MergeEngine.DEDUPLICATE)
                     .withDescription(
                             Description.builder()
-                                    .text("Specifies the merge engine for table with primary key.")
+                                    .text("Specify the merge engine for table with primary key.")
                                     .linebreak()
                                     .list(
                                             formatEnumOption(MergeEngine.DEDUPLICATE),
@@ -140,6 +151,7 @@ public class FileStoreOptions implements Serializable {
         allOptions.add(MANIFEST_TARGET_FILE_SIZE);
         allOptions.add(MANIFEST_MERGE_MIN_COUNT);
         allOptions.add(PARTITION_DEFAULT_NAME);
+        allOptions.add(COMPACTION_RESCALE_BUCKET);
         allOptions.add(SNAPSHOT_NUM_RETAINED_MIN);
         allOptions.add(SNAPSHOT_NUM_RETAINED_MAX);
         allOptions.add(SNAPSHOT_TIME_RETAINED);
@@ -224,6 +236,10 @@ public class FileStoreOptions implements Serializable {
 
     public int manifestMergeMinCount() {
         return options.get(MANIFEST_MERGE_MIN_COUNT);
+    }
+
+    public boolean rescaleBucket() {
+        return options.get(COMPACTION_RESCALE_BUCKET);
     }
 
     /** Specifies the merge engine for table with primary key. */
