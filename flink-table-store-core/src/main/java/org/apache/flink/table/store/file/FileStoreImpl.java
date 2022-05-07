@@ -68,7 +68,6 @@ public class FileStoreImpl implements FileStore {
                         new TableConfig(), keyType.getChildren(), "KeyComparator");
     }
 
-    @VisibleForTesting
     public FileStorePathFactory pathFactory() {
         return new FileStorePathFactory(
                 options.path(tableIdentifier), partitionType, options.partitionDefaultName());
