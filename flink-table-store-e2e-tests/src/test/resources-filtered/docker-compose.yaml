@@ -1,0 +1,99 @@
+################################################################################
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+version: "3"
+
+services:
+
+  # ----------------------------------------
+  # Flink services
+  # ----------------------------------------
+
+  jobmanager:
+    # TODO change image tag to official flink image after 1.15 is released
+    image: tsreaper/flink-test:${flink.version}
+    volumes:
+      - testdata:/test-data
+    command: jobmanager
+    env_file:
+      - ./flink.env
+    networks:
+      testnetwork:
+        aliases:
+          - jobmanager
+    ports:
+      - "8081:8081"
+
+  taskmanager:
+    # TODO change image tag to official flink image after 1.15 is released
+    image: tsreaper/flink-test:${flink.version}
+    volumes:
+      - testdata:/test-data
+    command: taskmanager
+    env_file:
+      - ./flink.env
+    networks:
+      testnetwork:
+        aliases:
+          - taskmanager
+    depends_on:
+      - jobmanager
+
+  # ----------------------------------------
+  # Kafka services
+  # ----------------------------------------
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.0.1
+    networks:
+      testnetwork:
+        aliases:
+          - zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.0.1
+    networks:
+      testnetwork:
+        aliases:
+          - kafka
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_MAX_TIMEOUT_MS: 7200000
+      # Disable log deletion to prevent records from being deleted during test run
+      KAFKA_LOG_RETENTION_MS: -1
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+
+volumes:
+  testdata:
+
+networks:
+  testnetwork:

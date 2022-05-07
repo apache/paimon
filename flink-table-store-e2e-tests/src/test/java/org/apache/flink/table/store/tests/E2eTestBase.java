@@ -20,27 +20,23 @@ package org.apache.flink.table.store.tests;
 
 import org.apache.flink.table.store.tests.utils.TestUtils;
 
-import com.github.dockerjava.api.model.Volume;
-import org.junit.ClassRule;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testcontainers.containers.BindMode;
 import org.testcontainers.containers.Container;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.Network;
+import org.testcontainers.containers.ContainerState;
+import org.testcontainers.containers.DockerComposeContainer;
 import org.testcontainers.containers.output.OutputFrame;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.utility.MountableFile;
 
-import java.io.IOException;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -55,95 +51,65 @@ public abstract class E2eTestBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(E2eTestBase.class);
 
-    // ------------------------------------------------------------------------------------------
-    // Flink Variables
-    // ------------------------------------------------------------------------------------------
-    private static final String FLINK_IMAGE_TAG;
+    private final boolean withKafka;
 
-    static {
-        Properties properties = new Properties();
-        try {
-            properties.load(
-                    E2eTestBase.class.getClassLoader().getResourceAsStream("project.properties"));
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-        // TODO change image tag to official flink image after 1.15 is released
-        FLINK_IMAGE_TAG = "tsreaper/flink-test:" + properties.getProperty("flink.version");
+    protected E2eTestBase() {
+        this(false);
     }
 
-    private static final String INTER_CONTAINER_JM_ALIAS = "jobmanager";
-    private static final String INTER_CONTAINER_TM_ALIAS = "taskmanager";
-    private static final int JOB_MANAGER_REST_PORT = 8081;
-    private static final String FLINK_PROPERTIES =
-            String.join(
-                    "\n",
-                    Arrays.asList(
-                            "jobmanager.rpc.address: jobmanager",
-                            "taskmanager.numberOfTaskSlots: 9",
-                            "parallelism.default: 3",
-                            "sql-client.execution.result-mode: TABLEAU"));
+    protected E2eTestBase(boolean withKafka) {
+        this.withKafka = withKafka;
+    }
 
-    // ------------------------------------------------------------------------------------------
-    // Additional Jars
-    // ------------------------------------------------------------------------------------------
     private static final String TABLE_STORE_JAR_NAME = "flink-table-store.jar";
     private static final String BUNDLED_HADOOP_JAR_NAME = "bundled-hadoop.jar";
-
-    protected static final String TEST_DATA_DIR = "/opt/flink/test-data";
-
-    @ClassRule public static final Network NETWORK = Network.newNetwork();
-    private GenericContainer<?> jobManager;
-    protected GenericContainer<?> taskManager;
+    protected static final String TEST_DATA_DIR = "/test-data";
 
     private static final String PRINT_SINK_IDENTIFIER = "table-store-e2e-result";
     private static final int CHECK_RESULT_INTERVAL_MS = 1000;
     private static final int CHECK_RESULT_RETRIES = 60;
     private final List<String> currentResults = new ArrayList<>();
 
+    private DockerComposeContainer<?> environment;
+    private ContainerState jobManager;
+
     @BeforeEach
     public void before() throws Exception {
-        Volume volume = new Volume(TEST_DATA_DIR);
-        jobManager =
-                new GenericContainer<>(FLINK_IMAGE_TAG)
-                        .withCommand("jobmanager")
-                        .withNetwork(NETWORK)
-                        .withNetworkAliases(INTER_CONTAINER_JM_ALIAS)
-                        .withExposedPorts(JOB_MANAGER_REST_PORT)
-                        .withEnv("FLINK_PROPERTIES", FLINK_PROPERTIES)
-                        .withLogConsumer(new LogConsumer(LOG))
-                        .withCreateContainerCmdModifier(
-                                cmd ->
-                                        cmd.withName("jobmanager-" + UUID.randomUUID().toString())
-                                                .withVolumes(volume));
-        jobManager.start();
-        jobManager.execInContainer("chown", "-R", "flink:flink", TEST_DATA_DIR);
-        LOG.info("Job manager started.");
+        List<String> services = new ArrayList<>();
+        services.add("jobmanager");
+        services.add("taskmanager");
+        environment =
+                new DockerComposeContainer<>(
+                                new File(
+                                        E2eTestBase.class
+                                                .getClassLoader()
+                                                .getResource("docker-compose.yaml")
+                                                .toURI()))
+                        .withLogConsumer("jobmanager_1", new LogConsumer(LOG))
+                        .withLogConsumer("taskmanager_1", new LogConsumer(LOG));
+        if (withKafka) {
+            services.add("zookeeper");
+            services.add("kafka");
+            environment
+                    .withLogConsumer("zookeeper_1", new Slf4jLogConsumer(LOG))
+                    .withLogConsumer("kafka_1", new Slf4jLogConsumer(LOG));
+        }
+        environment.withServices(services.toArray(new String[0]));
 
-        taskManager =
-                new GenericContainer<>(FLINK_IMAGE_TAG)
-                        .withCommand("taskmanager")
-                        .withNetwork(NETWORK)
-                        .withNetworkAliases(INTER_CONTAINER_TM_ALIAS)
-                        .withEnv("FLINK_PROPERTIES", FLINK_PROPERTIES)
-                        .withVolumesFrom(jobManager, BindMode.READ_WRITE)
-                        .dependsOn(jobManager)
-                        .withLogConsumer(new LogConsumer(LOG));
-        taskManager.start();
-        LOG.info("Task manager started.");
+        environment.start();
+        jobManager = environment.getContainerByServiceName("jobmanager_1").get();
+        jobManager.execInContainer("chown", "-R", "flink:flink", TEST_DATA_DIR);
 
         copyResource(TABLE_STORE_JAR_NAME);
         copyResource(BUNDLED_HADOOP_JAR_NAME);
     }
 
     @AfterEach
-    public void after() throws Exception {
-        taskManager.stop();
-        jobManager.stop();
-        LOG.info("Job manager and task manager stopped.");
+    public void after() {
+        environment.stop();
     }
 
-    private void copyResource(String resourceName) throws Exception {
+    private void copyResource(String resourceName) {
         jobManager.copyFileToContainer(
                 MountableFile.forHostPath(TestUtils.getResource(resourceName).toString()),
                 TEST_DATA_DIR + "/" + resourceName);
@@ -211,7 +177,7 @@ public abstract class E2eTestBase {
         return String.format(testDataSinkDdl, sinkName, schema, PRINT_SINK_IDENTIFIER);
     }
 
-    protected List<String> getCurrentResults() {
+    private List<String> getCurrentResults() {
         synchronized (currentResults) {
             return new ArrayList<>(currentResults);
         }
