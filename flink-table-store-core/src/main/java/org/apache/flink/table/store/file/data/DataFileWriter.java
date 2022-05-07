@@ -35,7 +35,6 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.writer.BaseBulkWriter;
 import org.apache.flink.table.store.file.writer.BaseFileWriter;
-import org.apache.flink.table.store.file.writer.FileWriter;
 import org.apache.flink.table.store.file.writer.RollingFileWriter;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.CloseableIterator;
@@ -141,8 +140,8 @@ public class DataFileWriter {
 
         private BinaryRowData minKey = null;
         private RowData maxKey = null;
-        private Long minSeqNumber = null;
-        private Long maxSeqNumber = null;
+        private long minSeqNumber = Long.MAX_VALUE;
+        private long maxSeqNumber = Long.MIN_VALUE;
 
         public KvFileWriter(BulkWriter.Factory<KeyValue> writerFactory, Path path, int level)
                 throws IOException {
@@ -183,17 +182,11 @@ public class DataFileWriter {
         }
 
         private void updateMinSeqNumber(KeyValue kv) {
-            minSeqNumber =
-                    minSeqNumber == null
-                            ? kv.sequenceNumber()
-                            : Math.min(minSeqNumber, kv.sequenceNumber());
+            minSeqNumber = Math.min(minSeqNumber, kv.sequenceNumber());
         }
 
         private void updateMaxSeqNumber(KeyValue kv) {
-            maxSeqNumber =
-                    maxSeqNumber == null
-                            ? kv.sequenceNumber()
-                            : Math.max(maxSeqNumber, kv.sequenceNumber());
+            maxSeqNumber = Math.max(maxSeqNumber, kv.sequenceNumber());
         }
 
         @Override
@@ -203,7 +196,7 @@ public class DataFileWriter {
             FieldStats[] valueStats;
             if (fileStatsExtractor == null) {
                 keyStats = keyStatsCollector.extract();
-                valueStats = keyStatsCollector.extract();
+                valueStats = valueStatsCollector.extract();
             } else {
                 FieldStats[] rowStats = fileStatsExtractor.extract(path);
                 int numKeyFields = keyType.getFieldCount();
@@ -214,7 +207,7 @@ public class DataFileWriter {
             return new DataFileMeta(
                     path.getName(),
                     FileUtils.getFileSize(path),
-                    super.recordCount(),
+                    recordCount(),
                     minKey,
                     keySerializer.toBinaryRow(maxKey).copy(),
                     keyStats,
@@ -227,13 +220,12 @@ public class DataFileWriter {
 
     private static class RollingKvWriter extends RollingFileWriter<KeyValue, DataFileMeta> {
 
-        public RollingKvWriter(
-                Supplier<FileWriter<KeyValue, DataFileMeta>> writerFactory, long targetFileSize) {
+        public RollingKvWriter(Supplier<KvFileWriter> writerFactory, long targetFileSize) {
             super(writerFactory, targetFileSize);
         }
     }
 
-    private Supplier<FileWriter<KeyValue, DataFileMeta>> createWriterFactory(int level) {
+    private Supplier<KvFileWriter> createWriterFactory(int level) {
         return () -> {
             try {
                 return new KvFileWriter(new KvBulkWriterFactory(), pathFactory.newPath(), level);

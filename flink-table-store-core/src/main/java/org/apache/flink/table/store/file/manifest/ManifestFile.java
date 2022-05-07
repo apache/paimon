@@ -32,7 +32,6 @@ import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
 import org.apache.flink.table.store.file.writer.BaseBulkWriter;
 import org.apache.flink.table.store.file.writer.BaseFileWriter;
-import org.apache.flink.table.store.file.writer.FileWriter;
 import org.apache.flink.table.store.file.writer.RollingFileWriter;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -99,11 +98,11 @@ public class ManifestFile {
         try (ManifestRollingWriter writer = rollingWriter) {
             writer.write(entries);
 
-        } catch (IOException e) {
+        } catch (Exception e) {
             LOG.warn("Exception occurs when writing manifest files. Cleaning up.", e);
 
             rollingWriter.abort();
-            throw new UncheckedIOException(e);
+            throw new RuntimeException(e);
         }
 
         return rollingWriter.result();
@@ -168,13 +167,12 @@ public class ManifestFile {
             extends RollingFileWriter<ManifestEntry, ManifestFileMeta> {
 
         public ManifestRollingWriter(
-                Supplier<FileWriter<ManifestEntry, ManifestFileMeta>> writerFactory,
-                long targetFileSize) {
+                Supplier<ManifestEntryWriter> writerFactory, long targetFileSize) {
             super(writerFactory, targetFileSize);
         }
     }
 
-    private Supplier<FileWriter<ManifestEntry, ManifestFileMeta>> createWriterFactory() {
+    private Supplier<ManifestEntryWriter> createWriterFactory() {
         return () -> {
             try {
                 return new ManifestEntryWriter(

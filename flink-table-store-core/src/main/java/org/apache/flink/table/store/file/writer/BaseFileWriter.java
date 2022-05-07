@@ -37,28 +37,37 @@ import java.io.IOException;
  */
 public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
 
+    private final BulkWriter.Factory<T> writerFactory;
     private final Path path;
 
     private long recordCount;
-    private FSDataOutputStream currentOut;
-    private BulkWriter<T> currentWriter;
+    private FSDataOutputStream currentOut = null;
+    private BulkWriter<T> currentWriter = null;
 
     private boolean closed = false;
 
-    public BaseFileWriter(BulkWriter.Factory<T> writerFactory, Path path) throws IOException {
+    public BaseFileWriter(BulkWriter.Factory<T> writerFactory, Path path) {
+        this.writerFactory = writerFactory;
         this.path = path;
 
         this.recordCount = 0;
-        this.currentOut = path.getFileSystem().create(path, FileSystem.WriteMode.NO_OVERWRITE);
-        this.currentWriter = writerFactory.create(currentOut);
     }
 
     public Path path() {
         return path;
     }
 
+    private void openCurrentWriter() throws IOException {
+        this.currentOut = path.getFileSystem().create(path, FileSystem.WriteMode.NO_OVERWRITE);
+        this.currentWriter = writerFactory.create(currentOut);
+    }
+
     @Override
     public void write(T row) throws IOException {
+        if (currentWriter == null) {
+            openCurrentWriter();
+        }
+
         currentWriter.addElement(row);
         recordCount += 1;
     }
@@ -70,12 +79,17 @@ public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
 
     @Override
     public long length() throws IOException {
-        return currentOut.getPos();
+        if (currentOut != null) {
+            return currentOut.getPos();
+        }
+        return 0;
     }
 
     @Override
     public void flush() throws IOException {
-        currentWriter.flush();
+        if (currentWriter != null) {
+            currentWriter.flush();
+        }
     }
 
     protected abstract R createFileMeta(Path path) throws IOException;
@@ -83,6 +97,7 @@ public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
     @Override
     public void abort() {
         IOUtils.closeQuietly(this);
+
         // Abort to clean the orphan file.
         FileUtils.deleteOrWarn(path);
     }

@@ -21,6 +21,9 @@ package org.apache.flink.table.store.file.writer;
 
 import org.apache.flink.util.Preconditions;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
@@ -34,8 +37,9 @@ import java.util.function.Supplier;
  * @param <R> the file metadata result.
  */
 public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
+    private static final Logger LOG = LoggerFactory.getLogger(RollingFileWriter.class);
 
-    private final Supplier<FileWriter<T, R>> writerFactory;
+    private final Supplier<? extends FileWriter<T, R>> writerFactory;
     private final long targetFileSize;
     private final List<FileWriter<T, R>> openedWriters;
     private final List<R> results;
@@ -45,7 +49,8 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
     private long recordCount = 0;
     private boolean closed = false;
 
-    public RollingFileWriter(Supplier<FileWriter<T, R>> writerFactory, long targetFileSize) {
+    public RollingFileWriter(
+            Supplier<? extends FileWriter<T, R>> writerFactory, long targetFileSize) {
         this.writerFactory = writerFactory;
         this.targetFileSize = targetFileSize;
         this.openedWriters = new ArrayList<>();
@@ -111,8 +116,16 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
 
     @Override
     public void abort() {
-        closeCurrentWriter();
-        openedWriters.stream().forEach(FileWriter::abort);
+        try {
+            close();
+        } catch (Throwable e) {
+            LOG.warn("Failed to close the current opened writer, because ", e);
+        }
+
+        // Abort all those writers.
+        for (FileWriter<T, R> writer : openedWriters) {
+            writer.abort();
+        }
     }
 
     @Override
