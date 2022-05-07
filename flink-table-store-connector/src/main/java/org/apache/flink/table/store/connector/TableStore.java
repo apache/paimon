@@ -320,7 +320,9 @@ public class TableStore {
                     continuousScanLatest,
                     projectedFields,
                     partitionPredicate,
-                    fieldPredicate);
+                    fieldPredicate,
+                    null,
+                    null);
         }
 
         private Source<RowData, ?, ?> buildSource() {

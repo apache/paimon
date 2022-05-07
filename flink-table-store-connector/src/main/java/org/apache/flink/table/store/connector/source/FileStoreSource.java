@@ -25,16 +25,21 @@ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 
 import static org.apache.flink.table.store.connector.source.PendingSplitsCheckpoint.INVALID_SNAPSHOT;
 import static org.apache.flink.util.Preconditions.checkArgument;
@@ -61,6 +66,13 @@ public class FileStoreSource
 
     @Nullable private final Predicate fieldPredicate;
 
+    /** The latest snapshot id seen at planning phase when manual compaction is triggered. */
+    @Nullable private final Long specifiedSnapshotId;
+
+    /** The manifest entries collected at planning phase when manual compaction is triggered. */
+    @Nullable
+    private final Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> specifiedManifestEntries;
+
     public FileStoreSource(
             FileStore fileStore,
             boolean valueCountMode,
@@ -69,7 +81,10 @@ public class FileStoreSource
             boolean latestContinuous,
             @Nullable int[][] projectedFields,
             @Nullable Predicate partitionPredicate,
-            @Nullable Predicate fieldPredicate) {
+            @Nullable Predicate fieldPredicate,
+            @Nullable Long specifiedSnapshotId,
+            @Nullable
+                    Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> specifiedManifestEntries) {
         this.fileStore = fileStore;
         this.valueCountMode = valueCountMode;
         this.isContinuous = isContinuous;
@@ -78,6 +93,8 @@ public class FileStoreSource
         this.projectedFields = projectedFields;
         this.partitionPredicate = partitionPredicate;
         this.fieldPredicate = fieldPredicate;
+        this.specifiedSnapshotId = specifiedSnapshotId;
+        this.specifiedManifestEntries = specifiedManifestEntries;
     }
 
     @Override
@@ -122,6 +139,17 @@ public class FileStoreSource
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
         FileStoreScan scan = fileStore.newScan();
+        Long snapshotId;
+        Collection<FileStoreSourceSplit> splits;
+        if (specifiedSnapshotId != null) {
+            Preconditions.checkNotNull(
+                    specifiedManifestEntries,
+                    "The manifest entries cannot be null for manual compaction.");
+            return new StaticFileStoreSplitEnumerator(
+                    context,
+                    scan.snapshot(specifiedSnapshotId),
+                    new FileStoreSourceSplitGenerator().createSplits(specifiedManifestEntries));
+        }
         if (partitionPredicate != null) {
             scan.withPartitionFilter(partitionPredicate);
         }
@@ -133,8 +161,6 @@ public class FileStoreSource
             }
         }
 
-        Long snapshotId;
-        Collection<FileStoreSourceSplit> splits;
         if (checkpoint == null) {
             // first, create new enumerator, plan splits
             if (latestContinuous) {
