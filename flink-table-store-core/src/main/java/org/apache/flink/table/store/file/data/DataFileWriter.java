@@ -93,7 +93,7 @@ public class DataFileWriter {
     }
 
     /**
-     * Write several {@link KeyValue}s into an data file of a given level.
+     * Write several {@link KeyValue}s into a data file of a given level.
      *
      * <p>NOTE: This method is atomic.
      */

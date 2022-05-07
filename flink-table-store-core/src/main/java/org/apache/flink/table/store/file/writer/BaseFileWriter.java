@@ -25,6 +25,7 @@ import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.utils.FileUtils;
+import org.apache.flink.util.IOUtils;
 import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
@@ -52,6 +53,10 @@ public abstract class BaseFileWriter<T> implements FileWriter<T, DataFileMeta> {
         this.currentWriter = writerFactory.create(currentOut);
     }
 
+    public Path path() {
+        return path;
+    }
+
     @Override
     public void write(T row) throws IOException {
         currentWriter.addElement(row);
@@ -77,6 +82,8 @@ public abstract class BaseFileWriter<T> implements FileWriter<T, DataFileMeta> {
 
     @Override
     public void abort() {
+        IOUtils.closeQuietly(this);
+        // Abort to clean the orphan file.
         FileUtils.deleteOrWarn(path);
     }
 

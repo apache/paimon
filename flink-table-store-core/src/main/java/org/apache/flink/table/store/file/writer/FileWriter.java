@@ -85,11 +85,7 @@ public interface FileWriter<T, R> extends Closeable {
      */
     void flush() throws IOException;
 
-    /**
-     * Abort to clear orphan file(s) if encounter any error.
-     *
-     * @throws IOException if encounter any IO error.
-     */
+    /** Abort to clear orphan file(s) if encounter any error. */
     default void abort() {}
 
     /** @return the result for this closed file writer. */

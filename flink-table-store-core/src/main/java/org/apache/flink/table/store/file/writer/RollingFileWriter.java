@@ -23,6 +23,7 @@ import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
@@ -36,6 +37,7 @@ public class RollingFileWriter<T> implements FileWriter<T, List<DataFileMeta>> {
 
     private final Supplier<BaseFileWriter<T>> writerFactory;
     private final long targetFileSize;
+    private final List<BaseFileWriter<T>> openedWriters;
     private final List<DataFileMeta> results;
 
     private BaseFileWriter<T> currentWriter = null;
@@ -45,6 +47,7 @@ public class RollingFileWriter<T> implements FileWriter<T, List<DataFileMeta>> {
     public RollingFileWriter(Supplier<BaseFileWriter<T>> writerFactory, long targetFileSize) {
         this.writerFactory = writerFactory;
         this.targetFileSize = targetFileSize;
+        this.openedWriters = new ArrayList<>();
         this.results = new ArrayList<>();
     }
 
@@ -52,15 +55,30 @@ public class RollingFileWriter<T> implements FileWriter<T, List<DataFileMeta>> {
     public void write(T row) throws IOException {
         // Open the current writer if write the first record or roll over happen before.
         if (currentWriter == null) {
-            currentWriter = writerFactory.get();
+            openCurrentWriter();
         }
 
         currentWriter.write(row);
         recordCount += 1;
 
         if (currentWriter.length() >= targetFileSize) {
-            currentWriter.close();
-            results.add(currentWriter.result());
+            closeCurrentWriter();
+        }
+    }
+
+    private void openCurrentWriter() {
+        currentWriter = writerFactory.get();
+        openedWriters.add(currentWriter);
+    }
+
+    private void closeCurrentWriter() {
+        if (currentWriter != null) {
+            try {
+                currentWriter.close();
+                results.add(currentWriter.result());
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
 
             currentWriter = null;
         }
@@ -73,12 +91,12 @@ public class RollingFileWriter<T> implements FileWriter<T, List<DataFileMeta>> {
 
     @Override
     public long length() throws IOException {
-        long lengthOfClosedFiles = results.stream().mapToLong(DataFileMeta::fileSize).sum();
+        long totalLength = results.stream().mapToLong(DataFileMeta::fileSize).sum();
         if (currentWriter != null) {
-            lengthOfClosedFiles += currentWriter.length();
+            totalLength += currentWriter.length();
         }
 
-        return lengthOfClosedFiles;
+        return totalLength;
     }
 
     @Override
@@ -90,7 +108,8 @@ public class RollingFileWriter<T> implements FileWriter<T, List<DataFileMeta>> {
 
     @Override
     public void abort() {
-        // TODO abort to delete all created files.
+        closeCurrentWriter();
+        openedWriters.stream().forEach(FileWriter::abort);
     }
 
     @Override
@@ -103,10 +122,7 @@ public class RollingFileWriter<T> implements FileWriter<T, List<DataFileMeta>> {
     @Override
     public void close() throws IOException {
         if (!closed) {
-            if (currentWriter != null) {
-                currentWriter.close();
-                currentWriter = null;
-            }
+            closeCurrentWriter();
 
             closed = true;
         }
