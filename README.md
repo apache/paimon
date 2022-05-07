@@ -13,9 +13,9 @@ Check our [quick-start](https://nightlies.apache.org/flink/flink-table-store-doc
 
 ## Building
 
-Run the `mvn clean package` command to build the project.
+Run the `mvn clean package -DskipTests` command to build the project.
 
-Then you will find a JAR file that contains your application, plus any libraries that you may have added as dependencies to the application: `target/<artifact-id>-<version>.jar`.
+Then you will find a JAR file with all shaded dependencies: `flink-table-store-dist/target/flink-table-store-dist-<version>.jar`.
 
 ## Contributing
 
