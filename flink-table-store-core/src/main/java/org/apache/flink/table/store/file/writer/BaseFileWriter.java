@@ -23,7 +23,6 @@ import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.util.IOUtils;
 import org.apache.flink.util.Preconditions;
@@ -34,8 +33,9 @@ import java.io.IOException;
  * The abstracted base file writer implementation for {@link FileWriter}.
  *
  * @param <T> record data type.
+ * @param <R> file meta data type.
  */
-public abstract class BaseFileWriter<T> implements FileWriter<T, DataFileMeta> {
+public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
 
     private final Path path;
 
@@ -78,7 +78,7 @@ public abstract class BaseFileWriter<T> implements FileWriter<T, DataFileMeta> {
         currentWriter.flush();
     }
 
-    protected abstract DataFileMeta createDataFileMeta(Path path) throws IOException;
+    protected abstract R createFileMeta(Path path) throws IOException;
 
     @Override
     public void abort() {
@@ -88,10 +88,10 @@ public abstract class BaseFileWriter<T> implements FileWriter<T, DataFileMeta> {
     }
 
     @Override
-    public DataFileMeta result() throws IOException {
+    public R result() throws IOException {
         Preconditions.checkState(closed, "Cannot access the file meta unless close this writer.");
 
-        return createDataFileMeta(path);
+        return createFileMeta(path);
     }
 
     @Override

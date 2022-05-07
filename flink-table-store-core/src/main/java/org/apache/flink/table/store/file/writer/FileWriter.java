@@ -24,7 +24,7 @@ import java.io.IOException;
 import java.util.Iterator;
 
 /**
- * File writer to roll over to a new file if the estimated file size exceed the expected threshold.
+ * File writer to accept one record or a branch of records and generate metadata after closing it.
  *
  * @param <T> record type.
  * @param <R> file result to collect.

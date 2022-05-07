@@ -29,16 +29,20 @@ import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.stats.FieldStatsCollector;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
-import org.apache.flink.table.store.file.utils.RollingFile;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
+import org.apache.flink.table.store.file.writer.BaseBulkWriter;
+import org.apache.flink.table.store.file.writer.BaseFileWriter;
+import org.apache.flink.table.store.file.writer.FileWriter;
+import org.apache.flink.table.store.file.writer.RollingFileWriter;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.ArrayList;
+import java.io.UncheckedIOException;
 import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * This file includes several {@link ManifestEntry}s, representing the additional changes since last
@@ -90,48 +94,51 @@ public class ManifestFile {
      * <p>NOTE: This method is atomic.
      */
     public List<ManifestFileMeta> write(List<ManifestEntry> entries) {
-        ManifestRollingFile rollingFile = new ManifestRollingFile();
-        List<ManifestFileMeta> result = new ArrayList<>();
-        List<Path> filesToCleanUp = new ArrayList<>();
-        try {
-            rollingFile.write(entries.iterator(), result, filesToCleanUp);
-        } catch (Throwable e) {
+
+        ManifestRollingWriter rollingWriter = createManifestRollingWriter(suggestedFileSize);
+        try (ManifestRollingWriter writer = rollingWriter) {
+            writer.write(entries);
+
+        } catch (IOException e) {
             LOG.warn("Exception occurs when writing manifest files. Cleaning up.", e);
-            for (Path path : filesToCleanUp) {
-                FileUtils.deleteOrWarn(path);
-            }
-            throw new RuntimeException(e);
+
+            rollingWriter.abort();
+            throw new UncheckedIOException(e);
         }
-        return result;
+
+        return rollingWriter.result();
     }
 
     public void delete(String fileName) {
         FileUtils.deleteOrWarn(pathFactory.toManifestFilePath(fileName));
     }
 
-    private class ManifestRollingFile extends RollingFile<ManifestEntry, ManifestFileMeta> {
+    private class ManifestEntryBulkWriterFactory implements BulkWriter.Factory<ManifestEntry> {
 
-        private long numAddedFiles;
-        private long numDeletedFiles;
-        private FieldStatsCollector statsCollector;
+        @Override
+        public BulkWriter<ManifestEntry> create(FSDataOutputStream out) throws IOException {
+            return new BaseBulkWriter<>(writerFactory.create(out), serializer::toRow);
+        }
+    }
 
-        private ManifestRollingFile() {
-            super(suggestedFileSize);
-            resetMeta();
+    private class ManifestEntryWriter extends BaseFileWriter<ManifestEntry, ManifestFileMeta> {
+
+        private final FieldStatsCollector statsCollector;
+
+        private long numAddedFiles = 0;
+        private long numDeletedFiles = 0;
+
+        ManifestEntryWriter(BulkWriter.Factory<ManifestEntry> writerFactory, Path path)
+                throws IOException {
+            super(writerFactory, path);
+
+            this.statsCollector = new FieldStatsCollector(partitionType);
         }
 
         @Override
-        protected Path newPath() {
-            return pathFactory.newManifestFile();
-        }
+        public void write(ManifestEntry entry) throws IOException {
+            super.write(entry);
 
-        @Override
-        protected BulkWriter<RowData> newWriter(FSDataOutputStream out) throws IOException {
-            return writerFactory.create(out);
-        }
-
-        @Override
-        protected RowData toRowData(ManifestEntry entry) {
             switch (entry.kind()) {
                 case ADD:
                     numAddedFiles++;
@@ -139,30 +146,47 @@ public class ManifestFile {
                 case DELETE:
                     numDeletedFiles++;
                     break;
+                default:
+                    throw new UnsupportedOperationException("Unknown entry kind: " + entry.kind());
             }
-            statsCollector.collect(entry.partition());
 
-            return serializer.toRow(entry);
+            statsCollector.collect(entry.partition());
         }
 
         @Override
-        protected ManifestFileMeta collectFile(Path path) throws IOException {
-            ManifestFileMeta result =
-                    new ManifestFileMeta(
-                            path.getName(),
-                            path.getFileSystem().getFileStatus(path).getLen(),
-                            numAddedFiles,
-                            numDeletedFiles,
-                            statsCollector.extract());
-            resetMeta();
-            return result;
+        protected ManifestFileMeta createFileMeta(Path path) throws IOException {
+            return new ManifestFileMeta(
+                    path.getName(),
+                    path.getFileSystem().getFileStatus(path).getLen(),
+                    numAddedFiles,
+                    numDeletedFiles,
+                    statsCollector.extract());
         }
+    }
 
-        private void resetMeta() {
-            numAddedFiles = 0;
-            numDeletedFiles = 0;
-            statsCollector = new FieldStatsCollector(partitionType);
+    private static class ManifestRollingWriter
+            extends RollingFileWriter<ManifestEntry, ManifestFileMeta> {
+
+        public ManifestRollingWriter(
+                Supplier<FileWriter<ManifestEntry, ManifestFileMeta>> writerFactory,
+                long targetFileSize) {
+            super(writerFactory, targetFileSize);
         }
+    }
+
+    private Supplier<FileWriter<ManifestEntry, ManifestFileMeta>> createWriterFactory() {
+        return () -> {
+            try {
+                return new ManifestEntryWriter(
+                        new ManifestEntryBulkWriterFactory(), pathFactory.newManifestFile());
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        };
+    }
+
+    private ManifestRollingWriter createManifestRollingWriter(long targetFileSize) {
+        return new ManifestRollingWriter(createWriterFactory(), targetFileSize);
     }
 
     /**

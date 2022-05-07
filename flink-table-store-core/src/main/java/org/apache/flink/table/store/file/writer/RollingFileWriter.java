@@ -19,7 +19,6 @@
 
 package org.apache.flink.table.store.file.writer;
 
-import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
@@ -32,19 +31,21 @@ import java.util.function.Supplier;
  * Writer to roll over to a new file if the current size exceed the target file size.
  *
  * @param <T> record data type.
+ * @param <R> the file metadata result.
  */
-public class RollingFileWriter<T> implements FileWriter<T, List<DataFileMeta>> {
+public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
 
-    private final Supplier<BaseFileWriter<T>> writerFactory;
+    private final Supplier<FileWriter<T, R>> writerFactory;
     private final long targetFileSize;
-    private final List<BaseFileWriter<T>> openedWriters;
-    private final List<DataFileMeta> results;
+    private final List<FileWriter<T, R>> openedWriters;
+    private final List<R> results;
 
-    private BaseFileWriter<T> currentWriter = null;
+    private FileWriter<T, R> currentWriter = null;
+    private long lengthOfClosedFiles = 0L;
     private long recordCount = 0;
     private boolean closed = false;
 
-    public RollingFileWriter(Supplier<BaseFileWriter<T>> writerFactory, long targetFileSize) {
+    public RollingFileWriter(Supplier<FileWriter<T, R>> writerFactory, long targetFileSize) {
         this.writerFactory = writerFactory;
         this.targetFileSize = targetFileSize;
         this.openedWriters = new ArrayList<>();
@@ -74,6 +75,8 @@ public class RollingFileWriter<T> implements FileWriter<T, List<DataFileMeta>> {
     private void closeCurrentWriter() {
         if (currentWriter != null) {
             try {
+                lengthOfClosedFiles += currentWriter.length();
+
                 currentWriter.close();
                 results.add(currentWriter.result());
             } catch (IOException e) {
@@ -91,12 +94,12 @@ public class RollingFileWriter<T> implements FileWriter<T, List<DataFileMeta>> {
 
     @Override
     public long length() throws IOException {
-        long totalLength = results.stream().mapToLong(DataFileMeta::fileSize).sum();
+        long length = lengthOfClosedFiles;
         if (currentWriter != null) {
-            totalLength += currentWriter.length();
+            length += currentWriter.length();
         }
 
-        return totalLength;
+        return length;
     }
 
     @Override
@@ -113,7 +116,7 @@ public class RollingFileWriter<T> implements FileWriter<T, List<DataFileMeta>> {
     }
 
     @Override
-    public List<DataFileMeta> result() {
+    public List<R> result() {
         Preconditions.checkState(closed, "Cannot access the results unless close all writers.");
 
         return results;

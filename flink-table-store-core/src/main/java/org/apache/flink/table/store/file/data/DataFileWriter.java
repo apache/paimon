@@ -33,7 +33,9 @@ import org.apache.flink.table.store.file.stats.FieldStatsCollector;
 import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
+import org.apache.flink.table.store.file.writer.BaseBulkWriter;
 import org.apache.flink.table.store.file.writer.BaseFileWriter;
+import org.apache.flink.table.store.file.writer.FileWriter;
 import org.apache.flink.table.store.file.writer.RollingFileWriter;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.CloseableIterator;
@@ -109,6 +111,8 @@ public class DataFileWriter {
 
             rollingKvWriter.abort();
             throw e;
+        } finally {
+            iterator.close();
         }
 
         return rollingKvWriter.result();
@@ -118,41 +122,17 @@ public class DataFileWriter {
         FileUtils.deleteOrWarn(pathFactory.toPath(file.fileName()));
     }
 
-    private class KvBulkWriter implements BulkWriter<KeyValue> {
-
-        private final BulkWriter<RowData> writer;
-        private final KeyValueSerializer keyValueSerializer;
-
-        KvBulkWriter(BulkWriter<RowData> writer) {
-            this.writer = writer;
-            this.keyValueSerializer = new KeyValueSerializer(keyType, valueType);
-        }
-
-        @Override
-        public void addElement(KeyValue keyValue) throws IOException {
-            writer.addElement(keyValueSerializer.toRow(keyValue));
-        }
-
-        @Override
-        public void flush() throws IOException {
-            writer.flush();
-        }
-
-        @Override
-        public void finish() throws IOException {
-            writer.finish();
-        }
-    }
-
     private class KvBulkWriterFactory implements BulkWriter.Factory<KeyValue> {
 
         @Override
         public BulkWriter<KeyValue> create(FSDataOutputStream out) throws IOException {
-            return new KvBulkWriter(writerFactory.create(out));
+            KeyValueSerializer serializer = new KeyValueSerializer(keyType, valueType);
+
+            return new BaseBulkWriter<>(writerFactory.create(out), serializer::toRow);
         }
     }
 
-    private class KvFileWriter extends BaseFileWriter<KeyValue> {
+    private class KvFileWriter extends BaseFileWriter<KeyValue, DataFileMeta> {
         private final int level;
         private final RowDataSerializer keySerializer;
 
@@ -160,9 +140,9 @@ public class DataFileWriter {
         private FieldStatsCollector valueStatsCollector = null;
 
         private BinaryRowData minKey = null;
-        private BinaryRowData maxKey = null;
-        private Long minSequenceNumber = null;
-        private Long maxSequenceNumber = null;
+        private RowData maxKey = null;
+        private Long minSeqNumber = null;
+        private Long maxSeqNumber = null;
 
         public KvFileWriter(BulkWriter.Factory<KeyValue> writerFactory, Path path, int level)
                 throws IOException {
@@ -199,27 +179,25 @@ public class DataFileWriter {
         }
 
         private void updateMaxKey(KeyValue kv) {
-            maxKey = keySerializer.toBinaryRow(kv.key()).copy();
+            maxKey = kv.key();
         }
 
         private void updateMinSeqNumber(KeyValue kv) {
-            if (minSequenceNumber == null) {
-                minSequenceNumber = kv.sequenceNumber();
-            } else {
-                minSequenceNumber = Math.min(minSequenceNumber, kv.sequenceNumber());
-            }
+            minSeqNumber =
+                    minSeqNumber == null
+                            ? kv.sequenceNumber()
+                            : Math.min(minSeqNumber, kv.sequenceNumber());
         }
 
         private void updateMaxSeqNumber(KeyValue kv) {
-            if (maxSequenceNumber == null) {
-                maxSequenceNumber = kv.sequenceNumber();
-            } else {
-                maxSequenceNumber = Math.max(maxSequenceNumber, kv.sequenceNumber());
-            }
+            maxSeqNumber =
+                    maxSeqNumber == null
+                            ? kv.sequenceNumber()
+                            : Math.max(maxSeqNumber, kv.sequenceNumber());
         }
 
         @Override
-        protected DataFileMeta createDataFileMeta(Path path) throws IOException {
+        protected DataFileMeta createFileMeta(Path path) throws IOException {
 
             FieldStats[] keyStats;
             FieldStats[] valueStats;
@@ -238,24 +216,24 @@ public class DataFileWriter {
                     FileUtils.getFileSize(path),
                     super.recordCount(),
                     minKey,
-                    maxKey,
+                    keySerializer.toBinaryRow(maxKey).copy(),
                     keyStats,
                     valueStats,
-                    minSequenceNumber,
-                    maxSequenceNumber,
+                    minSeqNumber,
+                    maxSeqNumber,
                     level);
         }
     }
 
-    private static class RollingKvWriter extends RollingFileWriter<KeyValue> {
+    private static class RollingKvWriter extends RollingFileWriter<KeyValue, DataFileMeta> {
 
         public RollingKvWriter(
-                Supplier<BaseFileWriter<KeyValue>> writerFactory, long targetFileSize) {
+                Supplier<FileWriter<KeyValue, DataFileMeta>> writerFactory, long targetFileSize) {
             super(writerFactory, targetFileSize);
         }
     }
 
-    private Supplier<BaseFileWriter<KeyValue>> createWriterFactory(int level) {
+    private Supplier<FileWriter<KeyValue, DataFileMeta>> createWriterFactory(int level) {
         return () -> {
             try {
                 return new KvFileWriter(new KvBulkWriterFactory(), pathFactory.newPath(), level);
