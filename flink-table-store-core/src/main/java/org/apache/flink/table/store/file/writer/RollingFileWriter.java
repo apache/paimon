@@ -19,10 +19,8 @@
 
 package org.apache.flink.table.store.file.writer;
 
+import org.apache.flink.util.IOUtils;
 import org.apache.flink.util.Preconditions;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -37,7 +35,6 @@ import java.util.function.Supplier;
  * @param <R> the file metadata result.
  */
 public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
-    private static final Logger LOG = LoggerFactory.getLogger(RollingFileWriter.class);
 
     private final Supplier<? extends FileWriter<T, R>> writerFactory;
     private final long targetFileSize;
@@ -108,19 +105,8 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
     }
 
     @Override
-    public void flush() throws IOException {
-        if (currentWriter != null) {
-            currentWriter.flush();
-        }
-    }
-
-    @Override
     public void abort() {
-        try {
-            close();
-        } catch (Throwable e) {
-            LOG.warn("Failed to close the current opened writer, because ", e);
-        }
+        IOUtils.closeQuietly(this);
 
         // Abort all those writers.
         for (FileWriter<T, R> writer : openedWriters) {

@@ -85,13 +85,6 @@ public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
         return 0;
     }
 
-    @Override
-    public void flush() throws IOException {
-        if (currentWriter != null) {
-            currentWriter.flush();
-        }
-    }
-
     protected abstract R createFileMeta(Path path) throws IOException;
 
     @Override

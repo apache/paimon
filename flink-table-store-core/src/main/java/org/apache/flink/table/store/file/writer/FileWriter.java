@@ -32,7 +32,7 @@ import java.util.Iterator;
 public interface FileWriter<T, R> extends Closeable {
 
     /**
-     * Write only one record to this file.
+     * Add only one record to this file writer.
      *
      * @param record to write.
      * @throws IOException if encounter any IO error.
@@ -78,15 +78,8 @@ public interface FileWriter<T, R> extends Closeable {
      */
     long length() throws IOException;
 
-    /**
-     * Flush the buffered records into underlying file system.
-     *
-     * @throws IOException if encounter any IO error.
-     */
-    void flush() throws IOException;
-
     /** Abort to clear orphan file(s) if encounter any error. */
-    default void abort() {}
+    void abort();
 
     /** @return the result for this closed file writer. */
     R result() throws IOException;
