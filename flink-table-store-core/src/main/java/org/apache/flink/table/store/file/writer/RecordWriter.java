@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.utils;
+package org.apache.flink.table.store.file.writer;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.ValueKind;

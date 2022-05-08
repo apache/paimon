@@ -33,7 +33,9 @@ import org.apache.flink.table.store.file.stats.FieldStatsCollector;
 import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
-import org.apache.flink.table.store.file.utils.RollingFile;
+import org.apache.flink.table.store.file.writer.BaseBulkWriter;
+import org.apache.flink.table.store.file.writer.BaseFileWriter;
+import org.apache.flink.table.store.file.writer.RollingFileWriter;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.CloseableIterator;
 
@@ -41,9 +43,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.ArrayList;
+import java.io.UncheckedIOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.Supplier;
 
 /** Writes {@link KeyValue}s into data files. */
 public class DataFileWriter {
@@ -91,176 +94,149 @@ public class DataFileWriter {
     }
 
     /**
-     * Write several {@link KeyValue}s into an data file of a given level.
+     * Write several {@link KeyValue}s into a data file of a given level.
      *
      * <p>NOTE: This method is atomic.
      */
     public List<DataFileMeta> write(CloseableIterator<KeyValue> iterator, int level)
             throws Exception {
-        DataRollingFile rollingFile =
-                fileStatsExtractor == null
-                        ? new StatsCollectingRollingFile(level)
-                        : new FileExtractingRollingFile(level);
-        List<DataFileMeta> result = new ArrayList<>();
-        List<Path> filesToCleanUp = new ArrayList<>();
-        try {
-            rollingFile.write(iterator, result, filesToCleanUp);
+
+        RollingKvWriter rollingKvWriter = createRollingKvWriter(level, suggestedFileSize);
+        try (RollingKvWriter writer = rollingKvWriter) {
+            writer.write(iterator);
+
         } catch (Throwable e) {
             LOG.warn("Exception occurs when writing data files. Cleaning up.", e);
-            for (Path path : filesToCleanUp) {
-                FileUtils.deleteOrWarn(path);
-            }
+
+            rollingKvWriter.abort();
             throw e;
         } finally {
             iterator.close();
         }
-        return result;
+
+        return rollingKvWriter.result();
     }
 
     public void delete(DataFileMeta file) {
         FileUtils.deleteOrWarn(pathFactory.toPath(file.fileName()));
     }
 
-    private abstract class DataRollingFile extends RollingFile<KeyValue, DataFileMeta> {
+    private class KvBulkWriterFactory implements BulkWriter.Factory<KeyValue> {
 
+        @Override
+        public BulkWriter<KeyValue> create(FSDataOutputStream out) throws IOException {
+            KeyValueSerializer serializer = new KeyValueSerializer(keyType, valueType);
+
+            return new BaseBulkWriter<>(writerFactory.create(out), serializer::toRow);
+        }
+    }
+
+    private class KvFileWriter extends BaseFileWriter<KeyValue, DataFileMeta> {
         private final int level;
-        private final KeyValueSerializer serializer;
         private final RowDataSerializer keySerializer;
 
-        private long rowCount;
-        private BinaryRowData minKey;
-        private RowData maxKey;
-        private long minSequenceNumber;
-        private long maxSequenceNumber;
+        private FieldStatsCollector keyStatsCollector = null;
+        private FieldStatsCollector valueStatsCollector = null;
 
-        private DataRollingFile(int level) {
-            // each level 0 data file is a sorted run,
-            // we must not write rolling files for level 0 data files
-            // otherwise we cannot reduce the number of sorted runs when compacting
-            super(level == 0 ? Long.MAX_VALUE : suggestedFileSize);
+        private BinaryRowData minKey = null;
+        private RowData maxKey = null;
+        private long minSeqNumber = Long.MAX_VALUE;
+        private long maxSeqNumber = Long.MIN_VALUE;
+
+        public KvFileWriter(BulkWriter.Factory<KeyValue> writerFactory, Path path, int level)
+                throws IOException {
+            super(writerFactory, path);
+
             this.level = level;
-            this.serializer = new KeyValueSerializer(keyType, valueType);
             this.keySerializer = new RowDataSerializer(keyType);
-            resetMeta();
+            if (fileStatsExtractor == null) {
+                this.keyStatsCollector = new FieldStatsCollector(keyType);
+                this.valueStatsCollector = new FieldStatsCollector(valueType);
+            }
         }
 
         @Override
-        protected Path newPath() {
-            return pathFactory.newPath();
-        }
+        public void write(KeyValue kv) throws IOException {
+            super.write(kv);
 
-        @Override
-        protected BulkWriter<RowData> newWriter(FSDataOutputStream out) throws IOException {
-            return writerFactory.create(out);
-        }
-
-        @Override
-        protected RowData toRowData(KeyValue kv) {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Writing key-value to data file, kv: " + kv.toString(keyType, valueType));
+            if (fileStatsExtractor == null) {
+                keyStatsCollector.collect(kv.key());
+                valueStatsCollector.collect(kv.value());
             }
 
-            rowCount++;
+            updateMinKey(kv);
+            updateMaxKey(kv);
+
+            updateMinSeqNumber(kv);
+            updateMaxSeqNumber(kv);
+        }
+
+        private void updateMinKey(KeyValue kv) {
             if (minKey == null) {
                 minKey = keySerializer.toBinaryRow(kv.key()).copy();
             }
+        }
+
+        private void updateMaxKey(KeyValue kv) {
             maxKey = kv.key();
-            minSequenceNumber = Math.min(minSequenceNumber, kv.sequenceNumber());
-            maxSequenceNumber = Math.max(maxSequenceNumber, kv.sequenceNumber());
+        }
 
-            return serializer.toRow(kv);
+        private void updateMinSeqNumber(KeyValue kv) {
+            minSeqNumber = Math.min(minSeqNumber, kv.sequenceNumber());
+        }
+
+        private void updateMaxSeqNumber(KeyValue kv) {
+            maxSeqNumber = Math.max(maxSeqNumber, kv.sequenceNumber());
         }
 
         @Override
-        protected DataFileMeta collectFile(Path path) throws IOException {
-            KeyAndValueStats stats = extractStats(path);
-            DataFileMeta result =
-                    new DataFileMeta(
-                            path.getName(),
-                            FileUtils.getFileSize(path),
-                            rowCount,
-                            minKey,
-                            keySerializer.toBinaryRow(maxKey).copy(),
-                            stats.keyStats,
-                            stats.valueStats,
-                            minSequenceNumber,
-                            maxSequenceNumber,
-                            level);
-            resetMeta();
-            return result;
-        }
+        protected DataFileMeta createFileMeta(Path path) throws IOException {
 
-        protected void resetMeta() {
-            rowCount = 0;
-            minKey = null;
-            maxKey = null;
-            minSequenceNumber = Long.MAX_VALUE;
-            maxSequenceNumber = Long.MIN_VALUE;
-        }
-
-        protected abstract KeyAndValueStats extractStats(Path path);
-    }
-
-    private class FileExtractingRollingFile extends DataRollingFile {
-
-        private FileExtractingRollingFile(int level) {
-            super(level);
-        }
-
-        @Override
-        protected KeyAndValueStats extractStats(Path path) {
-            FieldStats[] rawStats;
-            try {
-                rawStats = fileStatsExtractor.extract(path);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
+            FieldStats[] keyStats;
+            FieldStats[] valueStats;
+            if (fileStatsExtractor == null) {
+                keyStats = keyStatsCollector.extract();
+                valueStats = valueStatsCollector.extract();
+            } else {
+                FieldStats[] rowStats = fileStatsExtractor.extract(path);
+                int numKeyFields = keyType.getFieldCount();
+                keyStats = Arrays.copyOfRange(rowStats, 0, numKeyFields);
+                valueStats = Arrays.copyOfRange(rowStats, numKeyFields + 2, rowStats.length);
             }
 
-            int numKeyFields = keyType.getFieldCount();
-            return new KeyAndValueStats(
-                    Arrays.copyOfRange(rawStats, 0, numKeyFields),
-                    Arrays.copyOfRange(rawStats, numKeyFields + 2, rawStats.length));
+            return new DataFileMeta(
+                    path.getName(),
+                    FileUtils.getFileSize(path),
+                    recordCount(),
+                    minKey,
+                    keySerializer.toBinaryRow(maxKey).copy(),
+                    keyStats,
+                    valueStats,
+                    minSeqNumber,
+                    maxSeqNumber,
+                    level);
         }
     }
 
-    private class StatsCollectingRollingFile extends DataRollingFile {
+    private static class RollingKvWriter extends RollingFileWriter<KeyValue, DataFileMeta> {
 
-        private FieldStatsCollector keyStatsCollector;
-        private FieldStatsCollector valueStatsCollector;
-
-        private StatsCollectingRollingFile(int level) {
-            super(level);
-        }
-
-        @Override
-        protected RowData toRowData(KeyValue kv) {
-            keyStatsCollector.collect(kv.key());
-            valueStatsCollector.collect(kv.value());
-            return super.toRowData(kv);
-        }
-
-        @Override
-        protected KeyAndValueStats extractStats(Path path) {
-            return new KeyAndValueStats(keyStatsCollector.extract(), valueStatsCollector.extract());
-        }
-
-        @Override
-        protected void resetMeta() {
-            super.resetMeta();
-            keyStatsCollector = new FieldStatsCollector(keyType);
-            valueStatsCollector = new FieldStatsCollector(valueType);
+        public RollingKvWriter(Supplier<KvFileWriter> writerFactory, long targetFileSize) {
+            super(writerFactory, targetFileSize);
         }
     }
 
-    private static class KeyAndValueStats {
+    private Supplier<KvFileWriter> createWriterFactory(int level) {
+        return () -> {
+            try {
+                return new KvFileWriter(new KvBulkWriterFactory(), pathFactory.newPath(), level);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        };
+    }
 
-        private final FieldStats[] keyStats;
-        private final FieldStats[] valueStats;
-
-        private KeyAndValueStats(FieldStats[] keyStats, FieldStats[] valueStats) {
-            this.keyStats = keyStats;
-            this.valueStats = valueStats;
-        }
+    private RollingKvWriter createRollingKvWriter(int level, long targetFileSize) {
+        return new RollingKvWriter(createWriterFactory(level), targetFileSize);
     }
 
     /** Creates {@link DataFileWriter}. */
