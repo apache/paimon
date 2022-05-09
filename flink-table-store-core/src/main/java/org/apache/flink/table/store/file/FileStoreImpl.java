@@ -36,6 +36,8 @@ import org.apache.flink.table.store.file.operation.FileStoreWriteImpl;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.types.logical.RowType;
 
+import java.util.Objects;
+
 /** File store implementation. */
 public class FileStoreImpl implements FileStore {
 
@@ -166,5 +168,29 @@ public class FileStoreImpl implements FileStore {
     @Override
     public RowType partitionType() {
         return partitionType;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof FileStoreImpl)) {
+            return false;
+        }
+        FileStoreImpl fileStore = (FileStoreImpl) o;
+        return tableIdentifier.equals(fileStore.tableIdentifier)
+                && options.equals(fileStore.options)
+                && user.equals(fileStore.user)
+                && partitionType.equals(fileStore.partitionType)
+                && keyType.equals(fileStore.keyType)
+                && valueType.equals(fileStore.valueType)
+                && mergeFunction.equals(fileStore.mergeFunction);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(
+                tableIdentifier, options, user, partitionType, keyType, valueType, mergeFunction);
     }
 }
