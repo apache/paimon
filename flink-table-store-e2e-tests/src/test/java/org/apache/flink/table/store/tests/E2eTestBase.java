@@ -71,7 +71,6 @@ public abstract class E2eTestBase {
     private final List<String> currentResults = new ArrayList<>();
 
     private DockerComposeContainer<?> environment;
-    private static final Object environmentStartLock = new Object();
     private ContainerState jobManager;
 
     @BeforeEach
@@ -97,9 +96,9 @@ public abstract class E2eTestBase {
         }
         environment.withServices(services.toArray(new String[0]));
 
-        synchronized (environmentStartLock) {
-            // there are some steps which cannot be executed in parallel when starting a docker
-            // image, so we should lock here
+        synchronized (E2eTestBase.class) {
+            // there are some steps which cannot be executed in parallel when starting the same
+            // docker image, so we should lock here
             environment.start();
         }
         jobManager = environment.getContainerByServiceName("jobmanager_1").get();

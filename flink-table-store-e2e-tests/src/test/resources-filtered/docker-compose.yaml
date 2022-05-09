@@ -25,8 +25,7 @@ services:
   # ----------------------------------------
 
   jobmanager:
-    # TODO change image tag to official flink image after 1.15 is released
-    image: tsreaper/flink-test:${flink.version}
+    image: apache/flink:${flink.version}
     volumes:
       - testdata:/test-data
     command: jobmanager
@@ -40,8 +39,7 @@ services:
       - "8081:8081"
 
   taskmanager:
-    # TODO change image tag to official flink image after 1.15 is released
-    image: tsreaper/flink-test:${flink.version}
+    image: apache/flink:${flink.version}
     volumes:
       - testdata:/test-data
     command: taskmanager
