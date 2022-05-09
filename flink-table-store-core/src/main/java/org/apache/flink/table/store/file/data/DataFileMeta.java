@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.file.stats.FieldStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.types.logical.BigIntType;
@@ -36,6 +37,13 @@ import static org.apache.flink.util.Preconditions.checkArgument;
 /** Metadata of a data file. */
 public class DataFileMeta {
 
+    // Append only data files don't have any key columns and meaningful level value. it will use
+    // the following dummy values.
+    public static final FieldStats[] EMPTY_KEY_STATS = new FieldStats[0];
+    public static final BinaryRowData EMPTY_MIN_KEY = BinaryRowDataUtil.EMPTY_ROW;
+    public static final BinaryRowData EMPTY_MAX_KEY = BinaryRowDataUtil.EMPTY_ROW;
+    public static final int DUMMY_LEVEL = 0;
+
     private final String fileName;
     private final long fileSize;
     private final long rowCount;
@@ -48,6 +56,26 @@ public class DataFileMeta {
     private final long minSequenceNumber;
     private final long maxSequenceNumber;
     private final int level;
+
+    public DataFileMeta(
+            String fileName,
+            long fileSize,
+            long rowCount,
+            FieldStats[] rowStats,
+            long minSequenceNumber,
+            long maxSequenceNumber) {
+        this(
+                fileName,
+                fileSize,
+                rowCount,
+                EMPTY_MIN_KEY,
+                EMPTY_MAX_KEY,
+                EMPTY_KEY_STATS,
+                rowStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                DUMMY_LEVEL);
+    }
 
     public DataFileMeta(
             String fileName,

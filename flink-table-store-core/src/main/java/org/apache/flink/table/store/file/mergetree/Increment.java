@@ -35,11 +35,18 @@ import java.util.Objects;
  */
 public class Increment {
 
+    private static final List<DataFileMeta> EMPTY_COMPACT_BEFORE = Collections.emptyList();
+    private static final List<DataFileMeta> EMPTY_COMPACT_AFTER = Collections.emptyList();
+
     private final List<DataFileMeta> newFiles;
 
     private final List<DataFileMeta> compactBefore;
 
     private final List<DataFileMeta> compactAfter;
+
+    public Increment(List<DataFileMeta> newFiles) {
+        this(newFiles, EMPTY_COMPACT_BEFORE, EMPTY_COMPACT_AFTER);
+    }
 
     public Increment(
             List<DataFileMeta> newFiles,
