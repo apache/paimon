@@ -18,55 +18,15 @@
 
 package org.apache.flink.table.store.tests;
 
-import org.apache.flink.util.DockerImageVersions;
-
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.testcontainers.containers.KafkaContainer;
-import org.testcontainers.containers.output.Slf4jLogConsumer;
-import org.testcontainers.utility.DockerImageName;
 
-import java.time.Duration;
 import java.util.UUID;
 
 /** Tests for reading and writing log store in stream jobs. */
 public class LogStoreE2eTest extends E2eTestBase {
 
-    private static final Logger LOG = LoggerFactory.getLogger(LogStoreE2eTest.class);
-
-    private static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
-
-    private KafkaContainer kafka;
-
-    @BeforeEach
-    @Override
-    public void before() throws Exception {
-        super.before();
-        kafka =
-                new KafkaContainer(DockerImageName.parse(DockerImageVersions.KAFKA))
-                        .withEmbeddedZookeeper()
-                        .withNetwork(NETWORK)
-                        .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS)
-                        .withEnv(
-                                "KAFKA_TRANSACTION_MAX_TIMEOUT_MS",
-                                String.valueOf(Duration.ofHours(2).toMillis()))
-                        // Disable log deletion to prevent records from being deleted during test
-                        // run
-                        .withEnv("KAFKA_LOG_RETENTION_MS", "-1")
-                        .withLogConsumer(new Slf4jLogConsumer(LOG));
-        kafka.start();
-        LOG.info("Kafka started.");
-    }
-
-    @AfterEach
-    @Override
-    public void after() throws Exception {
-        super.after();
-        kafka.stop();
-        LOG.info("Kafka stopped.");
+    public LogStoreE2eTest() {
+        super(true);
     }
 
     @Test
@@ -118,9 +78,7 @@ public class LogStoreE2eTest extends E2eTestBase {
                         + ");";
         tableStoreStreamDdl =
                 String.format(
-                        tableStoreStreamDdl,
-                        TEST_DATA_DIR + "/" + tableStoreDir,
-                        getBootstrapServers());
+                        tableStoreStreamDdl, TEST_DATA_DIR + "/" + tableStoreDir, "kafka:9092");
 
         // prepare first part of test data
         writeTestData(testDataSourceDir + "/1.csv", "A,10\nC,30\nD,40\n");
@@ -147,10 +105,6 @@ public class LogStoreE2eTest extends E2eTestBase {
 
         // check that we can receive data from log store quickly
         checkResult(s -> s.split(",")[0], "A, 100", "B, 2", "C, 30", "D, 400");
-    }
-
-    private String getBootstrapServers() {
-        return INTER_CONTAINER_KAFKA_ALIAS + ":9092";
     }
 
     private void runSql(String sql, String... ddls) throws Exception {
