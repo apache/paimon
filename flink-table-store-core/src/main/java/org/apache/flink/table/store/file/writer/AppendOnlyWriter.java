@@ -51,7 +51,6 @@ public class AppendOnlyWriter implements RecordWriter {
     private final long targetFileSize;
     private final DataFilePathFactory pathFactory;
     private final FileStatsExtractor fileStatsExtractor;
-
     private final AtomicLong nextSeqNum;
 
     private RowRollingWriter writer;
@@ -66,10 +65,8 @@ public class AppendOnlyWriter implements RecordWriter {
         this.writerFactory = fileFormat.createWriterFactory(writeSchema);
         this.writeSchema = writeSchema;
         this.targetFileSize = targetFileSize;
-
         this.pathFactory = pathFactory;
         this.fileStatsExtractor = fileFormat.createStatsExtractor(writeSchema).orElse(null);
-
         this.nextSeqNum = new AtomicLong(maxWroteSeqNumber + 1);
 
         this.writer = createRollingRowWriter();
@@ -90,9 +87,9 @@ public class AppendOnlyWriter implements RecordWriter {
 
         if (writer != null) {
             writer.close();
+            newFiles.addAll(writer.result());
 
             // Reopen the writer to accept further records.
-            newFiles.addAll(writer.result());
             writer = createRollingRowWriter();
         }
 
