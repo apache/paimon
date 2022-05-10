@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector.source;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.api.connector.source.SourceReader;
@@ -30,6 +31,7 @@ import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.utils.PartitionedManifestMeta;
 
 import javax.annotation.Nullable;
 
@@ -61,6 +63,12 @@ public class FileStoreSource
 
     @Nullable private final Predicate fieldPredicate;
 
+    /**
+     * The partitioned manifest meta collected at planning phase when manual compaction is
+     * triggered.
+     */
+    @Nullable private final PartitionedManifestMeta specifiedPartManifests;
+
     public FileStoreSource(
             FileStore fileStore,
             boolean valueCountMode,
@@ -69,7 +77,8 @@ public class FileStoreSource
             boolean latestContinuous,
             @Nullable int[][] projectedFields,
             @Nullable Predicate partitionPredicate,
-            @Nullable Predicate fieldPredicate) {
+            @Nullable Predicate fieldPredicate,
+            @Nullable PartitionedManifestMeta specifiedPartManifests) {
         this.fileStore = fileStore;
         this.valueCountMode = valueCountMode;
         this.isContinuous = isContinuous;
@@ -78,6 +87,7 @@ public class FileStoreSource
         this.projectedFields = projectedFields;
         this.partitionPredicate = partitionPredicate;
         this.fieldPredicate = fieldPredicate;
+        this.specifiedPartManifests = specifiedPartManifests;
     }
 
     @Override
@@ -122,6 +132,15 @@ public class FileStoreSource
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
         FileStoreScan scan = fileStore.newScan();
+
+        if (specifiedPartManifests != null) {
+            return new StaticFileStoreSplitEnumerator(
+                    context,
+                    scan.snapshot(specifiedPartManifests.getSnapshotId()),
+                    new FileStoreSourceSplitGenerator()
+                            .createSplits(specifiedPartManifests.getManifestEntries()));
+        }
+
         if (partitionPredicate != null) {
             scan.withPartitionFilter(partitionPredicate);
         }
@@ -181,5 +200,11 @@ public class FileStoreSource
     @Override
     public PendingSplitsCheckpointSerializer getEnumeratorCheckpointSerializer() {
         return new PendingSplitsCheckpointSerializer(getSplitSerializer());
+    }
+
+    @VisibleForTesting
+    @Nullable
+    PartitionedManifestMeta getSpecifiedPartManifests() {
+        return specifiedPartManifests;
     }
 }
