@@ -46,7 +46,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test the correctness for {@link AppendOnlyWriter}. */
-public class TestAppendOnlyWriter {
+public class AppendOnlyWriterTest {
 
     private static final RowData EMPTY_ROW = BinaryRowDataUtil.EMPTY_ROW;
     private static final RowType SCHEMA =
@@ -63,6 +63,20 @@ public class TestAppendOnlyWriter {
     @BeforeEach
     public void before() {
         pathFactory = createPathFactory();
+    }
+
+    @Test
+    public void testEmptyCommits() throws Exception {
+        RecordWriter writer = createWriter(1024 * 1024L, SCHEMA, 0);
+
+        for (int i = 0; i < 3; i++) {
+            writer.sync();
+            Increment inc = writer.prepareCommit();
+
+            assertThat(inc.newFiles()).isEqualTo(Collections.emptyList());
+            assertThat(inc.compactBefore()).isEqualTo(Collections.emptyList());
+            assertThat(inc.compactAfter()).isEqualTo(Collections.emptyList());
+        }
     }
 
     @Test

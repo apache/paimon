@@ -158,13 +158,14 @@ public class AppendOnlyWriter implements RecordWriter {
                 stats = fieldStatsCollector.extract();
             }
 
-            return new DataFileMeta(
+            return DataFileMeta.forAppend(
                     path.getName(),
                     FileUtils.getFileSize(path),
                     recordCount(),
                     stats,
                     startSeqNum,
-                    Math.max(startSeqNum, nextSeqNum.get() - 1));
+                    Math.max(startSeqNum, nextSeqNum.get() - 1)
+            );
         }
     }
 }

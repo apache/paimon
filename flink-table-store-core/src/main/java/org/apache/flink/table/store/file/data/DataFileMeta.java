@@ -57,6 +57,27 @@ public class DataFileMeta {
     private final long maxSequenceNumber;
     private final int level;
 
+    public static DataFileMeta forAppend(
+            String fileName,
+            long fileSize,
+            long rowCount,
+            FieldStats[] rowStats,
+            long minSequenceNumber,
+            long maxSequenceNumber) {
+        return new DataFileMeta(
+                fileName,
+                fileSize,
+                rowCount,
+                EMPTY_MIN_KEY,
+                EMPTY_MAX_KEY,
+                EMPTY_KEY_STATS,
+                rowStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                DUMMY_LEVEL
+        );
+    }
+
     public DataFileMeta(
             String fileName,
             long fileSize,
