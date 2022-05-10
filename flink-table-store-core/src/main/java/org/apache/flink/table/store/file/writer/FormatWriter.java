@@ -25,7 +25,8 @@ import java.io.IOException;
 import java.io.Serializable;
 
 /**
- * File format writer to write the generic data type into ORC, PARQUET, AVRO files.
+ * File format writer to write the generic data type into ORC, PARQUET, AVRO files, with generated column statistics
+ * in the {@link Metric} result.
  *
  * @param <T> the generic data type.
  */

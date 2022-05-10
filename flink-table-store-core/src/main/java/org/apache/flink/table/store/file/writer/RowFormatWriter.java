@@ -163,7 +163,7 @@ public class RowFormatWriter implements FormatWriter<RowData> {
                 BulkWriter<RowData> bulkWriter = writerFactory.create(out);
                 return new RowFormatWriter(bulkWriter, out, path, writeSchema, extractor);
             } catch (Throwable e) {
-                LOG.error("Failed to create the ORC bulk writer for path: {}", path, e);
+                LOG.error("Failed to create the Row bulk writer for path: {}", path, e);
 
                 out.close();
                 throw e;
