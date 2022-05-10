@@ -19,7 +19,6 @@
 
 package org.apache.flink.table.store.file.writer;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.table.data.RowData;
 
 import java.io.IOException;
@@ -30,30 +29,45 @@ import java.util.function.Function;
  *
  * @param <T> generic record type.
  */
-public class BaseBulkWriter<T> implements BulkWriter<T> {
+public class BaseFormatWriter<T> implements FormatWriter<T> {
 
-    private final BulkWriter<RowData> writer;
+    private final FormatWriter<RowData> writer;
 
     // Convert the record from the generic type T to the concrete RowData type.
     private final Function<T, RowData> converter;
 
-    public BaseBulkWriter(BulkWriter<RowData> writer, Function<T, RowData> converter) {
+    public BaseFormatWriter(FormatWriter<RowData> writer, Function<T, RowData> converter) {
         this.writer = writer;
         this.converter = converter;
     }
 
     @Override
-    public void addElement(T elem) throws IOException {
-        writer.addElement(converter.apply(elem));
+    public void write(T record) throws IOException {
+        writer.write(converter.apply(record));
     }
 
     @Override
-    public void flush() throws IOException {
-        writer.flush();
+    public long recordCount() {
+        return writer.recordCount();
     }
 
     @Override
-    public void finish() throws IOException {
-        writer.finish();
+    public long length() throws IOException {
+        return writer.length();
+    }
+
+    @Override
+    public void abort() {
+        writer.abort();
+    }
+
+    @Override
+    public Metric result() throws IOException {
+        return writer.result();
+    }
+
+    @Override
+    public void close() throws IOException {
+        writer.close();
     }
 }

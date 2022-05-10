@@ -21,14 +21,13 @@ package org.apache.flink.table.store.file.manifest;
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
-import org.apache.flink.core.fs.FSDataOutputStream;
-import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
+import org.apache.flink.table.store.file.writer.FormatWriter;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.io.IOException;
@@ -42,13 +41,13 @@ public class ManifestList {
 
     private final ManifestFileMetaSerializer serializer;
     private final BulkFormat<RowData, FileSourceSplit> readerFactory;
-    private final BulkWriter.Factory<RowData> writerFactory;
+    private final FormatWriter.Factory<RowData> writerFactory;
     private final FileStorePathFactory pathFactory;
 
     private ManifestList(
             ManifestFileMetaSerializer serializer,
             BulkFormat<RowData, FileSourceSplit> readerFactory,
-            BulkWriter.Factory<RowData> writerFactory,
+            FormatWriter.Factory<RowData> writerFactory,
             FileStorePathFactory pathFactory) {
         this.serializer = serializer;
         this.readerFactory = readerFactory;
@@ -82,14 +81,11 @@ public class ManifestList {
     }
 
     private String write(List<ManifestFileMeta> metas, Path path) throws IOException {
-        FSDataOutputStream out =
-                path.getFileSystem().create(path, FileSystem.WriteMode.NO_OVERWRITE);
-        BulkWriter<RowData> writer = writerFactory.create(out);
-        for (ManifestFileMeta manifest : metas) {
-            writer.addElement(serializer.toRow(manifest));
+        try (FormatWriter<RowData> writer = writerFactory.create(path)) {
+            for (ManifestFileMeta manifest : metas) {
+                writer.write(serializer.toRow(manifest));
+            }
         }
-        writer.finish();
-        out.close();
         return path.getName();
     }
 

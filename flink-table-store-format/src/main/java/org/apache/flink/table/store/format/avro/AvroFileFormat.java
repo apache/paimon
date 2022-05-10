@@ -21,9 +21,13 @@ package org.apache.flink.table.store.format.avro;
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.file.table.format.BulkDecodingFormat;
-import org.apache.flink.table.connector.format.EncodingFormat;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.format.FileFormat;
+import org.apache.flink.table.store.file.writer.FormatWriter;
+import org.apache.flink.table.store.file.writer.RowFormatWriter;
+import org.apache.flink.table.types.logical.RowType;
+
+import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 
 /** Avro {@link FileFormat}. */
 public class AvroFileFormat extends FileFormat {
@@ -42,7 +46,11 @@ public class AvroFileFormat extends FileFormat {
     }
 
     @Override
-    protected EncodingFormat<BulkWriter.Factory<RowData>> getEncodingFormat() {
-        return factory.createEncodingFormat(null, formatOptions); // context is useless
+    public FormatWriter.Factory<RowData> createWriterFactory(RowType writeSchema) {
+        BulkWriter.Factory<RowData> bulkWriter =
+                factory.createEncodingFormat(null, formatOptions)
+                        .createRuntimeEncoder(SINK_CONTEXT, fromLogicalToDataType(writeSchema));
+
+        return new RowFormatWriter.RowFormatWriterFactory(bulkWriter, writeSchema, null);
     }
 }

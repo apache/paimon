@@ -18,18 +18,17 @@
 
 package org.apache.flink.table.store.file;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.util.Utils;
-import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.format.FileFormatImpl;
+import org.apache.flink.table.store.file.writer.FormatWriter;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -61,13 +60,11 @@ public class FileFormatTest {
         expected.add(GenericRowData.of(1, 1));
         expected.add(GenericRowData.of(2, 2));
         expected.add(GenericRowData.of(3, 3));
-        FSDataOutputStream out = fs.create(path, FileSystem.WriteMode.NO_OVERWRITE);
-        BulkWriter<RowData> writer = avro.createWriterFactory(rowType).create(out);
-        for (RowData row : expected) {
-            writer.addElement(row);
+        try (FormatWriter<RowData> writer = avro.createWriterFactory(rowType).create(path)) {
+            for (RowData row : expected) {
+                writer.write(row);
+            }
         }
-        writer.finish();
-        out.close();
 
         // read
         BulkFormat.Reader<RowData> reader =
@@ -85,15 +82,12 @@ public class FileFormatTest {
 
     @Test
     public void testUnsupportedOption(@TempDir java.nio.file.Path tempDir) {
-        BulkWriter.Factory<RowData> writerFactory =
+        FormatWriter.Factory<RowData> writerFactory =
                 createFileFormat("_unsupported").createWriterFactory(RowType.of(new IntType()));
         Path path = new Path(tempDir.toUri().toString(), "1.avro");
         Assertions.assertThrows(
                 AvroRuntimeException.class,
-                () ->
-                        writerFactory.create(
-                                path.getFileSystem()
-                                        .create(path, FileSystem.WriteMode.NO_OVERWRITE)),
+                () -> writerFactory.create(path),
                 "Unrecognized codec: _unsupported");
     }
 
