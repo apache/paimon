@@ -29,7 +29,7 @@ public class FieldStats {
     @Nullable private final Object maxValue;
     private final long nullCount;
 
-    public FieldStats(Object minValue, Object maxValue, long nullCount) {
+    public FieldStats(@Nullable Object minValue, @Nullable Object maxValue, long nullCount) {
         this.minValue = minValue;
         this.maxValue = maxValue;
         this.nullCount = nullCount;

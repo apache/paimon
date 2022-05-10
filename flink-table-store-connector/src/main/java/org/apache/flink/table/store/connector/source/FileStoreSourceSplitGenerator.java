@@ -18,9 +18,12 @@
 
 package org.apache.flink.table.store.connector.source;
 
+import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -36,7 +39,12 @@ public class FileStoreSourceSplitGenerator {
     private final char[] currentId = "0000000000".toCharArray();
 
     public List<FileStoreSourceSplit> createSplits(FileStoreScan.Plan plan) {
-        return plan.groupByPartFiles().entrySet().stream()
+        return createSplits(plan.groupByPartFiles());
+    }
+
+    public List<FileStoreSourceSplit> createSplits(
+            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupBy) {
+        return groupBy.entrySet().stream()
                 .flatMap(
                         pe ->
                                 pe.getValue().entrySet().stream()
