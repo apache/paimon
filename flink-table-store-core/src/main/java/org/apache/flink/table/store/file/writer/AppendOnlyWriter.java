@@ -130,12 +130,12 @@ public class AppendOnlyWriter implements RecordWriter {
     }
 
     private class RowFileWriter extends BaseFileWriter<RowData, DataFileMeta> {
-        private final long startSeqNum;
+        private final long minSeqNum;
         private final FieldStatsCollector fieldStatsCollector;
 
         public RowFileWriter(BulkWriter.Factory<RowData> writerFactory, Path path) {
             super(writerFactory, path);
-            this.startSeqNum = nextSeqNum.get();
+            this.minSeqNum = nextSeqNum.get();
             this.fieldStatsCollector = new FieldStatsCollector(writeSchema);
         }
 
@@ -163,8 +163,8 @@ public class AppendOnlyWriter implements RecordWriter {
                     FileUtils.getFileSize(path),
                     recordCount(),
                     stats,
-                    startSeqNum,
-                    Math.max(startSeqNum, nextSeqNum.get() - 1));
+                    minSeqNum,
+                    Math.max(minSeqNum, nextSeqNum.get() - 1));
         }
     }
 }
