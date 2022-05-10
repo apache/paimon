@@ -22,8 +22,6 @@ import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
 
-import java.util.Objects;
-
 /**
  * A {@link MergeFunction} where key is primary key (unique) and value is the full record, only keep
  * the latest one.
@@ -53,22 +51,5 @@ public class DeduplicateMergeFunction implements MergeFunction {
     @Override
     public MergeFunction copy() {
         return new DeduplicateMergeFunction();
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (!(o instanceof DeduplicateMergeFunction)) {
-            return false;
-        }
-        DeduplicateMergeFunction that = (DeduplicateMergeFunction) o;
-        return Objects.equals(latestValue, that.latestValue);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(latestValue);
     }
 }

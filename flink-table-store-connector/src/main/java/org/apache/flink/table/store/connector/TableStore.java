@@ -321,7 +321,6 @@ public class TableStore {
                     projectedFields,
                     partitionPredicate,
                     fieldPredicate,
-                    null,
                     null);
         }
 

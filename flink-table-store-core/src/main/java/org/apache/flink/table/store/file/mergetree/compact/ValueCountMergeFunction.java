@@ -23,8 +23,6 @@ import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
 
-import java.util.Objects;
-
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 /**
@@ -61,22 +59,5 @@ public class ValueCountMergeFunction implements MergeFunction {
     private long count(RowData value) {
         checkArgument(!value.isNullAt(0), "Value count should not be null.");
         return value.getLong(0);
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (!(o instanceof ValueCountMergeFunction)) {
-            return false;
-        }
-        ValueCountMergeFunction that = (ValueCountMergeFunction) o;
-        return total == that.total;
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(total);
     }
 }

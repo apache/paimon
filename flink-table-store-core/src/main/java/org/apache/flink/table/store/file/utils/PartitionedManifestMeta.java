@@ -36,28 +36,52 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
-/** A serializer to serialize manifest entries per partition. */
-public class PartitionedDataManifestSerializer implements Serializable {
+/** Manifest entries per partitioned with the corresponding snapshot id. */
+public class PartitionedManifestMeta implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private final BinaryRowDataSerializer partSerializer;
-    private final DataFileMetaSerializer metaSerializer;
+    /** The latest snapshot id seen at planning phase when manual compaction is triggered. */
+    private final Long snapshotId;
 
-    public PartitionedDataManifestSerializer(
-            int partFieldCount, RowType keyType, RowType valueType) {
-        this.partSerializer = new BinaryRowDataSerializer(partFieldCount);
-        this.metaSerializer = new DataFileMetaSerializer(keyType, valueType);
+    /** The manifest entries collected at planning phase when manual compaction is triggered. */
+    private transient Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> manifestEntries;
+
+    private final int partFieldCount;
+    private final RowType keyType;
+    private final RowType valueType;
+
+    public PartitionedManifestMeta(
+            Long snapshotId,
+            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> specifiedManifestEntries,
+            int partFieldCount,
+            RowType keyType,
+            RowType valueType) {
+        Preconditions.checkNotNull(snapshotId, "Specified snapshot should not be null.");
+        Preconditions.checkNotNull(
+                specifiedManifestEntries, "Specified manifest entries should not be null.");
+        this.snapshotId = snapshotId;
+        this.manifestEntries = specifiedManifestEntries;
+        this.partFieldCount = partFieldCount;
+        this.keyType = keyType;
+        this.valueType = valueType;
     }
 
-    public void serialize(
-            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> manifestEntries,
-            ObjectOutputStream out)
-            throws IOException {
-        Preconditions.checkNotNull(
-                manifestEntries,
-                "Manifest entries for manual compaction to serialize should not be null.");
+    public Long getSnapshotId() {
+        return snapshotId;
+    }
+
+    public Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> getManifestEntries() {
+        return manifestEntries;
+    }
+
+    private void writeObject(ObjectOutputStream out) throws IOException {
+        out.defaultWriteObject();
+
+        BinaryRowDataSerializer partSerializer = new BinaryRowDataSerializer(partFieldCount);
+        DataFileMetaSerializer metaSerializer = new DataFileMetaSerializer(keyType, valueType);
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
         view.writeInt(manifestEntries.size());
         for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> partEntry :
@@ -75,11 +99,13 @@ public class PartitionedDataManifestSerializer implements Serializable {
         }
     }
 
-    public Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> deserialize(ObjectInputStream in)
-            throws IOException {
-        Preconditions.checkState(in.available() > 0, "No more available bytes to read in.");
+    private void readObject(ObjectInputStream in) throws ClassNotFoundException, IOException {
+        in.defaultReadObject();
+
+        manifestEntries = new HashMap<>();
+        BinaryRowDataSerializer partSerializer = new BinaryRowDataSerializer(partFieldCount);
+        DataFileMetaSerializer metaSerializer = new DataFileMetaSerializer(keyType, valueType);
         DataInputViewStreamWrapper view = new DataInputViewStreamWrapper(in);
-        Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> manifestEntries = new HashMap<>();
         int partitionNum = view.readInt();
         while (partitionNum > 0) {
             BinaryRowData partition = partSerializer.deserialize(view);
@@ -103,6 +129,26 @@ public class PartitionedDataManifestSerializer implements Serializable {
             manifestEntries.put(partition, bucketEntry);
             partitionNum--;
         }
-        return manifestEntries;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof PartitionedManifestMeta)) {
+            return false;
+        }
+        PartitionedManifestMeta that = (PartitionedManifestMeta) o;
+        return partFieldCount == that.partFieldCount
+                && snapshotId.equals(that.snapshotId)
+                && manifestEntries.equals(that.manifestEntries)
+                && keyType.equals(that.keyType)
+                && valueType.equals(that.valueType);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(snapshotId, manifestEntries, partFieldCount, keyType, valueType);
     }
 }

@@ -32,6 +32,7 @@ import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunct
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.file.utils.PartitionedManifestMeta;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.DoubleType;
 import org.apache.flink.table.types.logical.IntType;
@@ -80,6 +81,15 @@ public class FileStoreSourceTest {
         Long specifiedSnapshotId = specified ? 1L : null;
         Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> specifiedManifestEntries =
                 specified ? buildManifestEntries(hasPk, partitioned) : null;
+        PartitionedManifestMeta partitionedManifestMeta =
+                specified
+                        ? new PartitionedManifestMeta(
+                                specifiedSnapshotId,
+                                specifiedManifestEntries,
+                                getPartitionType(partitioned).getFieldCount(),
+                                getKeyType(hasPk),
+                                getValueType(hasPk))
+                        : null;
         FileStoreSource source =
                 new FileStoreSource(
                         fileStore,
@@ -90,10 +100,17 @@ public class FileStoreSourceTest {
                         null,
                         null,
                         null,
-                        specifiedSnapshotId,
-                        specifiedManifestEntries);
+                        partitionedManifestMeta);
         Object object = readObject(writeObject(source));
-        assertThat(object).isEqualTo(source);
+        assertThat(object).isInstanceOf(FileStoreSource.class);
+        FileStoreSource deserialized = (FileStoreSource) object;
+        assertThat(deserialized.getBoundedness()).isEqualTo(source.getBoundedness());
+        if (specified) {
+            assertThat(deserialized.getSpecifiedPartitionedManifestMeta())
+                    .isEqualTo(source.getSpecifiedPartitionedManifestMeta());
+        } else {
+            assertThat(deserialized.getSpecifiedPartitionedManifestMeta()).isNull();
+        }
     }
 
     private byte[] writeObject(FileStoreSource source) throws IOException {

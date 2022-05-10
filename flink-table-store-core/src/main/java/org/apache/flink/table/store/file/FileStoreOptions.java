@@ -35,7 +35,6 @@ import java.io.Serializable;
 import java.time.Duration;
 import java.util.HashSet;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
@@ -250,22 +249,5 @@ public class FileStoreOptions implements Serializable {
         public InlineElement getDescription() {
             return text(description);
         }
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (!(o instanceof FileStoreOptions)) {
-            return false;
-        }
-        FileStoreOptions that = (FileStoreOptions) o;
-        return options.equals(that.options);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(options);
     }
 }

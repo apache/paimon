@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector.source;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.api.connector.source.SourceReader;
@@ -25,27 +26,17 @@ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.utils.PartitionedDataManifestSerializer;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.file.utils.PartitionedManifestMeta;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
 
 import static org.apache.flink.table.store.connector.source.PendingSplitsCheckpoint.INVALID_SNAPSHOT;
 import static org.apache.flink.util.Preconditions.checkArgument;
@@ -72,12 +63,11 @@ public class FileStoreSource
 
     @Nullable private final Predicate fieldPredicate;
 
-    /** The latest snapshot id seen at planning phase when manual compaction is triggered. */
-    @Nullable private final Long specifiedSnapshotId;
-
-    /** The manifest entries collected at planning phase when manual compaction is triggered. */
-    @Nullable
-    private transient Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> specifiedManifestEntries;
+    /**
+     * The partitioned manifest meta collected at planning phase when manual compaction is
+     * triggered.
+     */
+    @Nullable private final PartitionedManifestMeta specifiedPartitionedManifestMeta;
 
     public FileStoreSource(
             FileStore fileStore,
@@ -88,9 +78,7 @@ public class FileStoreSource
             @Nullable int[][] projectedFields,
             @Nullable Predicate partitionPredicate,
             @Nullable Predicate fieldPredicate,
-            @Nullable Long specifiedSnapshotId,
-            @Nullable
-                    Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> specifiedManifestEntries) {
+            @Nullable PartitionedManifestMeta specifiedPartitionedManifestMeta) {
         this.fileStore = fileStore;
         this.valueCountMode = valueCountMode;
         this.isContinuous = isContinuous;
@@ -99,8 +87,7 @@ public class FileStoreSource
         this.projectedFields = projectedFields;
         this.partitionPredicate = partitionPredicate;
         this.fieldPredicate = fieldPredicate;
-        this.specifiedSnapshotId = specifiedSnapshotId;
-        this.specifiedManifestEntries = specifiedManifestEntries;
+        this.specifiedPartitionedManifestMeta = specifiedPartitionedManifestMeta;
     }
 
     @Override
@@ -148,14 +135,12 @@ public class FileStoreSource
         Long snapshotId;
         Collection<FileStoreSourceSplit> splits;
 
-        if (specifiedSnapshotId != null) {
-            Preconditions.checkNotNull(
-                    specifiedManifestEntries,
-                    "The manifest entries cannot be null for manual compaction.");
+        if (specifiedPartitionedManifestMeta != null) {
             return new StaticFileStoreSplitEnumerator(
                     context,
-                    scan.snapshot(specifiedSnapshotId),
-                    new FileStoreSourceSplitGenerator().createSplits(specifiedManifestEntries));
+                    scan.snapshot(specifiedPartitionedManifestMeta.getSnapshotId()),
+                    new FileStoreSourceSplitGenerator()
+                            .createSplits(specifiedPartitionedManifestMeta.getManifestEntries()));
         }
 
         if (partitionPredicate != null) {
@@ -217,64 +202,9 @@ public class FileStoreSource
         return new PendingSplitsCheckpointSerializer(getSplitSerializer());
     }
 
-    private void writeObject(ObjectOutputStream out) throws IOException {
-        out.defaultWriteObject();
-        if (specifiedManifestEntries != null) {
-            new PartitionedDataManifestSerializer(
-                            fileStore.partitionType().getFieldCount(),
-                            fileStore.keyType(),
-                            fileStore.valueType())
-                    .serialize(specifiedManifestEntries, out);
-        }
-    }
-
-    private void readObject(ObjectInputStream in) throws ClassNotFoundException, IOException {
-        in.defaultReadObject();
-        if (in.available() > 0) {
-            specifiedManifestEntries =
-                    new PartitionedDataManifestSerializer(
-                                    fileStore.partitionType().getFieldCount(),
-                                    fileStore.keyType(),
-                                    fileStore.valueType())
-                            .deserialize(in);
-        }
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (!(o instanceof FileStoreSource)) {
-            return false;
-        }
-        FileStoreSource that = (FileStoreSource) o;
-        return valueCountMode == that.valueCountMode
-                && isContinuous == that.isContinuous
-                && discoveryInterval == that.discoveryInterval
-                && latestContinuous == that.latestContinuous
-                && fileStore.equals(that.fileStore)
-                && Arrays.deepEquals(projectedFields, that.projectedFields)
-                && Objects.equals(partitionPredicate, that.partitionPredicate)
-                && Objects.equals(fieldPredicate, that.fieldPredicate)
-                && Objects.equals(specifiedSnapshotId, that.specifiedSnapshotId)
-                && Objects.equals(specifiedManifestEntries, that.specifiedManifestEntries);
-    }
-
-    @Override
-    public int hashCode() {
-        int result =
-                Objects.hash(
-                        fileStore,
-                        valueCountMode,
-                        isContinuous,
-                        discoveryInterval,
-                        latestContinuous,
-                        partitionPredicate,
-                        fieldPredicate,
-                        specifiedSnapshotId,
-                        specifiedManifestEntries);
-        result = 31 * result + Arrays.deepHashCode(projectedFields);
-        return result;
+    @VisibleForTesting
+    @Nullable
+    PartitionedManifestMeta getSpecifiedPartitionedManifestMeta() {
+        return specifiedPartitionedManifestMeta;
     }
 }
