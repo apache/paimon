@@ -74,8 +74,7 @@ public class DataFileMeta {
                 rowStats,
                 minSequenceNumber,
                 maxSequenceNumber,
-                DUMMY_LEVEL
-        );
+                DUMMY_LEVEL);
     }
 
     public DataFileMeta(

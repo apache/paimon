@@ -164,8 +164,7 @@ public class AppendOnlyWriter implements RecordWriter {
                     recordCount(),
                     stats,
                     startSeqNum,
-                    Math.max(startSeqNum, nextSeqNum.get() - 1)
-            );
+                    Math.max(startSeqNum, nextSeqNum.get() - 1));
         }
     }
 }
