@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.table.factories.FactoryUtil;
@@ -39,13 +40,16 @@ public class TableStoreFactoryOptions {
                                     + "By default, compaction does not adjust the bucket number "
                                     + "of a partition/table.");
 
+    @Internal
     public static final ConfigOption<String> COMPACTION_SCANNED_MANIFEST =
             ConfigOptions.key("compaction.scanned-manifest")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "The string representation of manifest entries which are scanned during manual compaction "
-                                    + " planning phase and injected back into enriched options.");
+                            "The serialized json string of manifest entries which are scanned during manual compaction "
+                                    + "planning phase and injected back into enriched options. The json format contains "
+                                    + "snapshot id and each partition's data file meta list (among which "
+                                    + "each data file meta is encoded by Base64 format) tagged with bucket id.");
 
     public static final ConfigOption<String> LOG_SYSTEM =
             ConfigOptions.key("log.system")
