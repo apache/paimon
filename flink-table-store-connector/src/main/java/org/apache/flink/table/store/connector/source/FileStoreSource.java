@@ -67,7 +67,7 @@ public class FileStoreSource
      * The partitioned manifest meta collected at planning phase when manual compaction is
      * triggered.
      */
-    @Nullable private final PartitionedManifestMeta specifiedPartitionedManifestMeta;
+    @Nullable private final PartitionedManifestMeta specifiedPartManifests;
 
     public FileStoreSource(
             FileStore fileStore,
@@ -78,7 +78,7 @@ public class FileStoreSource
             @Nullable int[][] projectedFields,
             @Nullable Predicate partitionPredicate,
             @Nullable Predicate fieldPredicate,
-            @Nullable PartitionedManifestMeta specifiedPartitionedManifestMeta) {
+            @Nullable PartitionedManifestMeta specifiedPartManifests) {
         this.fileStore = fileStore;
         this.valueCountMode = valueCountMode;
         this.isContinuous = isContinuous;
@@ -87,7 +87,7 @@ public class FileStoreSource
         this.projectedFields = projectedFields;
         this.partitionPredicate = partitionPredicate;
         this.fieldPredicate = fieldPredicate;
-        this.specifiedPartitionedManifestMeta = specifiedPartitionedManifestMeta;
+        this.specifiedPartManifests = specifiedPartManifests;
     }
 
     @Override
@@ -132,15 +132,13 @@ public class FileStoreSource
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
         FileStoreScan scan = fileStore.newScan();
-        Long snapshotId;
-        Collection<FileStoreSourceSplit> splits;
 
-        if (specifiedPartitionedManifestMeta != null) {
+        if (specifiedPartManifests != null) {
             return new StaticFileStoreSplitEnumerator(
                     context,
-                    scan.snapshot(specifiedPartitionedManifestMeta.getSnapshotId()),
+                    scan.snapshot(specifiedPartManifests.getSnapshotId()),
                     new FileStoreSourceSplitGenerator()
-                            .createSplits(specifiedPartitionedManifestMeta.getManifestEntries()));
+                            .createSplits(specifiedPartManifests.getManifestEntries()));
         }
 
         if (partitionPredicate != null) {
@@ -154,6 +152,8 @@ public class FileStoreSource
             }
         }
 
+        Long snapshotId;
+        Collection<FileStoreSourceSplit> splits;
         if (checkpoint == null) {
             // first, create new enumerator, plan splits
             if (latestContinuous) {
@@ -204,7 +204,7 @@ public class FileStoreSource
 
     @VisibleForTesting
     @Nullable
-    PartitionedManifestMeta getSpecifiedPartitionedManifestMeta() {
-        return specifiedPartitionedManifestMeta;
+    PartitionedManifestMeta getSpecifiedPartManifests() {
+        return specifiedPartManifests;
     }
 }

@@ -57,8 +57,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -106,10 +104,10 @@ public class FileStoreSourceTest {
         FileStoreSource deserialized = (FileStoreSource) object;
         assertThat(deserialized.getBoundedness()).isEqualTo(source.getBoundedness());
         if (specified) {
-            assertThat(deserialized.getSpecifiedPartitionedManifestMeta())
-                    .isEqualTo(source.getSpecifiedPartitionedManifestMeta());
+            assertThat(deserialized.getSpecifiedPartManifests())
+                    .isEqualTo(source.getSpecifiedPartManifests());
         } else {
-            assertThat(deserialized.getSpecifiedPartitionedManifestMeta()).isNull();
+            assertThat(deserialized.getSpecifiedPartManifests()).isNull();
         }
     }
 
@@ -165,90 +163,13 @@ public class FileStoreSourceTest {
         Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> manifestEntries = new HashMap<>();
         Map<Integer, List<DataFileMeta>> bucketEntries = new HashMap<>();
         int totalBuckets = new Random().nextInt(10) + 1;
-        IntStream.range(0, totalBuckets)
-                .forEach(
-                        bucket ->
-                                bucketEntries.put(
-                                        bucket,
-                                        genMinMax(hasPk).stream()
-                                                .map(
-                                                        tuple -> {
-                                                            long seqNumber =
-                                                                    new Random().nextLong() + 1;
-                                                            BinaryRowData keyMin = tuple.f0;
-                                                            BinaryRowData keyMax = tuple.f1;
-                                                            FieldStats k0Stats =
-                                                                    new FieldStats(
-                                                                            keyMin.getInt(0),
-                                                                            keyMax.getInt(1),
-                                                                            0);
-                                                            FieldStats k1Stats =
-                                                                    new FieldStats(
-                                                                            keyMin.getString(1),
-                                                                            keyMax.getString(1),
-                                                                            0);
-                                                            FieldStats v0Status =
-                                                                    new FieldStats(
-                                                                            hasPk
-                                                                                    ? null
-                                                                                    : keyMin
-                                                                                            .getDouble(
-                                                                                                    2),
-                                                                            hasPk
-                                                                                    ? null
-                                                                                    : keyMax
-                                                                                            .getDouble(
-                                                                                                    2),
-                                                                            0);
-                                                            FieldStats v1Status =
-                                                                    new FieldStats(
-                                                                            hasPk
-                                                                                    ? null
-                                                                                    : keyMin
-                                                                                            .getString(
-                                                                                                    3),
-                                                                            hasPk
-                                                                                    ? null
-                                                                                    : keyMax
-                                                                                            .getString(
-                                                                                                    3),
-                                                                            0);
-                                                            long count = new Random().nextLong();
-                                                            return new DataFileMeta(
-                                                                    "data-" + UUID.randomUUID(),
-                                                                    new Random().nextInt(100),
-                                                                    new Random().nextInt(100),
-                                                                    keyMin,
-                                                                    keyMax,
-                                                                    hasPk
-                                                                            ? new FieldStats[] {
-                                                                                k0Stats, k1Stats
-                                                                            }
-                                                                            : new FieldStats[] {
-                                                                                k0Stats, k1Stats,
-                                                                                v0Status, v1Status
-                                                                            },
-                                                                    hasPk
-                                                                            ? new FieldStats[] {
-                                                                                k0Stats, k1Stats,
-                                                                                v0Status, v1Status
-                                                                            }
-                                                                            : new FieldStats[] {
-                                                                                new FieldStats(
-                                                                                        count,
-                                                                                        count
-                                                                                                + new Random()
-                                                                                                        .nextInt(
-                                                                                                                100),
-                                                                                        0)
-                                                                            },
-                                                                    seqNumber,
-                                                                    seqNumber
-                                                                            + new Random()
-                                                                                    .nextInt(100),
-                                                                    new Random().nextInt(4));
-                                                        })
-                                                .collect(Collectors.toList())));
+        for (int bucket = 0; bucket < totalBuckets; bucket++) {
+            List<DataFileMeta> metaList = new ArrayList<>();
+            for (Tuple2<BinaryRowData, BinaryRowData> tuple : genMinMax(hasPk)) {
+                metaList.add(genDataFileMeta(hasPk, tuple.f0, tuple.f1));
+            }
+            bucketEntries.put(bucket, metaList);
+        }
         genPartitionValues(partitioned)
                 .forEach(partValue -> manifestEntries.put(partValue, bucketEntries));
         return manifestEntries;
@@ -259,17 +180,15 @@ public class FileStoreSourceTest {
         if (partitioned) {
             int partSize = new Random().nextInt(10) + 1;
             List<BinaryRowData> partKeys = new ArrayList<>();
-            IntStream.range(0, partSize)
-                    .forEach(
-                            i ->
-                                    partKeys.add(
-                                            partSerializer
-                                                    .toBinaryRow(
-                                                            GenericRowData.of(
-                                                                    StringData.fromString(
-                                                                            UUID.randomUUID()
-                                                                                    .toString())))
-                                                    .copy()));
+            for (int i = 0; i < partSize; i++) {
+                partKeys.add(
+                        partSerializer
+                                .toBinaryRow(
+                                        GenericRowData.of(
+                                                StringData.fromString(
+                                                        UUID.randomUUID().toString())))
+                                .copy());
+            }
             return partKeys;
         }
         return Collections.singletonList(partSerializer.toBinaryRow(GenericRowData.of()).copy());
@@ -279,43 +198,75 @@ public class FileStoreSourceTest {
         RowDataSerializer keySerializer = new RowDataSerializer(getKeyType(hasPk));
         int size = new Random().nextInt(20);
         List<Tuple2<BinaryRowData, BinaryRowData>> minMaxKeys = new ArrayList<>();
-        IntStream.range(0, size)
-                .forEach(
-                        i -> {
-                            int k0 = new Random().nextInt(1000);
-                            String k1 = UUID.randomUUID().toString();
-                            BinaryRowData keyMin;
-                            BinaryRowData keyMax;
-                            if (hasPk) {
-                                keyMin =
-                                        keySerializer.toBinaryRow(
-                                                GenericRowData.of(k0, StringData.fromString(k1)));
-                                keyMax =
-                                        keySerializer.toBinaryRow(
-                                                GenericRowData.of(
-                                                        k0 + 100, StringData.fromString(k1)));
-                            } else {
-                                double v0 = new Random().nextDouble();
-                                String v1 = UUID.randomUUID().toString();
-                                keyMin =
-                                        keySerializer.toBinaryRow(
-                                                GenericRowData.of(
-                                                        k0,
-                                                        StringData.fromString(k1),
-                                                        v0,
-                                                        StringData.fromString(v1)));
-                                keyMax =
-                                        keySerializer.toBinaryRow(
-                                                GenericRowData.of(
-                                                        k0 + 100,
-                                                        StringData.fromString(k1),
-                                                        v0 + 1.5,
-                                                        StringData.fromString(v1)));
-                            }
-                            minMaxKeys.add(Tuple2.of(keyMin, keyMax));
-                        });
-
+        for (int i = 0; i < size; i++) {
+            int k0 = new Random().nextInt(1000);
+            String k1 = UUID.randomUUID().toString();
+            BinaryRowData keyMin;
+            BinaryRowData keyMax;
+            if (hasPk) {
+                keyMin =
+                        keySerializer.toBinaryRow(GenericRowData.of(k0, StringData.fromString(k1)));
+                keyMax =
+                        keySerializer.toBinaryRow(
+                                GenericRowData.of(k0 + 100, StringData.fromString(k1)));
+            } else {
+                double v0 = new Random().nextDouble();
+                String v1 = UUID.randomUUID().toString();
+                keyMin =
+                        keySerializer.toBinaryRow(
+                                GenericRowData.of(
+                                        k0,
+                                        StringData.fromString(k1),
+                                        v0,
+                                        StringData.fromString(v1)));
+                keyMax =
+                        keySerializer.toBinaryRow(
+                                GenericRowData.of(
+                                        k0 + 100,
+                                        StringData.fromString(k1),
+                                        v0 + 1.5,
+                                        StringData.fromString(v1)));
+            }
+            minMaxKeys.add(Tuple2.of(keyMin, keyMax));
+        }
         return minMaxKeys;
+    }
+
+    private static DataFileMeta genDataFileMeta(
+            boolean hasPk, BinaryRowData keyMin, BinaryRowData keyMax) {
+        long seqNumber = new Random().nextLong() + 1;
+        FieldStats k0Stats = new FieldStats(keyMin.getInt(0), keyMax.getInt(1), 0);
+        FieldStats k1Stats = new FieldStats(keyMin.getString(1), keyMax.getString(1), 0);
+        FieldStats v0Status =
+                new FieldStats(
+                        hasPk ? null : keyMin.getDouble(2), hasPk ? null : keyMax.getDouble(2), 0);
+        FieldStats v1Status =
+                new FieldStats(
+                        hasPk ? null : keyMin.getString(3), hasPk ? null : keyMax.getString(3), 0);
+        long count = new Random().nextLong();
+        return new DataFileMeta(
+                "data-" + UUID.randomUUID(),
+                new Random().nextInt(100),
+                new Random().nextInt(100),
+                keyMin,
+                keyMax,
+                hasPk
+                        ? new FieldStats[] {k0Stats, k1Stats}
+                        : new FieldStats[] {
+                            k0Stats, k1Stats,
+                            v0Status, v1Status
+                        },
+                hasPk
+                        ? new FieldStats[] {
+                            k0Stats, k1Stats,
+                            v0Status, v1Status
+                        }
+                        : new FieldStats[] {
+                            new FieldStats(count, count + new Random().nextInt(100), 0)
+                        },
+                seqNumber,
+                seqNumber + new Random().nextInt(100),
+                new Random().nextInt(4));
     }
 
     private static RowType getKeyType(boolean hasPk) {

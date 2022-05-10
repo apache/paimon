@@ -107,27 +107,24 @@ public class PartitionedManifestMeta implements Serializable {
         DataFileMetaSerializer metaSerializer = new DataFileMetaSerializer(keyType, valueType);
         DataInputViewStreamWrapper view = new DataInputViewStreamWrapper(in);
         int partitionNum = view.readInt();
-        while (partitionNum > 0) {
+        for (int i = 0; i < partitionNum; i++) {
             BinaryRowData partition = partSerializer.deserialize(view);
             Map<Integer, List<DataFileMeta>> bucketEntry = new HashMap<>();
             int bucketNum = view.readInt();
-            while (bucketNum > 0) {
+            for (int j = 0; j < bucketNum; j++) {
                 int bucket = view.readInt();
                 int entryNum = view.readInt();
                 if (entryNum == 0) {
                     bucketEntry.put(bucket, Collections.emptyList());
                 } else {
                     List<DataFileMeta> metas = new ArrayList<>();
-                    while (entryNum > 0) {
+                    for (int k = 0; k < entryNum; k++) {
                         metas.add(metaSerializer.deserialize(view));
-                        entryNum--;
                     }
                     bucketEntry.put(bucket, metas);
                 }
-                bucketNum--;
             }
             manifestEntries.put(partition, bucketEntry);
-            partitionNum--;
         }
     }
 
