@@ -32,8 +32,8 @@ import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.writer.BaseFileWriter;
-import org.apache.flink.table.store.file.writer.BaseFormatWriter;
 import org.apache.flink.table.store.file.writer.FormatWriter;
+import org.apache.flink.table.store.file.writer.GenericFormatWriter;
 import org.apache.flink.table.store.file.writer.Metric;
 import org.apache.flink.table.store.file.writer.RollingFileWriter;
 import org.apache.flink.table.types.logical.RowType;
@@ -128,7 +128,7 @@ public class DataFileWriter {
         public FormatWriter<KeyValue> create(Path path) throws IOException {
             KeyValueSerializer serializer = new KeyValueSerializer(keyType, valueType);
 
-            return new BaseFormatWriter<>(writerFactory.create(path), serializer::toRow);
+            return new GenericFormatWriter<>(writerFactory.create(path), serializer::toRow);
         }
     }
 
@@ -185,7 +185,8 @@ public class DataFileWriter {
             BinaryTableStats keyStats =
                     keyStatsConverter.toBinary(Arrays.copyOfRange(rowStats, 0, numKeyFields));
             BinaryTableStats valueStats =
-                    valueStatsConverter.toBinary(Arrays.copyOfRange(rowStats, numKeyFields + 2, rowStats.length));
+                    valueStatsConverter.toBinary(
+                            Arrays.copyOfRange(rowStats, numKeyFields + 2, rowStats.length));
 
             return new DataFileMeta(
                     path.getName(),

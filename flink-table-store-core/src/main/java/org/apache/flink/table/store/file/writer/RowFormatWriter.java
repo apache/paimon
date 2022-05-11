@@ -27,6 +27,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.stats.FieldStats;
 import org.apache.flink.table.store.file.stats.FieldStatsCollector;
 import org.apache.flink.table.store.file.stats.FileStatsExtractor;
+import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
@@ -45,7 +46,7 @@ public class RowFormatWriter implements FormatWriter<RowData> {
     private final BulkWriter<RowData> writer;
     private final FSDataOutputStream out;
     private final Path path;
-    private final FileStatsExtractor extractor;
+    private final FileStatsExtractor fileStatsExtractor;
 
     private FieldStatsCollector fieldStatsCollector = null;
 
@@ -57,13 +58,13 @@ public class RowFormatWriter implements FormatWriter<RowData> {
             FSDataOutputStream out,
             Path path,
             RowType writeSchema,
-            FileStatsExtractor extractor) {
+            FileStatsExtractor fileStatsExtractor) {
         this.writer = writer;
         this.out = out;
         this.path = path;
 
-        this.extractor = extractor;
-        if (extractor == null) {
+        this.fileStatsExtractor = fileStatsExtractor;
+        if (this.fileStatsExtractor == null) {
             this.fieldStatsCollector = new FieldStatsCollector(writeSchema);
         }
 
@@ -102,6 +103,8 @@ public class RowFormatWriter implements FormatWriter<RowData> {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+
+        FileUtils.deleteOrWarn(path);
     }
 
     @Override
@@ -109,8 +112,8 @@ public class RowFormatWriter implements FormatWriter<RowData> {
         Preconditions.checkState(closed, "Cannot access metric unless the writer is closed.");
 
         FieldStats[] stats;
-        if (extractor != null) {
-            stats = extractor.extract(path);
+        if (fileStatsExtractor != null) {
+            stats = fileStatsExtractor.extract(path);
         } else {
             stats = fieldStatsCollector.extractFieldStats();
         }
@@ -135,22 +138,20 @@ public class RowFormatWriter implements FormatWriter<RowData> {
         }
     }
 
-    /**
-     * A factory that creates {@link RowFormatWriter}.
-     */
+    /** A factory that creates {@link RowFormatWriter}. */
     public static class RowFormatWriterFactory implements FormatWriter.Factory<RowData> {
 
         private final BulkWriter.Factory<RowData> writerFactory;
         private final RowType writeSchema;
-        private final FileStatsExtractor extractor;
+        private final FileStatsExtractor fileStatsExtractor;
 
         public RowFormatWriterFactory(
                 BulkWriter.Factory<RowData> writerFactory,
                 RowType writeSchema,
-                FileStatsExtractor extractor) {
+                FileStatsExtractor fileStatsExtractor) {
             this.writerFactory = writerFactory;
             this.writeSchema = writeSchema;
-            this.extractor = extractor;
+            this.fileStatsExtractor = fileStatsExtractor;
         }
 
         @Override
@@ -161,7 +162,7 @@ public class RowFormatWriter implements FormatWriter<RowData> {
 
             try {
                 BulkWriter<RowData> bulkWriter = writerFactory.create(out);
-                return new RowFormatWriter(bulkWriter, out, path, writeSchema, extractor);
+                return new RowFormatWriter(bulkWriter, out, path, writeSchema, fileStatsExtractor);
             } catch (Throwable e) {
                 LOG.error("Failed to create the Row bulk writer for path: {}", path, e);
 

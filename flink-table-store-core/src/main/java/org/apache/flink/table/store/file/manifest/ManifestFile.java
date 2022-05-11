@@ -29,8 +29,8 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
 import org.apache.flink.table.store.file.writer.BaseFileWriter;
-import org.apache.flink.table.store.file.writer.BaseFormatWriter;
 import org.apache.flink.table.store.file.writer.FormatWriter;
+import org.apache.flink.table.store.file.writer.GenericFormatWriter;
 import org.apache.flink.table.store.file.writer.Metric;
 import org.apache.flink.table.store.file.writer.RollingFileWriter;
 import org.apache.flink.table.types.logical.RowType;
@@ -116,7 +116,7 @@ public class ManifestFile {
 
         @Override
         public FormatWriter<ManifestEntry> create(Path path) throws IOException {
-            return new BaseFormatWriter<>(writerFactory.create(path), serializer::toRow);
+            return new GenericFormatWriter<>(writerFactory.create(path), serializer::toRow);
         }
     }
 

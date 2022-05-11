@@ -25,18 +25,18 @@ import java.io.IOException;
 import java.util.function.Function;
 
 /**
- * Base bulk writer to delegate the generic data type writing into the {@link RowData} writer.
+ * Format writer to delegate the generic data type writing into the {@link RowData} writer.
  *
  * @param <T> generic record type.
  */
-public class BaseFormatWriter<T> implements FormatWriter<T> {
+public class GenericFormatWriter<T> implements FormatWriter<T> {
 
     private final FormatWriter<RowData> writer;
 
     // Convert the record from the generic type T to the concrete RowData type.
     private final Function<T, RowData> converter;
 
-    public BaseFormatWriter(FormatWriter<RowData> writer, Function<T, RowData> converter) {
+    public GenericFormatWriter(FormatWriter<RowData> writer, Function<T, RowData> converter) {
         this.writer = writer;
         this.converter = converter;
     }
