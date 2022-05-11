@@ -37,7 +37,6 @@ import org.apache.flink.util.Preconditions;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 /**
@@ -50,7 +49,7 @@ public class AppendOnlyWriter implements RecordWriter {
     private final long targetFileSize;
     private final DataFilePathFactory pathFactory;
     private final FileStatsExtractor fileStatsExtractor;
-    private final AtomicLong nextSeqNum;
+    private long nextSeqNum;
 
     private RowRollingWriter writer;
 
@@ -66,7 +65,7 @@ public class AppendOnlyWriter implements RecordWriter {
         this.targetFileSize = targetFileSize;
         this.pathFactory = pathFactory;
         this.fileStatsExtractor = fileFormat.createStatsExtractor(writeSchema).orElse(null);
-        this.nextSeqNum = new AtomicLong(maxWroteSeqNumber + 1);
+        this.nextSeqNum = maxWroteSeqNumber + 1;
 
         this.writer = createRollingRowWriter();
     }
@@ -134,7 +133,7 @@ public class AppendOnlyWriter implements RecordWriter {
 
         public RowFileWriter(BulkWriter.Factory<RowData> writerFactory, Path path) {
             super(writerFactory, path);
-            this.minSeqNum = nextSeqNum.get();
+            this.minSeqNum = nextSeqNum;
             this.fieldStatsCollector = new FieldStatsCollector(writeSchema);
         }
 
@@ -142,7 +141,7 @@ public class AppendOnlyWriter implements RecordWriter {
         public void write(RowData row) throws IOException {
             super.write(row);
 
-            nextSeqNum.incrementAndGet();
+            nextSeqNum += 1;
             if (fileStatsExtractor == null) {
                 fieldStatsCollector.collect(row);
             }
@@ -163,7 +162,7 @@ public class AppendOnlyWriter implements RecordWriter {
                     recordCount(),
                     stats,
                     minSeqNum,
-                    Math.max(minSeqNum, nextSeqNum.get() - 1));
+                    Math.max(minSeqNum, nextSeqNum - 1));
         }
     }
 }
