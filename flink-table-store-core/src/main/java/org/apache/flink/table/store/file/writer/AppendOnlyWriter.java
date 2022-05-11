@@ -34,9 +34,8 @@ import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.Lists;
-
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -83,7 +82,7 @@ public class AppendOnlyWriter implements RecordWriter {
 
     @Override
     public Increment prepareCommit() throws Exception {
-        List<DataFileMeta> newFiles = Lists.newArrayList();
+        List<DataFileMeta> newFiles = new ArrayList<>();
 
         if (writer != null) {
             writer.close();
@@ -93,7 +92,7 @@ public class AppendOnlyWriter implements RecordWriter {
             writer = createRollingRowWriter();
         }
 
-        return new Increment(Lists.newArrayList(newFiles));
+        return new Increment(newFiles);
     }
 
     @Override
@@ -105,7 +104,7 @@ public class AppendOnlyWriter implements RecordWriter {
     public List<DataFileMeta> close() throws Exception {
         sync();
 
-        List<DataFileMeta> result = Lists.newArrayList();
+        List<DataFileMeta> result = new ArrayList<>();
         if (writer != null) {
             // Abort this writer to clear uncommitted files.
             writer.abort();
