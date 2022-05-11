@@ -74,7 +74,7 @@ public class AppendOnlyWriter implements RecordWriter {
     public void write(ValueKind valueKind, RowData key, RowData value) throws Exception {
         Preconditions.checkArgument(
                 valueKind == ValueKind.ADD,
-                "Append-only writer cannot accept ValueKind: " + valueKind);
+                "Append-only writer cannot accept ValueKind: %s", valueKind);
 
         writer.write(value);
     }
@@ -91,7 +91,7 @@ public class AppendOnlyWriter implements RecordWriter {
             writer = createRollingRowWriter();
         }
 
-        return new Increment(newFiles);
+        return Increment.forAppend(newFiles);
     }
 
     @Override

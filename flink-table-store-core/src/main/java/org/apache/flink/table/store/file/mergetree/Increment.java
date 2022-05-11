@@ -44,8 +44,8 @@ public class Increment {
 
     private final List<DataFileMeta> compactAfter;
 
-    public Increment(List<DataFileMeta> newFiles) {
-        this(newFiles, EMPTY_COMPACT_BEFORE, EMPTY_COMPACT_AFTER);
+    public static Increment forAppend(List<DataFileMeta> newFiles) {
+        return new Increment(newFiles, EMPTY_COMPACT_BEFORE, EMPTY_COMPACT_AFTER);
     }
 
     public Increment(
