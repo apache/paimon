@@ -96,11 +96,7 @@ public abstract class E2eTestBase {
         }
         environment.withServices(services.toArray(new String[0]));
 
-        synchronized (E2eTestBase.class) {
-            // there are some steps which cannot be executed in parallel when starting the same
-            // docker image, so we should lock here
-            environment.start();
-        }
+        environment.start();
         jobManager = environment.getContainerByServiceName("jobmanager_1").get();
         jobManager.execInContainer("chown", "-R", "flink:flink", TEST_DATA_DIR);
 
