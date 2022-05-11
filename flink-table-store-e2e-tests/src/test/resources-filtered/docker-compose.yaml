@@ -35,8 +35,8 @@ services:
       testnetwork:
         aliases:
           - jobmanager
-    ports:
-      - "8081:8081"
+    expose:
+      - "8081"
 
   taskmanager:
     image: apache/flink:${flink.version}
@@ -65,8 +65,8 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
+    expose:
+      - "2181"
 
   kafka:
     image: confluentinc/cp-kafka:7.0.1
@@ -85,8 +85,8 @@ services:
       KAFKA_TRANSACTION_MAX_TIMEOUT_MS: 7200000
       # Disable log deletion to prevent records from being deleted during test run
       KAFKA_LOG_RETENTION_MS: -1
-    ports:
-      - "9092:9092"
+    expose:
+      - "9092"
     depends_on:
       - zookeeper
 
