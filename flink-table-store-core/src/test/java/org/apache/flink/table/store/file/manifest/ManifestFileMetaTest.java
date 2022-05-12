@@ -26,7 +26,7 @@ import org.apache.flink.table.data.writer.BinaryRowWriter;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.format.FileFormat;
-import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.types.logical.BigIntType;
@@ -143,8 +143,6 @@ public class ManifestFileMetaTest {
     private ManifestFile createManifestFile(String path) {
         return new ManifestFile.Factory(
                         PARTITION_TYPE,
-                        KEY_TYPE,
-                        ROW_TYPE,
                         avro,
                         new FileStorePathFactory(new Path(path), PARTITION_TYPE, "default"),
                         Long.MAX_VALUE)
@@ -237,10 +235,10 @@ public class ManifestFileMetaTest {
                         fileName,
                         0, // not used
                         0, // not used
+                        binaryRowData, // not useds
                         binaryRowData, // not used
-                        binaryRowData, // not used
-                        new FieldStats[] {new FieldStats(null, null, 0)}, // not used
-                        new FieldStats[] {new FieldStats(null, null, 0)}, // not used
+                        StatsTestUtils.newEmptyTableStats(), // not used
+                        StatsTestUtils.newEmptyTableStats(), // not used
                         0, // not used
                         0, // not used
                         0 // not used

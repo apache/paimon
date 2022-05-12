@@ -194,34 +194,26 @@ public class ManifestFile {
     public static class Factory {
 
         private final RowType partitionType;
-        private final RowType keyType;
-        private final RowType valueType;
         private final FileFormat fileFormat;
         private final FileStorePathFactory pathFactory;
         private final long suggestedFileSize;
 
         public Factory(
                 RowType partitionType,
-                RowType keyType,
-                RowType valueType,
                 FileFormat fileFormat,
                 FileStorePathFactory pathFactory,
                 long suggestedFileSize) {
             this.partitionType = partitionType;
-            this.keyType = keyType;
-            this.valueType = valueType;
             this.fileFormat = fileFormat;
             this.pathFactory = pathFactory;
             this.suggestedFileSize = suggestedFileSize;
         }
 
         public ManifestFile create() {
-            RowType entryType =
-                    VersionedObjectSerializer.versionType(
-                            ManifestEntry.schema(partitionType, keyType, valueType));
+            RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.schema());
             return new ManifestFile(
                     partitionType,
-                    new ManifestEntrySerializer(partitionType, keyType, valueType),
+                    new ManifestEntrySerializer(),
                     fileFormat.createReaderFactory(entryType),
                     fileFormat.createWriterFactory(entryType),
                     pathFactory,

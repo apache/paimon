@@ -18,10 +18,8 @@
 
 package org.apache.flink.table.store.file.stats;
 
-import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.utils.ObjectSerializer;
+import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.utils.RowDataToObjectArrayConverter;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
@@ -31,20 +29,21 @@ import org.apache.flink.table.types.logical.RowType;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Serializer for array of {@link FieldStats}. */
-public class FieldStatsArraySerializer extends ObjectSerializer<FieldStats[]> {
+import static org.apache.flink.table.store.file.utils.SerializationUtils.newBytesType;
 
-    private static final long serialVersionUID = 1L;
+/** Serializer for array of {@link FieldStats}. */
+public class FieldStatsArraySerializer {
+
+    private final RowDataSerializer serializer;
 
     private final RowDataToObjectArrayConverter converter;
 
-    public FieldStatsArraySerializer(RowType rowType) {
-        super(schema(rowType));
-        this.converter = new RowDataToObjectArrayConverter(toAllFieldsNullableRowType(rowType));
+    public FieldStatsArraySerializer(RowType type) {
+        this.serializer = new RowDataSerializer(type);
+        this.converter = new RowDataToObjectArrayConverter(toAllFieldsNullableRowType(type));
     }
 
-    @Override
-    public RowData toRow(FieldStats[] stats) {
+    public BinaryTableStats toBinary(FieldStats[] stats) {
         int rowFieldCount = stats.length;
         GenericRowData minValues = new GenericRowData(rowFieldCount);
         GenericRowData maxValues = new GenericRowData(rowFieldCount);
@@ -54,30 +53,31 @@ public class FieldStatsArraySerializer extends ObjectSerializer<FieldStats[]> {
             maxValues.setField(i, stats[i].maxValue());
             nullCounts[i] = stats[i].nullCount();
         }
-        return GenericRowData.of(minValues, maxValues, new GenericArrayData(nullCounts));
+        return new BinaryTableStats(
+                serializer.toBinaryRow(minValues).copy(),
+                serializer.toBinaryRow(maxValues).copy(),
+                nullCounts,
+                stats);
     }
 
-    @Override
-    public FieldStats[] fromRow(RowData row) {
+    public FieldStats[] fromBinary(BinaryTableStats array) {
         int rowFieldCount = converter.getArity();
-        RowData minValues = row.getRow(0, rowFieldCount);
-        Object[] minValueObjects = converter.convert(minValues);
-        RowData maxValues = row.getRow(1, rowFieldCount);
-        Object[] maxValueObjects = converter.convert(maxValues);
-        long[] nullValues = row.getArray(2).toLongArray();
+
+        Object[] minValueObjects = converter.convert(array.min());
+        Object[] maxValueObjects = converter.convert(array.max());
 
         FieldStats[] stats = new FieldStats[rowFieldCount];
         for (int i = 0; i < rowFieldCount; i++) {
-            stats[i] = new FieldStats(minValueObjects[i], maxValueObjects[i], nullValues[i]);
+            stats[i] =
+                    new FieldStats(minValueObjects[i], maxValueObjects[i], array.nullCounts()[i]);
         }
         return stats;
     }
 
-    public static RowType schema(RowType rowType) {
-        rowType = toAllFieldsNullableRowType(rowType);
+    public static RowType schema() {
         List<RowType.RowField> fields = new ArrayList<>();
-        fields.add(new RowType.RowField("_MIN_VALUES", rowType));
-        fields.add(new RowType.RowField("_MAX_VALUES", rowType));
+        fields.add(new RowType.RowField("_MIN_VALUES", newBytesType(false)));
+        fields.add(new RowType.RowField("_MAX_VALUES", newBytesType(false)));
         fields.add(new RowType.RowField("_NULL_COUNTS", new ArrayType(new BigIntType(false))));
         return new RowType(fields);
     }

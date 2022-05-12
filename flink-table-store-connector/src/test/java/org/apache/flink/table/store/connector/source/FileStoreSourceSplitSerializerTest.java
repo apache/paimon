@@ -20,9 +20,7 @@ package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.core.io.SimpleVersionedSerialization;
 import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.stats.FieldStats;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.file.stats.StatsTestUtils;
 
 import org.junit.jupiter.api.Test;
 
@@ -80,8 +78,8 @@ public class FileStoreSourceSplitSerializerTest {
                 1,
                 row(0),
                 row(0),
-                new FieldStats[] {new FieldStats(null, null, 0)},
-                new FieldStats[] {new FieldStats(null, null, 0)},
+                StatsTestUtils.newEmptyTableStats(),
+                StatsTestUtils.newEmptyTableStats(),
                 0,
                 1,
                 level);
@@ -89,11 +87,7 @@ public class FileStoreSourceSplitSerializerTest {
 
     private static FileStoreSourceSplit serializeAndDeserialize(FileStoreSourceSplit split)
             throws IOException {
-        final FileStoreSourceSplitSerializer serializer =
-                new FileStoreSourceSplitSerializer(
-                        RowType.of(new IntType()),
-                        RowType.of(new IntType()),
-                        RowType.of(new IntType()));
+        final FileStoreSourceSplitSerializer serializer = new FileStoreSourceSplitSerializer();
         final byte[] bytes =
                 SimpleVersionedSerialization.writeVersionAndSerialize(serializer, split);
         return SimpleVersionedSerialization.readVersionAndDeSerialize(serializer, bytes);

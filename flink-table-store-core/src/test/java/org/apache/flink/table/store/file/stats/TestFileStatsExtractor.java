@@ -53,7 +53,7 @@ public class TestFileStatsExtractor implements FileStatsExtractor {
         for (RowData record : records) {
             statsCollector.collect(record);
         }
-        return statsCollector.extract();
+        return statsCollector.extractFieldStats();
     }
 
     private static class IdentityObjectSerializer extends ObjectSerializer<RowData> {

@@ -21,9 +21,6 @@ package org.apache.flink.table.store.file.manifest;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.Increment;
-import org.apache.flink.table.store.file.stats.FieldStats;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
 
 import org.junit.jupiter.api.Test;
 
@@ -33,6 +30,7 @@ import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
+import static org.apache.flink.table.store.file.stats.StatsTestUtils.newTableStats;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ManifestCommittableSerializer}. */
@@ -49,8 +47,7 @@ public class ManifestCommittableSerializerTest {
     }
 
     public static ManifestCommittableSerializer serializer() {
-        return new ManifestCommittableSerializer(
-                RowType.of(new IntType()), RowType.of(new IntType()), RowType.of(new IntType()));
+        return new ManifestCommittableSerializer();
     }
 
     public static ManifestCommittable create() {
@@ -89,8 +86,16 @@ public class ManifestCommittableSerializerTest {
     }
 
     public static DataFileMeta newFile(int name, int level) {
-        FieldStats[] stats = new FieldStats[] {new FieldStats(0, 1, 0)};
         return new DataFileMeta(
-                String.valueOf(name), 0, 1, row(0), row(0), stats, stats, 0, 1, level);
+                String.valueOf(name),
+                0,
+                1,
+                row(0),
+                row(0),
+                newTableStats(0, 1),
+                newTableStats(0, 1),
+                0,
+                1,
+                level);
     }
 }

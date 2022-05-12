@@ -32,6 +32,7 @@ public class FieldStatsCollector {
     private final long[] nullCounts;
     private final RowDataToObjectArrayConverter converter;
     private final TypeSerializer<Object>[] fieldSerializers;
+    private final FieldStatsArraySerializer fieldStatsArraySerializer;
 
     public FieldStatsCollector(RowType rowType) {
         int numFields = rowType.getFieldCount();
@@ -43,6 +44,7 @@ public class FieldStatsCollector {
         for (int i = 0; i < numFields; i++) {
             fieldSerializers[i] = InternalSerializers.create(rowType.getTypeAt(i));
         }
+        this.fieldStatsArraySerializer = new FieldStatsArraySerializer(rowType);
     }
 
     /**
@@ -74,7 +76,15 @@ public class FieldStatsCollector {
         }
     }
 
-    public FieldStats[] extract() {
+    public BinaryTableStats extract() {
+        return toBinary(extractFieldStats());
+    }
+
+    public BinaryTableStats toBinary(FieldStats[] stats) {
+        return fieldStatsArraySerializer.toBinary(stats);
+    }
+
+    public FieldStats[] extractFieldStats() {
         FieldStats[] stats = new FieldStats[nullCounts.length];
         for (int i = 0; i < stats.length; i++) {
             stats[i] = new FieldStats(minValues[i], maxValues[i], nullCounts[i]);

@@ -28,6 +28,7 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializerTest;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.format.FlushingFileFormat;
+import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -72,14 +73,17 @@ public class DataFileTest {
     private void testWriteAndReadDataFileImpl(String format) throws Exception {
         DataFileTestDataGenerator.Data data = gen.next();
         DataFileWriter writer = createDataFileWriter(tempDir.toString(), format);
-        DataFileMetaSerializer serializer =
-                new DataFileMetaSerializer(
-                        TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.ROW_TYPE);
+        DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
         List<DataFileMeta> actualMetas =
                 writer.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
 
-        checkRollingFiles(data.meta, actualMetas, writer.suggestedFileSize());
+        checkRollingFiles(
+                TestKeyValueGenerator.KEY_TYPE,
+                TestKeyValueGenerator.ROW_TYPE,
+                data.meta,
+                actualMetas,
+                writer.suggestedFileSize());
 
         DataFileReader reader = createDataFileReader(tempDir.toString(), format, null, null);
         assertData(
@@ -118,9 +122,7 @@ public class DataFileTest {
     public void testKeyProjection() throws Exception {
         DataFileTestDataGenerator.Data data = gen.next();
         DataFileWriter dataFileWriter = createDataFileWriter(tempDir.toString(), "avro");
-        DataFileMetaSerializer serializer =
-                new DataFileMetaSerializer(
-                        TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.ROW_TYPE);
+        DataFileMetaSerializer serializer = new DataFileMetaSerializer();
         List<DataFileMeta> actualMetas =
                 dataFileWriter.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
 
@@ -150,9 +152,7 @@ public class DataFileTest {
     public void testValueProjection() throws Exception {
         DataFileTestDataGenerator.Data data = gen.next();
         DataFileWriter dataFileWriter = createDataFileWriter(tempDir.toString(), "avro");
-        DataFileMetaSerializer serializer =
-                new DataFileMetaSerializer(
-                        TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.ROW_TYPE);
+        DataFileMetaSerializer serializer = new DataFileMetaSerializer();
         List<DataFileMeta> actualMetas =
                 dataFileWriter.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
 
@@ -265,7 +265,14 @@ public class DataFileTest {
     }
 
     private void checkRollingFiles(
-            DataFileMeta expected, List<DataFileMeta> actual, long suggestedFileSize) {
+            RowType keyType,
+            RowType valueType,
+            DataFileMeta expected,
+            List<DataFileMeta> actual,
+            long suggestedFileSize) {
+        FieldStatsArraySerializer keyStatsConverter = new FieldStatsArraySerializer(keyType);
+        FieldStatsArraySerializer valueStatsConverter = new FieldStatsArraySerializer(valueType);
+
         // all but last file should be no smaller than suggestedFileSize
         for (int i = 0; i + 1 < actual.size(); i++) {
             assertThat(actual.get(i).fileSize() >= suggestedFileSize).isTrue();
@@ -282,15 +289,19 @@ public class DataFileTest {
         assertThat(actual.get(actual.size() - 1).maxKey()).isEqualTo(expected.maxKey());
 
         // check stats
-        for (int i = 0; i < expected.keyStats().length; i++) {
+        for (int i = 0; i < keyType.getFieldCount(); i++) {
             int idx = i;
             StatsTestUtils.checkRollingFileStats(
-                    expected.keyStats()[i], actual, m -> m.keyStats()[idx]);
+                    keyStatsConverter.fromBinary(expected.keyStats())[i],
+                    actual,
+                    m -> keyStatsConverter.fromBinary(m.keyStats())[idx]);
         }
-        for (int i = 0; i < expected.valueStats().length; i++) {
+        for (int i = 0; i < valueType.getFieldCount(); i++) {
             int idx = i;
             StatsTestUtils.checkRollingFileStats(
-                    expected.valueStats()[i], actual, m -> m.valueStats()[idx]);
+                    valueStatsConverter.fromBinary(expected.valueStats())[i],
+                    actual,
+                    m -> valueStatsConverter.fromBinary(m.valueStats())[idx]);
         }
 
         // expected.minSequenceNumber == min(minSequenceNumber)

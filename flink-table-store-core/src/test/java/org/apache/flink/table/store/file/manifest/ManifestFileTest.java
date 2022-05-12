@@ -97,12 +97,7 @@ public class ManifestFileTest {
                         new Path(path), TestKeyValueGenerator.PARTITION_TYPE, "default");
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         return new ManifestFile.Factory(
-                        TestKeyValueGenerator.PARTITION_TYPE,
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.ROW_TYPE,
-                        avro,
-                        pathFactory,
-                        suggestedFileSize)
+                        TestKeyValueGenerator.PARTITION_TYPE, avro, pathFactory, suggestedFileSize)
                 .create();
     }
 
@@ -122,10 +117,12 @@ public class ManifestFileTest {
                 .isEqualTo(expected.numDeletedFiles());
 
         // check stats
-        for (int i = 0; i < expected.partitionStats().length; i++) {
+        for (int i = 0; i < expected.partitionStats().fields(null).length; i++) {
             int idx = i;
             StatsTestUtils.checkRollingFileStats(
-                    expected.partitionStats()[i], actual, meta -> meta.partitionStats()[idx]);
+                    expected.partitionStats().fields(null)[i],
+                    actual,
+                    meta -> meta.partitionStats().fields(null)[idx]);
         }
     }
 }

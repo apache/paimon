@@ -19,8 +19,6 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.core.io.SimpleVersionedSerialization;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
 
 import org.junit.jupiter.api.Test;
 
@@ -99,11 +97,7 @@ public class PendingSplitsCheckpointSerializerTest {
             final PendingSplitsCheckpoint split) throws IOException {
 
         final PendingSplitsCheckpointSerializer serializer =
-                new PendingSplitsCheckpointSerializer(
-                        new FileStoreSourceSplitSerializer(
-                                RowType.of(new IntType()),
-                                RowType.of(new IntType()),
-                                RowType.of(new IntType())));
+                new PendingSplitsCheckpointSerializer(new FileStoreSourceSplitSerializer());
         final byte[] bytes =
                 SimpleVersionedSerialization.writeVersionAndSerialize(serializer, split);
         return SimpleVersionedSerialization.readVersionAndDeSerialize(serializer, bytes);

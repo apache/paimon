@@ -30,6 +30,7 @@ import org.apache.flink.table.store.file.predicate.Equal;
 import org.apache.flink.table.store.file.predicate.Literal;
 import org.apache.flink.table.store.file.predicate.Or;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RowDataToObjectArrayConverter;
@@ -53,6 +54,9 @@ import java.util.stream.Collectors;
 /** Default implementation of {@link FileStoreScan}. */
 public class FileStoreScanImpl implements FileStoreScan {
 
+    private final FieldStatsArraySerializer partitionStatsConverter;
+    private final FieldStatsArraySerializer keyStatsConverter;
+    private final FieldStatsArraySerializer valueStatsConverter;
     private final RowDataToObjectArrayConverter partitionConverter;
     private final FileStorePathFactory pathFactory;
     private final ManifestFile.Factory manifestFileFactory;
@@ -70,10 +74,15 @@ public class FileStoreScanImpl implements FileStoreScan {
 
     public FileStoreScanImpl(
             RowType partitionType,
+            RowType keyType,
+            RowType valueType,
             FileStorePathFactory pathFactory,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets) {
+        this.partitionStatsConverter = new FieldStatsArraySerializer(partitionType);
+        this.keyStatsConverter = new FieldStatsArraySerializer(keyType);
+        this.valueStatsConverter = new FieldStatsArraySerializer(valueType);
         this.partitionConverter = new RowDataToObjectArrayConverter(partitionType);
         this.pathFactory = pathFactory;
         this.manifestFileFactory = manifestFileFactory;
@@ -263,7 +272,7 @@ public class FileStoreScanImpl implements FileStoreScan {
         return partitionFilter == null
                 || partitionFilter.test(
                         manifest.numAddedFiles() + manifest.numDeletedFiles(),
-                        manifest.partitionStats());
+                        manifest.partitionStats().fields(partitionStatsConverter));
     }
 
     private boolean filterManifestEntry(ManifestEntry entry) {
@@ -275,9 +284,13 @@ public class FileStoreScanImpl implements FileStoreScan {
         return (partitionFilter == null
                         || partitionFilter.test(partitionConverter.convert(entry.partition())))
                 && (keyFilter == null
-                        || keyFilter.test(entry.file().rowCount(), entry.file().keyStats()))
+                        || keyFilter.test(
+                                entry.file().rowCount(),
+                                entry.file().keyStats().fields(keyStatsConverter)))
                 && (valueFilter == null
-                        || valueFilter.test(entry.file().rowCount(), entry.file().valueStats()))
+                        || valueFilter.test(
+                                entry.file().rowCount(),
+                                entry.file().valueStats().fields(valueStatsConverter)))
                 && (specifiedBucket == null || entry.bucket() == specifiedBucket);
     }
 

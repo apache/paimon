@@ -19,8 +19,7 @@
 package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.binary.BinaryRowDataUtil;
-import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
@@ -28,10 +27,11 @@ import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
+import static org.apache.flink.table.data.binary.BinaryRowDataUtil.EMPTY_ROW;
+import static org.apache.flink.table.store.file.utils.SerializationUtils.newBytesType;
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 /** Metadata of a data file. */
@@ -39,9 +39,10 @@ public class DataFileMeta {
 
     // Append only data files don't have any key columns and meaningful level value. it will use
     // the following dummy values.
-    public static final FieldStats[] EMPTY_KEY_STATS = new FieldStats[0];
-    public static final BinaryRowData EMPTY_MIN_KEY = BinaryRowDataUtil.EMPTY_ROW;
-    public static final BinaryRowData EMPTY_MAX_KEY = BinaryRowDataUtil.EMPTY_ROW;
+    public static final BinaryTableStats EMPTY_KEY_STATS =
+            new BinaryTableStats(EMPTY_ROW, EMPTY_ROW, new long[0]);
+    public static final BinaryRowData EMPTY_MIN_KEY = EMPTY_ROW;
+    public static final BinaryRowData EMPTY_MAX_KEY = EMPTY_ROW;
     public static final int DUMMY_LEVEL = 0;
 
     private final String fileName;
@@ -50,8 +51,8 @@ public class DataFileMeta {
 
     private final BinaryRowData minKey;
     private final BinaryRowData maxKey;
-    private final FieldStats[] keyStats;
-    private final FieldStats[] valueStats;
+    private final BinaryTableStats keyStats;
+    private final BinaryTableStats valueStats;
 
     private final long minSequenceNumber;
     private final long maxSequenceNumber;
@@ -61,7 +62,7 @@ public class DataFileMeta {
             String fileName,
             long fileSize,
             long rowCount,
-            FieldStats[] rowStats,
+            BinaryTableStats rowStats,
             long minSequenceNumber,
             long maxSequenceNumber) {
         return new DataFileMeta(
@@ -83,8 +84,8 @@ public class DataFileMeta {
             long rowCount,
             BinaryRowData minKey,
             BinaryRowData maxKey,
-            FieldStats[] keyStats,
-            FieldStats[] valueStats,
+            BinaryTableStats keyStats,
+            BinaryTableStats valueStats,
             long minSequenceNumber,
             long maxSequenceNumber,
             int level) {
@@ -122,11 +123,11 @@ public class DataFileMeta {
         return maxKey;
     }
 
-    public FieldStats[] keyStats() {
+    public BinaryTableStats keyStats() {
         return keyStats;
     }
 
-    public FieldStats[] valueStats() {
+    public BinaryTableStats valueStats() {
         return valueStats;
     }
 
@@ -168,8 +169,8 @@ public class DataFileMeta {
                 && rowCount == that.rowCount
                 && Objects.equals(minKey, that.minKey)
                 && Objects.equals(maxKey, that.maxKey)
-                && Arrays.equals(keyStats, that.keyStats)
-                && Arrays.equals(valueStats, that.valueStats)
+                && Objects.equals(keyStats, that.keyStats)
+                && Objects.equals(valueStats, that.valueStats)
                 && minSequenceNumber == that.minSequenceNumber
                 && maxSequenceNumber == that.maxSequenceNumber
                 && level == that.level;
@@ -183,10 +184,8 @@ public class DataFileMeta {
                 rowCount,
                 minKey,
                 maxKey,
-                // by default, hash code of arrays are computed by reference, not by content.
-                // so we must use Arrays.hashCode to hash by content.
-                Arrays.hashCode(keyStats),
-                Arrays.hashCode(valueStats),
+                keyStats,
+                valueStats,
                 minSequenceNumber,
                 maxSequenceNumber,
                 level);
@@ -201,23 +200,22 @@ public class DataFileMeta {
                 rowCount,
                 minKey,
                 maxKey,
-                Arrays.toString(keyStats),
-                Arrays.toString(valueStats),
+                keyStats,
+                valueStats,
                 minSequenceNumber,
                 maxSequenceNumber,
                 level);
     }
 
-    public static RowType schema(RowType keyType, RowType valueType) {
+    public static RowType schema() {
         List<RowType.RowField> fields = new ArrayList<>();
         fields.add(new RowType.RowField("_FILE_NAME", new VarCharType(false, Integer.MAX_VALUE)));
         fields.add(new RowType.RowField("_FILE_SIZE", new BigIntType(false)));
         fields.add(new RowType.RowField("_ROW_COUNT", new BigIntType(false)));
-        fields.add(new RowType.RowField("_MIN_KEY", keyType));
-        fields.add(new RowType.RowField("_MAX_KEY", keyType));
-        fields.add(new RowType.RowField("_KEY_STATS", FieldStatsArraySerializer.schema(keyType)));
-        fields.add(
-                new RowType.RowField("_VALUE_STATS", FieldStatsArraySerializer.schema(valueType)));
+        fields.add(new RowType.RowField("_MIN_KEY", newBytesType(false)));
+        fields.add(new RowType.RowField("_MAX_KEY", newBytesType(false)));
+        fields.add(new RowType.RowField("_KEY_STATS", FieldStatsArraySerializer.schema()));
+        fields.add(new RowType.RowField("_VALUE_STATS", FieldStatsArraySerializer.schema()));
         fields.add(new RowType.RowField("_MIN_SEQUENCE_NUMBER", new BigIntType(false)));
         fields.add(new RowType.RowField("_MAX_SEQUENCE_NUMBER", new BigIntType(false)));
         fields.add(new RowType.RowField("_LEVEL", new IntType(false)));

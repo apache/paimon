@@ -21,25 +21,21 @@ package org.apache.flink.table.store.file.manifest;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
+import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
-import org.apache.flink.table.types.logical.RowType;
 
 /** Serializer for {@link ManifestFileMeta}. */
 public class ManifestFileMetaSerializer extends VersionedObjectSerializer<ManifestFileMeta> {
 
     private static final long serialVersionUID = 1L;
 
-    private final FieldStatsArraySerializer statsArraySerializer;
-
-    public ManifestFileMetaSerializer(RowType partitionType) {
-        super(ManifestFileMeta.schema(partitionType));
-        this.statsArraySerializer = new FieldStatsArraySerializer(partitionType);
+    public ManifestFileMetaSerializer() {
+        super(ManifestFileMeta.schema());
     }
 
     @Override
     public int getVersion() {
-        return 1;
+        return 2;
     }
 
     @Override
@@ -49,13 +45,19 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
         row.setField(1, meta.fileSize());
         row.setField(2, meta.numAddedFiles());
         row.setField(3, meta.numDeletedFiles());
-        row.setField(4, statsArraySerializer.toRow(meta.partitionStats()));
+        row.setField(4, meta.partitionStats().toRowData());
         return row;
     }
 
     @Override
     public ManifestFileMeta convertFrom(int version, RowData row) {
-        if (version != 1) {
+        if (version != 2) {
+            if (version == 1) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "The current version %s is not compatible with the version %s, please recreate the table.",
+                                getVersion(), version));
+            }
             throw new IllegalArgumentException("Unsupported version: " + version);
         }
         return new ManifestFileMeta(
@@ -63,6 +65,6 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
                 row.getLong(1),
                 row.getLong(2),
                 row.getLong(3),
-                statsArraySerializer.fromRow(row.getRow(4, statsArraySerializer.numFields())));
+                BinaryTableStats.fromRowData(row.getRow(4, 3)));
     }
 }
