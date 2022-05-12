@@ -38,6 +38,7 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 
 import static org.apache.flink.table.store.connector.source.PendingSplitsCheckpoint.INVALID_SNAPSHOT;
 import static org.apache.flink.util.Preconditions.checkArgument;
@@ -60,6 +61,8 @@ public class FileStoreSource
 
     private final boolean latestContinuous;
 
+    private final boolean nonRescaleCompact;
+
     @Nullable private final int[][] projectedFields;
 
     @Nullable private final Predicate partitionPredicate;
@@ -67,7 +70,7 @@ public class FileStoreSource
     @Nullable private final Predicate fieldPredicate;
 
     /**
-     * The partitioned manifest meta collected at planning phase when manual compaction is
+     * The partitioned manifest meta collected at planning phase when rescale-bucket compaction is
      * triggered.
      */
     @Nullable private final PartitionedManifestMeta specifiedPartManifests;
@@ -79,6 +82,7 @@ public class FileStoreSource
             boolean isContinuous,
             long discoveryInterval,
             boolean latestContinuous,
+            boolean nonRescaleCompact,
             @Nullable int[][] projectedFields,
             @Nullable Predicate partitionPredicate,
             @Nullable Predicate fieldPredicate,
@@ -89,6 +93,7 @@ public class FileStoreSource
         this.isContinuous = isContinuous;
         this.discoveryInterval = discoveryInterval;
         this.latestContinuous = latestContinuous;
+        this.nonRescaleCompact = nonRescaleCompact;
         this.projectedFields = projectedFields;
         this.partitionPredicate = partitionPredicate;
         this.fieldPredicate = fieldPredicate;
@@ -138,12 +143,17 @@ public class FileStoreSource
             PendingSplitsCheckpoint checkpoint) {
         FileStoreScan scan = fileStore.newScan();
 
+        // let rescale compaction read pre-planned manifests
         if (specifiedPartManifests != null) {
             return new StaticFileStoreSplitEnumerator(
                     context,
                     scan.snapshot(specifiedPartManifests.getSnapshotId()),
                     new FileStoreSourceSplitGenerator()
                             .createSplits(specifiedPartManifests.getManifestEntries()));
+        }
+
+        if (nonRescaleCompact) {
+            return new StaticFileStoreSplitEnumerator(context, null, Collections.emptyList());
         }
 
         if (partitionPredicate != null) {

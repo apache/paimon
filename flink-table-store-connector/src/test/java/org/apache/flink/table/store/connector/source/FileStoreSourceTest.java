@@ -77,14 +77,14 @@ public class FileStoreSourceTest {
     @ParameterizedTest
     public void testSerDe(boolean hasPk, boolean partitioned, boolean specified)
             throws ClassNotFoundException, IOException {
-        FileStore fileStore = buildFileStore(hasPk, partitioned);
-        Long specifiedSnapshotId = specified ? 1L : null;
         Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> specifiedManifestEntries =
                 specified ? buildManifestEntries(hasPk, partitioned) : null;
+        Long specifiedSnapshotId = specified ? 1L : null;
         PartitionedManifestMeta partitionedManifestMeta =
                 specified
                         ? new PartitionedManifestMeta(specifiedSnapshotId, specifiedManifestEntries)
                         : null;
+        FileStore fileStore = buildFileStore(hasPk, partitioned);
         FileStoreSource source =
                 new FileStoreSource(
                         fileStore,
@@ -93,6 +93,7 @@ public class FileStoreSourceTest {
                         true,
                         Duration.ofSeconds(1).toMillis(),
                         true,
+                        false,
                         null,
                         null,
                         null,

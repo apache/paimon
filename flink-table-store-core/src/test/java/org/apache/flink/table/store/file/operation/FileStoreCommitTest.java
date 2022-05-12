@@ -276,9 +276,9 @@ public class FileStoreCommitTest {
                 "avro",
                 root,
                 numBucket,
-                TestKeyValueGenerator.PARTITION_TYPE,
+                TestKeyValueGenerator.DEFAULT_PART_TYPE,
                 TestKeyValueGenerator.KEY_TYPE,
-                TestKeyValueGenerator.ROW_TYPE,
+                TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                 new DeduplicateMergeFunction());
     }
 
@@ -310,7 +310,10 @@ public class FileStoreCommitTest {
 
         LOG.debug("========== Beginning of " + name + " ==========");
         for (KeyValue kv : supplier.get()) {
-            LOG.debug(kv.toString(TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.ROW_TYPE));
+            LOG.debug(
+                    kv.toString(
+                            TestKeyValueGenerator.KEY_TYPE,
+                            TestKeyValueGenerator.DEFAULT_ROW_TYPE));
         }
         LOG.debug("========== End of " + name + " ==========");
     }

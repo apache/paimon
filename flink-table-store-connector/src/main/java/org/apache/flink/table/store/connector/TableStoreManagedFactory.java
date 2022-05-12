@@ -23,22 +23,36 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.ObjectIdentifier;
+import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.factories.ManagedTableFactory;
 import org.apache.flink.table.store.connector.utils.TableConfigUtils;
+import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
+import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.operation.FileStoreScan;
+import org.apache.flink.table.store.file.predicate.PredicateConverter;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
+import org.apache.flink.table.store.file.utils.PartitionedManifestMeta;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
+import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.Base64;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_MANUAL_TRIGGERED;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_PARTITION_SPEC;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_RESCALE_BUCKET;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_SCANNED_MANIFEST;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
@@ -183,6 +197,43 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
     @Override
     public Map<String, String> onCompactTable(
             Context context, CatalogPartitionSpec catalogPartitionSpec) {
-        throw new UnsupportedOperationException("Not implement yet");
+        Map<String, String> newOptions = new HashMap<>(context.getCatalogTable().getOptions());
+        if (Boolean.parseBoolean(newOptions.get(COMPACTION_RESCALE_BUCKET.key()))) {
+            FileStore fileStore = buildTableStore(context).buildFileStore();
+            FileStoreScan.Plan plan =
+                    fileStore
+                            .newScan()
+                            .withPartitionFilter(
+                                    PredicateConverter.CONVERTER.fromMap(
+                                            catalogPartitionSpec.getPartitionSpec(),
+                                            fileStore.partitionType()))
+                            .plan();
+
+            Preconditions.checkState(
+                    plan.snapshotId() != null && !plan.files().isEmpty(),
+                    "The specified %s to rescale does not exist any snapshot",
+                    catalogPartitionSpec.getPartitionSpec().isEmpty()
+                            ? "table"
+                            : String.format(
+                                    "partition %s", catalogPartitionSpec.getPartitionSpec()));
+            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupBy = plan.groupByPartFiles();
+            try {
+                newOptions.put(
+                        COMPACTION_SCANNED_MANIFEST.key(),
+                        Base64.getEncoder()
+                                .encodeToString(
+                                        InstantiationUtil.serializeObject(
+                                                new PartitionedManifestMeta(
+                                                        plan.snapshotId(), groupBy))));
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        } else {
+            newOptions.put(COMPACTION_MANUAL_TRIGGERED.key(), String.valueOf(true));
+            newOptions.put(
+                    COMPACTION_PARTITION_SPEC.key(),
+                    JsonSerdeUtil.toJson(catalogPartitionSpec.getPartitionSpec()));
+        }
+        return newOptions;
     }
 }

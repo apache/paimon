@@ -20,14 +20,18 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.mergetree.LevelSortedRun;
 import org.apache.flink.table.store.file.mergetree.Levels;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
@@ -45,7 +49,7 @@ public class CompactManager {
 
     private final ExecutorService executor;
 
-    private final CompactStrategy strategy;
+    @Nullable private final CompactStrategy<LevelSortedRun> strategy;
 
     private final Comparator<RowData> keyComparator;
 
@@ -53,11 +57,19 @@ public class CompactManager {
 
     private final Rewriter rewriter;
 
-    private Future<CompactResult> taskFuture;
+    protected List<Future<CompactResult>> taskFutures;
 
     public CompactManager(
             ExecutorService executor,
-            CompactStrategy strategy,
+            Comparator<RowData> keyComparator,
+            long minFileSize,
+            Rewriter rewriter) {
+        this(executor, null, keyComparator, minFileSize, rewriter);
+    }
+
+    public CompactManager(
+            ExecutorService executor,
+            @Nullable CompactStrategy<LevelSortedRun> strategy,
             Comparator<RowData> keyComparator,
             long minFileSize,
             Rewriter rewriter) {
@@ -66,17 +78,20 @@ public class CompactManager {
         this.keyComparator = keyComparator;
         this.strategy = strategy;
         this.rewriter = rewriter;
+        this.taskFutures = new ArrayList<>();
     }
 
     public boolean isCompactionFinished() {
-        return taskFuture == null;
+        return taskFutures.isEmpty();
     }
 
-    /** Submit a new compaction task. */
     public void submitCompaction(Levels levels) {
-        if (taskFuture != null) {
+        if (!taskFutures.isEmpty()) {
             throw new IllegalStateException(
                     "Please finish the previous compaction before submitting new one.");
+        }
+        if (strategy == null) {
+            throw new IllegalStateException("Level based compaction should assign a strategy.");
         }
         strategy.pick(levels.numberOfLevels(), levels.levelSortedRuns())
                 .ifPresent(
@@ -97,45 +112,65 @@ public class CompactManager {
 
                             if (LOG.isDebugEnabled()) {
                                 LOG.debug(
-                                        "Submit compaction with files (level, size): "
+                                        "Submit compaction with files (name, level, size): "
                                                 + levels.levelSortedRuns().stream()
                                                         .flatMap(lsr -> lsr.run().files().stream())
                                                         .map(
                                                                 file ->
                                                                         String.format(
-                                                                                "(%d, %d)",
-                                                                                file.level(),
-                                                                                file.fileSize()))
-                                                        .collect(Collectors.joining(", ")));
-                                LOG.debug(
-                                        "Pick these files (level, size) for compaction: "
-                                                + unit.files().stream()
-                                                        .map(
-                                                                file ->
-                                                                        String.format(
-                                                                                "(%d, %d)",
+                                                                                "(%s, %d, %d)",
+                                                                                file.fileName(),
                                                                                 file.level(),
                                                                                 file.fileSize()))
                                                         .collect(Collectors.joining(", ")));
                             }
-
-                            CompactTask task = new CompactTask(unit, dropDelete);
-                            taskFuture = executor.submit(task);
+                            submitCompaction(unit, dropDelete);
                         });
+    }
+
+    public void submitCompaction(CompactUnit unit, boolean dropDelete) {
+        CompactTask task = new CompactTask(unit, dropDelete);
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Pick these files (name, level, size) for compaction: {}",
+                    unit.files().stream()
+                            .map(
+                                    file ->
+                                            String.format(
+                                                    "(%s, %d, %d)",
+                                                    file.fileName(), file.level(), file.fileSize()))
+                            .collect(Collectors.joining(", ")));
+        }
+        taskFutures.add(executor.submit(task));
     }
 
     /** Finish current task, and update result files to {@link Levels}. */
     public Optional<CompactResult> finishCompaction(Levels levels, boolean blocking)
             throws ExecutionException, InterruptedException {
-        if (taskFuture != null) {
+        if (!taskFutures.isEmpty()) {
+            Future<CompactResult> taskFuture = taskFutures.get(0);
             if (blocking || taskFuture.isDone()) {
                 CompactResult result = taskFuture.get();
                 levels.update(result.before(), result.after());
-                taskFuture = null;
+                taskFutures.clear();
                 return Optional.of(result);
             }
         }
         return Optional.empty();
+    }
+
+    public Optional<List<CompactResult>> finishCompaction()
+            throws ExecutionException, InterruptedException {
+        List<CompactResult> results = new ArrayList<>();
+        Iterator<Future<CompactResult>> iterator = taskFutures.iterator();
+        while (iterator.hasNext()) {
+            Future<CompactResult> taskFuture = iterator.next();
+            if (taskFuture.isDone()) {
+                results.add(taskFuture.get());
+                iterator.remove();
+            }
+        }
+        return results.isEmpty() ? Optional.empty() : Optional.of(results);
     }
 
     /** Rewrite sections to the files. */

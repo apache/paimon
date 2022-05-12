@@ -35,7 +35,7 @@ import java.util.Optional;
  * <p>See RocksDb Universal-Compaction:
  * https://github.com/facebook/rocksdb/wiki/Universal-Compaction.
  */
-public class UniversalCompaction implements CompactStrategy {
+public class UniversalCompaction implements CompactStrategy<LevelSortedRun> {
 
     private static final Logger LOG = LoggerFactory.getLogger(UniversalCompaction.class);
 

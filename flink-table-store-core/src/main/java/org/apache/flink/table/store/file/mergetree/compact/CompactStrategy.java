@@ -18,13 +18,11 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.table.store.file.mergetree.LevelSortedRun;
-
 import java.util.List;
 import java.util.Optional;
 
 /** Compact strategy to decide which files to select for compaction. */
-public interface CompactStrategy {
+public interface CompactStrategy<T> {
 
     /**
      * Pick compaction unit from runs.
@@ -35,5 +33,5 @@ public interface CompactStrategy {
      *   <li>compaction is sequential from small level to large level.
      * </ul>
      */
-    Optional<CompactUnit> pick(int numLevels, List<LevelSortedRun> runs);
+    Optional<CompactUnit> pick(int numLevels, List<T> runs);
 }

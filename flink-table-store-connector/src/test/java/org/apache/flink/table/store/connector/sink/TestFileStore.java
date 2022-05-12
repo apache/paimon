@@ -25,6 +25,7 @@ import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.mergetree.Increment;
+import org.apache.flink.table.store.file.mergetree.compact.CompactUnit;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.FileStoreExpire;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
@@ -32,6 +33,7 @@ import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
+import org.apache.flink.table.store.file.writer.CompactWriter;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -88,6 +90,12 @@ public class TestFileStore implements FileStore {
             public RecordWriter createEmptyWriter(
                     BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
                 return new TestRecordWriter(hasPk);
+            }
+
+            @Override
+            public CompactWriter createCompactWriter(
+                    BinaryRowData partition, int bucket, List<CompactUnit> units) {
+                throw new UnsupportedOperationException();
             }
         };
     }
@@ -208,6 +216,9 @@ public class TestFileStore implements FileStore {
         public void sync() {
             synced = true;
         }
+
+        @Override
+        public void flush() throws Exception {}
 
         @Override
         public List<DataFileMeta> close() {

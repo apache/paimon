@@ -52,10 +52,25 @@ public class TableStoreFactoryOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "The serialized json string of manifest entries which are scanned during manual compaction "
-                                    + "planning phase and injected back into enriched options. The json format contains "
-                                    + "snapshot id and each partition's data file meta list (among which "
-                                    + "each data file meta is encoded by Base64 format) tagged with bucket id.");
+                            "The base64 string of manifest entries which are scanned during manual compaction "
+                                    + "planning phase and injected back into enriched options. The format contains "
+                                    + "snapshot id and each partition's data file meta list tagged with bucket id.");
+
+    @Internal
+    public static final ConfigOption<Boolean> COMPACTION_MANUAL_TRIGGERED =
+            ConfigOptions.key("compaction.manual-triggered")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "An internal flag to indicate a manual triggered non-rescale bucket compaction.");
+
+    @Internal
+    public static final ConfigOption<String> COMPACTION_PARTITION_SPEC =
+            ConfigOptions.key("compaction.partition-spec")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "An internal flag to record the partition spec for the manual triggered non-rescale bucket compaction.");
 
     public static final ConfigOption<String> LOG_SYSTEM =
             ConfigOptions.key("log.system")

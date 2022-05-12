@@ -126,6 +126,10 @@ public class StoreSinkTest {
                         primaryKeys,
                         primaryKeys,
                         2,
+                        false,
+                        0,
+                        0,
+                        null,
                         () -> lock,
                         new HashMap<>(),
                         null);
@@ -207,7 +211,7 @@ public class StoreSinkTest {
     }
 
     private List<Committable> write(StoreSink<?, ?> sink, RowData... rows) throws Exception {
-        StoreSinkWriter<?> writer = sink.createWriter(null);
+        StoreSinkWriterBase<?> writer = sink.createWriter(null);
         for (RowData row : rows) {
             writer.write(row, null);
         }
@@ -258,6 +262,10 @@ public class StoreSinkTest {
                 primaryKeys,
                 primaryKeys,
                 2,
+                false,
+                0,
+                0,
+                null,
                 () -> lock,
                 overwritePartition,
                 null);

@@ -133,9 +133,9 @@ public class FileStoreReadTest {
         }
         TestFileStore store =
                 createStore(
-                        TestKeyValueGenerator.PARTITION_TYPE,
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
                         TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.ROW_TYPE,
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                         new DeduplicateMergeFunction());
 
         RowDataSerializer projectedValueSerializer =

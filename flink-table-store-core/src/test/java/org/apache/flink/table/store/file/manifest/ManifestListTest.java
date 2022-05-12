@@ -92,8 +92,8 @@ public class ManifestListTest {
     private ManifestList createManifestList(String path) {
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
-                        new Path(path), TestKeyValueGenerator.PARTITION_TYPE, "default");
-        return new ManifestList.Factory(TestKeyValueGenerator.PARTITION_TYPE, avro, pathFactory)
+                        new Path(path), TestKeyValueGenerator.DEFAULT_PART_TYPE, "default");
+        return new ManifestList.Factory(TestKeyValueGenerator.DEFAULT_PART_TYPE, avro, pathFactory)
                 .create();
     }
 }

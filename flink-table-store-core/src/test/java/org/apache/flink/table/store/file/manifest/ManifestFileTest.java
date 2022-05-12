@@ -21,7 +21,6 @@ package org.apache.flink.table.store.file.manifest;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
@@ -36,6 +35,7 @@ import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.table.store.file.TestKeyValueGenerator.DEFAULT_PART_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ManifestFile}. */
@@ -93,11 +93,9 @@ public class ManifestFileTest {
 
     private ManifestFile createManifestFile(String path) {
         FileStorePathFactory pathFactory =
-                new FileStorePathFactory(
-                        new Path(path), TestKeyValueGenerator.PARTITION_TYPE, "default");
+                new FileStorePathFactory(new Path(path), DEFAULT_PART_TYPE, "default");
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
-        return new ManifestFile.Factory(
-                        TestKeyValueGenerator.PARTITION_TYPE, avro, pathFactory, suggestedFileSize)
+        return new ManifestFile.Factory(DEFAULT_PART_TYPE, avro, pathFactory, suggestedFileSize)
                 .create();
     }
 
