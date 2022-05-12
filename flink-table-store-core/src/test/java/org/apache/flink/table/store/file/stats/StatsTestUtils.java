@@ -18,6 +18,9 @@
 
 package org.apache.flink.table.store.file.stats;
 
+import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.types.logical.RowType;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
@@ -61,5 +64,25 @@ public class StatsTestUtils {
         }
         assertThat(actual.stream().mapToLong(FieldStats::nullCount).sum())
                 .isEqualTo(expected.nullCount());
+    }
+
+    public static BinaryTableStats newEmptyTableStats() {
+        return newEmptyTableStats(1);
+    }
+
+    public static BinaryTableStats newEmptyTableStats(int fieldCount) {
+        FieldStatsArraySerializer statsConverter =
+                new FieldStatsArraySerializer(RowType.of(new IntType()));
+        FieldStats[] array = new FieldStats[fieldCount];
+        for (int i = 0; i < fieldCount; i++) {
+            array[i] = new FieldStats(null, null, 0);
+        }
+        return statsConverter.toBinary(array);
+    }
+
+    public static BinaryTableStats newTableStats(int min, int max) {
+        FieldStatsArraySerializer statsConverter =
+                new FieldStatsArraySerializer(RowType.of(new IntType()));
+        return statsConverter.toBinary(new FieldStats[] {new FieldStats(min, max, 0)});
     }
 }

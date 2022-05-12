@@ -31,6 +31,7 @@ import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -53,6 +54,8 @@ public class AppendOnlyWriterTest {
             RowType.of(
                     new LogicalType[] {new IntType(), new VarCharType(), new VarCharType()},
                     new String[] {"id", "name", "dt"});
+    private static final FieldStatsArraySerializer STATS_SERIALIZER =
+            new FieldStatsArraySerializer(SCHEMA);
 
     @TempDir public java.nio.file.Path tempDir;
     public DataFilePathFactory pathFactory;
@@ -102,7 +105,7 @@ public class AppendOnlyWriterTest {
                 new FieldStats[] {
                     initStats(1, 1, 0), initStats("AAA", "AAA", 0), initStats(PART, PART, 0)
                 };
-        assertThat(meta.valueStats()).isEqualTo(expected);
+        assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinary(expected));
 
         assertThat(meta.minSequenceNumber()).isEqualTo(1);
         assertThat(meta.maxSequenceNumber()).isEqualTo(1);
@@ -145,7 +148,7 @@ public class AppendOnlyWriterTest {
                         initStats(String.format("%03d", start), String.format("%03d", end - 1), 0),
                         initStats(PART, PART, 0)
                     };
-            assertThat(meta.valueStats()).isEqualTo(expected);
+            assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinary(expected));
 
             assertThat(meta.minSequenceNumber()).isEqualTo(start + 1);
             assertThat(meta.maxSequenceNumber()).isEqualTo(end);
@@ -186,7 +189,7 @@ public class AppendOnlyWriterTest {
                         initStats(String.format("%03d", id), String.format("%03d", id), 0),
                         initStats(PART, PART, 0)
                     };
-            assertThat(meta.valueStats()).isEqualTo(expected);
+            assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinary(expected));
 
             assertThat(meta.minSequenceNumber()).isEqualTo(id + 1);
             assertThat(meta.maxSequenceNumber()).isEqualTo(id + 1);

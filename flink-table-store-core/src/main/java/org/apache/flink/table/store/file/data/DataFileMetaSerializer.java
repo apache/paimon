@@ -21,25 +21,19 @@ package org.apache.flink.table.store.file.data;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
-import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
+import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.utils.ObjectSerializer;
-import org.apache.flink.table.types.logical.RowType;
+
+import static org.apache.flink.table.store.file.utils.SerializationUtils.deserializeBinaryRow;
+import static org.apache.flink.table.store.file.utils.SerializationUtils.serializeBinaryRow;
 
 /** Serializer for {@link DataFileMeta}. */
 public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
 
     private static final long serialVersionUID = 1L;
 
-    private final RowDataSerializer keySerializer;
-    private final FieldStatsArraySerializer keyStatsArraySerializer;
-    private final FieldStatsArraySerializer valueStatsArraySerializer;
-
-    public DataFileMetaSerializer(RowType keyType, RowType valueType) {
-        super(DataFileMeta.schema(keyType, valueType));
-        this.keySerializer = new RowDataSerializer(keyType);
-        this.keyStatsArraySerializer = new FieldStatsArraySerializer(keyType);
-        this.valueStatsArraySerializer = new FieldStatsArraySerializer(valueType);
+    public DataFileMetaSerializer() {
+        super(DataFileMeta.schema());
     }
 
     @Override
@@ -48,10 +42,10 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 StringData.fromString(meta.fileName()),
                 meta.fileSize(),
                 meta.rowCount(),
-                meta.minKey(),
-                meta.maxKey(),
-                keyStatsArraySerializer.toRow(meta.keyStats()),
-                valueStatsArraySerializer.toRow(meta.valueStats()),
+                serializeBinaryRow(meta.minKey()),
+                serializeBinaryRow(meta.maxKey()),
+                meta.keyStats().toRowData(),
+                meta.valueStats().toRowData(),
                 meta.minSequenceNumber(),
                 meta.maxSequenceNumber(),
                 meta.level());
@@ -59,16 +53,14 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
 
     @Override
     public DataFileMeta fromRow(RowData row) {
-        int keyFieldCount = keySerializer.getArity();
         return new DataFileMeta(
                 row.getString(0).toString(),
                 row.getLong(1),
                 row.getLong(2),
-                keySerializer.toBinaryRow(row.getRow(3, keyFieldCount)).copy(),
-                keySerializer.toBinaryRow(row.getRow(4, keyFieldCount)).copy(),
-                keyStatsArraySerializer.fromRow(row.getRow(5, keyStatsArraySerializer.numFields())),
-                valueStatsArraySerializer.fromRow(
-                        row.getRow(6, valueStatsArraySerializer.numFields())),
+                deserializeBinaryRow(row.getBinary(3)),
+                deserializeBinaryRow(row.getBinary(4)),
+                BinaryTableStats.fromRowData(row.getRow(5, 3)),
+                BinaryTableStats.fromRowData(row.getRow(6, 3)),
                 row.getLong(7),
                 row.getLong(8),
                 row.getInt(9));

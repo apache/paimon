@@ -22,7 +22,7 @@ import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
-import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.file.stats.StatsTestUtils;
 
 import org.junit.jupiter.api.Test;
 
@@ -110,8 +110,8 @@ public class FileStoreSourceSplitGeneratorTest {
                         0, // not used
                         null, // not used
                         null, // not used
-                        new FieldStats[] {new FieldStats(null, null, 0)}, // not used
-                        new FieldStats[] {new FieldStats(null, null, 0)}, // not used
+                        StatsTestUtils.newEmptyTableStats(), // not used
+                        StatsTestUtils.newEmptyTableStats(), // not used
                         0, // not used
                         0, // not used
                         0 // not used

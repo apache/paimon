@@ -23,7 +23,7 @@ import org.apache.flink.table.data.writer.BinaryRowWriter;
 import org.apache.flink.table.runtime.generated.RecordComparator;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
-import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.file.stats.StatsTestUtils;
 
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
@@ -39,6 +39,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.table.store.file.stats.StatsTestUtils.newTableStats;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -171,8 +172,8 @@ public class IntervalPartitionTest {
                 25,
                 minKey,
                 maxKey,
-                new FieldStats[] {new FieldStats(left, right, 0)},
-                new FieldStats[] {new FieldStats(null, null, 0)}, // not used
+                newTableStats(left, right),
+                StatsTestUtils.newEmptyTableStats(), // not used
                 0,
                 24,
                 0);

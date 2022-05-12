@@ -21,24 +21,22 @@ package org.apache.flink.table.store.connector.source;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
-import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.store.file.data.DataFileMetaSerializer;
-import org.apache.flink.table.types.logical.RowType;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+
+import static org.apache.flink.table.store.file.utils.SerializationUtils.deserializeBinaryRow;
+import static org.apache.flink.table.store.file.utils.SerializationUtils.serializeBinaryRow;
 
 /** A {@link SimpleVersionedSerializer} for {@link FileStoreSourceSplit}. */
 public class FileStoreSourceSplitSerializer
         implements SimpleVersionedSerializer<FileStoreSourceSplit> {
 
-    private final BinaryRowDataSerializer partSerializer;
     private final DataFileMetaSerializer dataFileSerializer;
 
-    public FileStoreSourceSplitSerializer(
-            RowType partitionType, RowType keyType, RowType valueType) {
-        this.partSerializer = new BinaryRowDataSerializer(partitionType.getFieldCount());
-        this.dataFileSerializer = new DataFileMetaSerializer(keyType, valueType);
+    public FileStoreSourceSplitSerializer() {
+        this.dataFileSerializer = new DataFileMetaSerializer();
     }
 
     @Override
@@ -51,7 +49,7 @@ public class FileStoreSourceSplitSerializer
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
         view.writeUTF(split.splitId());
-        partSerializer.serialize(split.partition(), view);
+        serializeBinaryRow(split.partition(), view);
         view.writeInt(split.bucket());
         dataFileSerializer.serializeList(split.files(), view);
         view.writeLong(split.recordsToSkip());
@@ -63,7 +61,7 @@ public class FileStoreSourceSplitSerializer
         DataInputDeserializer view = new DataInputDeserializer(serialized);
         return new FileStoreSourceSplit(
                 view.readUTF(),
-                partSerializer.deserialize(view),
+                deserializeBinaryRow(view),
                 view.readInt(),
                 dataFileSerializer.deserializeList(view),
                 view.readLong());

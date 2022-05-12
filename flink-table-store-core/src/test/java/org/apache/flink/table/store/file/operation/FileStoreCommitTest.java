@@ -65,8 +65,6 @@ public class FileStoreCommitTest {
     @BeforeEach
     public void beforeEach() throws IOException {
         gen = new TestKeyValueGenerator();
-        Path root = new Path(tempDir.toString());
-        root.getFileSystem().mkdirs(new Path(root + "/snapshot"));
         // for failure tests
         FailingAtomicRenameFileSystem.get().reset(100, 5000);
     }

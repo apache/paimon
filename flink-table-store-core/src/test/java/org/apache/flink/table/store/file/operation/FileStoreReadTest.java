@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
@@ -38,11 +37,9 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -57,12 +54,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class FileStoreReadTest {
 
     @TempDir java.nio.file.Path tempDir;
-
-    @BeforeEach
-    public void beforeEach() throws IOException {
-        Path root = new Path(tempDir.toString());
-        root.getFileSystem().mkdirs(new Path(root + "/snapshot"));
-    }
 
     @Test
     public void testKeyProjection() throws Exception {

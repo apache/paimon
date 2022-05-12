@@ -78,8 +78,6 @@ public class FileStoreImpl implements FileStore {
     public ManifestFile.Factory manifestFileFactory() {
         return new ManifestFile.Factory(
                 partitionType,
-                keyType,
-                valueType,
                 options.manifestFormat(),
                 pathFactory(),
                 options.manifestTargetSize().getBytes());
@@ -147,6 +145,8 @@ public class FileStoreImpl implements FileStore {
     public FileStoreScanImpl newScan() {
         return new FileStoreScanImpl(
                 partitionType,
+                keyType,
+                valueType,
                 pathFactory(),
                 manifestFileFactory(),
                 manifestListFactory(),

@@ -53,8 +53,6 @@ public class FileStoreExpireTest {
     @BeforeEach
     public void beforeEach() throws IOException {
         gen = new TestKeyValueGenerator();
-        Path root = new Path(tempDir.toString());
-        root.getFileSystem().mkdirs(new Path(root + "/snapshot"));
         store =
                 TestFileStore.create(
                         "avro",

@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.manifest;
 
-import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.utils.ObjectSerializer;
 import org.apache.flink.table.store.file.utils.ObjectSerializerTestBase;
 
@@ -29,10 +28,7 @@ public class ManifestEntrySerializerTest extends ObjectSerializerTestBase<Manife
 
     @Override
     protected ObjectSerializer<ManifestEntry> serializer() {
-        return new ManifestEntrySerializer(
-                TestKeyValueGenerator.PARTITION_TYPE,
-                TestKeyValueGenerator.KEY_TYPE,
-                TestKeyValueGenerator.ROW_TYPE);
+        return new ManifestEntrySerializer();
     }
 
     @Override

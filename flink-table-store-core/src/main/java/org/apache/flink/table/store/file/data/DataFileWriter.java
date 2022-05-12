@@ -28,7 +28,9 @@ import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.format.FileFormat;
+import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.stats.FieldStatsCollector;
 import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -57,6 +59,8 @@ public class DataFileWriter {
     private final RowType valueType;
     private final BulkWriter.Factory<RowData> writerFactory;
     private final FileStatsExtractor fileStatsExtractor;
+    private final FieldStatsArraySerializer keyStatsConverter;
+    private final FieldStatsArraySerializer valueStatsConverter;
     private final DataFilePathFactory pathFactory;
     private final long suggestedFileSize;
 
@@ -71,6 +75,8 @@ public class DataFileWriter {
         this.valueType = valueType;
         this.writerFactory = writerFactory;
         this.fileStatsExtractor = fileStatsExtractor;
+        this.keyStatsConverter = new FieldStatsArraySerializer(keyType);
+        this.valueStatsConverter = new FieldStatsArraySerializer(valueType);
         this.pathFactory = pathFactory;
         this.suggestedFileSize = suggestedFileSize;
     }
@@ -192,16 +198,19 @@ public class DataFileWriter {
         @Override
         protected DataFileMeta createFileMeta(Path path) throws IOException {
 
-            FieldStats[] keyStats;
-            FieldStats[] valueStats;
+            BinaryTableStats keyStats;
+            BinaryTableStats valueStats;
             if (fileStatsExtractor == null) {
                 keyStats = keyStatsCollector.extract();
                 valueStats = valueStatsCollector.extract();
             } else {
                 FieldStats[] rowStats = fileStatsExtractor.extract(path);
                 int numKeyFields = keyType.getFieldCount();
-                keyStats = Arrays.copyOfRange(rowStats, 0, numKeyFields);
-                valueStats = Arrays.copyOfRange(rowStats, numKeyFields + 2, rowStats.length);
+                keyStats =
+                        keyStatsConverter.toBinary(Arrays.copyOfRange(rowStats, 0, numKeyFields));
+                valueStats =
+                        valueStatsConverter.toBinary(
+                                Arrays.copyOfRange(rowStats, numKeyFields + 2, rowStats.length));
             }
 
             return new DataFileMeta(

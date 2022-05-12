@@ -76,7 +76,7 @@ public abstract class FileStatsExtractorTestBase {
         for (GenericRowData row : data) {
             collector.collect(row);
         }
-        FieldStats[] expected = collector.extract();
+        FieldStats[] expected = collector.extractFieldStats();
 
         FileStatsExtractor extractor = format.createStatsExtractor(rowType).get();
         assertThat(extractor).isNotNull();

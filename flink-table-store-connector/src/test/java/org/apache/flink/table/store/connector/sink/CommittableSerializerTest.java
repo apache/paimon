@@ -21,8 +21,6 @@ package org.apache.flink.table.store.connector.sink;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.streaming.runtime.operators.sink.TestSink;
 import org.apache.flink.table.store.file.mergetree.Increment;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
 
 import org.junit.jupiter.api.Test;
 
@@ -35,11 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link CommittableSerializer}. */
 public class CommittableSerializerTest {
 
-    private final FileCommittableSerializer fileSerializer =
-            new FileCommittableSerializer(
-                    RowType.of(new IntType()),
-                    RowType.of(new IntType()),
-                    RowType.of(new IntType()));
+    private final FileCommittableSerializer fileSerializer = new FileCommittableSerializer();
 
     private final CommittableSerializer serializer =
             new CommittableSerializer(

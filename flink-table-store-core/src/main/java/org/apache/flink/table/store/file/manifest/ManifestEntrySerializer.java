@@ -20,36 +20,35 @@ package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
-import org.apache.flink.table.types.logical.RowType;
+
+import static org.apache.flink.table.store.file.utils.SerializationUtils.deserializeBinaryRow;
+import static org.apache.flink.table.store.file.utils.SerializationUtils.serializeBinaryRow;
 
 /** Serializer for {@link ManifestEntry}. */
 public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestEntry> {
 
     private static final long serialVersionUID = 1L;
 
-    private final RowDataSerializer partitionSerializer;
     private final DataFileMetaSerializer dataFileMetaSerializer;
 
-    public ManifestEntrySerializer(RowType partitionType, RowType keyType, RowType valueType) {
-        super(ManifestEntry.schema(partitionType, keyType, valueType));
-        this.partitionSerializer = new RowDataSerializer(partitionType);
-        this.dataFileMetaSerializer = new DataFileMetaSerializer(keyType, valueType);
+    public ManifestEntrySerializer() {
+        super(ManifestEntry.schema());
+        this.dataFileMetaSerializer = new DataFileMetaSerializer();
     }
 
     @Override
     public int getVersion() {
-        return 1;
+        return 2;
     }
 
     @Override
     public RowData convertTo(ManifestEntry entry) {
         GenericRowData row = new GenericRowData(5);
         row.setField(0, entry.kind().toByteValue());
-        row.setField(1, entry.partition());
+        row.setField(1, serializeBinaryRow(entry.partition()));
         row.setField(2, entry.bucket());
         row.setField(3, entry.totalBuckets());
         row.setField(4, dataFileMetaSerializer.toRow(entry.file()));
@@ -58,14 +57,18 @@ public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestE
 
     @Override
     public ManifestEntry convertFrom(int version, RowData row) {
-        if (version != 1) {
+        if (version != 2) {
+            if (version == 1) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "The current version %s is not compatible with the version %s, please recreate the table.",
+                                getVersion(), version));
+            }
             throw new IllegalArgumentException("Unsupported version: " + version);
         }
         return new ManifestEntry(
                 ValueKind.fromByteValue(row.getByte(0)),
-                partitionSerializer
-                        .toBinaryRow(row.getRow(1, partitionSerializer.getArity()))
-                        .copy(),
+                deserializeBinaryRow(row.getBinary(1)),
                 row.getInt(2),
                 row.getInt(3),
                 dataFileMetaSerializer.fromRow(row.getRow(4, dataFileMetaSerializer.numFields())));

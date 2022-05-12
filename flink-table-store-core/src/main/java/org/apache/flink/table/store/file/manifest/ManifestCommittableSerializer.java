@@ -22,10 +22,8 @@ import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileMetaSerializer;
-import org.apache.flink.table.types.logical.RowType;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -34,17 +32,17 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.flink.table.store.file.utils.SerializationUtils.deserializeBinaryRow;
+import static org.apache.flink.table.store.file.utils.SerializationUtils.serializeBinaryRow;
+
 /** {@link SimpleVersionedSerializer} for {@link ManifestCommittable}. */
 public class ManifestCommittableSerializer
         implements SimpleVersionedSerializer<ManifestCommittable> {
 
-    private final BinaryRowDataSerializer partSerializer;
     private final DataFileMetaSerializer dataFileSerializer;
 
-    public ManifestCommittableSerializer(
-            RowType partitionType, RowType keyType, RowType valueType) {
-        this.partSerializer = new BinaryRowDataSerializer(partitionType.getFieldCount());
-        this.dataFileSerializer = new DataFileMetaSerializer(keyType, valueType);
+    public ManifestCommittableSerializer() {
+        this.dataFileSerializer = new DataFileMetaSerializer();
     }
 
     @Override
@@ -88,7 +86,7 @@ public class ManifestCommittableSerializer
             throws IOException {
         view.writeInt(files.size());
         for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> entry : files.entrySet()) {
-            partSerializer.serialize(entry.getKey(), view);
+            serializeBinaryRow(entry.getKey(), view);
             view.writeInt(entry.getValue().size());
             for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry : entry.getValue().entrySet()) {
                 view.writeInt(bucketEntry.getKey());
@@ -105,7 +103,7 @@ public class ManifestCommittableSerializer
         int partNumber = view.readInt();
         Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> files = new HashMap<>();
         for (int i = 0; i < partNumber; i++) {
-            BinaryRowData part = partSerializer.deserialize(view);
+            BinaryRowData part = deserializeBinaryRow(view);
             int bucketNumber = view.readInt();
             Map<Integer, List<DataFileMeta>> bucketMap = new HashMap<>();
             files.put(part, bucketMap);
