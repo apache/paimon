@@ -1576,6 +1576,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
     private void testSinkParallelism(Integer configParallelism, int expectedParallelism) {
         // 1. create a mock table sink
         Map<String, String> options = new HashMap<>();
+        options.put(FileStoreOptions.PATH.key(), "/fake/path");
         if (configParallelism != null) {
             options.put(SINK_PARALLELISM.key(), configParallelism.toString());
         }

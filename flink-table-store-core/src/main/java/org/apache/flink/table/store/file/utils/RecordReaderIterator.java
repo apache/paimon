@@ -42,6 +42,10 @@ public class RecordReaderIterator implements CloseableIterator<KeyValue> {
         this.currentResult = null;
     }
 
+    /**
+     * <b>IMPORTANT</b>: Before calling this, make sure that the previous returned key-value is not
+     * used any more!
+     */
     @Override
     public boolean hasNext() {
         if (currentIterator == null) {

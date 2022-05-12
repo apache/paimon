@@ -20,13 +20,13 @@ package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreImpl;
+import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
@@ -136,8 +136,7 @@ public class FileStoreSourceTest {
                 Arguments.of(false, true, true));
     }
 
-    private static FileStore buildFileStore(boolean hasPk, boolean partitioned) {
-        ObjectIdentifier tableIdentifier = ObjectIdentifier.of("cat", "db", "tbl");
+    private FileStore buildFileStore(boolean hasPk, boolean partitioned) {
         String user = "user";
         RowType partitionType = getPartitionType(partitioned);
         RowType keyType = getKeyType(hasPk);
@@ -145,8 +144,8 @@ public class FileStoreSourceTest {
         MergeFunction mergeFunction =
                 hasPk ? new DeduplicateMergeFunction() : new ValueCountMergeFunction();
         return new FileStoreImpl(
-                tableIdentifier,
-                new Configuration(),
+                "/fake/path",
+                new FileStoreOptions(new Configuration()),
                 user,
                 partitionType,
                 keyType,
