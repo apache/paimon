@@ -42,6 +42,7 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
 
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -65,6 +66,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link FileStoreSource}. */
 public class FileStoreSourceTest {
+
+    @TempDir java.nio.file.Path tempDir;
 
     private static final RowType RECORD_TYPE =
             RowType.of(
@@ -137,9 +140,11 @@ public class FileStoreSourceTest {
                 Arguments.of(false, true, true));
     }
 
-    private static FileStore buildFileStore(boolean hasPk, boolean partitioned) {
+    private FileStore buildFileStore(boolean hasPk, boolean partitioned) {
         ObjectIdentifier tableIdentifier = ObjectIdentifier.of("cat", "db", "tbl");
-        FileStoreOptions options = new FileStoreOptions(new Configuration());
+        Configuration conf = new Configuration();
+        conf.setString(FileStoreOptions.PATH, tempDir.toString());
+        FileStoreOptions options = new FileStoreOptions(conf);
         String user = "user";
         RowType partitionType = getPartitionType(partitioned);
         RowType keyType = getKeyType(hasPk);
