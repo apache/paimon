@@ -30,6 +30,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 
 import static org.apache.flink.table.data.binary.BinarySegmentUtils.copyToBytes;
+import static org.apache.flink.table.data.binary.BinarySegmentUtils.copyToView;
 
 /** Utils for serialization. */
 public class SerializationUtils {
@@ -90,7 +91,9 @@ public class SerializationUtils {
      */
     public static void serializeBinaryRow(BinaryRowData row, DataOutputView out)
             throws IOException {
-        serializeBytes(out, serializeBinaryRow(row));
+        out.writeInt(4 + row.getSizeInBytes());
+        out.writeInt(row.getArity());
+        copyToView(row.getSegments(), row.getOffset(), row.getSizeInBytes(), out);
     }
 
     /** Schemaless deserialization for {@link BinaryRowData} from a {@link DataInputView}. */
