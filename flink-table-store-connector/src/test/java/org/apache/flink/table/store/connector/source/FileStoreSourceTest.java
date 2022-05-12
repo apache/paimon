@@ -20,7 +20,6 @@ package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowData;
@@ -42,7 +41,6 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
 
-import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -66,8 +64,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link FileStoreSource}. */
 public class FileStoreSourceTest {
-
-    @TempDir java.nio.file.Path tempDir;
 
     private static final RowType RECORD_TYPE =
             RowType.of(
@@ -141,10 +137,6 @@ public class FileStoreSourceTest {
     }
 
     private FileStore buildFileStore(boolean hasPk, boolean partitioned) {
-        ObjectIdentifier tableIdentifier = ObjectIdentifier.of("cat", "db", "tbl");
-        Configuration conf = new Configuration();
-        conf.setString(FileStoreOptions.PATH, tempDir.toString());
-        FileStoreOptions options = new FileStoreOptions(conf);
         String user = "user";
         RowType partitionType = getPartitionType(partitioned);
         RowType keyType = getKeyType(hasPk);
@@ -152,8 +144,8 @@ public class FileStoreSourceTest {
         MergeFunction mergeFunction =
                 hasPk ? new DeduplicateMergeFunction() : new ValueCountMergeFunction();
         return new FileStoreImpl(
-                options.path(tableIdentifier).toString(),
-                options,
+                "/fake/path",
+                new FileStoreOptions(new Configuration()),
                 user,
                 partitionType,
                 keyType,
