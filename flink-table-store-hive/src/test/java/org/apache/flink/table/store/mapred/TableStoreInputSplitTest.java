@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.mapred;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.data.DataFileTestDataGenerator;
 
 import org.junit.jupiter.api.Test;
@@ -53,9 +52,6 @@ public class TableStoreInputSplitTest {
         BinaryRowData wantedPartition = generated.get(0).partition;
         TableStoreInputSplit split =
                 new TableStoreInputSplit(
-                        TestKeyValueGenerator.PARTITION_TYPE,
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.ROW_TYPE,
                         wantedPartition,
                         0,
                         generated.stream()

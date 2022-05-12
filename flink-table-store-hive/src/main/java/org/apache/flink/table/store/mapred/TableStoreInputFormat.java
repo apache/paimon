@@ -68,14 +68,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
                                 .bucketPath()
                                 .toString();
                 TableStoreInputSplit split =
-                        new TableStoreInputSplit(
-                                store.partitionType(),
-                                store.keyType(),
-                                store.valueType(),
-                                partition,
-                                bucket,
-                                be.getValue(),
-                                bucketPath);
+                        new TableStoreInputSplit(partition, bucket, be.getValue(), bucketPath);
                 result.add(split);
             }
         }
