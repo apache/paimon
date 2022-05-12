@@ -24,11 +24,14 @@ import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
 import org.junit.jupiter.api.Test;
 
 import java.sql.Date;
+import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link TableStoreDateObjectInspector}. */
 public class TableStoreDateObjectInspectorTest {
+
+    private static final long MILLIS_PER_DAY = Duration.ofDays(1).toMillis();
 
     @Test
     public void testCategoryAndClass() {
@@ -46,9 +49,8 @@ public class TableStoreDateObjectInspectorTest {
     public void testGetPrimitiveJavaObject() {
         TableStoreDateObjectInspector oi = new TableStoreDateObjectInspector();
 
-        int input = 10007;
-        Date expected = new Date(input);
-        assertThat(oi.getPrimitiveJavaObject(input)).isEqualTo(expected);
+        int input = 375;
+        assertThat(oi.getPrimitiveJavaObject(input).toString()).isEqualTo("1971-01-11");
         assertThat(oi.getPrimitiveJavaObject(null)).isNull();
     }
 
@@ -56,9 +58,8 @@ public class TableStoreDateObjectInspectorTest {
     public void testGetPrimitiveWritableObject() {
         TableStoreDateObjectInspector oi = new TableStoreDateObjectInspector();
 
-        int input = 10007;
-        DateWritable expected = new DateWritable(new Date(input));
-        assertThat(oi.getPrimitiveWritableObject(input)).isEqualTo(expected);
+        int input = 375;
+        assertThat(oi.getPrimitiveWritableObject(input).get().toString()).isEqualTo("1971-01-11");
         assertThat(oi.getPrimitiveWritableObject(null)).isNull();
     }
 
@@ -66,12 +67,12 @@ public class TableStoreDateObjectInspectorTest {
     public void testCopyObject() {
         TableStoreDateObjectInspector oi = new TableStoreDateObjectInspector();
 
-        Date input = new Date(10007);
+        Date input = new Date(375 * MILLIS_PER_DAY);
         Object copy = oi.copyObject(input);
         assertThat(copy).isEqualTo(input);
         assertThat(copy).isNotSameAs(input);
 
-        assertThat(oi.copyObject(10007)).isEqualTo(10007);
+        assertThat(oi.copyObject(375)).isEqualTo(375);
         assertThat(oi.copyObject(null)).isNull();
     }
 }
