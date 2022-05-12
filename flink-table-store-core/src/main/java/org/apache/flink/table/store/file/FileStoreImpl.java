@@ -27,6 +27,7 @@ import org.apache.flink.table.runtime.generated.RecordComparator;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
+import org.apache.flink.table.store.file.mergetree.compact.AggregationMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFunction;
@@ -227,17 +228,20 @@ public class FileStoreImpl implements FileStore {
                                 .collect(Collectors.toList()));
 
         MergeFunction mergeFunction;
+        List<LogicalType> fieldTypes = rowType.getChildren();
+        RowData.FieldGetter[] fieldGetters = new RowData.FieldGetter[fieldTypes.size()];
+        for (int i = 0; i < fieldTypes.size(); i++) {
+            fieldGetters[i] = RowData.createFieldGetter(fieldTypes.get(i), i);
+        }
         switch (mergeEngine) {
             case DEDUPLICATE:
                 mergeFunction = new DeduplicateMergeFunction();
                 break;
             case PARTIAL_UPDATE:
-                List<LogicalType> fieldTypes = rowType.getChildren();
-                RowData.FieldGetter[] fieldGetters = new RowData.FieldGetter[fieldTypes.size()];
-                for (int i = 0; i < fieldTypes.size(); i++) {
-                    fieldGetters[i] = RowData.createFieldGetter(fieldTypes.get(i), i);
-                }
                 mergeFunction = new PartialUpdateMergeFunction(fieldGetters);
+                break;
+            case AGGREGATION:
+                mergeFunction = new AggregationMergeFunction(fieldGetters);
                 break;
             default:
                 throw new UnsupportedOperationException("Unsupported merge engine: " + mergeEngine);

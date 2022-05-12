@@ -268,3 +268,39 @@ For example, the inputs:
 
 Output: 
 - <1, 25.2, 20, 'This is a book'>
+
+## Aggregation Update
+
+You can configure partial update from options:
+
+```sql
+CREATE TABLE MyTable (
+  a STRING,
+  b INT,
+  c INT,
+  PRIMARY KEY (a) NOT ENFORCED 
+) WITH (
+  'merge-engine'='aggregation'
+);
+```
+{{< hint info >}}
+__Note:__Aggregate updates are only supported for tables with primary keys.
+{{< /hint >}}
+
+{{< hint info >}}
+__Note:__Aggregate updates do not support streaming consumption.
+{{< /hint >}}
+
+{{< hint info >}}
+__Note:__currently returns null for data types that do not support aggregation
+{{< /hint >}}
+
+The value field is updated to the result of the summation under the same primary key.
+
+For example, the inputs: 
+- <'a', 3, 2>
+- <'a', 2, 0>
+- <'a', 2, 5>
+
+Output: 
+- <'a', 7, 7>

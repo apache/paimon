@@ -126,7 +126,8 @@ public class FileStoreOptions implements Serializable {
                                     .linebreak()
                                     .list(
                                             formatEnumOption(MergeEngine.DEDUPLICATE),
-                                            formatEnumOption(MergeEngine.PARTIAL_UPDATE))
+                                            formatEnumOption(MergeEngine.PARTIAL_UPDATE),
+                                            formatEnumOption(MergeEngine.AGGREGATION))
                                     .build());
 
     private final Configuration options;
@@ -234,8 +235,9 @@ public class FileStoreOptions implements Serializable {
     public enum MergeEngine implements DescribedEnum {
         DEDUPLICATE("deduplicate", "De-duplicate and keep the last row."),
 
-        PARTIAL_UPDATE("partial-update", "Partial update non-null fields.");
+        PARTIAL_UPDATE("partial-update", "Partial update non-null fields."),
 
+        AGGREGATION("aggregation", "Aggregate the rows.");
         private final String value;
         private final String description;
 
