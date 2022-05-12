@@ -70,7 +70,7 @@ public class TableStoreJobConf {
         this.jobConf = jobConf;
     }
 
-    public static void update(Properties properties, Map<String, String> map) {
+    public static void configureInputJobProperties(Properties properties, Map<String, String> map) {
         String tableNameString = properties.getProperty(hive_metastoreConstants.META_TABLE_NAME);
         String[] tableName = tableNameString.split("\\.");
         Preconditions.checkState(

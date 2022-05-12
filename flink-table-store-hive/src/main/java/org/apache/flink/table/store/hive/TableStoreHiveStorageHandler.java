@@ -74,7 +74,7 @@ public class TableStoreHiveStorageHandler implements HiveStorageHandler {
     @Override
     public void configureInputJobProperties(TableDesc tableDesc, Map<String, String> map) {
         Properties properties = tableDesc.getProperties();
-        TableStoreJobConf.update(properties, map);
+        TableStoreJobConf.configureInputJobProperties(properties, map);
     }
 
     @Override
