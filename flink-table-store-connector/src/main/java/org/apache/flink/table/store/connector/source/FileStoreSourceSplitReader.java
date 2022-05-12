@@ -232,6 +232,10 @@ public class FileStoreSourceSplitReader
         @Override
         public RecordAndPosition<RowData> next() {
             RowData row = rowDataSupplier.get();
+            if (row == null) {
+                return null;
+            }
+
             row = projectedRow == null ? row : projectedRow.replaceRow(row);
             recordAndPosition.setNext(row);
             currentNumRead++;
