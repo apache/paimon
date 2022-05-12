@@ -19,20 +19,15 @@
 package org.apache.flink.table.store.mapred;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.JobConfWrapper;
 import org.apache.flink.table.store.RowDataContainer;
+import org.apache.flink.table.store.TableStoreJobConf;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
-import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
-import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
@@ -48,6 +43,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * {@link InputFormat} for table store. It divides all files into {@link InputSplit}s (one split per
@@ -57,7 +54,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
 
     @Override
     public InputSplit[] getSplits(JobConf jobConf, int numSplits) throws IOException {
-        FileStoreImpl store = getFileStore(jobConf);
+        FileStoreImpl store = createFileStore(jobConf);
         FileStoreScan scan = store.newScan();
         List<TableStoreInputSplit> result = new ArrayList<>();
         for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> pe :
@@ -68,7 +65,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
                 String bucketPath =
                         store.pathFactory()
                                 .createDataFilePathFactory(partition, bucket)
-                                .toPath("")
+                                .bucketPath()
                                 .toString();
                 TableStoreInputSplit split =
                         new TableStoreInputSplit(
@@ -88,29 +85,28 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
     @Override
     public RecordReader<Void, RowDataContainer> getRecordReader(
             InputSplit inputSplit, JobConf jobConf, Reporter reporter) throws IOException {
-        FileStore store = getFileStore(jobConf);
+        FileStore store = createFileStore(jobConf);
         FileStoreRead read = store.newRead();
         TableStoreInputSplit split = (TableStoreInputSplit) inputSplit;
         org.apache.flink.table.store.file.utils.RecordReader wrapped =
                 read.withDropDelete(true)
                         .createReader(split.partition(), split.bucket(), split.files());
         long splitLength = split.getLength();
-        return new JobConfWrapper(jobConf).getPrimaryKeyNames().isPresent()
-                ? new TableStorePkRecordReader(wrapped, splitLength)
-                : new TableStoreCountRecordReader(wrapped, splitLength);
+        return new TableStoreRecordReader(
+                wrapped,
+                !new TableStoreJobConf(jobConf).getPrimaryKeyNames().isPresent(),
+                splitLength);
     }
 
-    private FileStoreImpl getFileStore(JobConf jobConf) {
-        JobConfWrapper wrapper = new JobConfWrapper(jobConf);
+    private FileStoreImpl createFileStore(JobConf jobConf) {
+        TableStoreJobConf wrapper = new TableStoreJobConf(jobConf);
 
-        String catalogName = wrapper.getCatalogName();
         String dbName = wrapper.getDbName();
         String tableName = wrapper.getTableName();
-        ObjectIdentifier identifier = ObjectIdentifier.of(catalogName, dbName, tableName);
 
-        Configuration fileStoreOptions = new Configuration();
-        fileStoreOptions.setString(FileStoreOptions.PATH, wrapper.getLocation());
-        wrapper.updateFileStoreOptions(fileStoreOptions);
+        Configuration options = new Configuration();
+        String tableLocation = wrapper.getLocation();
+        wrapper.updateFileStoreOptions(options);
 
         String user = wrapper.getFileStoreUser();
 
@@ -130,51 +126,37 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
         RowType partitionType =
                 RowType.of(partitionLogicalTypes, partitionColumnNames.toArray(new String[0]));
 
-        // same implementation as org.apache.flink.table.store.connector.TableStore#buildFileStore
-        RowType keyType;
-        RowType valueType;
-        MergeFunction mergeFunction;
         Optional<List<String>> optionalPrimaryKeyNames = wrapper.getPrimaryKeyNames();
         if (optionalPrimaryKeyNames.isPresent()) {
-            List<String> primaryKeyNames = optionalPrimaryKeyNames.get();
-            LogicalType[] primaryKeyLogicalTypes =
-                    primaryKeyNames.stream()
-                            .map(
-                                    s -> {
-                                        int idx = columnNames.indexOf(s);
-                                        Preconditions.checkState(
-                                                idx >= 0,
-                                                "Primary key column "
-                                                        + s
-                                                        + " not found in table "
-                                                        + dbName
-                                                        + "."
-                                                        + tableName);
-                                        return columnTypes.get(idx);
-                                    })
-                            .toArray(LogicalType[]::new);
-            keyType =
-                    RowType.of(
-                            primaryKeyLogicalTypes,
-                            primaryKeyNames.stream().map(s -> "_KEY_" + s).toArray(String[]::new));
-            valueType = rowType;
-            mergeFunction = new DeduplicateMergeFunction();
+            Function<String, RowType.RowField> rowFieldMapper =
+                    s -> {
+                        int idx = columnNames.indexOf(s);
+                        Preconditions.checkState(
+                                idx >= 0,
+                                "Primary key column "
+                                        + s
+                                        + " not found in table "
+                                        + dbName
+                                        + "."
+                                        + tableName);
+                        return new RowType.RowField(s, columnTypes.get(idx));
+                    };
+            RowType primaryKeyType =
+                    new RowType(
+                            optionalPrimaryKeyNames.get().stream()
+                                    .map(rowFieldMapper)
+                                    .collect(Collectors.toList()));
+            return FileStoreImpl.createWithPrimaryKey(
+                    tableLocation,
+                    new FileStoreOptions(options),
+                    user,
+                    partitionType,
+                    primaryKeyType,
+                    rowType,
+                    FileStoreOptions.MergeEngine.DEDUPLICATE);
         } else {
-            keyType = rowType;
-            valueType =
-                    RowType.of(
-                            new LogicalType[] {new BigIntType(false)},
-                            new String[] {"_VALUE_COUNT"});
-            mergeFunction = new ValueCountMergeFunction();
+            return FileStoreImpl.createWithValueCount(
+                    tableLocation, new FileStoreOptions(options), user, partitionType, rowType);
         }
-
-        return new FileStoreImpl(
-                identifier,
-                fileStoreOptions,
-                user,
-                partitionType,
-                keyType,
-                valueType,
-                mergeFunction);
     }
 }

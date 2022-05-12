@@ -21,7 +21,7 @@ package org.apache.flink.table.store;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.file.FileStoreOptions;
-import org.apache.flink.table.store.hive.TypeUtils;
+import org.apache.flink.table.store.hive.HiveTypeUtils;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.utils.LogicalTypeParser;
 import org.apache.flink.util.Preconditions;
@@ -42,15 +42,13 @@ import java.util.stream.Collectors;
  * Utility class to convert Hive table property keys and get file store specific configurations from
  * {@link JobConf}.
  */
-public class JobConfWrapper {
+public class TableStoreJobConf {
 
     private static final String TBLPROPERTIES_PREFIX = "table-store.";
     private static final String TBLPROPERTIES_PRIMARY_KEYS = TBLPROPERTIES_PREFIX + "primary-keys";
-    private static final String TBLPROPERTIES_CATALOG = TBLPROPERTIES_PREFIX + "catalog";
     private static final String INTERNAL_TBLPROPERTIES_PREFIX =
             "table-store.internal.tblproperties.";
 
-    private static final String INTERNAL_CATALOG_NAME = "table-store.internal.catalog-name";
     private static final String INTERNAL_DB_NAME = "table-store.internal.db-name";
     private static final String INTERNAL_TABLE_NAME = "table-store.internal.table-name";
     private static final String INTERNAL_LOCATION = "table-store.internal.location";
@@ -68,19 +66,11 @@ public class JobConfWrapper {
 
     private final JobConf jobConf;
 
-    public JobConfWrapper(JobConf jobConf) {
+    public TableStoreJobConf(JobConf jobConf) {
         this.jobConf = jobConf;
     }
 
     public static void update(Properties properties, Map<String, String> map) {
-        Preconditions.checkArgument(
-                properties.containsKey(TBLPROPERTIES_CATALOG),
-                "To read table store records from Hive, "
-                        + "catalog name must be specified in the table properties with key '"
-                        + TBLPROPERTIES_CATALOG
-                        + "'.");
-        map.put(INTERNAL_CATALOG_NAME, properties.getProperty(TBLPROPERTIES_CATALOG));
-
         String tableNameString = properties.getProperty(hive_metastoreConstants.META_TABLE_NAME);
         String[] tableName = tableNameString.split("\\.");
         Preconditions.checkState(
@@ -108,7 +98,7 @@ public class JobConfWrapper {
                         .stream()
                         .map(
                                 t ->
-                                        TypeUtils.typeInfoToDataType(t)
+                                        HiveTypeUtils.typeInfoToDataType(t)
                                                 .getLogicalType()
                                                 .asSerializableString())
                         .collect(Collectors.toList());
@@ -131,10 +121,6 @@ public class JobConfWrapper {
                         properties.getProperty(TBLPROPERTIES_PREFIX + option.key()));
             }
         }
-    }
-
-    public String getCatalogName() {
-        return jobConf.get(INTERNAL_CATALOG_NAME);
     }
 
     public String getDbName() {

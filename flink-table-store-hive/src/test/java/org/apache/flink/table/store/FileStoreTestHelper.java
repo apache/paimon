@@ -24,6 +24,7 @@ import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileStoreImpl;
+import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
@@ -66,10 +67,11 @@ public class FileStoreTestHelper {
             MergeFunction mergeFunction,
             BiFunction<RowData, RowData, BinaryRowData> partitionCalculator,
             Function<RowData, Integer> bucketCalculator) {
+        FileStoreOptions options = new FileStoreOptions(conf);
         this.store =
                 new FileStoreImpl(
-                        oi,
-                        conf,
+                        options.path(oi).toString(),
+                        options,
                         UUID.randomUUID().toString(),
                         partitionType,
                         keyType,

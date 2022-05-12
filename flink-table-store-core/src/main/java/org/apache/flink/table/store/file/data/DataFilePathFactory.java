@@ -42,6 +42,10 @@ public class DataFilePathFactory {
         this.pathCount = new AtomicInteger(0);
     }
 
+    public Path bucketPath() {
+        return bucketDir;
+    }
+
     public Path newPath() {
         return new Path(bucketDir + "/data-" + uuid + "-" + pathCount.getAndIncrement());
     }

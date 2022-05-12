@@ -71,10 +71,10 @@ public class TableStoreTimestampObjectInspectorTest {
     public void testCopyObject() {
         TableStoreTimestampObjectInspector oi = new TableStoreTimestampObjectInspector();
 
+        // TimestampData is immutable
         TimestampData input1 = TimestampData.fromEpochMillis(10007);
         Object copy1 = oi.copyObject(input1);
         assertThat(copy1).isEqualTo(input1);
-        assertThat(copy1).isNotSameAs(input1);
 
         Timestamp input2 = new Timestamp(10007);
         Object copy2 = oi.copyObject(input2);

@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.hive.objectinspector;
 
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.hive.TypeUtils;
+import org.apache.flink.table.store.hive.HiveTypeUtils;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
@@ -51,10 +51,10 @@ public class TableStoreRowDataObjectInspector extends StructObjectInspector {
             TableStoreStructField structField =
                     new TableStoreStructField(
                             name,
-                            TypeUtils.getObjectInspector(typeInfo),
+                            HiveTypeUtils.getObjectInspector(typeInfo),
                             i,
                             RowData.createFieldGetter(
-                                    TypeUtils.typeInfoToDataType(typeInfo).getLogicalType(), i),
+                                    HiveTypeUtils.typeInfoToDataType(typeInfo).getLogicalType(), i),
                             fieldComments.get(i));
             structFields.add(structField);
             structFieldMap.put(name, structField);

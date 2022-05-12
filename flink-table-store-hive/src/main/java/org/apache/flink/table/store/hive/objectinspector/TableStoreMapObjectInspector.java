@@ -20,7 +20,7 @@ package org.apache.flink.table.store.hive.objectinspector;
 
 import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.data.MapData;
-import org.apache.flink.table.store.hive.TypeUtils;
+import org.apache.flink.table.store.hive.HiveTypeUtils;
 
 import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.objectinspector.MapObjectInspector;
@@ -45,14 +45,14 @@ public class TableStoreMapObjectInspector implements MapObjectInspector {
     private final ArrayData.ElementGetter valueGetter;
 
     public TableStoreMapObjectInspector(TypeInfo keyTypeInfo, TypeInfo valueTypeInfo) {
-        this.keyObjectInspector = TypeUtils.getObjectInspector(keyTypeInfo);
-        this.valueObjectInspector = TypeUtils.getObjectInspector(valueTypeInfo);
+        this.keyObjectInspector = HiveTypeUtils.getObjectInspector(keyTypeInfo);
+        this.valueObjectInspector = HiveTypeUtils.getObjectInspector(valueTypeInfo);
         this.keyGetter =
                 ArrayData.createElementGetter(
-                        TypeUtils.typeInfoToDataType(keyTypeInfo).getLogicalType());
+                        HiveTypeUtils.typeInfoToDataType(keyTypeInfo).getLogicalType());
         this.valueGetter =
                 ArrayData.createElementGetter(
-                        TypeUtils.typeInfoToDataType(valueTypeInfo).getLogicalType());
+                        HiveTypeUtils.typeInfoToDataType(valueTypeInfo).getLogicalType());
     }
 
     @Override

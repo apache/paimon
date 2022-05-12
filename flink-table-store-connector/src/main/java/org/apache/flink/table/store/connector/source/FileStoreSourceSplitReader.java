@@ -31,9 +31,10 @@ import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.utils.ProjectedRowData;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
+import org.apache.flink.table.store.file.utils.PrimaryKeyRowDataSupplier;
 import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.file.utils.ValueCountRowDataSupplier;
 import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
@@ -42,6 +43,7 @@ import java.io.IOException;
 import java.util.LinkedList;
 import java.util.Optional;
 import java.util.Queue;
+import java.util.function.Supplier;
 
 /** The {@link SplitReader} implementation for the file store source. */
 public class FileStoreSourceSplitReader
@@ -74,8 +76,7 @@ public class FileStoreSourceSplitReader
         this.valueCountModeProjects = valueCountModeProjects;
         this.splits = new LinkedList<>();
         this.pool = new Pool<>(1);
-        this.pool.add(
-                valueCountMode ? new ValueCountRecordIterator() : new PrimaryKeyRecordIterator());
+        this.pool.add(new FileStoreRecordIterator());
     }
 
     @Override
@@ -186,61 +187,14 @@ public class FileStoreSourceSplitReader
         return finishRecords;
     }
 
-    private abstract class FileStoreRecordIterator implements BulkFormat.RecordIterator<RowData> {
+    private class FileStoreRecordIterator implements BulkFormat.RecordIterator<RowData> {
+
+        private final Supplier<RowData> rowDataSupplier;
 
         private RecordReader.RecordIterator iterator;
 
-        protected final MutableRecordAndPosition<RowData> recordAndPosition =
+        private final MutableRecordAndPosition<RowData> recordAndPosition =
                 new MutableRecordAndPosition<>();
-
-        public FileStoreRecordIterator replace(RecordReader.RecordIterator iterator) {
-            this.iterator = iterator;
-            this.recordAndPosition.set(null, RecordAndPosition.NO_OFFSET, currentNumRead);
-            return this;
-        }
-
-        protected KeyValue nextKeyValue() throws IOException {
-            // The RowData is reused in iterator, we should set back to insert kind
-            if (recordAndPosition.getRecord() != null) {
-                recordAndPosition.getRecord().setRowKind(RowKind.INSERT);
-            }
-
-            return iterator.next();
-        }
-
-        @Override
-        public void releaseBatch() {
-            this.iterator.releaseBatch();
-            pool.recycler().recycle(this);
-        }
-    }
-
-    private class PrimaryKeyRecordIterator extends FileStoreRecordIterator {
-
-        @Nullable
-        @Override
-        public RecordAndPosition<RowData> next() {
-            try {
-                KeyValue kv = nextKeyValue();
-                if (kv == null) {
-                    return null;
-                }
-                RowData row = kv.value();
-                if (kv.valueKind() == ValueKind.DELETE) {
-                    row.setRowKind(RowKind.DELETE);
-                }
-                recordAndPosition.setNext(row);
-                currentNumRead++;
-                return recordAndPosition;
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        }
-    }
-
-    private class ValueCountRecordIterator extends FileStoreRecordIterator {
-
-        private long count = 0;
 
         @Nullable
         private final ProjectedRowData projectedRow =
@@ -248,42 +202,46 @@ public class FileStoreSourceSplitReader
                         .map(ProjectedRowData::from)
                         .orElse(null);
 
-        @Nullable
-        @Override
-        public RecordAndPosition<RowData> next() {
+        private FileStoreRecordIterator() {
+            this.rowDataSupplier =
+                    valueCountMode
+                            ? new ValueCountRowDataSupplier(this::nextKeyValue)
+                            : new PrimaryKeyRowDataSupplier(this::nextKeyValue);
+        }
+
+        public FileStoreRecordIterator replace(RecordReader.RecordIterator iterator) {
+            this.iterator = iterator;
+            this.recordAndPosition.set(null, RecordAndPosition.NO_OFFSET, currentNumRead);
+            return this;
+        }
+
+        private KeyValue nextKeyValue() {
+            // The RowData is reused in iterator, we should set back to insert kind
+            if (recordAndPosition.getRecord() != null) {
+                recordAndPosition.getRecord().setRowKind(RowKind.INSERT);
+            }
+
             try {
-                if (count == 0) {
-                    KeyValue kv = nextKeyValue();
-                    if (kv == null) {
-                        return null;
-                    }
-
-                    long value = kv.value().getLong(0);
-                    count = Math.abs(value);
-                    if (count == 0) {
-                        throw new IllegalStateException("count can not be zero.");
-                    }
-
-                    RowData row = kv.key();
-                    if (value < 0) {
-                        row.setRowKind(RowKind.DELETE);
-                    }
-                    setNext(row);
-                } else {
-                    // move forward recordSkipCount
-                    recordAndPosition.setNext(recordAndPosition.getRecord());
-                }
-                count--;
-                currentNumRead++;
-                return recordAndPosition;
+                return iterator.next();
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
         }
 
-        private void setNext(RowData row) {
+        @Nullable
+        @Override
+        public RecordAndPosition<RowData> next() {
+            RowData row = rowDataSupplier.get();
             row = projectedRow == null ? row : projectedRow.replaceRow(row);
             recordAndPosition.setNext(row);
+            currentNumRead++;
+            return recordAndPosition;
+        }
+
+        @Override
+        public void releaseBatch() {
+            this.iterator.releaseBatch();
+            pool.recycler().recycle(this);
         }
     }
 }

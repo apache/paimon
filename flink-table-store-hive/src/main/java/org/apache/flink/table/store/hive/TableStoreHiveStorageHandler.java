@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.hive;
 
-import org.apache.flink.table.store.JobConfWrapper;
+import org.apache.flink.table.store.TableStoreJobConf;
 import org.apache.flink.table.store.mapred.TableStoreInputFormat;
 import org.apache.flink.table.store.mapred.TableStoreOutputFormat;
 
@@ -74,7 +74,7 @@ public class TableStoreHiveStorageHandler implements HiveStorageHandler {
     @Override
     public void configureInputJobProperties(TableDesc tableDesc, Map<String, String> map) {
         Properties properties = tableDesc.getProperties();
-        JobConfWrapper.update(properties, map);
+        TableStoreJobConf.update(properties, map);
     }
 
     @Override
@@ -85,7 +85,7 @@ public class TableStoreHiveStorageHandler implements HiveStorageHandler {
 
     @Override
     public void configureJobConf(TableDesc tableDesc, JobConf jobConf) {
-        JobConfWrapper wrapper = new JobConfWrapper(jobConf);
+        TableStoreJobConf wrapper = new TableStoreJobConf(jobConf);
         wrapper.setFileStoreUser(UUID.randomUUID().toString());
     }
 

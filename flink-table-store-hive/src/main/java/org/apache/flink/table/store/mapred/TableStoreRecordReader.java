@@ -18,31 +18,53 @@
 
 package org.apache.flink.table.store.mapred;
 
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.RowDataContainer;
+import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.utils.PrimaryKeyRowDataSupplier;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
+import org.apache.flink.table.store.file.utils.ValueCountRowDataSupplier;
 
 import org.apache.hadoop.mapred.RecordReader;
 
 import java.io.IOException;
+import java.util.function.Supplier;
 
 /**
- * Base {@link RecordReader} for table store. Reads {@link
- * org.apache.flink.table.store.file.KeyValue}s from data files and picks out {@link
- * org.apache.flink.table.data.RowData} for Hive to consume.
+ * Base {@link RecordReader} for table store. Reads {@link KeyValue}s from data files and picks out
+ * {@link RowData} for Hive to consume.
  */
-public abstract class AbstractTableStoreRecordReader
-        implements RecordReader<Void, RowDataContainer> {
+public class TableStoreRecordReader implements RecordReader<Void, RowDataContainer> {
 
-    protected final RecordReaderIterator iterator;
+    private final RecordReaderIterator iterator;
+    private final Supplier<RowData> rowDataSupplier;
     private final long splitLength;
 
-    protected float progress;
+    private float progress;
 
-    public AbstractTableStoreRecordReader(
-            org.apache.flink.table.store.file.utils.RecordReader wrapped, long splitLength) {
+    public TableStoreRecordReader(
+            org.apache.flink.table.store.file.utils.RecordReader wrapped,
+            boolean valueCountMode,
+            long splitLength) {
         this.iterator = new RecordReaderIterator(wrapped);
+        this.rowDataSupplier =
+                valueCountMode
+                        ? new ValueCountRowDataSupplier(iterator::next)
+                        : new PrimaryKeyRowDataSupplier(iterator::next);
         this.splitLength = splitLength;
         this.progress = 0;
+    }
+
+    @Override
+    public boolean next(Void key, RowDataContainer value) throws IOException {
+        RowData rowData = rowDataSupplier.get();
+        if (rowData == null) {
+            progress = 1;
+            return false;
+        } else {
+            value.set(rowData);
+            return true;
+        }
     }
 
     @Override
@@ -71,6 +93,8 @@ public abstract class AbstractTableStoreRecordReader
 
     @Override
     public float getProgress() throws IOException {
+        // currently the value of progress is either 0 or 1
+        // only when the reading finishes will this be set to 1
         // TODO make this more precise
         return progress;
     }

@@ -100,24 +100,26 @@ public class TestFileStore extends FileStoreImpl {
         conf.set(FileStoreOptions.PATH, root);
         conf.set(FileStoreOptions.BUCKET, numBuckets);
 
-        return new TestFileStore(conf, partitionType, keyType, valueType, mergeFunction);
+        return new TestFileStore(
+                root, new FileStoreOptions(conf), partitionType, keyType, valueType, mergeFunction);
     }
 
-    public TestFileStore(
-            Configuration conf,
+    private TestFileStore(
+            String root,
+            FileStoreOptions options,
             RowType partitionType,
             RowType keyType,
             RowType valueType,
             MergeFunction mergeFunction) {
         super(
-                ObjectIdentifier.of("catalog", "database", "table"),
-                conf,
+                options.path(ObjectIdentifier.of("catalog", "database", "table")).toString(),
+                options,
                 UUID.randomUUID().toString(),
                 partitionType,
                 keyType,
                 valueType,
                 mergeFunction);
-        this.root = conf.getString(FileStoreOptions.PATH);
+        this.root = root;
         this.keySerializer = new RowDataSerializer(keyType);
         this.valueSerializer = new RowDataSerializer(valueType);
     }

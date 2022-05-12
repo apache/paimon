@@ -48,9 +48,7 @@ public class TableStoreDecimalObjectInspector extends AbstractPrimitiveJavaObjec
     @Override
     public Object copyObject(Object o) {
         if (o instanceof DecimalData) {
-            DecimalData decimalData = (DecimalData) o;
-            return DecimalData.fromBigDecimal(
-                    decimalData.toBigDecimal(), decimalData.precision(), decimalData.scale());
+            return ((DecimalData) o).copy();
         } else if (o instanceof HiveDecimal) {
             HiveDecimal hiveDecimal = (HiveDecimal) o;
             return HiveDecimal.create(hiveDecimal.bigDecimalValue());

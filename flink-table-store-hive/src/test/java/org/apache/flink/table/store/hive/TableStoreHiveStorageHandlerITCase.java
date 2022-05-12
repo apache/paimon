@@ -143,7 +143,9 @@ public class TableStoreHiveStorageHandlerITCase {
                                 "  c STRING",
                                 ")",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
-                                "LOCATION '" + root + "'",
+                                "LOCATION '"
+                                        + root
+                                        + "/test_catalog.catalog/test_db.db/test_table'",
                                 "TBLPROPERTIES (",
                                 "  'table-store.catalog' = 'test_catalog',",
                                 "  'table-store.primary-keys' = 'a,b',",
@@ -217,7 +219,9 @@ public class TableStoreHiveStorageHandlerITCase {
                                 "  c STRING",
                                 ")",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
-                                "LOCATION '" + root + "'",
+                                "LOCATION '"
+                                        + root
+                                        + "/test_catalog.catalog/test_db.db/test_table'",
                                 "TBLPROPERTIES (",
                                 "  'table-store.catalog' = 'test_catalog',",
                                 "  'table-store.bucket' = '2',",
@@ -230,14 +234,6 @@ public class TableStoreHiveStorageHandlerITCase {
     }
 
     @Test
-    public void myTest() throws Exception {
-        for (int i = 0; i < 1000; i++) {
-            System.out.println(i);
-            testReadAllSupportedTypes();
-            hiveShell.execute("drop table if exists test_table");
-        }
-    }
-
     public void testReadAllSupportedTypes() throws Exception {
         String root = folder.newFolder().toString();
         Configuration conf = new Configuration();
@@ -253,7 +249,10 @@ public class TableStoreHiveStorageHandlerITCase {
                                 new String[] {"_KEY_f_int"}),
                         RowType.of(
                                 RandomGenericRowDataGenerator.TYPE_INFOS.stream()
-                                        .map(t -> TypeUtils.typeInfoToDataType(t).getLogicalType())
+                                        .map(
+                                                t ->
+                                                        HiveTypeUtils.typeInfoToDataType(t)
+                                                                .getLogicalType())
                                         .toArray(LogicalType[]::new),
                                 RandomGenericRowDataGenerator.FIELD_NAMES.toArray(new String[0])),
                         new DeduplicateMergeFunction(),
@@ -298,7 +297,9 @@ public class TableStoreHiveStorageHandlerITCase {
                                 ddl.toString(),
                                 ")",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
-                                "LOCATION '" + root + "'",
+                                "LOCATION '"
+                                        + root
+                                        + "/test_catalog.catalog/test_db.db/test_table'",
                                 "TBLPROPERTIES (",
                                 "  'table-store.catalog' = 'test_catalog',",
                                 "  'table-store.primary-keys' = 'f_int',",
@@ -316,9 +317,6 @@ public class TableStoreHiveStorageHandlerITCase {
         }
         for (Object[] actualRow : actual) {
             int key = (int) actualRow[3];
-            if (!expected.containsKey(key)) {
-                System.out.println("!!!");
-            }
             Assert.assertTrue(expected.containsKey(key));
             GenericRowData expectedRow = expected.get(key);
             Assert.assertEquals(expectedRow.getArity(), actualRow.length);
@@ -328,7 +326,7 @@ public class TableStoreHiveStorageHandlerITCase {
                     continue;
                 }
                 ObjectInspector oi =
-                        TypeUtils.getObjectInspector(
+                        HiveTypeUtils.getObjectInspector(
                                 RandomGenericRowDataGenerator.TYPE_INFOS.get(i));
                 switch (oi.getCategory()) {
                     case PRIMITIVE:

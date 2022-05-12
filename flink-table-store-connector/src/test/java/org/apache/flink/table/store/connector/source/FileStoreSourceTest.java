@@ -27,6 +27,7 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreImpl;
+import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
@@ -138,6 +139,7 @@ public class FileStoreSourceTest {
 
     private static FileStore buildFileStore(boolean hasPk, boolean partitioned) {
         ObjectIdentifier tableIdentifier = ObjectIdentifier.of("cat", "db", "tbl");
+        FileStoreOptions options = new FileStoreOptions(new Configuration());
         String user = "user";
         RowType partitionType = getPartitionType(partitioned);
         RowType keyType = getKeyType(hasPk);
@@ -145,8 +147,8 @@ public class FileStoreSourceTest {
         MergeFunction mergeFunction =
                 hasPk ? new DeduplicateMergeFunction() : new ValueCountMergeFunction();
         return new FileStoreImpl(
-                tableIdentifier,
-                new Configuration(),
+                options.path(tableIdentifier).toString(),
+                options,
                 user,
                 partitionType,
                 keyType,

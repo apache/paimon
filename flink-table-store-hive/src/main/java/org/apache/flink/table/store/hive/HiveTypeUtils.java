@@ -41,7 +41,7 @@ import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.VarcharTypeInfo;
 
 /** Utils for converting types related classes between Flink and Hive. */
-public class TypeUtils {
+public class HiveTypeUtils {
 
     public static DataType typeInfoToDataType(TypeInfo typeInfo) {
         ObjectInspector.Category category = typeInfo.getCategory();

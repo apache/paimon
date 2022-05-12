@@ -31,6 +31,7 @@ import org.apache.flink.table.store.RowDataContainer;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -38,18 +39,20 @@ import org.apache.flink.table.types.logical.RowType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link TableStorePkRecordReader}. */
-public class TableStorePkRecordReaderTest {
+/** Tests for {@link TableStoreRecordReader}. */
+public class TableStoreRecordReaderTest {
 
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testIterate() throws Exception {
+    public void testPk() throws Exception {
         Configuration conf = new Configuration();
         conf.setString(FileStoreOptions.PATH, tempDir.toString());
         conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
@@ -94,7 +97,7 @@ public class TableStorePkRecordReaderTest {
         helper.finishWrite();
 
         Tuple2<RecordReader, Long> tuple = helper.read(BinaryRowDataUtil.EMPTY_ROW, 0);
-        TableStorePkRecordReader reader = new TableStorePkRecordReader(tuple.f0, tuple.f1);
+        TableStoreRecordReader reader = new TableStoreRecordReader(tuple.f0, false, tuple.f1);
         RowDataContainer container = reader.createValue();
         Set<String> actual = new HashSet<>();
         while (reader.next(null, container)) {
@@ -106,6 +109,71 @@ public class TableStorePkRecordReaderTest {
         Set<String> expected = new HashSet<>();
         expected.add("1|Hi again");
         expected.add("3|World");
+        assertThat(actual).isEqualTo(expected);
+    }
+
+    @Test
+    public void testValueCount() throws Exception {
+        Configuration conf = new Configuration();
+        conf.setString(FileStoreOptions.PATH, tempDir.toString());
+        conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
+        FileStoreTestHelper helper =
+                new FileStoreTestHelper(
+                        ObjectIdentifier.of("test_catalog", "test_db", "test_table"),
+                        conf,
+                        RowType.of(),
+                        RowType.of(
+                                new LogicalType[] {
+                                    DataTypes.INT().getLogicalType(),
+                                    DataTypes.STRING().getLogicalType()
+                                },
+                                new String[] {"_KEY_a", "_KEY_b"}),
+                        RowType.of(
+                                new LogicalType[] {DataTypes.BIGINT().getLogicalType()},
+                                new String[] {"_VALUE_COUNT"}),
+                        new ValueCountMergeFunction(),
+                        (k, v) -> BinaryRowDataUtil.EMPTY_ROW,
+                        k -> 0);
+
+        helper.write(
+                ValueKind.ADD,
+                GenericRowData.of(1, StringData.fromString("Hi")),
+                GenericRowData.of(1L));
+        helper.write(
+                ValueKind.ADD,
+                GenericRowData.of(2, StringData.fromString("Hello")),
+                GenericRowData.of(1L));
+        helper.write(
+                ValueKind.ADD,
+                GenericRowData.of(3, StringData.fromString("World")),
+                GenericRowData.of(1L));
+        helper.write(
+                ValueKind.ADD,
+                GenericRowData.of(1, StringData.fromString("Hi")),
+                GenericRowData.of(1L));
+        helper.write(
+                ValueKind.DELETE,
+                GenericRowData.of(2, StringData.fromString("Hello")),
+                GenericRowData.of(1L));
+        helper.write(
+                ValueKind.ADD,
+                GenericRowData.of(1, StringData.fromString("Hi")),
+                GenericRowData.of(1L));
+        helper.finishWrite();
+
+        Tuple2<RecordReader, Long> tuple = helper.read(BinaryRowDataUtil.EMPTY_ROW, 0);
+        TableStoreRecordReader reader = new TableStoreRecordReader(tuple.f0, true, tuple.f1);
+        RowDataContainer container = reader.createValue();
+        Map<String, Integer> actual = new HashMap<>();
+        while (reader.next(null, container)) {
+            RowData rowData = container.get();
+            String key = rowData.getInt(0) + "|" + rowData.getString(1).toString();
+            actual.compute(key, (k, v) -> (v == null ? 0 : v) + 1);
+        }
+
+        Map<String, Integer> expected = new HashMap<>();
+        expected.put("1|Hi", 3);
+        expected.put("3|World", 1);
         assertThat(actual).isEqualTo(expected);
     }
 }

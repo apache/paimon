@@ -19,27 +19,35 @@
 package org.apache.flink.table.store.file;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.TableConfig;
-import org.apache.flink.table.catalog.ObjectIdentifier;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.generated.GeneratedRecordComparator;
 import org.apache.flink.table.runtime.generated.RecordComparator;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
+import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.operation.FileStoreCommitImpl;
 import org.apache.flink.table.store.file.operation.FileStoreExpireImpl;
 import org.apache.flink.table.store.file.operation.FileStoreReadImpl;
 import org.apache.flink.table.store.file.operation.FileStoreScanImpl;
 import org.apache.flink.table.store.file.operation.FileStoreWriteImpl;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.types.logical.BigIntType;
+import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+
+import java.util.List;
+import java.util.stream.Collectors;
 
 /** File store implementation. */
 public class FileStoreImpl implements FileStore {
 
-    private final ObjectIdentifier tableIdentifier;
+    private final String tablePath;
     private final FileStoreOptions options;
     private final String user;
     private final RowType partitionType;
@@ -49,15 +57,15 @@ public class FileStoreImpl implements FileStore {
     private final GeneratedRecordComparator genRecordComparator;
 
     public FileStoreImpl(
-            ObjectIdentifier tableIdentifier,
-            Configuration options,
+            String tablePath,
+            FileStoreOptions options,
             String user,
             RowType partitionType,
             RowType keyType,
             RowType valueType,
             MergeFunction mergeFunction) {
-        this.tableIdentifier = tableIdentifier;
-        this.options = new FileStoreOptions(options);
+        this.tablePath = tablePath;
+        this.options = options;
         this.user = user;
         this.partitionType = partitionType;
         this.keyType = keyType;
@@ -70,7 +78,7 @@ public class FileStoreImpl implements FileStore {
 
     public FileStorePathFactory pathFactory() {
         return new FileStorePathFactory(
-                options.path(tableIdentifier), partitionType, options.partitionDefaultName());
+                new Path(tablePath), partitionType, options.partitionDefaultName());
     }
 
     @VisibleForTesting
@@ -165,5 +173,60 @@ public class FileStoreImpl implements FileStore {
     @Override
     public RowType partitionType() {
         return partitionType;
+    }
+
+    public static FileStoreImpl createWithPrimaryKey(
+            String tablePath,
+            FileStoreOptions options,
+            String user,
+            RowType partitionType,
+            RowType primaryKeyType,
+            RowType rowType,
+            FileStoreOptions.MergeEngine mergeEngine) {
+        // add _KEY_ prefix to avoid conflict with value
+        RowType keyType =
+                new RowType(
+                        primaryKeyType.getFields().stream()
+                                .map(
+                                        f ->
+                                                new RowType.RowField(
+                                                        "_KEY_" + f.getName(),
+                                                        f.getType(),
+                                                        f.getDescription().orElse(null)))
+                                .collect(Collectors.toList()));
+
+        MergeFunction mergeFunction;
+        switch (mergeEngine) {
+            case DEDUPLICATE:
+                mergeFunction = new DeduplicateMergeFunction();
+                break;
+            case PARTIAL_UPDATE:
+                List<LogicalType> fieldTypes = rowType.getChildren();
+                RowData.FieldGetter[] fieldGetters = new RowData.FieldGetter[fieldTypes.size()];
+                for (int i = 0; i < fieldTypes.size(); i++) {
+                    fieldGetters[i] = RowData.createFieldGetter(fieldTypes.get(i), i);
+                }
+                mergeFunction = new PartialUpdateMergeFunction(fieldGetters);
+                break;
+            default:
+                throw new UnsupportedOperationException("Unsupported merge engine: " + mergeEngine);
+        }
+
+        return new FileStoreImpl(
+                tablePath, options, user, partitionType, keyType, rowType, mergeFunction);
+    }
+
+    public static FileStoreImpl createWithValueCount(
+            String tablePath,
+            FileStoreOptions options,
+            String user,
+            RowType partitionType,
+            RowType rowType) {
+        RowType countType =
+                RowType.of(
+                        new LogicalType[] {new BigIntType(false)}, new String[] {"_VALUE_COUNT"});
+        MergeFunction mergeFunction = new ValueCountMergeFunction();
+        return new FileStoreImpl(
+                tablePath, options, user, partitionType, rowType, countType, mergeFunction);
     }
 }

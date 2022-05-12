@@ -22,20 +22,14 @@ import org.apache.flink.table.store.RowDataContainer;
 import org.apache.flink.table.store.hive.objectinspector.TableStoreRowDataObjectInspector;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.AbstractSerDe;
 import org.apache.hadoop.hive.serde2.SerDeException;
 import org.apache.hadoop.hive.serde2.SerDeStats;
-import org.apache.hadoop.hive.serde2.SerDeUtils;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
 import org.apache.hadoop.io.Writable;
 
 import javax.annotation.Nullable;
 
-import java.util.Arrays;
-import java.util.List;
 import java.util.Properties;
 
 /**
@@ -50,21 +44,10 @@ public class TableStoreSerDe extends AbstractSerDe {
     @Override
     public void initialize(@Nullable Configuration configuration, Properties properties)
             throws SerDeException {
-        String columnNames = properties.getProperty(serdeConstants.LIST_COLUMNS);
-        String columnNameDelimiter =
-                properties.getProperty(
-                        serdeConstants.COLUMN_NAME_DELIMITER, String.valueOf(SerDeUtils.COMMA));
-        List<String> names = Arrays.asList(columnNames.split(columnNameDelimiter));
-
-        String columnTypes = properties.getProperty(serdeConstants.LIST_COLUMN_TYPES);
-        List<TypeInfo> typeInfos = TypeInfoUtils.getTypeInfosFromTypeString(columnTypes);
-
-        // see MetastoreUtils#addCols for the exact property name and separator
-        String columnCommentsPropertyName = "columns.comments";
-        List<String> comments =
-                Arrays.asList(properties.getProperty(columnCommentsPropertyName).split("\0", -1));
-
-        inspector = new TableStoreRowDataObjectInspector(names, typeInfos, comments);
+        HiveSchema schema = HiveSchema.extract(properties);
+        inspector =
+                new TableStoreRowDataObjectInspector(
+                        schema.fieldNames(), schema.fieldTypeInfos(), schema.fieldComments());
     }
 
     @Override

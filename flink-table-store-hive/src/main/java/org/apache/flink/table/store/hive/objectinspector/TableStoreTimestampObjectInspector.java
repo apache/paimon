@@ -49,8 +49,8 @@ public class TableStoreTimestampObjectInspector extends AbstractPrimitiveJavaObj
     @Override
     public Object copyObject(Object o) {
         if (o instanceof TimestampData) {
-            TimestampData timestampData = (TimestampData) o;
-            return TimestampData.fromLocalDateTime(timestampData.toLocalDateTime());
+            // TimestampData is immutable
+            return o;
         } else if (o instanceof Timestamp) {
             Timestamp timestamp = (Timestamp) o;
             return new Timestamp(timestamp.getTime());
