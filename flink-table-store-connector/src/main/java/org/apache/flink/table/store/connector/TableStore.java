@@ -45,17 +45,13 @@ import org.apache.flink.table.store.connector.source.LogHybridSourceFactory;
 import org.apache.flink.table.store.connector.source.StaticFileStoreSplitEnumerator;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreImpl;
+import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.FileStoreOptions.MergeEngine;
-import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
-import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFunction;
-import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.log.LogOptions.LogStartupMode;
 import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.utils.TypeUtils;
-import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
@@ -175,50 +171,24 @@ public class TableStore {
 
     private FileStore buildFileStore() {
         RowType partitionType = TypeUtils.project(type, partitions);
-        RowType keyType;
-        RowType valueType;
-        MergeFunction mergeFunction;
+        FileStoreOptions fileStoreOptions = new FileStoreOptions(options);
         if (primaryKeys.length == 0) {
-            keyType = type;
-            valueType =
-                    RowType.of(
-                            new LogicalType[] {new BigIntType(false)},
-                            new String[] {"_VALUE_COUNT"});
-            mergeFunction = new ValueCountMergeFunction();
+            return FileStoreImpl.createWithValueCount(
+                    fileStoreOptions.path(tableIdentifier).toString(),
+                    fileStoreOptions,
+                    user,
+                    partitionType,
+                    type);
         } else {
-            List<RowType.RowField> fields = TypeUtils.project(type, primaryKeys).getFields();
-            // add _KEY_ prefix to avoid conflict with value
-            keyType =
-                    new RowType(
-                            fields.stream()
-                                    .map(
-                                            f ->
-                                                    new RowType.RowField(
-                                                            "_KEY_" + f.getName(),
-                                                            f.getType(),
-                                                            f.getDescription().orElse(null)))
-                                    .collect(Collectors.toList()));
-            valueType = type;
-
-            switch (mergeEngine()) {
-                case DEDUPLICATE:
-                    mergeFunction = new DeduplicateMergeFunction();
-                    break;
-                case PARTIAL_UPDATE:
-                    List<LogicalType> fieldTypes = type.getChildren();
-                    RowData.FieldGetter[] fieldGetters = new RowData.FieldGetter[fieldTypes.size()];
-                    for (int i = 0; i < fieldTypes.size(); i++) {
-                        fieldGetters[i] = RowData.createFieldGetter(fieldTypes.get(i), i);
-                    }
-                    mergeFunction = new PartialUpdateMergeFunction(fieldGetters);
-                    break;
-                default:
-                    throw new UnsupportedOperationException(
-                            "Unsupported merge engine: " + mergeEngine());
-            }
+            return FileStoreImpl.createWithPrimaryKey(
+                    fileStoreOptions.path(tableIdentifier).toString(),
+                    fileStoreOptions,
+                    user,
+                    partitionType,
+                    TypeUtils.project(type, primaryKeys),
+                    type,
+                    mergeEngine());
         }
-        return new FileStoreImpl(
-                tableIdentifier, options, user, partitionType, keyType, valueType, mergeFunction);
     }
 
     private void adjustIndexAndValidate() {

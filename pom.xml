@@ -60,13 +60,19 @@ under the License.
         <module>flink-table-store-dist</module>
         <module>flink-table-store-e2e-tests</module>
         <module>flink-table-store-format</module>
+        <module>flink-table-store-hive</module>
         <module>flink-table-store-kafka</module>
     </modules>
 
     <properties>
         <flink.version>1.15.0</flink.version>
+        <flink.shaded.version>15.0</flink.shaded.version>
+        <flink.shaded.jackson.version>2.12.4</flink.shaded.jackson.version>
         <hadoop.version>2.8.5</hadoop.version>
+        <hive.version>2.3.4</hive.version>
         <scala.binary.version>2.12</scala.binary.version>
+        <snappy.version>1.1.8.3</snappy.version>
+        <lz4.version>1.8.0</lz4.version>
         <slf4j.version>1.7.15</slf4j.version>
         <log4j.version>2.17.1</log4j.version>
         <junit4.version>4.13.2</junit4.version>
