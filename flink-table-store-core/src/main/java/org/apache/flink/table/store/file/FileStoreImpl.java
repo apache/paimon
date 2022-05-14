@@ -241,7 +241,7 @@ public class FileStoreImpl implements FileStore {
                 mergeFunction = new PartialUpdateMergeFunction(fieldGetters);
                 break;
             case AGGREGATION:
-                mergeFunction = new AggregationMergeFunction(fieldGetters);
+                mergeFunction = new AggregationMergeFunction(fieldGetters, primaryKeyType, rowType);
                 break;
             default:
                 throw new UnsupportedOperationException("Unsupported merge engine: " + mergeEngine);

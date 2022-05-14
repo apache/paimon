@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
@@ -34,11 +35,16 @@ public class AggregationMergeFunction implements MergeFunction {
     private static final long serialVersionUID = 1L;
 
     private final RowData.FieldGetter[] getters;
+    private final RowType primaryKeyType;
+    private final RowType rowType;
 
     private transient GenericRowData row;
 
-    public AggregationMergeFunction(RowData.FieldGetter[] getters) {
-        this.getters = getters;
+    public AggregationMergeFunction(
+            RowData.FieldGetter[] fieldGetters, RowType primaryKeyType, RowType rowType) {
+        this.getters = fieldGetters;
+        this.primaryKeyType = primaryKeyType;
+        this.rowType = rowType;
     }
 
     @Override
@@ -50,10 +56,18 @@ public class AggregationMergeFunction implements MergeFunction {
     public void add(RowData value) {
         for (int i = 0; i < getters.length; i++) {
             Object currentField = getters[i].getFieldOrNull(value);
-            Object oldValue = row.getField(i);
-            Object result = sum(value.getRowKind(), oldValue, currentField);
-            if (result != null) {
-                row.setField(i, result);
+
+            if (primaryKeyType.getFieldIndex(rowType.getFieldNames().get(i)) != -1) {
+                // primary key
+                if (currentField != null) {
+                    row.setField(i, currentField);
+                }
+            } else {
+                Object oldValue = row.getField(i);
+                Object result = sum(value.getRowKind(), oldValue, currentField);
+                if (result != null) {
+                    row.setField(i, result);
+                }
             }
         }
     }
@@ -112,6 +126,6 @@ public class AggregationMergeFunction implements MergeFunction {
     @Override
     public MergeFunction copy() {
         // RowData.FieldGetter is thread safe
-        return new AggregationMergeFunction(getters);
+        return new AggregationMergeFunction(getters, primaryKeyType, rowType);
     }
 }

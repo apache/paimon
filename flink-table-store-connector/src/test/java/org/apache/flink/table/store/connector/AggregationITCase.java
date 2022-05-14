@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.types.Row;
+
 import org.junit.Test;
 
 import java.util.Collections;
@@ -28,14 +29,22 @@ import java.util.concurrent.ExecutionException;
 import static org.apache.flink.util.CollectionUtil.iteratorToList;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * ITCase for partial update.
- */
+/** ITCase for partial update. */
 public class AggregationITCase extends FileStoreTableITCase {
 
     @Override
     protected List<String> ddl() {
-        return Collections.singletonList("CREATE TABLE IF NOT EXISTS T3 (" + "a STRING," + "b INT," + "c INT ," + "PRIMARY KEY (a) NOT ENFORCED )" + " WITH ('merge-engine'='aggregation'     );");
+        return Collections.singletonList(
+                "CREATE TABLE IF NOT EXISTS T3 ( "
+                        + " a STRING, "
+                        + " b INT, "
+                        + " c INT, "
+                        + " PRIMARY KEY (a) NOT ENFORCED )"
+                        + " WITH ("
+                        + " 'merge-engine'='aggregation' ,"
+                        + " 'b.aggregate-function'='sum' ,"
+                        + " 'c.aggregate-function'='sum' "
+                        + " );");
     }
 
     @Test
@@ -54,7 +63,6 @@ public class AggregationITCase extends FileStoreTableITCase {
         assertThat(result).containsExactlyInAnyOrder(Row.of("pk1", 4, 6));
     }
 
-
     @Test
     public void testMergeCompaction() throws ExecutionException, InterruptedException {
         // Wait compaction
@@ -71,11 +79,6 @@ public class AggregationITCase extends FileStoreTableITCase {
         bEnv.executeSql("INSERT INTO T3 VALUES ('pk2', 4,4)").await();
 
         List<Row> result = iteratorToList(bEnv.from("T3").execute().collect());
-        assertThat(result).containsExactlyInAnyOrder(Row.of("pk1",11,12), Row.of("pk2",19,11));
+        assertThat(result).containsExactlyInAnyOrder(Row.of("pk1", 11, 12), Row.of("pk2", 19, 11));
     }
-
-//    @Test
-//    public void testStreamingRead() {
-//        assertThatThrownBy(() -> sEnv.from("T3").execute().print(), "Partial update continuous reading is not supported");
-//    }
 }
