@@ -37,9 +37,7 @@ public class ContinuousFileStoreITCase extends FileStoreTableITCase {
     protected List<String> ddl() {
         return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING)",
-                "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)",
-                "CREATE TABLE IF NOT EXISTS T3 (a STRING, b INT, c INT, PRIMARY KEY (a) NOT ENFORCED)",
-                "CREATE TABLE IF NOT EXISTS T4 (a STRING, b INT, c INT, PRIMARY KEY (a,b) NOT ENFORCED)");
+                "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)");
     }
 
     @Test
