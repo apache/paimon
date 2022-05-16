@@ -47,6 +47,9 @@ public class NotEqual implements Predicate {
     @Override
     public boolean test(long rowCount, FieldStats[] fieldStats) {
         FieldStats stats = fieldStats[index];
+        if (rowCount == stats.nullCount()) {
+            return false;
+        }
         return literal.compareValueTo(stats.minValue()) != 0
                 || literal.compareValueTo(stats.maxValue()) != 0;
     }
