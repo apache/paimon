@@ -19,8 +19,11 @@
 
 package org.apache.flink.table.store.file.writer;
 
+import org.apache.flink.core.fs.Path;
+
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.Iterator;
 
 /**
@@ -83,4 +86,17 @@ public interface FileWriter<T, R> extends Closeable {
 
     /** @return the result for this closed file writer. */
     R result() throws IOException;
+
+    /** A factory that creates a {@link FormatWriter}. */
+    interface Factory<T, R> extends Serializable {
+
+        /**
+         * Creates a writer that writes to the given stream.
+         *
+         * @param path the path to write records.
+         * @return the file format writer.
+         * @throws IOException if any IO error was encountered then open the writer.
+         */
+        FileWriter<T, R> create(Path path) throws IOException;
+    }
 }

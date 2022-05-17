@@ -31,19 +31,18 @@ import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.function.Function;
 
 /**
- * A {@link FormatWriter} implementation that write {@link RowData} with generated {@link Metric}.
+ * An {@link FileWriter} to write generic record and generate {@link Metric} once closing it.
+ *
+ * @param <T> generic record type.
  */
-public class RowFormatWriter implements FormatWriter<RowData> {
-    private static final Logger LOG = LoggerFactory.getLogger(RowFormatWriter.class);
-
+public class MetricFileWriter<T> implements FileWriter<T, Metric> {
     private final BulkWriter<RowData> writer;
+    private final Function<T, RowData> converter;
     private final FSDataOutputStream out;
     private final Path path;
     private final FileStatsExtractor fileStatsExtractor;
@@ -53,13 +52,15 @@ public class RowFormatWriter implements FormatWriter<RowData> {
     private long recordCount;
     private boolean closed = false;
 
-    private RowFormatWriter(
+    private MetricFileWriter(
             BulkWriter<RowData> writer,
+            Function<T, RowData> converter,
             FSDataOutputStream out,
             Path path,
             RowType writeSchema,
             FileStatsExtractor fileStatsExtractor) {
         this.writer = writer;
+        this.converter = converter;
         this.out = out;
         this.path = path;
 
@@ -72,11 +73,12 @@ public class RowFormatWriter implements FormatWriter<RowData> {
     }
 
     @Override
-    public void write(RowData record) throws IOException {
-        writer.addElement(record);
+    public void write(T record) throws IOException {
+        RowData rowData = converter.apply(record);
+        writer.addElement(rowData);
 
         if (fieldStatsCollector != null) {
-            fieldStatsCollector.collect(record);
+            fieldStatsCollector.collect(rowData);
         }
 
         recordCount += 1;
@@ -138,37 +140,41 @@ public class RowFormatWriter implements FormatWriter<RowData> {
         }
     }
 
-    /** A factory that creates {@link RowFormatWriter}. */
-    public static class RowFormatWriterFactory implements FormatWriter.Factory<RowData> {
+    public static <T> FileWriter.Factory<T, Metric> createFactory(
+            BulkWriter.Factory<RowData> factory,
+            Function<T, RowData> converter,
+            RowType writeSchema,
+            FileStatsExtractor fileStatsExtractor) {
+        return new Factory<>(factory, converter, writeSchema, fileStatsExtractor);
+    }
 
-        private final BulkWriter.Factory<RowData> writerFactory;
+    private static class Factory<T> implements FileWriter.Factory<T, Metric> {
+        private final BulkWriter.Factory<RowData> factory;
+        private final Function<T, RowData> converter;
         private final RowType writeSchema;
         private final FileStatsExtractor fileStatsExtractor;
 
-        public RowFormatWriterFactory(
-                BulkWriter.Factory<RowData> writerFactory,
+        public Factory(
+                BulkWriter.Factory<RowData> factory,
+                Function<T, RowData> converter,
                 RowType writeSchema,
                 FileStatsExtractor fileStatsExtractor) {
-            this.writerFactory = writerFactory;
+            this.factory = factory;
+            this.converter = converter;
             this.writeSchema = writeSchema;
             this.fileStatsExtractor = fileStatsExtractor;
         }
 
         @Override
-        public FormatWriter<RowData> create(Path path) throws IOException {
+        public FileWriter<T, Metric> create(Path path) throws IOException {
+            // TODO check the failure case , should we close the output stream or fd in the finally
+            // block ???
+            FSDataOutputStream out =
+                    path.getFileSystem().create(path, FileSystem.WriteMode.NO_OVERWRITE);
+            BulkWriter<RowData> bulkWriter = factory.create(out);
 
-            FileSystem fs = path.getFileSystem();
-            FSDataOutputStream out = fs.create(path, FileSystem.WriteMode.NO_OVERWRITE);
-
-            try {
-                BulkWriter<RowData> bulkWriter = writerFactory.create(out);
-                return new RowFormatWriter(bulkWriter, out, path, writeSchema, fileStatsExtractor);
-            } catch (Throwable e) {
-                LOG.error("Failed to create the Row bulk writer for path: {}", path, e);
-
-                out.close();
-                throw e;
-            }
+            return new MetricFileWriter<>(
+                    bulkWriter, converter, out, path, writeSchema, fileStatsExtractor);
         }
     }
 }

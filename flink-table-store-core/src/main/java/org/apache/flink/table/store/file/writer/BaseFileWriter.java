@@ -34,15 +34,15 @@ import java.io.IOException;
  */
 public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
 
-    private final FormatWriter.Factory<T> writerFactory;
+    private final FileWriter.Factory<T, Metric> writerFactory;
     private final Path path;
 
-    private FormatWriter<T> writer = null;
+    private FileWriter<T, Metric> writer = null;
     private Metric metric = null;
 
     private boolean closed = false;
 
-    public BaseFileWriter(FormatWriter.Factory<T> writerFactory, Path path) {
+    public BaseFileWriter(FileWriter.Factory<T, Metric> writerFactory, Path path) {
         this.writerFactory = writerFactory;
         this.path = path;
     }
@@ -80,7 +80,7 @@ public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
         return 0;
     }
 
-    protected abstract R createFileMeta(Path path, Metric metric) throws IOException;
+    protected abstract R createResult(Path path, Metric metric) throws IOException;
 
     @Override
     public void abort() {
@@ -95,7 +95,7 @@ public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
         Preconditions.checkState(closed, "Cannot access the file meta unless close this writer.");
         Preconditions.checkNotNull(metric, "Metric cannot be null.");
 
-        return createFileMeta(path, metric);
+        return createResult(path, metric);
     }
 
     @Override

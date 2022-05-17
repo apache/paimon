@@ -19,6 +19,7 @@
 
 package org.apache.flink.table.store.file.writer;
 
+import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.ValueKind;
@@ -28,6 +29,7 @@ import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsCollector;
+import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
@@ -35,6 +37,7 @@ import org.apache.flink.util.Preconditions;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -42,7 +45,8 @@ import java.util.function.Supplier;
  * operations and don't have any unique keys or sort keys.
  */
 public class AppendOnlyWriter implements RecordWriter {
-    private final FormatWriter.Factory<RowData> writerFactory;
+    private final BulkWriter.Factory<RowData> writerFactory;
+    private final FileStatsExtractor fileStatsExtractor;
     private final RowType writeSchema;
     private final long targetFileSize;
     private final DataFilePathFactory pathFactory;
@@ -58,8 +62,9 @@ public class AppendOnlyWriter implements RecordWriter {
             DataFilePathFactory pathFactory) {
 
         this.writerFactory = fileFormat.createWriterFactory(writeSchema);
-        this.writeSchema = writeSchema;
+        this.fileStatsExtractor = fileFormat.createStatsExtractor(writeSchema).orElse(null);
         this.targetFileSize = targetFileSize;
+        this.writeSchema = writeSchema;
         this.pathFactory = pathFactory;
         this.nextSeqNum = maxWroteSeqNumber + 1;
 
@@ -112,9 +117,15 @@ public class AppendOnlyWriter implements RecordWriter {
         return result;
     }
 
+    private FileWriter.Factory<RowData, Metric> createFileWriterFactory() {
+        return MetricFileWriter.createFactory(
+                writerFactory, Function.identity(), writeSchema, fileStatsExtractor);
+    }
+
     private RowRollingWriter createRollingRowWriter() {
         return new RowRollingWriter(
-                () -> new RowFileWriter(writerFactory, pathFactory.newPath()), targetFileSize);
+                () -> new RowFileWriter(createFileWriterFactory(), pathFactory.newPath()),
+                targetFileSize);
     }
 
     private class RowRollingWriter extends RollingFileWriter<RowData, DataFileMeta> {
@@ -128,7 +139,7 @@ public class AppendOnlyWriter implements RecordWriter {
         private final long minSeqNum;
         private final FieldStatsCollector fieldStatsCollector;
 
-        public RowFileWriter(FormatWriter.Factory<RowData> writerFactory, Path path) {
+        public RowFileWriter(FileWriter.Factory<RowData, Metric> writerFactory, Path path) {
             super(writerFactory, path);
             this.minSeqNum = nextSeqNum;
             this.fieldStatsCollector = new FieldStatsCollector(writeSchema);
@@ -142,7 +153,7 @@ public class AppendOnlyWriter implements RecordWriter {
         }
 
         @Override
-        protected DataFileMeta createFileMeta(Path path, Metric metric) throws IOException {
+        protected DataFileMeta createResult(Path path, Metric metric) throws IOException {
             BinaryTableStats stats = fieldStatsCollector.toBinary(metric.fieldStats());
 
             return DataFileMeta.forAppend(
