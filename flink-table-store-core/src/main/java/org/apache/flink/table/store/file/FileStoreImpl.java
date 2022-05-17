@@ -84,10 +84,7 @@ public class FileStoreImpl implements FileStore {
     @VisibleForTesting
     public ManifestFile.Factory manifestFileFactory() {
         return new ManifestFile.Factory(
-                partitionType,
-                options.manifestFormat(),
-                pathFactory(),
-                options.manifestTargetSize().getBytes());
+                options.manifestFormat(), pathFactory(), options.manifestTargetSize().getBytes());
     }
 
     @VisibleForTesting

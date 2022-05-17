@@ -25,6 +25,7 @@ import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.format.FileFormat;
+import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
@@ -51,22 +52,22 @@ public class ManifestFile {
 
     private static final Logger LOG = LoggerFactory.getLogger(ManifestFile.class);
 
-    private final RowType partitionType;
     private final ManifestEntrySerializer serializer;
+    private final FieldStatsArraySerializer statsSerializer;
     private final BulkFormat<RowData, FileSourceSplit> readerFactory;
     private final FormatWriter.Factory<RowData> writerFactory;
     private final FileStorePathFactory pathFactory;
     private final long suggestedFileSize;
 
     private ManifestFile(
-            RowType partitionType,
             ManifestEntrySerializer serializer,
+            FieldStatsArraySerializer statsSerializer,
             BulkFormat<RowData, FileSourceSplit> readerFactory,
             FormatWriter.Factory<RowData> writerFactory,
             FileStorePathFactory pathFactory,
             long suggestedFileSize) {
-        this.partitionType = partitionType;
         this.serializer = serializer;
+        this.statsSerializer = statsSerializer;
         this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
         this.pathFactory = pathFactory;
@@ -120,8 +121,7 @@ public class ManifestFile {
         }
     }
 
-    private static class ManifestEntryWriter
-            extends BaseFileWriter<ManifestEntry, ManifestFileMeta> {
+    private class ManifestEntryWriter extends BaseFileWriter<ManifestEntry, ManifestFileMeta> {
 
         private long numAddedFiles = 0;
         private long numDeletedFiles = 0;
@@ -154,7 +154,7 @@ public class ManifestFile {
                     path.getFileSystem().getFileStatus(path).getLen(),
                     numAddedFiles,
                     numDeletedFiles,
-                    metric.fieldStats());
+                    statsSerializer.toBinary(metric.fieldStats()));
         }
     }
 
@@ -188,17 +188,12 @@ public class ManifestFile {
      */
     public static class Factory {
 
-        private final RowType partitionType;
         private final FileFormat fileFormat;
         private final FileStorePathFactory pathFactory;
         private final long suggestedFileSize;
 
         public Factory(
-                RowType partitionType,
-                FileFormat fileFormat,
-                FileStorePathFactory pathFactory,
-                long suggestedFileSize) {
-            this.partitionType = partitionType;
+                FileFormat fileFormat, FileStorePathFactory pathFactory, long suggestedFileSize) {
             this.fileFormat = fileFormat;
             this.pathFactory = pathFactory;
             this.suggestedFileSize = suggestedFileSize;
@@ -207,8 +202,8 @@ public class ManifestFile {
         public ManifestFile create() {
             RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.schema());
             return new ManifestFile(
-                    partitionType,
                     new ManifestEntrySerializer(),
+                    new FieldStatsArraySerializer(entryType),
                     fileFormat.createReaderFactory(entryType),
                     fileFormat.createWriterFactory(entryType),
                     pathFactory,

@@ -142,7 +142,6 @@ public class ManifestFileMetaTest {
 
     private ManifestFile createManifestFile(String path) {
         return new ManifestFile.Factory(
-                        PARTITION_TYPE,
                         avro,
                         new FileStorePathFactory(new Path(path), PARTITION_TYPE, "default"),
                         Long.MAX_VALUE)
