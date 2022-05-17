@@ -39,18 +39,18 @@ public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
 
     private final BulkWriter.Factory<T> writerFactory;
     private final Path path;
+    private final MetricCollector<T> metric;
 
-    private long recordCount;
     private FSDataOutputStream currentOut = null;
     private BulkWriter<T> currentWriter = null;
 
     private boolean closed = false;
 
-    public BaseFileWriter(BulkWriter.Factory<T> writerFactory, Path path) {
+    public BaseFileWriter(
+            BulkWriter.Factory<T> writerFactory, Path path, MetricCollector<T> metric) {
         this.writerFactory = writerFactory;
         this.path = path;
-
-        this.recordCount = 0;
+        this.metric = metric;
     }
 
     public Path path() {
@@ -69,12 +69,12 @@ public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
         }
 
         currentWriter.addElement(row);
-        recordCount += 1;
+        metric.update(row);
     }
 
     @Override
     public long recordCount() {
-        return recordCount;
+        return metric.recordCount();
     }
 
     @Override
@@ -85,7 +85,7 @@ public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
         return 0;
     }
 
-    protected abstract R createFileMeta(Path path) throws IOException;
+    protected abstract R createResult(Path path, Metric metric) throws IOException;
 
     @Override
     public void abort() {
@@ -99,7 +99,7 @@ public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
     public R result() throws IOException {
         Preconditions.checkState(closed, "Cannot access the file meta unless close this writer.");
 
-        return createFileMeta(path);
+        return createResult(path, metric.get());
     }
 
     @Override

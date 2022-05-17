@@ -37,9 +37,12 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.writer.BaseBulkWriter;
 import org.apache.flink.table.store.file.writer.BaseFileWriter;
+import org.apache.flink.table.store.file.writer.Metric;
+import org.apache.flink.table.store.file.writer.MetricCollector;
 import org.apache.flink.table.store.file.writer.RollingFileWriter;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.CloseableIterator;
+import org.apache.flink.util.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -137,12 +140,70 @@ public class DataFileWriter {
         }
     }
 
+    private class KvMetricCollector implements MetricCollector<KeyValue> {
+        private long recordCount = 0;
+
+        private final Path path;
+        private final FieldStatsCollector keyStatsCollector;
+        private final FieldStatsCollector valStatsCollector;
+
+        KvMetricCollector(Path path) {
+            this.path = path;
+
+            if (fileStatsExtractor == null) {
+                this.keyStatsCollector = new FieldStatsCollector(keyType);
+                this.valStatsCollector = new FieldStatsCollector(valueType);
+            } else {
+                this.keyStatsCollector = null;
+                this.valStatsCollector = null;
+            }
+        }
+
+        @Override
+        public void update(KeyValue row) {
+            recordCount += 1;
+
+            if (keyStatsCollector != null) {
+                this.keyStatsCollector.collect(row.key());
+            }
+
+            if (valStatsCollector != null) {
+                this.valStatsCollector.collect(row.value());
+            }
+        }
+
+        @Override
+        public long recordCount() {
+            return recordCount;
+        }
+
+        @Override
+        public Metric get() {
+            if (fileStatsExtractor == null) {
+                Preconditions.checkNotNull(keyStatsCollector);
+                Preconditions.checkNotNull(valStatsCollector);
+                FieldStats[] keys = keyStatsCollector.extractFieldStats();
+                FieldStats[] vals = valStatsCollector.extractFieldStats();
+
+                FieldStats[] stats = new FieldStats[keys.length + vals.length];
+                System.arraycopy(keys, 0, stats, 0, keys.length);
+                System.arraycopy(
+                        vals, 0, stats, keys.length, keys.length + vals.length - keys.length);
+
+                return new Metric(stats, recordCount);
+            } else {
+                try {
+                    return new Metric(fileStatsExtractor.extract(path), recordCount);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            }
+        }
+    }
+
     private class KvFileWriter extends BaseFileWriter<KeyValue, DataFileMeta> {
         private final int level;
         private final RowDataSerializer keySerializer;
-
-        private FieldStatsCollector keyStatsCollector = null;
-        private FieldStatsCollector valueStatsCollector = null;
 
         private BinaryRowData minKey = null;
         private RowData maxKey = null;
@@ -151,24 +212,15 @@ public class DataFileWriter {
 
         public KvFileWriter(BulkWriter.Factory<KeyValue> writerFactory, Path path, int level)
                 throws IOException {
-            super(writerFactory, path);
+            super(writerFactory, path, new KvMetricCollector(path));
 
             this.level = level;
             this.keySerializer = new RowDataSerializer(keyType);
-            if (fileStatsExtractor == null) {
-                this.keyStatsCollector = new FieldStatsCollector(keyType);
-                this.valueStatsCollector = new FieldStatsCollector(valueType);
-            }
         }
 
         @Override
         public void write(KeyValue kv) throws IOException {
             super.write(kv);
-
-            if (fileStatsExtractor == null) {
-                keyStatsCollector.collect(kv.key());
-                valueStatsCollector.collect(kv.value());
-            }
 
             updateMinKey(kv);
             updateMaxKey(kv);
@@ -196,22 +248,20 @@ public class DataFileWriter {
         }
 
         @Override
-        protected DataFileMeta createFileMeta(Path path) throws IOException {
+        protected DataFileMeta createResult(Path path, Metric metric) throws IOException {
 
             BinaryTableStats keyStats;
             BinaryTableStats valueStats;
-            if (fileStatsExtractor == null) {
-                keyStats = keyStatsCollector.extract();
-                valueStats = valueStatsCollector.extract();
-            } else {
-                FieldStats[] rowStats = fileStatsExtractor.extract(path);
-                int numKeyFields = keyType.getFieldCount();
-                keyStats =
-                        keyStatsConverter.toBinary(Arrays.copyOfRange(rowStats, 0, numKeyFields));
-                valueStats =
-                        valueStatsConverter.toBinary(
-                                Arrays.copyOfRange(rowStats, numKeyFields + 2, rowStats.length));
-            }
+            int numKeyFields = keyType.getFieldCount();
+            keyStats =
+                    keyStatsConverter.toBinary(
+                            Arrays.copyOfRange(metric.fieldStats(), 0, numKeyFields));
+            valueStats =
+                    valueStatsConverter.toBinary(
+                            Arrays.copyOfRange(
+                                    metric.fieldStats(),
+                                    numKeyFields + 2,
+                                    metric.fieldStats().length));
 
             return new DataFileMeta(
                     path.getName(),

@@ -27,7 +27,7 @@ import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.Increment;
-import org.apache.flink.table.store.file.stats.BinaryTableStats;
+import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.stats.FieldStatsCollector;
 import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.store.file.utils.FileUtils;
@@ -35,6 +35,7 @@ import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
@@ -128,14 +129,57 @@ public class AppendOnlyWriter implements RecordWriter {
         }
     }
 
+    private class RowMetricCollector implements MetricCollector<RowData> {
+
+        private final Path path;
+        private final FieldStatsCollector fieldStatsCollector;
+        private long recordCount = 0;
+
+        private RowMetricCollector(Path path) {
+            this.path = path;
+            if (fileStatsExtractor != null) {
+                this.fieldStatsCollector = new FieldStatsCollector(writeSchema);
+            } else {
+                this.fieldStatsCollector = null;
+            }
+        }
+
+        @Override
+        public void update(RowData row) {
+            recordCount += 1;
+
+            if (fieldStatsCollector != null) {
+                fieldStatsCollector.collect(row);
+            }
+        }
+
+        @Override
+        public long recordCount() {
+            return recordCount;
+        }
+
+        @Override
+        public Metric get() {
+            if (fileStatsExtractor != null) {
+                try {
+                    return new Metric(fileStatsExtractor.extract(path), recordCount);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            } else {
+                return new Metric(fieldStatsCollector.extractFieldStats(), recordCount);
+            }
+        }
+    }
+
     private class RowFileWriter extends BaseFileWriter<RowData, DataFileMeta> {
         private final long minSeqNum;
-        private final FieldStatsCollector fieldStatsCollector;
+        private final FieldStatsArraySerializer serializer;
 
         public RowFileWriter(BulkWriter.Factory<RowData> writerFactory, Path path) {
-            super(writerFactory, path);
+            super(writerFactory, path, new RowMetricCollector(path));
             this.minSeqNum = nextSeqNum;
-            this.fieldStatsCollector = new FieldStatsCollector(writeSchema);
+            this.serializer = new FieldStatsArraySerializer(writeSchema);
         }
 
         @Override
@@ -143,25 +187,15 @@ public class AppendOnlyWriter implements RecordWriter {
             super.write(row);
 
             nextSeqNum += 1;
-            if (fileStatsExtractor == null) {
-                fieldStatsCollector.collect(row);
-            }
         }
 
         @Override
-        protected DataFileMeta createFileMeta(Path path) throws IOException {
-            BinaryTableStats stats;
-            if (fileStatsExtractor != null) {
-                stats = fieldStatsCollector.toBinary(fileStatsExtractor.extract(path));
-            } else {
-                stats = fieldStatsCollector.extract();
-            }
-
+        protected DataFileMeta createResult(Path path, Metric metric) throws IOException {
             return DataFileMeta.forAppend(
                     path.getName(),
                     FileUtils.getFileSize(path),
                     recordCount(),
-                    stats,
+                    serializer.toBinary(metric.fieldStats()),
                     minSeqNum,
                     Math.max(minSeqNum, nextSeqNum - 1));
         }

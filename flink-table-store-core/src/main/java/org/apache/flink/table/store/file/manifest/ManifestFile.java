@@ -26,12 +26,15 @@ import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.format.FileFormat;
+import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.stats.FieldStatsCollector;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
 import org.apache.flink.table.store.file.writer.BaseBulkWriter;
 import org.apache.flink.table.store.file.writer.BaseFileWriter;
+import org.apache.flink.table.store.file.writer.Metric;
+import org.apache.flink.table.store.file.writer.MetricCollector;
 import org.apache.flink.table.store.file.writer.RollingFileWriter;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -120,18 +123,41 @@ public class ManifestFile {
         }
     }
 
-    private class ManifestEntryWriter extends BaseFileWriter<ManifestEntry, ManifestFileMeta> {
-
+    private class PartitionMetricCollector implements MetricCollector<ManifestEntry> {
         private final FieldStatsCollector statsCollector;
+        private long recordCount;
+
+        private PartitionMetricCollector() {
+            this.statsCollector = new FieldStatsCollector(partitionType);
+        }
+
+        @Override
+        public void update(ManifestEntry row) {
+            this.statsCollector.collect(row.partition());
+            recordCount += 1;
+        }
+
+        @Override
+        public long recordCount() {
+            return recordCount;
+        }
+
+        @Override
+        public Metric get() {
+            return new Metric(statsCollector.extractFieldStats(), recordCount);
+        }
+    }
+
+    private class ManifestEntryWriter extends BaseFileWriter<ManifestEntry, ManifestFileMeta> {
 
         private long numAddedFiles = 0;
         private long numDeletedFiles = 0;
+        private final FieldStatsArraySerializer serializer;
 
         ManifestEntryWriter(BulkWriter.Factory<ManifestEntry> writerFactory, Path path)
                 throws IOException {
-            super(writerFactory, path);
-
-            this.statsCollector = new FieldStatsCollector(partitionType);
+            super(writerFactory, path, new PartitionMetricCollector());
+            this.serializer = new FieldStatsArraySerializer(partitionType);
         }
 
         @Override
@@ -148,18 +174,16 @@ public class ManifestFile {
                 default:
                     throw new UnsupportedOperationException("Unknown entry kind: " + entry.kind());
             }
-
-            statsCollector.collect(entry.partition());
         }
 
         @Override
-        protected ManifestFileMeta createFileMeta(Path path) throws IOException {
+        protected ManifestFileMeta createResult(Path path, Metric metric) throws IOException {
             return new ManifestFileMeta(
                     path.getName(),
                     path.getFileSystem().getFileStatus(path).getLen(),
                     numAddedFiles,
                     numDeletedFiles,
-                    statsCollector.extract());
+                    serializer.toBinary(metric.fieldStats()));
         }
     }
 
