@@ -133,7 +133,7 @@ public class ManifestFile {
 
         @Override
         public void update(ManifestEntry row) {
-            this.statsCollector.collect(row.partition());
+            statsCollector.collect(row.partition());
             recordCount += 1;
         }
 

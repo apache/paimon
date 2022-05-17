@@ -138,9 +138,9 @@ public class AppendOnlyWriter implements RecordWriter {
         private RowMetricCollector(Path path) {
             this.path = path;
             if (fileStatsExtractor != null) {
-                this.fieldStatsCollector = new FieldStatsCollector(writeSchema);
-            } else {
                 this.fieldStatsCollector = null;
+            } else {
+                this.fieldStatsCollector = new FieldStatsCollector(writeSchema);
             }
         }
 

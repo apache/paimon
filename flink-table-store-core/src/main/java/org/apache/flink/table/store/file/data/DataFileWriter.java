@@ -151,11 +151,11 @@ public class DataFileWriter {
             this.path = path;
 
             if (fileStatsExtractor == null) {
-                this.keyStatsCollector = new FieldStatsCollector(keyType);
-                this.valStatsCollector = new FieldStatsCollector(valueType);
+                keyStatsCollector = new FieldStatsCollector(keyType);
+                valStatsCollector = new FieldStatsCollector(valueType);
             } else {
-                this.keyStatsCollector = null;
-                this.valStatsCollector = null;
+                keyStatsCollector = null;
+                valStatsCollector = null;
             }
         }
 
@@ -187,8 +187,7 @@ public class DataFileWriter {
 
                 FieldStats[] stats = new FieldStats[keys.length + vals.length];
                 System.arraycopy(keys, 0, stats, 0, keys.length);
-                System.arraycopy(
-                        vals, 0, stats, keys.length, keys.length + vals.length - keys.length);
+                System.arraycopy(vals, 0, stats, keys.length, vals.length);
 
                 return new Metric(stats, recordCount);
             } else {
@@ -249,18 +248,15 @@ public class DataFileWriter {
 
         @Override
         protected DataFileMeta createResult(Path path, Metric metric) throws IOException {
-
-            BinaryTableStats keyStats;
-            BinaryTableStats valueStats;
             int numKeyFields = keyType.getFieldCount();
-            keyStats =
+            BinaryTableStats keyStats =
                     keyStatsConverter.toBinary(
                             Arrays.copyOfRange(metric.fieldStats(), 0, numKeyFields));
-            valueStats =
+            BinaryTableStats valueStats =
                     valueStatsConverter.toBinary(
                             Arrays.copyOfRange(
                                     metric.fieldStats(),
-                                    numKeyFields + 2,
+                                    numKeyFields,
                                     metric.fieldStats().length));
 
             return new DataFileMeta(
