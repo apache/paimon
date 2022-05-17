@@ -21,7 +21,6 @@ package org.apache.flink.table.store.hive.objectinspector;
 import org.apache.hadoop.hive.serde2.io.DateWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
-
 import org.junit.jupiter.api.Test;
 
 import java.sql.Date;
