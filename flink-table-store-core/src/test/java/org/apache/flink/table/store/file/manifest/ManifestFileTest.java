@@ -96,7 +96,9 @@ public class ManifestFileTest {
                 new FileStorePathFactory(
                         new Path(path), TestKeyValueGenerator.PARTITION_TYPE, "default");
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
-        return new ManifestFile.Factory(avro, pathFactory, suggestedFileSize).create();
+        return new ManifestFile.Factory(
+                        TestKeyValueGenerator.PARTITION_TYPE, avro, pathFactory, suggestedFileSize)
+                .create();
     }
 
     private void checkRollingFiles(

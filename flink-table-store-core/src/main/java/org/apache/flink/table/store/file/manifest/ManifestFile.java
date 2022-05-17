@@ -26,6 +26,7 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
+import org.apache.flink.table.store.file.stats.FieldStatsCollector;
 import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
@@ -53,6 +54,7 @@ public class ManifestFile {
 
     private static final Logger LOG = LoggerFactory.getLogger(ManifestFile.class);
 
+    private final RowType partitionType;
     private final RowType entryType;
     private final ManifestEntrySerializer serializer;
     private final FieldStatsArraySerializer statsSerializer;
@@ -63,6 +65,7 @@ public class ManifestFile {
     private final long suggestedFileSize;
 
     private ManifestFile(
+            RowType partitionType,
             RowType entryType,
             ManifestEntrySerializer serializer,
             FieldStatsArraySerializer statsSerializer,
@@ -71,6 +74,7 @@ public class ManifestFile {
             FileStatsExtractor fileStatsExtractor,
             FileStorePathFactory pathFactory,
             long suggestedFileSize) {
+        this.partitionType = partitionType;
         this.entryType = entryType;
         this.serializer = serializer;
         this.statsSerializer = statsSerializer;
@@ -127,12 +131,15 @@ public class ManifestFile {
 
     private class ManifestEntryWriter extends BaseFileWriter<ManifestEntry, ManifestFileMeta> {
 
+        private final FieldStatsCollector fieldStatsCollector;
         private long numAddedFiles = 0;
         private long numDeletedFiles = 0;
 
         ManifestEntryWriter(FileWriter.Factory<ManifestEntry, Metric> writerFactory, Path path)
                 throws IOException {
             super(writerFactory, path);
+
+            this.fieldStatsCollector = new FieldStatsCollector(partitionType);
         }
 
         @Override
@@ -149,16 +156,20 @@ public class ManifestFile {
                 default:
                     throw new UnsupportedOperationException("Unknown entry kind: " + entry.kind());
             }
+
+            fieldStatsCollector.collect(entry.partition());
         }
 
         @Override
-        protected ManifestFileMeta createResult(Path path, Metric metric) throws IOException {
+        protected ManifestFileMeta createResult(Path path, Metric ignore) throws IOException {
+            // The input metric will be ignored because it includes all the column's stats, rather
+            // than the partition stats.
             return new ManifestFileMeta(
                     path.getName(),
                     path.getFileSystem().getFileStatus(path).getLen(),
                     numAddedFiles,
                     numDeletedFiles,
-                    statsSerializer.toBinary(metric.fieldStats()));
+                    fieldStatsCollector.extract());
         }
     }
 
@@ -192,12 +203,17 @@ public class ManifestFile {
      */
     public static class Factory {
 
+        private final RowType partitionType;
         private final FileFormat fileFormat;
         private final FileStorePathFactory pathFactory;
         private final long suggestedFileSize;
 
         public Factory(
-                FileFormat fileFormat, FileStorePathFactory pathFactory, long suggestedFileSize) {
+                RowType partitionType,
+                FileFormat fileFormat,
+                FileStorePathFactory pathFactory,
+                long suggestedFileSize) {
+            this.partitionType = partitionType;
             this.fileFormat = fileFormat;
             this.pathFactory = pathFactory;
             this.suggestedFileSize = suggestedFileSize;
@@ -206,6 +222,7 @@ public class ManifestFile {
         public ManifestFile create() {
             RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.schema());
             return new ManifestFile(
+                    partitionType,
                     entryType,
                     new ManifestEntrySerializer(),
                     new FieldStatsArraySerializer(entryType),

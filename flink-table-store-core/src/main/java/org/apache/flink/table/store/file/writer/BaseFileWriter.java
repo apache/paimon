@@ -68,6 +68,8 @@ public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
     public long recordCount() {
         if (writer != null) {
             return writer.recordCount();
+        } else if (metric != null) {
+            return metric.recordCount();
         }
         return 0L;
     }

@@ -18,11 +18,14 @@
 
 package org.apache.flink.table.store.file.format;
 
+import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.file.table.format.BulkDecodingFormat;
+import org.apache.flink.table.connector.format.EncodingFormat;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.writer.FormatWriter;
 import org.apache.flink.table.types.logical.RowType;
+
+import java.io.IOException;
 
 /** A special {@link FileFormat} which flushes for every added element. */
 public class FlushingFileFormat extends FileFormat {
@@ -41,7 +44,32 @@ public class FlushingFileFormat extends FileFormat {
     }
 
     @Override
-    public FormatWriter.Factory<RowData> createWriterFactory(RowType type) {
-        return path -> format.createWriterFactory(type).create(path);
+    protected EncodingFormat<BulkWriter.Factory<RowData>> getEncodingFormat() {
+        return format.getEncodingFormat();
+    }
+
+    @Override
+    public BulkWriter.Factory<RowData> createWriterFactory(RowType type) {
+        return fsDataOutputStream -> {
+            BulkWriter<RowData> wrapped =
+                    super.createWriterFactory(type).create(fsDataOutputStream);
+            return new BulkWriter<RowData>() {
+                @Override
+                public void addElement(RowData rowData) throws IOException {
+                    wrapped.addElement(rowData);
+                    wrapped.flush();
+                }
+
+                @Override
+                public void flush() throws IOException {
+                    wrapped.flush();
+                }
+
+                @Override
+                public void finish() throws IOException {
+                    wrapped.finish();
+                }
+            };
+        };
     }
 }

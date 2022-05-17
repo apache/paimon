@@ -18,6 +18,9 @@
 
 package org.apache.flink.table.store.file.stats;
 
+import org.apache.flink.api.common.serialization.BulkWriter;
+import org.apache.flink.core.fs.FSDataOutputStream;
+import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.data.DecimalData;
@@ -27,7 +30,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.data.binary.BinaryStringData;
 import org.apache.flink.table.store.file.format.FileFormat;
-import org.apache.flink.table.store.file.writer.FormatWriter;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.CharType;
 import org.apache.flink.table.types.logical.DecimalType;
@@ -58,15 +60,17 @@ public abstract class FileStatsExtractorTestBase {
         FileFormat format = createFormat();
         RowType rowType = rowType();
 
-        FormatWriter.Factory<RowData> writerFactory = format.createWriterFactory(rowType);
+        BulkWriter.Factory<RowData> writerFactory = format.createWriterFactory(rowType);
         Path path = new Path(tempDir.toString() + "/test");
+        FSDataOutputStream out =
+                path.getFileSystem().create(path, FileSystem.WriteMode.NO_OVERWRITE);
+        BulkWriter<RowData> writer = writerFactory.create(out);
+
         List<GenericRowData> data = createData(rowType);
-        FormatWriter<RowData> formatWriter = writerFactory.create(path);
-        try (FormatWriter<RowData> writer = formatWriter) {
-            for (GenericRowData row : data) {
-                writer.write(row);
-            }
+        for (GenericRowData row : data) {
+            writer.addElement(row);
         }
+        writer.finish();
 
         FieldStatsCollector collector = new FieldStatsCollector(rowType);
         for (GenericRowData row : data) {
@@ -74,7 +78,9 @@ public abstract class FileStatsExtractorTestBase {
         }
         FieldStats[] expected = collector.extractFieldStats();
 
-        FieldStats[] actual = formatWriter.result().fieldStats();
+        FileStatsExtractor extractor = format.createStatsExtractor(rowType).get();
+        assertThat(extractor).isNotNull();
+        FieldStats[] actual = extractor.extract(path);
         assertThat(actual).isEqualTo(expected);
     }
 

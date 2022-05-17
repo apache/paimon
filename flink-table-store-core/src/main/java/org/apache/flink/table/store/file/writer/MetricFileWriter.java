@@ -29,7 +29,11 @@ import org.apache.flink.table.store.file.stats.FieldStatsCollector;
 import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.IOUtils;
 import org.apache.flink.util.Preconditions;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -41,6 +45,8 @@ import java.util.function.Function;
  * @param <T> generic record type.
  */
 public class MetricFileWriter<T> implements FileWriter<T, Metric> {
+    private static final Logger LOG = LoggerFactory.getLogger(MetricFileWriter.class);
+
     private final BulkWriter<RowData> writer;
     private final Function<T, RowData> converter;
     private final FSDataOutputStream out;
@@ -167,14 +173,22 @@ public class MetricFileWriter<T> implements FileWriter<T, Metric> {
 
         @Override
         public FileWriter<T, Metric> create(Path path) throws IOException {
-            // TODO check the failure case , should we close the output stream or fd in the finally
-            // block ???
-            FSDataOutputStream out =
-                    path.getFileSystem().create(path, FileSystem.WriteMode.NO_OVERWRITE);
-            BulkWriter<RowData> bulkWriter = factory.create(out);
+            FileSystem fs = path.getFileSystem();
+            FSDataOutputStream out = fs.create(path, FileSystem.WriteMode.NO_OVERWRITE);
 
-            return new MetricFileWriter<>(
-                    bulkWriter, converter, out, path, writeSchema, fileStatsExtractor);
+            try {
+                BulkWriter<RowData> bulkWriter = factory.create(out);
+
+                return new MetricFileWriter<>(
+                        bulkWriter, converter, out, path, writeSchema, fileStatsExtractor);
+            } catch (Throwable e) {
+                LOG.warn(
+                        "Failed to open the bulk writer, closing the output stream and throw the error.",
+                        e);
+
+                IOUtils.closeQuietly(out);
+                throw e;
+            }
         }
     }
 }
