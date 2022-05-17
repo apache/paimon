@@ -18,17 +18,18 @@
 
 package org.apache.flink.table.store.format;
 
+import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.util.Utils;
+import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.format.FileFormat;
-import org.apache.flink.table.store.file.writer.FormatWriter;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -85,11 +86,13 @@ public class BulkFileFormatTest {
         expected.add(GenericRowData.of(1, 1));
         expected.add(GenericRowData.of(2, 2));
         expected.add(GenericRowData.of(3, 3));
-        try (FormatWriter<RowData> writer = fileFormat.createWriterFactory(rowType).create(path)) {
-            for (RowData row : expected) {
-                writer.write(row);
-            }
+        FSDataOutputStream out = fs.create(path, FileSystem.WriteMode.NO_OVERWRITE);
+        BulkWriter<RowData> writer = fileFormat.createWriterFactory(rowType).create(out);
+        for (RowData row : expected) {
+            writer.addElement(row);
         }
+        writer.finish();
+        out.close();
 
         // read
         BulkFormat.Reader<RowData> reader =

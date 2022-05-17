@@ -26,13 +26,14 @@ import org.apache.flink.configuration.DelegatingConfiguration;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.table.format.BulkDecodingFormat;
+import org.apache.flink.table.connector.format.EncodingFormat;
 import org.apache.flink.table.connector.format.ProjectableDecodingFormat;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-import org.apache.flink.table.store.file.writer.FormatWriter;
+import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -40,6 +41,7 @@ import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.ServiceLoader;
 
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
@@ -52,6 +54,8 @@ import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDa
 public abstract class FileFormat {
 
     protected abstract BulkDecodingFormat<RowData> getDecodingFormat();
+
+    protected abstract EncodingFormat<BulkWriter.Factory<RowData>> getEncodingFormat();
 
     /**
      * Create a {@link BulkFormat} from the type, with projection pushed down.
@@ -76,7 +80,9 @@ public abstract class FileFormat {
     }
 
     /** Create a {@link BulkWriter.Factory} from the type. */
-    public abstract FormatWriter.Factory<RowData> createWriterFactory(RowType type);
+    public BulkWriter.Factory<RowData> createWriterFactory(RowType type) {
+        return getEncodingFormat().createRuntimeEncoder(SINK_CONTEXT, fromLogicalToDataType(type));
+    }
 
     public BulkFormat<RowData, FileSourceSplit> createReaderFactory(RowType rowType) {
         int[][] projection = new int[rowType.getFieldCount()][];
@@ -89,6 +95,10 @@ public abstract class FileFormat {
     public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
             RowType rowType, int[][] projection) {
         return createReaderFactory(rowType, projection, new ArrayList<>());
+    }
+
+    public Optional<FileStatsExtractor> createStatsExtractor(RowType type) {
+        return Optional.empty();
     }
 
     /** Create a {@link FileFormatImpl} from table options. */
@@ -115,7 +125,7 @@ public abstract class FileFormat {
         return new FileFormatImpl(classLoader, formatIdentifier, formatOptions);
     }
 
-    protected static final DynamicTableSink.Context SINK_CONTEXT =
+    private static final DynamicTableSink.Context SINK_CONTEXT =
             new DynamicTableSink.Context() {
 
                 @Override
