@@ -18,19 +18,18 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
+import org.apache.flink.table.utils.DateTimeUtils;
+
 import org.apache.hadoop.hive.serde2.io.DateWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.DateObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
 import java.sql.Date;
-import java.time.Duration;
 
 /** {@link AbstractPrimitiveJavaObjectInspector} for DATE type. */
 public class TableStoreDateObjectInspector extends AbstractPrimitiveJavaObjectInspector
         implements DateObjectInspector {
-
-    private static final long MILLIS_PER_DAY = Duration.ofDays(1).toMillis();
 
     public TableStoreDateObjectInspector() {
         super(TypeInfoFactory.dateTypeInfo);
@@ -40,7 +39,7 @@ public class TableStoreDateObjectInspector extends AbstractPrimitiveJavaObjectIn
     public Date getPrimitiveJavaObject(Object o) {
         // Flink stores date as an integer (epoch day, 1970-01-01 = day 0)
         // while constructor of Date accepts epoch millis
-        return o == null ? null : new Date(((Integer) o) * MILLIS_PER_DAY);
+        return o == null ? null : DateTimeUtils.toSQLDate((Integer) o);
     }
 
     @Override

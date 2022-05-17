@@ -16,4 +16,9 @@ jobs:
       - name: Build
         run: mvn clean install -DskipTests
       - name: Test
-        run: mvn test -pl flink-table-store-e2e-tests
+        run: |
+          # run tests with random timezone to find out timezone related bugs
+          . .github/workflows/utils.sh
+          jvm_timezone=$(random_timezone)
+          echo "JVM timezone is set to $jvm_timezone"
+          mvn test -pl flink-table-store-e2e-tests -Duser.timezone=$jvm_timezone
