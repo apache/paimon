@@ -25,6 +25,7 @@ import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.types.Row;
 
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.time.LocalDateTime;
@@ -40,6 +41,7 @@ public class StreamingWarehouseITCase extends ReadWriteTableTestBase {
     private final StreamTableEnvironment batchTableEnv =
             StreamTableEnvironment.create(buildBatchEnv(1), EnvironmentSettings.inBatchMode());
 
+    @Ignore // unstable case
     @Test
     public void testUserStory() throws Exception {
         // Step1: define trade order table schema
