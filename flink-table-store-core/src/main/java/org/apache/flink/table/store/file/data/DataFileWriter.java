@@ -255,9 +255,7 @@ public class DataFileWriter {
             BinaryTableStats valueStats =
                     valueStatsConverter.toBinary(
                             Arrays.copyOfRange(
-                                    metric.fieldStats(),
-                                    numKeyFields,
-                                    metric.fieldStats().length));
+                                    metric.fieldStats(), numKeyFields, metric.fieldStats().length));
 
             return new DataFileMeta(
                     path.getName(),
