@@ -51,8 +51,7 @@ public class TableStoreTimestampObjectInspectorTest {
 
         LocalDateTime local = LocalDateTime.of(2022, 4, 27, 15, 0, 0);
         TimestampData input = TimestampData.fromLocalDateTime(local);
-        Timestamp expected = Timestamp.valueOf(local);
-        assertThat(oi.getPrimitiveJavaObject(input)).isEqualTo(expected);
+        assertThat(oi.getPrimitiveJavaObject(input).toString()).isEqualTo("2022-04-27 15:00:00.0");
         assertThat(oi.getPrimitiveJavaObject(null)).isNull();
     }
 
@@ -62,8 +61,8 @@ public class TableStoreTimestampObjectInspectorTest {
 
         LocalDateTime local = LocalDateTime.of(2022, 4, 27, 15, 0, 0);
         TimestampData input = TimestampData.fromLocalDateTime(local);
-        TimestampWritable expected = new TimestampWritable(Timestamp.valueOf(local));
-        assertThat(oi.getPrimitiveWritableObject(input)).isEqualTo(expected);
+        assertThat(oi.getPrimitiveWritableObject(input).getTimestamp().toString())
+                .isEqualTo("2022-04-27 15:00:00.0");
         assertThat(oi.getPrimitiveWritableObject(null)).isNull();
     }
 

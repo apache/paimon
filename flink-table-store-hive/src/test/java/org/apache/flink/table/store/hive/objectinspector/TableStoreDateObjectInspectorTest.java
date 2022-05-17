@@ -21,17 +21,17 @@ package org.apache.flink.table.store.hive.objectinspector;
 import org.apache.hadoop.hive.serde2.io.DateWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
+
 import org.junit.jupiter.api.Test;
 
 import java.sql.Date;
-import java.time.Duration;
+import java.time.LocalDate;
+import java.util.TimeZone;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link TableStoreDateObjectInspector}. */
 public class TableStoreDateObjectInspectorTest {
-
-    private static final long MILLIS_PER_DAY = Duration.ofDays(1).toMillis();
 
     @Test
     public void testCategoryAndClass() {
@@ -47,6 +47,8 @@ public class TableStoreDateObjectInspectorTest {
 
     @Test
     public void testGetPrimitiveJavaObject() {
+        // for debug, will be removed later
+        System.out.println("Current timezone = " + TimeZone.getDefault().getDisplayName());
         TableStoreDateObjectInspector oi = new TableStoreDateObjectInspector();
 
         int input = 375;
@@ -56,6 +58,8 @@ public class TableStoreDateObjectInspectorTest {
 
     @Test
     public void testGetPrimitiveWritableObject() {
+        // for debug, will be removed later
+        System.out.println("Current timezone = " + TimeZone.getDefault().getDisplayName());
         TableStoreDateObjectInspector oi = new TableStoreDateObjectInspector();
 
         int input = 375;
@@ -67,7 +71,7 @@ public class TableStoreDateObjectInspectorTest {
     public void testCopyObject() {
         TableStoreDateObjectInspector oi = new TableStoreDateObjectInspector();
 
-        Date input = new Date(375 * MILLIS_PER_DAY);
+        Date input = Date.valueOf(LocalDate.ofEpochDay(375));
         Object copy = oi.copyObject(input);
         assertThat(copy).isEqualTo(input);
         assertThat(copy).isNotSameAs(input);
