@@ -25,7 +25,6 @@ import org.junit.jupiter.api.Test;
 
 import java.sql.Date;
 import java.time.LocalDate;
-import java.util.TimeZone;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -46,8 +45,6 @@ public class TableStoreDateObjectInspectorTest {
 
     @Test
     public void testGetPrimitiveJavaObject() {
-        // for debug, will be removed later
-        System.out.println("Current timezone = " + TimeZone.getDefault().getDisplayName());
         TableStoreDateObjectInspector oi = new TableStoreDateObjectInspector();
 
         int input = 375;
@@ -57,8 +54,6 @@ public class TableStoreDateObjectInspectorTest {
 
     @Test
     public void testGetPrimitiveWritableObject() {
-        // for debug, will be removed later
-        System.out.println("Current timezone = " + TimeZone.getDefault().getDisplayName());
         TableStoreDateObjectInspector oi = new TableStoreDateObjectInspector();
 
         int input = 375;
