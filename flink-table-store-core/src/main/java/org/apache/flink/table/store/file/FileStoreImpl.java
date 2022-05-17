@@ -21,7 +21,6 @@ package org.apache.flink.table.store.file;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.TableConfig;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.generated.GeneratedRecordComparator;
 import org.apache.flink.table.runtime.generated.RecordComparator;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
@@ -228,20 +227,15 @@ public class FileStoreImpl implements FileStore {
                                 .collect(Collectors.toList()));
 
         MergeFunction mergeFunction;
-        List<LogicalType> fieldTypes = rowType.getChildren();
-        RowData.FieldGetter[] fieldGetters = new RowData.FieldGetter[fieldTypes.size()];
-        for (int i = 0; i < fieldTypes.size(); i++) {
-            fieldGetters[i] = RowData.createFieldGetter(fieldTypes.get(i), i);
-        }
         switch (mergeEngine) {
             case DEDUPLICATE:
                 mergeFunction = new DeduplicateMergeFunction();
                 break;
             case PARTIAL_UPDATE:
-                mergeFunction = new PartialUpdateMergeFunction(fieldGetters);
+                mergeFunction = new PartialUpdateMergeFunction(rowType);
                 break;
             case AGGREGATION:
-                mergeFunction = new AggregationMergeFunction(fieldGetters, primaryKeyType, rowType);
+                mergeFunction = new AggregationMergeFunction(primaryKeyType, rowType);
                 break;
             default:
                 throw new UnsupportedOperationException("Unsupported merge engine: " + mergeEngine);

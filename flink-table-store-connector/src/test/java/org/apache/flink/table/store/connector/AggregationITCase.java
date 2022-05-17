@@ -38,7 +38,7 @@ public class AggregationITCase extends FileStoreTableITCase {
         String ddl1 =
                 "CREATE TABLE IF NOT EXISTS T3 ( "
                         + " a STRING, "
-                        + " b INT, "
+                        + " b BIGINT, "
                         + " c INT, "
                         + " PRIMARY KEY (a) NOT ENFORCED )"
                         + " WITH ("
@@ -50,7 +50,7 @@ public class AggregationITCase extends FileStoreTableITCase {
                 "CREATE TABLE IF NOT EXISTS T4 ( "
                         + " a STRING,"
                         + " b INT,"
-                        + " c INT,"
+                        + " c DOUBLE,"
                         + " PRIMARY KEY (a, b) NOT ENFORCED )"
                         + " WITH ("
                         + " 'merge-engine'='aggregation',"
@@ -68,12 +68,12 @@ public class AggregationITCase extends FileStoreTableITCase {
         // T3
         bEnv.executeSql("INSERT INTO T3 VALUES " + "('pk1',1, 2), " + "('pk1',1, 2)").await();
         result = iteratorToList(bEnv.from("T3").execute().collect());
-        assertThat(result).containsExactlyInAnyOrder(Row.of("pk1", 2, 4));
+        assertThat(result).containsExactlyInAnyOrder(Row.of("pk1", 2L, 4));
 
         // T4
-        bEnv.executeSql("INSERT INTO T4 VALUES " + "('pk1',1, 2), " + "('pk1',1, 2)").await();
+        bEnv.executeSql("INSERT INTO T4 VALUES " + "('pk1',1, 2.0), " + "('pk1',1, 2.0)").await();
         result = iteratorToList(bEnv.from("T4").execute().collect());
-        assertThat(result).containsExactlyInAnyOrder(Row.of("pk1", 1, 4));
+        assertThat(result).containsExactlyInAnyOrder(Row.of("pk1", 1, 4.0));
     }
 
     @Test
@@ -84,14 +84,14 @@ public class AggregationITCase extends FileStoreTableITCase {
         bEnv.executeSql("INSERT INTO T3 VALUES ('pk1',1, 4)").await();
         bEnv.executeSql("INSERT INTO T3 VALUES ('pk1',2, 0)").await();
         result = iteratorToList(bEnv.from("T3").execute().collect());
-        assertThat(result).containsExactlyInAnyOrder(Row.of("pk1", 4, 6));
+        assertThat(result).containsExactlyInAnyOrder(Row.of("pk1", 4L, 6));
 
         // T4
-        bEnv.executeSql("INSERT INTO T4 VALUES ('pk1',1, 2)").await();
-        bEnv.executeSql("INSERT INTO T4 VALUES ('pk1',1, 4)").await();
-        bEnv.executeSql("INSERT INTO T4 VALUES ('pk1',1, 0)").await();
+        bEnv.executeSql("INSERT INTO T4 VALUES ('pk1',1, 2.0)").await();
+        bEnv.executeSql("INSERT INTO T4 VALUES ('pk1',1, 4.0)").await();
+        bEnv.executeSql("INSERT INTO T4 VALUES ('pk1',1, 0.0)").await();
         result = iteratorToList(bEnv.from("T4").execute().collect());
-        assertThat(result).containsExactlyInAnyOrder(Row.of("pk1", 1, 6));
+        assertThat(result).containsExactlyInAnyOrder(Row.of("pk1", 1, 6.0));
     }
 
     @Test
@@ -113,29 +113,30 @@ public class AggregationITCase extends FileStoreTableITCase {
         bEnv.executeSql("INSERT INTO T3 VALUES ('pk2', 4,4)").await();
 
         result = iteratorToList(bEnv.from("T3").execute().collect());
-        assertThat(result).containsExactlyInAnyOrder(Row.of("pk1", 11, 12), Row.of("pk2", 19, 11));
+        assertThat(result)
+                .containsExactlyInAnyOrder(Row.of("pk1", 11L, 12), Row.of("pk2", 19L, 11));
 
         // T4
         // Wait compaction
         bEnv.executeSql("ALTER TABLE T4 SET ('commit.force-compact'='true')");
 
         // key pk1_3
-        bEnv.executeSql("INSERT INTO T4 VALUES ('pk1', 3, 1)").await();
+        bEnv.executeSql("INSERT INTO T4 VALUES ('pk1', 3, 1.0)").await();
         // key pk1_4
-        bEnv.executeSql("INSERT INTO T4 VALUES ('pk1', 4, 5)").await();
-        bEnv.executeSql("INSERT INTO T4 VALUES ('pk1', 4, 6)").await();
+        bEnv.executeSql("INSERT INTO T4 VALUES ('pk1', 4, 5.0)").await();
+        bEnv.executeSql("INSERT INTO T4 VALUES ('pk1', 4, 6.0)").await();
         // key pk2_4
-        bEnv.executeSql("INSERT INTO T4 VALUES ('pk2', 4,4)").await();
+        bEnv.executeSql("INSERT INTO T4 VALUES ('pk2', 4,4.0)").await();
         // key pk2_2
-        bEnv.executeSql("INSERT INTO T4 VALUES ('pk2', 2,7)").await();
+        bEnv.executeSql("INSERT INTO T4 VALUES ('pk2', 2,7.0)").await();
         bEnv.executeSql("INSERT INTO T4 VALUES ('pk2', 2,0)").await();
 
         result = iteratorToList(bEnv.from("T4").execute().collect());
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        Row.of("pk1", 3, 1),
-                        Row.of("pk1", 4, 11),
-                        Row.of("pk2", 4, 4),
-                        Row.of("pk2", 2, 7));
+                        Row.of("pk1", 3, 1.0),
+                        Row.of("pk1", 4, 11.0),
+                        Row.of("pk2", 4, 4.0),
+                        Row.of("pk2", 2, 7.0));
     }
 }

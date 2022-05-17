@@ -18,10 +18,6 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.api.java.aggregation.AggregationFunction;
-import org.apache.flink.api.java.aggregation.AggregationFunctionFactory;
-import org.apache.flink.api.java.aggregation.Aggregations;
-import org.apache.flink.api.java.aggregation.UnsupportedAggregationTypeException;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -30,8 +26,8 @@ import org.apache.flink.table.types.logical.RowType;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * A {@link MergeFunction} where key is primary key (unique) and value is the partial record, update
@@ -43,33 +39,49 @@ public class AggregationMergeFunction implements MergeFunction {
     private static final long serialVersionUID = 1L;
 
     private final RowData.FieldGetter[] getters;
-    private final RowType primaryKeyType;
-    private final RowType rowType;
-    private final Set<String> primaryKeyNames;
-    private final ArrayList<String> rowNames;
 
-    private final ArrayList<AggregationFunction<Object>> types;
+    private final RowType rowType;
+    private final ArrayList<AggregateFunction<?>> aggregateFunctions;
+    private final boolean[] isPrimaryKey;
+    private final RowType primaryKeyType;
     private transient GenericRowData row;
 
-    public AggregationMergeFunction(
-            RowData.FieldGetter[] fieldGetters, RowType primaryKeyType, RowType rowType) {
-        this.getters = fieldGetters;
+    public AggregationMergeFunction(RowType primaryKeyType, RowType rowType) {
         this.primaryKeyType = primaryKeyType;
         this.rowType = rowType;
-        this.primaryKeyNames = new HashSet<>(primaryKeyType.getFieldNames());
-        this.rowNames = new ArrayList<>(rowType.getFieldNames());
-        this.types = new ArrayList<>(rowType.getFieldCount());
-        AggregationFunctionFactory factory = Aggregations.SUM.getFactory();
-        for (LogicalType type : rowType.getChildren()) {
-            try {
-                AggregationFunction<Object> f =
-                        factory.createAggregationFunction(
-                                (Class<Object>) type.getDefaultConversion());
-                types.add(f);
-            } catch (UnsupportedAggregationTypeException e) {
-                types.add(null);
-            }
+
+        List<LogicalType> fieldTypes = rowType.getChildren();
+        this.getters = new RowData.FieldGetter[fieldTypes.size()];
+        for (int i = 0; i < fieldTypes.size(); i++) {
+            getters[i] = RowData.createFieldGetter(fieldTypes.get(i), i);
         }
+
+        this.isPrimaryKey = new boolean[this.getters.length];
+        Arrays.fill(isPrimaryKey, false);
+        List<String> rowNames = rowType.getFieldNames();
+        for (String primaryKeyName : primaryKeyType.getFieldNames()) {
+            isPrimaryKey[rowNames.indexOf(primaryKeyName)] = true;
+        }
+
+        this.aggregateFunctions = new ArrayList<>(rowType.getFieldCount());
+        for (LogicalType type : rowType.getChildren()) {
+            AggregateFunction<?> f = choiceRightAggregateFunction(type.getDefaultConversion());
+            aggregateFunctions.add(f);
+        }
+    }
+
+    private AggregateFunction<?> choiceRightAggregateFunction(Class<?> c) {
+        AggregateFunction<?> f = null;
+        if (Double.class.equals(c)) {
+            f = new DoubleAggregateFunction();
+        } else if (Long.class.equals(c)) {
+            f = new LongAggregateFunction();
+        } else if (Integer.class.equals(c)) {
+            f = new IntegerAggregateFunction();
+        } else if (Float.class.equals(c)) {
+            f = new FloatAggregateFunction();
+        }
+        return f;
     }
 
     @Override
@@ -81,15 +93,15 @@ public class AggregationMergeFunction implements MergeFunction {
     public void add(RowData value) {
         for (int i = 0; i < getters.length; i++) {
             Object currentField = getters[i].getFieldOrNull(value);
-            AggregationFunction<Object> f = types.get(i);
-            if (primaryKeyNames.contains(rowNames.get(i))) {
+            AggregateFunction<?> f = aggregateFunctions.get(i);
+            if (isPrimaryKey[i]) {
                 // primary key
                 if (currentField != null) {
                     row.setField(i, currentField);
                 }
             } else {
                 if (f != null) {
-                    f.initializeAggregate();
+                    f.reset();
                     Object oldValue = row.getField(i);
                     if (oldValue != null) {
                         f.aggregate(oldValue);
@@ -99,13 +111,15 @@ public class AggregationMergeFunction implements MergeFunction {
                             f.aggregate(currentField);
                             break;
                         case DELETE:
+                            f.aggregate(currentField, false);
+                            break;
                         case UPDATE_AFTER:
                         case UPDATE_BEFORE:
                         default:
                             throw new UnsupportedOperationException(
                                     "Unsupported row kind: " + row.getRowKind());
                     }
-                    Object result = f.getAggregate();
+                    Object result = f.getResult();
                     if (result != null) {
                         row.setField(i, result);
                     }
@@ -123,6 +137,6 @@ public class AggregationMergeFunction implements MergeFunction {
     @Override
     public MergeFunction copy() {
         // RowData.FieldGetter is thread safe
-        return new AggregationMergeFunction(getters, primaryKeyType, rowType);
+        return new AggregationMergeFunction(primaryKeyType, rowType);
     }
 }

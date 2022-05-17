@@ -20,8 +20,12 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
+
+import java.util.List;
 
 /**
  * A {@link MergeFunction} where key is primary key (unique) and value is the partial record, update
@@ -33,10 +37,17 @@ public class PartialUpdateMergeFunction implements MergeFunction {
 
     private final RowData.FieldGetter[] getters;
 
+    private final RowType rowType;
+
     private transient GenericRowData row;
 
-    public PartialUpdateMergeFunction(RowData.FieldGetter[] getters) {
-        this.getters = getters;
+    public PartialUpdateMergeFunction(RowType rowType) {
+        List<LogicalType> fieldTypes = rowType.getChildren();
+        this.getters = new RowData.FieldGetter[fieldTypes.size()];
+        for (int i = 0; i < fieldTypes.size(); i++) {
+            this.getters[i] = RowData.createFieldGetter(fieldTypes.get(i), i);
+        }
+        this.rowType = rowType;
     }
 
     @Override
@@ -63,6 +74,6 @@ public class PartialUpdateMergeFunction implements MergeFunction {
     @Override
     public MergeFunction copy() {
         // RowData.FieldGetter is thread safe
-        return new PartialUpdateMergeFunction(getters);
+        return new PartialUpdateMergeFunction(rowType);
     }
 }
