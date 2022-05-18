@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.predicate;
 import org.apache.flink.table.store.file.stats.FieldStats;
 
 import java.util.Objects;
+import java.util.Optional;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -51,6 +52,11 @@ public class LessThan implements Predicate {
             return false;
         }
         return literal.compareValueTo(stats.minValue()) > 0;
+    }
+
+    @Override
+    public Optional<Predicate> negate() {
+        return Optional.of(new GreaterOrEqual(index, literal));
     }
 
     @Override

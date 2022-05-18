@@ -39,8 +39,8 @@ import org.apache.flink.table.expressions.TypeLiteralExpression;
 import org.apache.flink.table.expressions.ValueLiteralExpression;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.store.connector.TableStore;
-import org.apache.flink.table.store.file.predicate.And;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.predicate.PredicateConverter;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
@@ -199,8 +199,9 @@ public class TableStoreSource
                 PredicateConverter.convert(filter).ifPresent(fieldPredicates::add);
             }
         }
-        partitionPredicate = partitionPredicates.stream().reduce(And::new).orElse(null);
-        fieldPredicate = fieldPredicates.stream().reduce(And::new).orElse(null);
+        partitionPredicate =
+                partitionPredicates.isEmpty() ? null : PredicateBuilder.and(partitionPredicates);
+        fieldPredicate = fieldPredicates.isEmpty() ? null : PredicateBuilder.and(fieldPredicates);
         return Result.of(
                 filters, streaming && logStoreTableFactory != null ? filters : notAcceptedFilters);
     }

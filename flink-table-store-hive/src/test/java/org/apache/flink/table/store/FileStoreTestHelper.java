@@ -103,7 +103,7 @@ public class FileStoreTestHelper {
         writer.write(kind, key, value);
     }
 
-    public void finishWrite() throws Exception {
+    public void commit() throws Exception {
         ManifestCommittable committable = new ManifestCommittable(UUID.randomUUID().toString());
         for (Map.Entry<BinaryRowData, Map<Integer, RecordWriter>> entryWithPartition :
                 writers.entrySet()) {
@@ -117,6 +117,7 @@ public class FileStoreTestHelper {
                 writer.close();
             }
         }
+        writers.clear();
         FileStoreCommitImpl commit = store.newCommit();
         commit.commit(committable, Collections.emptyMap());
     }

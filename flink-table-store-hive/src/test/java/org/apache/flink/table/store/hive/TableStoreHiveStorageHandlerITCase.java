@@ -24,6 +24,7 @@ import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.FileStoreTestHelper;
 import org.apache.flink.table.store.file.FileStoreOptions;
@@ -48,8 +49,10 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -131,7 +134,7 @@ public class TableStoreHiveStorageHandlerITCase {
                 ValueKind.ADD,
                 GenericRowData.of(2, 40L),
                 GenericRowData.of(2, 40L, StringData.fromString("Test")));
-        helper.finishWrite();
+        helper.commit();
 
         hiveShell.execute(
                 String.join(
@@ -207,7 +210,7 @@ public class TableStoreHiveStorageHandlerITCase {
                 ValueKind.ADD,
                 GenericRowData.of(2, 40L, StringData.fromString("Test")),
                 GenericRowData.of(1L));
-        helper.finishWrite();
+        helper.commit();
 
         hiveShell.execute(
                 String.join(
@@ -274,7 +277,7 @@ public class TableStoreHiveStorageHandlerITCase {
         for (GenericRowData rowData : input) {
             helper.write(ValueKind.ADD, GenericRowData.of(rowData.getInt(3)), rowData);
         }
-        helper.finishWrite();
+        helper.commit();
 
         StringBuilder ddl = new StringBuilder();
         for (int i = 0; i < RandomGenericRowDataGenerator.FIELD_NAMES.size(); i++) {
@@ -378,5 +381,177 @@ public class TableStoreHiveStorageHandlerITCase {
             expected.remove(key);
         }
         Assert.assertTrue(expected.isEmpty());
+    }
+
+    @Test
+    public void testPredicatePushDown() throws Exception {
+        String root = folder.getRoot().getPath();
+        Configuration conf = new Configuration();
+        conf.setString(FileStoreOptions.PATH, root);
+        conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
+        FileStoreTestHelper helper =
+                new FileStoreTestHelper(
+                        ObjectIdentifier.of("test_catalog", "test_db", "test_table"),
+                        conf,
+                        RowType.of(),
+                        RowType.of(
+                                new LogicalType[] {DataTypes.INT().getLogicalType()},
+                                new String[] {"a"}),
+                        RowType.of(
+                                new LogicalType[] {DataTypes.BIGINT().getLogicalType()},
+                                new String[] {"_VALUE_COUNT"}),
+                        new ValueCountMergeFunction(),
+                        (k, v) -> BinaryRowDataUtil.EMPTY_ROW,
+                        k -> 0);
+
+        // TODO add NaN related tests after FLINK-27627 and FLINK-27628 are fixed
+
+        helper.write(ValueKind.ADD, GenericRowData.of(1), GenericRowData.of(1L));
+        helper.commit();
+        helper.write(ValueKind.ADD, GenericRowData.of((Object) null), GenericRowData.of(1L));
+        helper.commit();
+        helper.write(ValueKind.ADD, GenericRowData.of(2), GenericRowData.of(1L));
+        helper.write(ValueKind.ADD, GenericRowData.of(3), GenericRowData.of(1L));
+        helper.write(ValueKind.ADD, GenericRowData.of((Object) null), GenericRowData.of(1L));
+        helper.commit();
+        helper.write(ValueKind.ADD, GenericRowData.of(4), GenericRowData.of(1L));
+        helper.write(ValueKind.ADD, GenericRowData.of(5), GenericRowData.of(1L));
+        helper.write(ValueKind.ADD, GenericRowData.of(6), GenericRowData.of(1L));
+        helper.commit();
+
+        hiveShell.execute(
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE EXTERNAL TABLE test_table (",
+                                "  a INT",
+                                ")",
+                                "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
+                                "LOCATION '"
+                                        + root
+                                        + "/test_catalog.catalog/test_db.db/test_table'",
+                                "TBLPROPERTIES (",
+                                "  'table-store.catalog' = 'test_catalog',",
+                                "  'table-store.file.format' = 'avro'",
+                                ")")));
+        Assert.assertEquals(
+                Arrays.asList("1", "5"),
+                hiveShell.executeQuery("SELECT * FROM test_table WHERE a = 1 OR a = 5"));
+        Assert.assertEquals(
+                Arrays.asList("2", "3", "6"),
+                hiveShell.executeQuery(
+                        "SELECT * FROM test_table WHERE a <> 1 AND a <> 4 AND a <> 5"));
+        Assert.assertEquals(
+                Arrays.asList("2", "3", "6"),
+                hiveShell.executeQuery(
+                        "SELECT * FROM test_table WHERE NOT (a = 1 OR a = 5) AND NOT a = 4"));
+        Assert.assertEquals(
+                Arrays.asList("1", "2", "3"),
+                hiveShell.executeQuery("SELECT * FROM test_table WHERE a < 4"));
+        Assert.assertEquals(
+                Arrays.asList("1", "2", "3"),
+                hiveShell.executeQuery("SELECT * FROM test_table WHERE a <= 3"));
+        Assert.assertEquals(
+                Arrays.asList("4", "5", "6"),
+                hiveShell.executeQuery("SELECT * FROM test_table WHERE a > 3"));
+        Assert.assertEquals(
+                Arrays.asList("4", "5", "6"),
+                hiveShell.executeQuery("SELECT * FROM test_table WHERE a >= 4"));
+        Assert.assertEquals(
+                Arrays.asList("1", "3"),
+                hiveShell.executeQuery("SELECT * FROM test_table WHERE a IN (0, 1, 3, 7)"));
+        Assert.assertEquals(
+                Arrays.asList("4", "6"),
+                hiveShell.executeQuery(
+                        "SELECT * FROM test_table WHERE a NOT IN (0, 1, 3, 2, 5, 7)"));
+        Assert.assertEquals(
+                Arrays.asList("2", "3"),
+                hiveShell.executeQuery("SELECT * FROM test_table WHERE a BETWEEN 2 AND 3"));
+        Assert.assertEquals(
+                Arrays.asList("1", "5", "6"),
+                hiveShell.executeQuery("SELECT * FROM test_table WHERE a NOT BETWEEN 2 AND 4"));
+        Assert.assertEquals(
+                Arrays.asList("NULL", "NULL"),
+                hiveShell.executeQuery("SELECT * FROM test_table WHERE a IS NULL"));
+        Assert.assertEquals(
+                Arrays.asList("1", "2", "3", "4", "5", "6"),
+                hiveShell.executeQuery("SELECT * FROM test_table WHERE a IS NOT NULL"));
+    }
+
+    @Test
+    public void testDateAndTimestamp() throws Exception {
+        String root = folder.getRoot().getPath();
+        Configuration conf = new Configuration();
+        conf.setString(FileStoreOptions.PATH, root);
+        conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
+        FileStoreTestHelper helper =
+                new FileStoreTestHelper(
+                        ObjectIdentifier.of("test_catalog", "test_db", "test_table"),
+                        conf,
+                        RowType.of(),
+                        RowType.of(
+                                new LogicalType[] {
+                                    DataTypes.DATE().getLogicalType(),
+                                    DataTypes.TIMESTAMP(3).getLogicalType()
+                                },
+                                new String[] {"dt", "ts"}),
+                        RowType.of(
+                                new LogicalType[] {DataTypes.BIGINT().getLogicalType()},
+                                new String[] {"_VALUE_COUNT"}),
+                        new ValueCountMergeFunction(),
+                        (k, v) -> BinaryRowDataUtil.EMPTY_ROW,
+                        k -> 0);
+
+        helper.write(
+                ValueKind.ADD,
+                GenericRowData.of(
+                        375, /* 1971-01-11 */
+                        TimestampData.fromLocalDateTime(LocalDateTime.of(2022, 5, 17, 17, 29, 20))),
+                GenericRowData.of(1L));
+        helper.commit();
+        helper.write(ValueKind.ADD, GenericRowData.of(null, null), GenericRowData.of(1L));
+        helper.commit();
+        helper.write(
+                ValueKind.ADD,
+                GenericRowData.of(376 /* 1971-01-12 */, null),
+                GenericRowData.of(1L));
+        helper.write(
+                ValueKind.ADD,
+                GenericRowData.of(
+                        null,
+                        TimestampData.fromLocalDateTime(LocalDateTime.of(2022, 6, 18, 8, 30, 0))),
+                GenericRowData.of(1L));
+        helper.commit();
+
+        hiveShell.execute(
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE EXTERNAL TABLE test_table (",
+                                "  dt DATE,",
+                                "  ts TIMESTAMP",
+                                ")",
+                                "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
+                                "LOCATION '"
+                                        + root
+                                        + "/test_catalog.catalog/test_db.db/test_table'",
+                                "TBLPROPERTIES (",
+                                "  'table-store.catalog' = 'test_catalog',",
+                                "  'table-store.file.format' = 'avro'",
+                                ")")));
+        Assert.assertEquals(
+                Collections.singletonList("1971-01-11\t2022-05-17 17:29:20.0"),
+                hiveShell.executeQuery("SELECT * FROM test_table WHERE dt = '1971-01-11'"));
+        Assert.assertEquals(
+                Collections.singletonList("1971-01-11\t2022-05-17 17:29:20.0"),
+                hiveShell.executeQuery(
+                        "SELECT * FROM test_table WHERE ts = '2022-05-17 17:29:20'"));
+        Assert.assertEquals(
+                Collections.singletonList("1971-01-12\tNULL"),
+                hiveShell.executeQuery("SELECT * FROM test_table WHERE dt = '1971-01-12'"));
+        Assert.assertEquals(
+                Collections.singletonList("NULL\t2022-06-18 08:30:00.0"),
+                hiveShell.executeQuery(
+                        "SELECT * FROM test_table WHERE ts = '2022-06-18 08:30:00'"));
     }
 }
