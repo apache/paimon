@@ -42,9 +42,11 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinWorkerThread;
+import java.util.stream.Stream;
 
 /** Utils for file reading and writing. */
 public class FileUtils {
@@ -148,5 +150,31 @@ public class FileUtils {
             }
         }
         return statuses;
+    }
+
+    /**
+     * List versioned files for the directory.
+     *
+     * @return version stream
+     */
+    public static Stream<Long> listVersionedFiles(Path dir, String prefix) throws IOException {
+        if (!dir.getFileSystem().exists(dir)) {
+            return Stream.of();
+        }
+
+        FileStatus[] statuses = FileUtils.safelyListFileStatus(dir);
+
+        if (statuses == null) {
+            throw new RuntimeException(
+                    String.format(
+                            "The return value is null of the listStatus for the '%s' directory.",
+                            dir));
+        }
+
+        return Arrays.stream(statuses)
+                .map(FileStatus::getPath)
+                .map(Path::getName)
+                .filter(name -> name.startsWith(prefix))
+                .map(name -> Long.parseLong(name.substring(prefix.length())));
     }
 }

@@ -22,12 +22,11 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.utils.FileUtils;
+import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -40,6 +39,7 @@ public class Snapshot {
     public static final long FIRST_SNAPSHOT_ID = 1;
 
     private static final String FIELD_ID = "id";
+    private static final String FIELD_SCHEMA_ID = "schemaId";
     private static final String FIELD_BASE_MANIFEST_LIST = "baseManifestList";
     private static final String FIELD_DELTA_MANIFEST_LIST = "deltaManifestList";
     private static final String FIELD_COMMIT_USER = "commitUser";
@@ -50,6 +50,9 @@ public class Snapshot {
 
     @JsonProperty(FIELD_ID)
     private final long id;
+
+    @JsonProperty(FIELD_SCHEMA_ID)
+    private final long schemaId;
 
     // a manifest list recording all changes from the previous snapshots
     @JsonProperty(FIELD_BASE_MANIFEST_LIST)
@@ -79,6 +82,7 @@ public class Snapshot {
     @JsonCreator
     public Snapshot(
             @JsonProperty(FIELD_ID) long id,
+            @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
             @JsonProperty(FIELD_BASE_MANIFEST_LIST) String baseManifestList,
             @JsonProperty(FIELD_DELTA_MANIFEST_LIST) String deltaManifestList,
             @JsonProperty(FIELD_COMMIT_USER) String commitUser,
@@ -87,6 +91,7 @@ public class Snapshot {
             @JsonProperty(FIELD_TIME_MILLIS) long timeMillis,
             @JsonProperty(FIELD_LOG_OFFSETS) Map<Integer, Long> logOffsets) {
         this.id = id;
+        this.schemaId = schemaId;
         this.baseManifestList = baseManifestList;
         this.deltaManifestList = deltaManifestList;
         this.commitUser = commitUser;
@@ -99,6 +104,11 @@ public class Snapshot {
     @JsonGetter(FIELD_ID)
     public long id() {
         return id;
+    }
+
+    @JsonGetter(FIELD_SCHEMA_ID)
+    public long schemaId() {
+        return schemaId;
     }
 
     @JsonGetter(FIELD_BASE_MANIFEST_LIST)
@@ -137,11 +147,7 @@ public class Snapshot {
     }
 
     public String toJson() {
-        try {
-            return new ObjectMapper().writeValueAsString(this);
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException(e);
-        }
+        return JsonSerdeUtil.toJson(this);
     }
 
     public List<ManifestFileMeta> readAllManifests(ManifestList manifestList) {
@@ -152,11 +158,7 @@ public class Snapshot {
     }
 
     public static Snapshot fromJson(String json) {
-        try {
-            return new ObjectMapper().readValue(json, Snapshot.class);
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException(e);
-        }
+        return JsonSerdeUtil.fromJson(json, Snapshot.class);
     }
 
     public static Snapshot fromPath(Path path) {

@@ -141,6 +141,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
                                     .collect(Collectors.toList()));
             return FileStoreImpl.createWithPrimaryKey(
                     tableLocation,
+                    0, // TODO
                     new FileStoreOptions(options),
                     user,
                     partitionType,
@@ -149,7 +150,12 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
                     FileStoreOptions.MergeEngine.DEDUPLICATE);
         } else {
             return FileStoreImpl.createWithValueCount(
-                    tableLocation, new FileStoreOptions(options), user, partitionType, rowType);
+                    tableLocation,
+                    0, // TODO
+                    new FileStoreOptions(options),
+                    user,
+                    partitionType,
+                    rowType);
         }
     }
 }

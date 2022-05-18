@@ -145,6 +145,7 @@ public class FileStoreSourceTest {
                 hasPk ? new DeduplicateMergeFunction() : new ValueCountMergeFunction();
         return new FileStoreImpl(
                 "/fake/path",
+                0,
                 new FileStoreOptions(new Configuration()),
                 user,
                 partitionType,

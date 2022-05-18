@@ -48,6 +48,7 @@ import java.util.stream.Collectors;
 public class FileStoreImpl implements FileStore {
 
     private final String tablePath;
+    private final long schemaId;
     private final FileStoreOptions options;
     private final String user;
     private final RowType partitionType;
@@ -58,6 +59,7 @@ public class FileStoreImpl implements FileStore {
 
     public FileStoreImpl(
             String tablePath,
+            long schemaId,
             FileStoreOptions options,
             String user,
             RowType partitionType,
@@ -65,6 +67,7 @@ public class FileStoreImpl implements FileStore {
             RowType valueType,
             MergeFunction mergeFunction) {
         this.tablePath = tablePath;
+        this.schemaId = schemaId;
         this.options = options;
         this.user = user;
         this.partitionType = partitionType;
@@ -126,6 +129,7 @@ public class FileStoreImpl implements FileStore {
     @Override
     public FileStoreCommitImpl newCommit() {
         return new FileStoreCommitImpl(
+                schemaId,
                 user,
                 partitionType,
                 pathFactory(),
@@ -177,6 +181,7 @@ public class FileStoreImpl implements FileStore {
 
     public static FileStoreImpl createWithPrimaryKey(
             String tablePath,
+            long schemaId,
             FileStoreOptions options,
             String user,
             RowType partitionType,
@@ -213,11 +218,12 @@ public class FileStoreImpl implements FileStore {
         }
 
         return new FileStoreImpl(
-                tablePath, options, user, partitionType, keyType, rowType, mergeFunction);
+                tablePath, schemaId, options, user, partitionType, keyType, rowType, mergeFunction);
     }
 
     public static FileStoreImpl createWithValueCount(
             String tablePath,
+            long schemaId,
             FileStoreOptions options,
             String user,
             RowType partitionType,
@@ -227,6 +233,13 @@ public class FileStoreImpl implements FileStore {
                         new LogicalType[] {new BigIntType(false)}, new String[] {"_VALUE_COUNT"});
         MergeFunction mergeFunction = new ValueCountMergeFunction();
         return new FileStoreImpl(
-                tablePath, options, user, partitionType, rowType, countType, mergeFunction);
+                tablePath,
+                schemaId,
+                options,
+                user,
+                partitionType,
+                rowType,
+                countType,
+                mergeFunction);
     }
 }
