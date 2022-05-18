@@ -20,7 +20,6 @@ package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
@@ -31,18 +30,21 @@ import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
-import org.apache.flink.table.store.file.stats.FieldStatsCollector;
 import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
-import org.apache.flink.table.store.file.writer.BaseBulkWriter;
 import org.apache.flink.table.store.file.writer.BaseFileWriter;
+import org.apache.flink.table.store.file.writer.FileWriter;
+import org.apache.flink.table.store.file.writer.Metric;
+import org.apache.flink.table.store.file.writer.MetricFileWriter;
 import org.apache.flink.table.store.file.writer.RollingFileWriter;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.CloseableIterator;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -68,7 +70,7 @@ public class DataFileWriter {
             RowType keyType,
             RowType valueType,
             BulkWriter.Factory<RowData> writerFactory,
-            FileStatsExtractor fileStatsExtractor,
+            @Nullable FileStatsExtractor fileStatsExtractor,
             DataFilePathFactory pathFactory,
             long suggestedFileSize) {
         this.keyType = keyType;
@@ -77,6 +79,7 @@ public class DataFileWriter {
         this.fileStatsExtractor = fileStatsExtractor;
         this.keyStatsConverter = new FieldStatsArraySerializer(keyType);
         this.valueStatsConverter = new FieldStatsArraySerializer(valueType);
+
         this.pathFactory = pathFactory;
         this.suggestedFileSize = suggestedFileSize;
     }
@@ -127,48 +130,27 @@ public class DataFileWriter {
         FileUtils.deleteOrWarn(pathFactory.toPath(file.fileName()));
     }
 
-    private class KvBulkWriterFactory implements BulkWriter.Factory<KeyValue> {
-
-        @Override
-        public BulkWriter<KeyValue> create(FSDataOutputStream out) throws IOException {
-            KeyValueSerializer serializer = new KeyValueSerializer(keyType, valueType);
-
-            return new BaseBulkWriter<>(writerFactory.create(out), serializer::toRow);
-        }
-    }
-
     private class KvFileWriter extends BaseFileWriter<KeyValue, DataFileMeta> {
         private final int level;
         private final RowDataSerializer keySerializer;
-
-        private FieldStatsCollector keyStatsCollector = null;
-        private FieldStatsCollector valueStatsCollector = null;
 
         private BinaryRowData minKey = null;
         private RowData maxKey = null;
         private long minSeqNumber = Long.MAX_VALUE;
         private long maxSeqNumber = Long.MIN_VALUE;
 
-        public KvFileWriter(BulkWriter.Factory<KeyValue> writerFactory, Path path, int level)
+        public KvFileWriter(
+                FileWriter.Factory<KeyValue, Metric> writerFactory, Path path, int level)
                 throws IOException {
             super(writerFactory, path);
 
             this.level = level;
             this.keySerializer = new RowDataSerializer(keyType);
-            if (fileStatsExtractor == null) {
-                this.keyStatsCollector = new FieldStatsCollector(keyType);
-                this.valueStatsCollector = new FieldStatsCollector(valueType);
-            }
         }
 
         @Override
         public void write(KeyValue kv) throws IOException {
             super.write(kv);
-
-            if (fileStatsExtractor == null) {
-                keyStatsCollector.collect(kv.key());
-                valueStatsCollector.collect(kv.value());
-            }
 
             updateMinKey(kv);
             updateMaxKey(kv);
@@ -196,22 +178,16 @@ public class DataFileWriter {
         }
 
         @Override
-        protected DataFileMeta createFileMeta(Path path) throws IOException {
+        protected DataFileMeta createResult(Path path, Metric metric) throws IOException {
+            FieldStats[] rowStats = metric.fieldStats();
+            int numKeyFields = keyType.getFieldCount();
 
-            BinaryTableStats keyStats;
-            BinaryTableStats valueStats;
-            if (fileStatsExtractor == null) {
-                keyStats = keyStatsCollector.extract();
-                valueStats = valueStatsCollector.extract();
-            } else {
-                FieldStats[] rowStats = fileStatsExtractor.extract(path);
-                int numKeyFields = keyType.getFieldCount();
-                keyStats =
-                        keyStatsConverter.toBinary(Arrays.copyOfRange(rowStats, 0, numKeyFields));
-                valueStats =
-                        valueStatsConverter.toBinary(
-                                Arrays.copyOfRange(rowStats, numKeyFields + 2, rowStats.length));
-            }
+            FieldStats[] keyFieldStats = Arrays.copyOfRange(rowStats, 0, numKeyFields);
+            BinaryTableStats keyStats = keyStatsConverter.toBinary(keyFieldStats);
+
+            FieldStats[] valFieldStats =
+                    Arrays.copyOfRange(rowStats, numKeyFields + 2, rowStats.length);
+            BinaryTableStats valueStats = valueStatsConverter.toBinary(valFieldStats);
 
             return new DataFileMeta(
                     path.getName(),
@@ -237,7 +213,15 @@ public class DataFileWriter {
     private Supplier<KvFileWriter> createWriterFactory(int level) {
         return () -> {
             try {
-                return new KvFileWriter(new KvBulkWriterFactory(), pathFactory.newPath(), level);
+                KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
+                FileWriter.Factory<KeyValue, Metric> fileWriterFactory =
+                        MetricFileWriter.createFactory(
+                                writerFactory,
+                                kvSerializer::toRow,
+                                KeyValue.schema(keyType, valueType),
+                                fileStatsExtractor);
+
+                return new KvFileWriter(fileWriterFactory, pathFactory.newPath(), level);
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
