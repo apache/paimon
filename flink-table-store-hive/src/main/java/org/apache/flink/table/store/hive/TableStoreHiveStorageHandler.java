@@ -26,9 +26,13 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.HiveMetaHook;
 import org.apache.hadoop.hive.ql.metadata.HiveException;
 import org.apache.hadoop.hive.ql.metadata.HiveStorageHandler;
+import org.apache.hadoop.hive.ql.metadata.HiveStoragePredicateHandler;
+import org.apache.hadoop.hive.ql.plan.ExprNodeDesc;
+import org.apache.hadoop.hive.ql.plan.ExprNodeGenericFuncDesc;
 import org.apache.hadoop.hive.ql.plan.TableDesc;
 import org.apache.hadoop.hive.ql.security.authorization.HiveAuthorizationProvider;
 import org.apache.hadoop.hive.serde2.AbstractSerDe;
+import org.apache.hadoop.hive.serde2.Deserializer;
 import org.apache.hadoop.mapred.InputFormat;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.OutputFormat;
@@ -40,7 +44,8 @@ import java.util.Properties;
 import java.util.UUID;
 
 /** {@link HiveStorageHandler} for table store. This is the entrance class of Hive API. */
-public class TableStoreHiveStorageHandler implements HiveStorageHandler {
+public class TableStoreHiveStorageHandler
+        implements HiveStoragePredicateHandler, HiveStorageHandler {
 
     private static final Logger LOG = LoggerFactory.getLogger(TableStoreHiveStorageHandler.class);
 
@@ -97,5 +102,14 @@ public class TableStoreHiveStorageHandler implements HiveStorageHandler {
     @Override
     public Configuration getConf() {
         return conf;
+    }
+
+    @Override
+    public DecomposedPredicate decomposePredicate(
+            JobConf jobConf, Deserializer deserializer, ExprNodeDesc predicate) {
+        DecomposedPredicate decomposed = new DecomposedPredicate();
+        decomposed.residualPredicate = (ExprNodeGenericFuncDesc) predicate;
+        decomposed.pushedPredicate = (ExprNodeGenericFuncDesc) predicate;
+        return decomposed;
     }
 }

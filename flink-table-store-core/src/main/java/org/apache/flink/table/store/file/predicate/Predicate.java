@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.predicate;
 import org.apache.flink.table.store.file.stats.FieldStats;
 
 import java.io.Serializable;
+import java.util.Optional;
 
 /** Predicate which returns Boolean and provides testing by stats. */
 public interface Predicate extends Serializable {
@@ -39,4 +40,7 @@ public interface Predicate extends Serializable {
      *     absolutely not possible to hit.
      */
     boolean test(long rowCount, FieldStats[] fieldStats);
+
+    /** @return the negation predicate of this predicate if possible. */
+    Optional<Predicate> negate();
 }

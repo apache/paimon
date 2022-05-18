@@ -94,7 +94,7 @@ public class TableStoreRecordReaderTest {
                 ValueKind.DELETE,
                 GenericRowData.of(2L),
                 GenericRowData.of(2L, StringData.fromString("Hello")));
-        helper.finishWrite();
+        helper.commit();
 
         Tuple2<RecordReader, Long> tuple = helper.read(BinaryRowDataUtil.EMPTY_ROW, 0);
         TableStoreRecordReader reader = new TableStoreRecordReader(tuple.f0, false, tuple.f1);
@@ -159,7 +159,7 @@ public class TableStoreRecordReaderTest {
                 ValueKind.ADD,
                 GenericRowData.of(1, StringData.fromString("Hi")),
                 GenericRowData.of(1L));
-        helper.finishWrite();
+        helper.commit();
 
         Tuple2<RecordReader, Long> tuple = helper.read(BinaryRowDataUtil.EMPTY_ROW, 0);
         TableStoreRecordReader reader = new TableStoreRecordReader(tuple.f0, true, tuple.f1);

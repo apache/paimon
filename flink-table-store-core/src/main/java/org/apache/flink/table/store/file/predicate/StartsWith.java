@@ -21,6 +21,8 @@ package org.apache.flink.table.store.file.predicate;
 import org.apache.flink.table.data.binary.BinaryStringData;
 import org.apache.flink.table.store.file.stats.FieldStats;
 
+import java.util.Optional;
+
 /** A {@link Predicate} to evaluate {@code filter like 'abc%' or filter like 'abc_'}. */
 public class StartsWith implements Predicate {
 
@@ -52,5 +54,10 @@ public class StartsWith implements Predicate {
         BinaryStringData pattern = (BinaryStringData) patternLiteral.value();
         return (min.startsWith(pattern) || min.compareTo(pattern) <= 0)
                 && (max.startsWith(pattern) || max.compareTo(pattern) >= 0);
+    }
+
+    @Override
+    public Optional<Predicate> negate() {
+        return Optional.empty();
     }
 }

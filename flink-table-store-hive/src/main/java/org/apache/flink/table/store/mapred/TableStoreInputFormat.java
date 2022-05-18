@@ -21,22 +21,31 @@ package org.apache.flink.table.store.mapred;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.RowDataContainer;
+import org.apache.flink.table.store.SearchArgumentToPredicateConverter;
 import org.apache.flink.table.store.TableStoreJobConf;
-import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
+import org.apache.flink.table.store.file.operation.FileStoreScanImpl;
+import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
+import org.apache.hadoop.hive.ql.exec.SerializationUtilities;
+import org.apache.hadoop.hive.ql.io.sarg.ConvertAstToSearchArg;
+import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
+import org.apache.hadoop.hive.ql.plan.ExprNodeGenericFuncDesc;
+import org.apache.hadoop.hive.ql.plan.TableScanDesc;
 import org.apache.hadoop.mapred.InputFormat;
 import org.apache.hadoop.mapred.InputSplit;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.RecordReader;
 import org.apache.hadoop.mapred.Reporter;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -54,8 +63,8 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
 
     @Override
     public InputSplit[] getSplits(JobConf jobConf, int numSplits) throws IOException {
-        FileStoreImpl store = createFileStore(jobConf);
-        FileStoreScan scan = store.newScan();
+        FileStoreWrapper wrapper = new FileStoreWrapper(jobConf);
+        FileStoreScan scan = wrapper.newScan();
         List<TableStoreInputSplit> result = new ArrayList<>();
         for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> pe :
                 scan.plan().groupByPartFiles().entrySet()) {
@@ -63,7 +72,8 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
                 BinaryRowData partition = pe.getKey();
                 int bucket = be.getKey();
                 String bucketPath =
-                        store.pathFactory()
+                        wrapper.store
+                                .pathFactory()
                                 .createDataFilePathFactory(partition, bucket)
                                 .bucketPath()
                                 .toString();
@@ -78,8 +88,8 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
     @Override
     public RecordReader<Void, RowDataContainer> getRecordReader(
             InputSplit inputSplit, JobConf jobConf, Reporter reporter) throws IOException {
-        FileStore store = createFileStore(jobConf);
-        FileStoreRead read = store.newRead();
+        FileStoreWrapper wrapper = new FileStoreWrapper(jobConf);
+        FileStoreRead read = wrapper.store.newRead();
         TableStoreInputSplit split = (TableStoreInputSplit) inputSplit;
         org.apache.flink.table.store.file.utils.RecordReader wrapped =
                 read.withDropDelete(true)
@@ -91,71 +101,117 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
                 splitLength);
     }
 
-    private FileStoreImpl createFileStore(JobConf jobConf) {
-        TableStoreJobConf wrapper = new TableStoreJobConf(jobConf);
+    private static class FileStoreWrapper {
 
-        String dbName = wrapper.getDbName();
-        String tableName = wrapper.getTableName();
+        private List<String> columnNames;
+        private List<LogicalType> columnTypes;
 
-        Configuration options = new Configuration();
-        String tableLocation = wrapper.getLocation();
-        wrapper.updateFileStoreOptions(options);
+        private FileStoreImpl store;
+        private boolean valueCountMode;
+        @Nullable private Predicate predicate;
 
-        String user = wrapper.getFileStoreUser();
+        private FileStoreWrapper(JobConf jobConf) {
+            createFileStore(jobConf);
+            createPredicate(jobConf);
+        }
 
-        List<String> columnNames = wrapper.getColumnNames();
-        List<LogicalType> columnTypes = wrapper.getColumnTypes();
+        private void createFileStore(JobConf jobConf) {
+            TableStoreJobConf wrapper = new TableStoreJobConf(jobConf);
 
-        List<String> partitionColumnNames = wrapper.getPartitionColumnNames();
+            String dbName = wrapper.getDbName();
+            String tableName = wrapper.getTableName();
 
-        RowType rowType =
-                RowType.of(
-                        columnTypes.toArray(new LogicalType[0]),
-                        columnNames.toArray(new String[0]));
-        LogicalType[] partitionLogicalTypes =
-                partitionColumnNames.stream()
-                        .map(s -> columnTypes.get(columnNames.indexOf(s)))
-                        .toArray(LogicalType[]::new);
-        RowType partitionType =
-                RowType.of(partitionLogicalTypes, partitionColumnNames.toArray(new String[0]));
+            Configuration options = new Configuration();
+            String tableLocation = wrapper.getLocation();
+            wrapper.updateFileStoreOptions(options);
 
-        Optional<List<String>> optionalPrimaryKeyNames = wrapper.getPrimaryKeyNames();
-        if (optionalPrimaryKeyNames.isPresent()) {
-            Function<String, RowType.RowField> rowFieldMapper =
-                    s -> {
-                        int idx = columnNames.indexOf(s);
-                        Preconditions.checkState(
-                                idx >= 0,
-                                "Primary key column "
-                                        + s
-                                        + " not found in table "
-                                        + dbName
-                                        + "."
-                                        + tableName);
-                        return new RowType.RowField(s, columnTypes.get(idx));
-                    };
-            RowType primaryKeyType =
-                    new RowType(
-                            optionalPrimaryKeyNames.get().stream()
-                                    .map(rowFieldMapper)
-                                    .collect(Collectors.toList()));
-            return FileStoreImpl.createWithPrimaryKey(
-                    tableLocation,
-                    0, // TODO
-                    new FileStoreOptions(options),
-                    user,
-                    partitionType,
-                    primaryKeyType,
-                    rowType,
-                    FileStoreOptions.MergeEngine.DEDUPLICATE);
-        } else {
-            return FileStoreImpl.createWithValueCount(
-                    tableLocation,
-                    0, // TODO
-                    new FileStoreOptions(options),
-                    user,
-                    partitionType,
-                    rowType);
+            String user = wrapper.getFileStoreUser();
+
+            columnNames = wrapper.getColumnNames();
+            columnTypes = wrapper.getColumnTypes();
+
+            List<String> partitionColumnNames = wrapper.getPartitionColumnNames();
+
+            RowType rowType =
+                    RowType.of(
+                            columnTypes.toArray(new LogicalType[0]),
+                            columnNames.toArray(new String[0]));
+            LogicalType[] partitionLogicalTypes =
+                    partitionColumnNames.stream()
+                            .map(s -> columnTypes.get(columnNames.indexOf(s)))
+                            .toArray(LogicalType[]::new);
+            RowType partitionType =
+                    RowType.of(partitionLogicalTypes, partitionColumnNames.toArray(new String[0]));
+
+            Optional<List<String>> optionalPrimaryKeyNames = wrapper.getPrimaryKeyNames();
+            if (optionalPrimaryKeyNames.isPresent()) {
+                Function<String, RowType.RowField> rowFieldMapper =
+                        s -> {
+                            int idx = columnNames.indexOf(s);
+                            Preconditions.checkState(
+                                    idx >= 0,
+                                    "Primary key column "
+                                            + s
+                                            + " not found in table "
+                                            + dbName
+                                            + "."
+                                            + tableName);
+                            return new RowType.RowField(s, columnTypes.get(idx));
+                        };
+                RowType primaryKeyType =
+                        new RowType(
+                                optionalPrimaryKeyNames.get().stream()
+                                        .map(rowFieldMapper)
+                                        .collect(Collectors.toList()));
+                store =
+                        FileStoreImpl.createWithPrimaryKey(
+                                tableLocation,
+                                0, // TODO
+                                new FileStoreOptions(options),
+                                user,
+                                partitionType,
+                                primaryKeyType,
+                                rowType,
+                                options.get(FileStoreOptions.MERGE_ENGINE));
+                valueCountMode = false;
+            } else {
+                store =
+                        FileStoreImpl.createWithValueCount(
+                                tableLocation,
+                                0, // TODO
+                                new FileStoreOptions(options),
+                                user,
+                                partitionType,
+                                rowType);
+                valueCountMode = true;
+            }
+        }
+
+        private void createPredicate(JobConf jobConf) {
+            String hiveFilter = jobConf.get(TableScanDesc.FILTER_EXPR_CONF_STR);
+            if (hiveFilter == null) {
+                return;
+            }
+
+            ExprNodeGenericFuncDesc exprNodeDesc =
+                    SerializationUtilities.deserializeObject(
+                            hiveFilter, ExprNodeGenericFuncDesc.class);
+            SearchArgument sarg = ConvertAstToSearchArg.create(jobConf, exprNodeDesc);
+            SearchArgumentToPredicateConverter converter =
+                    new SearchArgumentToPredicateConverter(sarg, columnNames, columnTypes);
+            predicate = converter.convert().orElse(null);
+        }
+
+        private FileStoreScanImpl newScan() {
+            FileStoreScanImpl scan = store.newScan();
+            if (predicate != null) {
+                if (valueCountMode) {
+                    scan.withKeyFilter(predicate);
+                } else {
+                    scan.withValueFilter(predicate);
+                }
+            }
+            return scan;
         }
     }
 }
