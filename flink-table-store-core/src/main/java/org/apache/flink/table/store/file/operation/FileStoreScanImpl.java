@@ -25,11 +25,10 @@ import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
-import org.apache.flink.table.store.file.predicate.And;
 import org.apache.flink.table.store.file.predicate.Equal;
 import org.apache.flink.table.store.file.predicate.Literal;
-import org.apache.flink.table.store.file.predicate.Or;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
@@ -46,7 +45,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -129,17 +127,17 @@ public class FileStoreScanImpl implements FileStoreScan {
                                         partitionObjects[i]);
                         fieldPredicates.add(new Equal(i, l));
                     }
-                    return fieldPredicates.stream().reduce(And::new).get();
+                    return PredicateBuilder.and(fieldPredicates);
                 };
-        Optional<Predicate> predicate =
+        List<Predicate> predicates =
                 partitions.stream()
                         .filter(p -> p.getArity() > 0)
                         .map(partitionToPredicate)
-                        .reduce(Or::new);
-        if (predicate.isPresent()) {
-            return withPartitionFilter(predicate.get());
-        } else {
+                        .collect(Collectors.toList());
+        if (predicates.isEmpty()) {
             return this;
+        } else {
+            return withPartitionFilter(PredicateBuilder.or(predicates));
         }
     }
 

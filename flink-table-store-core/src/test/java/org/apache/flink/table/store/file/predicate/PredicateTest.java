@@ -80,6 +80,9 @@ public class PredicateTest {
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(6, 7, 0)})).isEqualTo(false);
         assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
                 .isEqualTo(false);
+
+        assertThat(predicate.negate().orElse(null))
+                .isEqualTo(new NotEqual(0, new Literal(DataTypes.INT().getLogicalType(), 5)));
     }
 
     @Test
@@ -98,6 +101,9 @@ public class PredicateTest {
         assertThat(predicate.test(1, new FieldStats[] {new FieldStats(5, 5, 0)})).isEqualTo(false);
         assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
                 .isEqualTo(false);
+
+        assertThat(predicate.negate().orElse(null))
+                .isEqualTo(new Equal(0, new Literal(DataTypes.INT().getLogicalType(), 5)));
     }
 
     @Test
@@ -120,25 +126,9 @@ public class PredicateTest {
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(6, 7, 0)})).isEqualTo(true);
         assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
                 .isEqualTo(false);
-    }
 
-    @Test
-    public void testGreaterReverse() {
-        CallExpression expression =
-                call(BuiltInFunctionDefinitions.LESS_THAN, literal(5), field(0, DataTypes.INT()));
-        Predicate predicate = expression.accept(CONVERTER);
-
-        assertThat(predicate.test(new Object[] {4})).isEqualTo(false);
-        assertThat(predicate.test(new Object[] {5})).isEqualTo(false);
-        assertThat(predicate.test(new Object[] {6})).isEqualTo(true);
-        assertThat(predicate.test(new Object[] {null})).isEqualTo(false);
-
-        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 4, 0)})).isEqualTo(false);
-        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 5, 0)})).isEqualTo(false);
-        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 6, 0)})).isEqualTo(true);
-        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(6, 7, 0)})).isEqualTo(true);
-        assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
-                .isEqualTo(false);
+        assertThat(predicate.negate().orElse(null))
+                .isEqualTo(new LessOrEqual(0, new Literal(DataTypes.INT().getLogicalType(), 5)));
     }
 
     @Test
@@ -161,6 +151,9 @@ public class PredicateTest {
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(6, 7, 0)})).isEqualTo(true);
         assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
                 .isEqualTo(false);
+
+        assertThat(predicate.negate().orElse(null))
+                .isEqualTo(new LessThan(0, new Literal(DataTypes.INT().getLogicalType(), 5)));
     }
 
     @Test
@@ -179,6 +172,9 @@ public class PredicateTest {
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(4, 7, 0)})).isEqualTo(true);
         assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
                 .isEqualTo(false);
+
+        assertThat(predicate.negate().orElse(null))
+                .isEqualTo(new GreaterOrEqual(0, new Literal(DataTypes.INT().getLogicalType(), 5)));
     }
 
     @Test
@@ -200,6 +196,9 @@ public class PredicateTest {
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(4, 7, 0)})).isEqualTo(true);
         assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
                 .isEqualTo(false);
+
+        assertThat(predicate.negate().orElse(null))
+                .isEqualTo(new GreaterThan(0, new Literal(DataTypes.INT().getLogicalType(), 5)));
     }
 
     @Test
@@ -216,6 +215,8 @@ public class PredicateTest {
 
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(6, 7, 0)})).isEqualTo(false);
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(5, 7, 1)})).isEqualTo(true);
+
+        assertThat(predicate.negate().orElse(null)).isEqualTo(new IsNotNull(0));
     }
 
     @Test
@@ -234,6 +235,8 @@ public class PredicateTest {
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(5, 7, 1)})).isEqualTo(true);
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(null, null, 3)}))
                 .isEqualTo(false);
+
+        assertThat(predicate.negate().orElse(null)).isEqualTo(new IsNull(0));
     }
 
     @Test
@@ -277,6 +280,12 @@ public class PredicateTest {
                                     new FieldStats(6, 7, 0), new FieldStats(4, 6, 0)
                                 }))
                 .isEqualTo(false);
+
+        assertThat(predicate.negate().orElse(null))
+                .isEqualTo(
+                        new Or(
+                                new NotEqual(0, new Literal(DataTypes.INT().getLogicalType(), 3)),
+                                new NotEqual(1, new Literal(DataTypes.INT().getLogicalType(), 5))));
     }
 
     @Test
@@ -320,6 +329,12 @@ public class PredicateTest {
                                     new FieldStats(6, 7, 0), new FieldStats(8, 10, 0)
                                 }))
                 .isEqualTo(false);
+
+        assertThat(predicate.negate().orElse(null))
+                .isEqualTo(
+                        new And(
+                                new NotEqual(0, new Literal(DataTypes.INT().getLogicalType(), 3)),
+                                new NotEqual(1, new Literal(DataTypes.INT().getLogicalType(), 5))));
     }
 
     @MethodSource("provideLikeExpressions")

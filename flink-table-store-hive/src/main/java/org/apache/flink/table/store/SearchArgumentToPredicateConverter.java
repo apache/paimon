@@ -21,18 +21,13 @@ package org.apache.flink.table.store;
 import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.store.file.predicate.And;
 import org.apache.flink.table.store.file.predicate.Equal;
-import org.apache.flink.table.store.file.predicate.GreaterOrEqual;
-import org.apache.flink.table.store.file.predicate.GreaterThan;
-import org.apache.flink.table.store.file.predicate.IsNotNull;
 import org.apache.flink.table.store.file.predicate.IsNull;
 import org.apache.flink.table.store.file.predicate.LessOrEqual;
 import org.apache.flink.table.store.file.predicate.LessThan;
 import org.apache.flink.table.store.file.predicate.Literal;
-import org.apache.flink.table.store.file.predicate.NotEqual;
-import org.apache.flink.table.store.file.predicate.Or;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.util.Preconditions;
@@ -52,6 +47,7 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /** Converts {@link SearchArgument} to {@link Predicate} with best effort. */
 public class SearchArgumentToPredicateConverter {
@@ -59,14 +55,14 @@ public class SearchArgumentToPredicateConverter {
     private static final Logger LOG =
             LoggerFactory.getLogger(SearchArgumentToPredicateConverter.class);
 
-    private final ExpressionTree tree;
+    private final ExpressionTree root;
     private final List<PredicateLeaf> leaves;
     private final List<String> columnNames;
     private final List<LogicalType> columnTypes;
 
     public SearchArgumentToPredicateConverter(
             SearchArgument sarg, List<String> columnNames, List<LogicalType> columnTypes) {
-        this.tree = sarg.getExpression();
+        this.root = sarg.getExpression();
         this.leaves = sarg.getLeaves();
         this.columnNames = columnNames;
         this.columnTypes = columnTypes;
@@ -74,9 +70,12 @@ public class SearchArgumentToPredicateConverter {
 
     public Optional<Predicate> convert() {
         try {
-            return Optional.of(convertTree(tree));
-        } catch (Throwable t) {
-            LOG.warn("Failed to convert predicate. Filter will be processed by Hive instead.", t);
+            return Optional.of(convertTree(root));
+        } catch (UnsupportedOperationException e) {
+            LOG.warn(
+                    "Failed to convert predicate due to unsupported feature. "
+                            + "Filter will be processed by Hive instead.",
+                    e);
             return Optional.empty();
         }
     }
@@ -85,33 +84,24 @@ public class SearchArgumentToPredicateConverter {
         List<ExpressionTree> children = tree.getChildren();
         switch (tree.getOperator()) {
             case OR:
-                return children.stream().map(this::convertTree).reduce(Or::new).get();
+                return PredicateBuilder.or(
+                        children.stream().map(this::convertTree).collect(Collectors.toList()));
             case AND:
-                return children.stream().map(this::convertTree).reduce(And::new).get();
+                return PredicateBuilder.and(
+                        children.stream().map(this::convertTree).collect(Collectors.toList()));
             case NOT:
-                return convertNotTree(children.get(0));
+                return convertTree(children.get(0))
+                        .negate()
+                        .orElseThrow(
+                                () ->
+                                        new UnsupportedOperationException(
+                                                "Unsupported negate of "
+                                                        + children.get(0).getOperator().name()));
             case LEAF:
                 return convertLeaf(leaves.get(tree.getLeaf()));
             default:
                 throw new UnsupportedOperationException(
-                        "Unsupported operator " + tree.getOperator());
-        }
-    }
-
-    private Predicate convertNotTree(ExpressionTree tree) {
-        List<ExpressionTree> children = tree.getChildren();
-        switch (tree.getOperator()) {
-            case OR:
-                return children.stream().map(this::convertNotTree).reduce(And::new).get();
-            case AND:
-                return children.stream().map(this::convertNotTree).reduce(Or::new).get();
-            case NOT:
-                return convertTree(children.get(0));
-            case LEAF:
-                return convertNotLeaf(leaves.get(tree.getLeaf()));
-            default:
-                throw new UnsupportedOperationException(
-                        "Unsupported operator " + tree.getOperator());
+                        "Unsupported operator " + tree.getOperator().name());
         }
     }
 
@@ -128,50 +118,22 @@ public class SearchArgumentToPredicateConverter {
             case LESS_THAN_EQUALS:
                 return new LessOrEqual(idx, toLiteral(columnType, leaf.getLiteral()));
             case IN:
-                return leaf.getLiteralList().stream()
-                        .map(o -> (Predicate) new Equal(idx, toLiteral(columnType, o)))
-                        .reduce(Or::new)
-                        .get();
+                return PredicateBuilder.in(
+                        idx,
+                        leaf.getLiteralList().stream()
+                                .map(o -> toLiteral(columnType, o))
+                                .collect(Collectors.toList()));
             case BETWEEN:
                 List<Object> literalList = leaf.getLiteralList();
-                return new And(
-                        new GreaterOrEqual(idx, toLiteral(columnType, literalList.get(0))),
-                        new LessOrEqual(idx, toLiteral(columnType, literalList.get(1))));
+                return PredicateBuilder.between(
+                        idx,
+                        toLiteral(columnType, literalList.get(0)),
+                        toLiteral(columnType, literalList.get(1)));
             case IS_NULL:
                 return new IsNull(idx);
             default:
                 throw new UnsupportedOperationException(
-                        "Unsupported operator " + tree.getOperator());
-        }
-    }
-
-    private Predicate convertNotLeaf(PredicateLeaf leaf) {
-        String columnName = leaf.getColumnName();
-        int idx = columnNames.indexOf(columnName);
-        Preconditions.checkArgument(idx >= 0, "Column " + columnName + " not found.");
-        LogicalType columnType = columnTypes.get(idx);
-        switch (leaf.getOperator()) {
-            case EQUALS:
-                return new NotEqual(idx, toLiteral(columnType, leaf.getLiteral()));
-            case LESS_THAN:
-                return new GreaterOrEqual(idx, toLiteral(columnType, leaf.getLiteral()));
-            case LESS_THAN_EQUALS:
-                return new GreaterThan(idx, toLiteral(columnType, leaf.getLiteral()));
-            case IN:
-                return leaf.getLiteralList().stream()
-                        .map(o -> (Predicate) new NotEqual(idx, toLiteral(columnType, o)))
-                        .reduce(And::new)
-                        .get();
-            case BETWEEN:
-                List<Object> literalList = leaf.getLiteralList();
-                return new Or(
-                        new LessThan(idx, toLiteral(columnType, literalList.get(0))),
-                        new GreaterThan(idx, toLiteral(columnType, literalList.get(1))));
-            case IS_NULL:
-                return new IsNotNull(idx);
-            default:
-                throw new UnsupportedOperationException(
-                        "Unsupported operator " + tree.getOperator());
+                        "Unsupported operator " + leaf.getOperator());
         }
     }
 

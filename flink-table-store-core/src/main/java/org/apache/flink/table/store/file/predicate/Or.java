@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.predicate;
 import org.apache.flink.table.store.file.stats.FieldStats;
 
 import java.util.Objects;
+import java.util.Optional;
 
 /** A {@link Predicate} to eval or. */
 public class Or implements Predicate {
@@ -43,6 +44,17 @@ public class Or implements Predicate {
     @Override
     public boolean test(long rowCount, FieldStats[] fieldStats) {
         return predicate1.test(rowCount, fieldStats) || predicate2.test(rowCount, fieldStats);
+    }
+
+    @Override
+    public Optional<Predicate> negate() {
+        Optional<Predicate> negate1 = predicate1.negate();
+        Optional<Predicate> negate2 = predicate2.negate();
+        if (negate1.isPresent() && negate2.isPresent()) {
+            return Optional.of(new And(negate1.get(), negate2.get()));
+        } else {
+            return Optional.empty();
+        }
     }
 
     @Override
