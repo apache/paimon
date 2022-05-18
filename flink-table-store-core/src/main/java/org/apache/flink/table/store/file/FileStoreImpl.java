@@ -43,8 +43,11 @@ import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
-import java.util.List;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /** File store implementation. */
 public class FileStoreImpl implements FileStore {
@@ -227,6 +230,8 @@ public class FileStoreImpl implements FileStore {
                                 .collect(Collectors.toList()));
 
         MergeFunction mergeFunction;
+        Map<String, String> rightConfMap =
+                options.getFilterConf(e -> e.getKey().endsWith(".aggregate-function"));
         switch (mergeEngine) {
             case DEDUPLICATE:
                 mergeFunction = new DeduplicateMergeFunction();
@@ -235,7 +240,18 @@ public class FileStoreImpl implements FileStore {
                 mergeFunction = new PartialUpdateMergeFunction(rowType);
                 break;
             case AGGREGATION:
-                mergeFunction = new AggregationMergeFunction(primaryKeyType, rowType);
+                Set<String> valueSet = new HashSet<>(rightConfMap.values());
+                if (valueSet.size() != 1 || !valueSet.contains("sum")) {
+                    throw new IllegalArgumentException(
+                            "Aggregate function must be the same for all columns");
+                }
+                Set<String> aggregateColumnNames =
+                        rightConfMap.keySet().stream()
+                                .distinct()
+                                .flatMap(s -> Stream.of(s.split(".aggregate-function")[0]))
+                                .collect(Collectors.toSet());
+                mergeFunction =
+                        new AggregationMergeFunction(primaryKeyType, rowType, aggregateColumnNames);
                 break;
             default:
                 throw new UnsupportedOperationException("Unsupported merge engine: " + mergeEngine);

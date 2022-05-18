@@ -28,6 +28,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 /**
  * A {@link MergeFunction} where key is primary key (unique) and value is the partial record, update
@@ -46,9 +47,13 @@ public class AggregationMergeFunction implements MergeFunction {
     private final RowType primaryKeyType;
     private transient GenericRowData row;
 
-    public AggregationMergeFunction(RowType primaryKeyType, RowType rowType) {
+    private final Set<String> aggregateColumnNames;
+
+    public AggregationMergeFunction(
+            RowType primaryKeyType, RowType rowType, Set<String> aggregateColumnNames) {
         this.primaryKeyType = primaryKeyType;
         this.rowType = rowType;
+        this.aggregateColumnNames = aggregateColumnNames;
 
         List<LogicalType> fieldTypes = rowType.getChildren();
         this.getters = new RowData.FieldGetter[fieldTypes.size()];
@@ -64,8 +69,11 @@ public class AggregationMergeFunction implements MergeFunction {
         }
 
         this.aggregateFunctions = new ArrayList<>(rowType.getFieldCount());
-        for (LogicalType type : rowType.getChildren()) {
-            AggregateFunction<?> f = choiceRightAggregateFunction(type.getDefaultConversion());
+        for (int i = 0; i < rowType.getFieldCount(); i++) {
+            AggregateFunction<?> f = null;
+            if (aggregateColumnNames.contains(rowNames.get(i))) {
+                f = choiceRightAggregateFunction(rowType.getTypeAt(i).getDefaultConversion());
+            }
             aggregateFunctions.add(f);
         }
     }
@@ -137,6 +145,6 @@ public class AggregationMergeFunction implements MergeFunction {
     @Override
     public MergeFunction copy() {
         // RowData.FieldGetter is thread safe
-        return new AggregationMergeFunction(primaryKeyType, rowType);
+        return new AggregationMergeFunction(primaryKeyType, rowType, aggregateColumnNames);
     }
 }

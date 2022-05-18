@@ -36,6 +36,8 @@ import java.time.Duration;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
 import static org.apache.flink.configuration.description.TextElement.text;
@@ -229,6 +231,12 @@ public class FileStoreOptions implements Serializable {
 
     public int manifestMergeMinCount() {
         return options.get(MANIFEST_MERGE_MIN_COUNT);
+    }
+
+    public Map<String, String> getFilterConf(Predicate<Map.Entry<String, String>> predicate) {
+        return options.toMap().entrySet().stream()
+                .filter(predicate)
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
     /** Specifies the merge engine for table with primary key. */
