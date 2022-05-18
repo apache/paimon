@@ -88,6 +88,11 @@ public abstract class TableScan {
         return this;
     }
 
+    public TableScan withRescaleBucket(boolean rescaleBucket) {
+        scan.withRescaleBucket(rescaleBucket);
+        return this;
+    }
+
     public Plan plan() {
         FileStoreScan.Plan plan = scan.plan();
         return new Plan(

@@ -34,6 +34,8 @@ import org.apache.flink.table.types.logical.IntType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -45,6 +47,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link KeyValueFileStoreScan}. */
 public class KeyValueFileStoreScanTest {
@@ -192,6 +195,32 @@ public class KeyValueFileStoreScanTest {
         gen.sort(expectedKvs);
         Map<BinaryRowData, BinaryRowData> expected = store.toKvMap(expectedKvs);
         runTestExactMatch(scan, null, expected);
+    }
+
+    @ValueSource(booleans = {true, false})
+    @ParameterizedTest
+    public void testWithRescaleBucket(boolean rescaleBucket) throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        List<KeyValue> data = generateData(random.nextInt(100) + 1);
+        Snapshot snapshot = writeData(data);
+        int newBucketNum = random.nextInt(NUM_BUCKETS + 1, 20);
+        store =
+                TestFileStore.create(
+                        "avro",
+                        tempDir.toString(),
+                        newBucketNum,
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                        TestKeyValueGenerator.KEY_TYPE,
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                        new DeduplicateMergeFunction());
+        FileStoreScan scan = store.newScan().withRescaleBucket(rescaleBucket);
+        if (rescaleBucket) {
+            runTestExactMatch(scan, snapshot.id(), store.toKvMap(data));
+        } else {
+            assertThatThrownBy(scan::plan)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("Bucket number has been changed. Manifest might be corrupted.");
+        }
     }
 
     private void runTestExactMatch(

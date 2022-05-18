@@ -44,6 +44,8 @@ import javax.annotation.Nullable;
 
 import java.util.Optional;
 
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.OVERWRITE_RESCALE_BUCKET;
+
 /** Source builder to build a Flink {@link Source}. */
 public class FlinkSourceBuilder {
 
@@ -98,12 +100,14 @@ public class FlinkSourceBuilder {
         return conf.get(FileStoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis();
     }
 
-    private FileStoreSource buildFileSource(boolean isContinuous, boolean continuousScanLatest) {
+    private FileStoreSource buildFileSource(
+            boolean isContinuous, boolean continuousScanLatest, boolean rescaleBucket) {
         return new FileStoreSource(
                 table,
                 isContinuous,
                 discoveryIntervalMills(),
                 continuousScanLatest,
+                rescaleBucket,
                 projectedFields,
                 predicate);
     }
@@ -121,20 +125,21 @@ public class FlinkSourceBuilder {
             LogOptions.LogStartupMode startupMode =
                     new DelegatingConfiguration(conf, LogOptions.LOG_PREFIX).get(LogOptions.SCAN);
             if (logSourceProvider == null) {
-                return buildFileSource(true, startupMode == LogOptions.LogStartupMode.LATEST);
+                return buildFileSource(
+                        true, startupMode == LogOptions.LogStartupMode.LATEST, false);
             } else {
                 if (startupMode != LogOptions.LogStartupMode.FULL) {
                     return logSourceProvider.createSource(null);
                 }
                 return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
-                                buildFileSource(false, false))
+                                buildFileSource(false, false, false))
                         .addSource(
                                 new LogHybridSourceFactory(logSourceProvider),
                                 Boundedness.CONTINUOUS_UNBOUNDED)
                         .build();
             }
         } else {
-            return buildFileSource(false, false);
+            return buildFileSource(false, false, conf.get(OVERWRITE_RESCALE_BUCKET));
         }
     }
 
