@@ -25,9 +25,11 @@ import org.apache.flink.core.fs.FSDataOutputStreamWrapper;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.FileSystemFactory;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.util.ExceptionUtils;
 
 import java.io.IOException;
 import java.net.URI;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -156,6 +158,18 @@ public class FailingAtomicRenameFileSystem extends TestAtomicRenameFileSystem {
                 throw new ArtificialException();
             }
             super.write(b, off, len);
+        }
+    }
+
+    public static <T> T retryArtificialException(Callable<T> callable) throws Exception {
+        while (true) {
+            try {
+                return callable.call();
+            } catch (Throwable t) {
+                if (!ExceptionUtils.findThrowable(t, ArtificialException.class).isPresent()) {
+                    throw t;
+                }
+            }
         }
     }
 }

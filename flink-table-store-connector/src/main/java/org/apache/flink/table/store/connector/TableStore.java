@@ -26,6 +26,7 @@ import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.DelegatingConfiguration;
 import org.apache.flink.connector.base.source.hybrid.HybridSource;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
@@ -48,22 +49,21 @@ import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.FileStoreOptions.MergeEngine;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.log.LogOptions.LogStartupMode;
 import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
@@ -76,26 +76,32 @@ import static org.apache.flink.table.store.log.LogOptions.SCAN;
 @Experimental
 public class TableStore {
 
+    private final ObjectIdentifier tableIdentifier;
+
     private final Configuration options;
+
+    private final Schema schema;
+
+    private final RowType type;
 
     /** commit user, default uuid. */
     private String user = UUID.randomUUID().toString();
 
-    /** partition keys, default no partition. */
-    private int[] partitions = new int[0];
-
-    /** file store primary keys which exclude partition fields if partitioned, default no key. */
-    private int[] primaryKeys = new int[0];
-
-    /** log store primary keys which include partition fields if partitioned, default no key. */
-    private int[] logPrimaryKeys = new int[0];
-
-    private RowType type;
-
-    private ObjectIdentifier tableIdentifier;
-
-    public TableStore(Configuration options) {
+    public TableStore(ObjectIdentifier tableIdentifier, Configuration options) {
+        this.tableIdentifier = tableIdentifier;
         this.options = options;
+
+        Path tablePath = new FileStoreOptions(options).path(tableIdentifier);
+        this.schema =
+                new SchemaManager(tablePath)
+                        .latest()
+                        .orElseThrow(
+                                () ->
+                                        new RuntimeException(
+                                                String.format(
+                                                        "Can not find schema in path %s, please create table first.",
+                                                        tablePath)));
+        this.type = schema.logicalRowType();
     }
 
     public TableStore withUser(String user) {
@@ -103,35 +109,16 @@ public class TableStore {
         return this;
     }
 
-    public TableStore withSchema(RowType type) {
-        this.type = type;
-        return this;
-    }
-
-    public TableStore withPartitions(int[] partitions) {
-        this.partitions = partitions;
-        adjustIndexAndValidate();
-        return this;
-    }
-
-    public TableStore withPrimaryKeys(int[] primaryKeys) {
-        this.primaryKeys = primaryKeys;
-        this.logPrimaryKeys = primaryKeys;
-        adjustIndexAndValidate();
-        return this;
-    }
-
-    public TableStore withTableIdentifier(ObjectIdentifier tableIdentifier) {
-        this.tableIdentifier = tableIdentifier;
-        return this;
+    public RowType type() {
+        return type;
     }
 
     public boolean partitioned() {
-        return partitions.length > 0;
+        return schema.partitionKeys().size() > 0;
     }
 
     public boolean valueCountMode() {
-        return primaryKeys.length == 0;
+        return trimmedPrimaryKeys().size() == 0;
     }
 
     public List<String> fieldNames() {
@@ -139,14 +126,33 @@ public class TableStore {
     }
 
     public List<String> partitionKeys() {
-        RowType partitionType = TypeUtils.project(type, partitions);
-        return partitionType.getFieldNames();
+        return schema.partitionKeys();
     }
 
     @VisibleForTesting
-    List<String> primaryKeys() {
-        RowType primaryKeyType = TypeUtils.project(type, primaryKeys);
-        return primaryKeyType.getFieldNames();
+    List<String> trimmedPrimaryKeys() {
+        return schema.trimmedPrimaryKeys();
+    }
+
+    private int[] toIndex(List<String> fields) {
+        List<String> fieldNames = type.getFieldNames();
+        return fields.stream().mapToInt(fieldNames::indexOf).toArray();
+    }
+
+    private int[] partitionKeysIndex() {
+        return toIndex(schema.partitionKeys());
+    }
+
+    private int[] fullPrimaryKeysIndex() {
+        return toIndex(schema.primaryKeys());
+    }
+
+    private int[] trimmedPrimaryKeysIndex() {
+        return toIndex(trimmedPrimaryKeys());
+    }
+
+    public Schema schema() {
+        return schema;
     }
 
     public Configuration options() {
@@ -170,11 +176,13 @@ public class TableStore {
     }
 
     private FileStore buildFileStore() {
-        RowType partitionType = TypeUtils.project(type, partitions);
+        RowType partitionType = TypeUtils.project(type, partitionKeysIndex());
         FileStoreOptions fileStoreOptions = new FileStoreOptions(options);
-        if (primaryKeys.length == 0) {
+        int[] trimmedPrimaryKeys = trimmedPrimaryKeysIndex();
+        if (trimmedPrimaryKeys.length == 0) {
             return FileStoreImpl.createWithValueCount(
                     fileStoreOptions.path(tableIdentifier).toString(),
+                    schema.id(),
                     fileStoreOptions,
                     user,
                     partitionType,
@@ -182,45 +190,13 @@ public class TableStore {
         } else {
             return FileStoreImpl.createWithPrimaryKey(
                     fileStoreOptions.path(tableIdentifier).toString(),
+                    schema.id(),
                     fileStoreOptions,
                     user,
                     partitionType,
-                    TypeUtils.project(type, primaryKeys),
+                    TypeUtils.project(type, trimmedPrimaryKeys),
                     type,
                     mergeEngine());
-        }
-    }
-
-    private void adjustIndexAndValidate() {
-        if (logPrimaryKeys.length > 0 && partitions.length > 0) {
-            List<Integer> pkList =
-                    Arrays.stream(logPrimaryKeys).boxed().collect(Collectors.toList());
-            List<Integer> partitionList =
-                    Arrays.stream(partitions).boxed().collect(Collectors.toList());
-
-            String pkInfo =
-                    type == null
-                            ? pkList.toString()
-                            : TypeUtils.project(type, logPrimaryKeys).getFieldNames().toString();
-            String partitionInfo =
-                    type == null
-                            ? partitionList.toString()
-                            : TypeUtils.project(type, partitions).getFieldNames().toString();
-            Preconditions.checkState(
-                    pkList.containsAll(partitionList),
-                    String.format(
-                            "Primary key constraint %s should include all partition fields %s",
-                            pkInfo, partitionInfo));
-            primaryKeys =
-                    Arrays.stream(logPrimaryKeys)
-                            .filter(pk -> !partitionList.contains(pk))
-                            .toArray();
-
-            Preconditions.checkState(
-                    primaryKeys.length > 0,
-                    String.format(
-                            "Primary key constraint %s should not be same with partition fields %s, this will result in only one record in a partition",
-                            pkInfo, partitionInfo));
         }
     }
 
@@ -284,7 +260,7 @@ public class TableStore {
                 boolean isContinuous, boolean continuousScanLatest) {
             return new FileStoreSource(
                     buildFileStore(),
-                    primaryKeys.length == 0,
+                    schema.primaryKeys().isEmpty(),
                     isContinuous,
                     discoveryIntervalMills(),
                     continuousScanLatest,
@@ -296,7 +272,7 @@ public class TableStore {
 
         private Source<RowData, ?, ?> buildSource() {
             if (isContinuous) {
-                if (primaryKeys.length > 0 && mergeEngine() == PARTIAL_UPDATE) {
+                if (schema.primaryKeys().size() > 0 && mergeEngine() == PARTIAL_UPDATE) {
                     throw new ValidationException(
                             "Partial update continuous reading is not supported.");
                 }
@@ -388,7 +364,11 @@ public class TableStore {
 
             BucketStreamPartitioner partitioner =
                     new BucketStreamPartitioner(
-                            numBucket, type, partitions, primaryKeys, logPrimaryKeys);
+                            numBucket,
+                            type,
+                            partitionKeysIndex(),
+                            trimmedPrimaryKeysIndex(),
+                            fullPrimaryKeysIndex());
             PartitionTransformation<RowData> partitioned =
                     new PartitionTransformation<>(input.getTransformation(), partitioner);
             if (parallelism != null) {
@@ -399,9 +379,9 @@ public class TableStore {
                     new StoreSink<>(
                             tableIdentifier,
                             fileStore,
-                            partitions,
-                            primaryKeys,
-                            logPrimaryKeys,
+                            partitionKeysIndex(),
+                            trimmedPrimaryKeysIndex(),
+                            fullPrimaryKeysIndex(),
                             numBucket,
                             lockFactory,
                             overwritePartition,

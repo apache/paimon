@@ -90,21 +90,12 @@ public class LogStoreSinkITCase extends KafkaTableTestBase {
         StreamExecutionEnvironment env = isBatch ? buildBatchEnv() : buildStreamEnv();
 
         // in eventual mode, failure will result in duplicate data
-        TableStore store = buildTableStore(isBatch || !transaction, TEMPORARY_FOLDER);
-        if (partitioned) {
-            if (hasPk) {
-                store.withPrimaryKeys(new int[] {1, 2});
-            } else {
-                store.withPrimaryKeys(new int[0]);
-            }
-            store.withPartitions(new int[] {1});
-        } else {
-            store.withPartitions(new int[0]);
-        }
-
-        if (!hasPk) {
-            store.withPrimaryKeys(new int[0]);
-        }
+        TableStore store =
+                buildTableStore(
+                        isBatch || !transaction,
+                        TEMPORARY_FOLDER,
+                        partitioned ? new int[] {1} : new int[0],
+                        hasPk ? new int[] {2} : new int[0]);
 
         // prepare log
         DynamicTableFactory.Context context =

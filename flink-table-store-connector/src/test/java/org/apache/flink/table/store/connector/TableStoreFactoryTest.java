@@ -45,6 +45,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
@@ -160,13 +161,18 @@ public class TableStoreFactoryTest {
 
     @ParameterizedTest
     @MethodSource("providingResolvedTable")
-    public void testBuildTableStore(
+    public void testCreateAndCheckTableStore(
             RowType rowType,
             List<String> partitions,
             List<String> primaryKeys,
             TableStoreTestBase.ExpectedResult expectedResult) {
         ResolvedCatalogTable catalogTable =
-                createResolvedTable(Collections.emptyMap(), rowType, partitions, primaryKeys);
+                createResolvedTable(
+                        Collections.singletonMap(
+                                "path", sharedTempDir.toAbsolutePath() + "/" + UUID.randomUUID()),
+                        rowType,
+                        partitions,
+                        primaryKeys);
         context =
                 new FactoryUtil.DefaultDynamicTableContext(
                         TABLE_IDENTIFIER,
@@ -176,6 +182,7 @@ public class TableStoreFactoryTest {
                         Thread.currentThread().getContextClassLoader(),
                         false);
         if (expectedResult.success) {
+            tableStoreFactory.onCreateTable(context, false);
             TableStore tableStore = tableStoreFactory.buildTableStore(context);
             assertThat(tableStore.partitioned()).isEqualTo(catalogTable.isPartitioned());
             assertThat(tableStore.valueCountMode())
@@ -184,12 +191,12 @@ public class TableStoreFactoryTest {
             // check primary key doesn't contain partition
             if (tableStore.partitioned() && !tableStore.valueCountMode()) {
                 assertThat(
-                                tableStore.primaryKeys().stream()
+                                tableStore.trimmedPrimaryKeys().stream()
                                         .noneMatch(pk -> tableStore.partitionKeys().contains(pk)))
                         .isTrue();
             }
         } else {
-            assertThatThrownBy(() -> tableStoreFactory.buildTableStore(context))
+            assertThatThrownBy(() -> tableStoreFactory.onCreateTable(context, false))
                     .isInstanceOf(expectedResult.expectedType)
                     .hasMessageContaining(expectedResult.expectedMessage);
         }
