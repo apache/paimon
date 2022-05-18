@@ -61,7 +61,6 @@ public class DataFileWriter {
     private final RowType valueType;
     private final FieldStatsArraySerializer keyStatsConverter;
     private final FieldStatsArraySerializer valueStatsConverter;
-    private final KeyValueSerializer kvSerializer;
     private final DataFilePathFactory pathFactory;
     private final long suggestedFileSize;
     private final FileWriter.Factory<KeyValue, Metric> fileWriterFactory;
@@ -77,11 +76,12 @@ public class DataFileWriter {
         this.valueType = valueType;
         this.keyStatsConverter = new FieldStatsArraySerializer(keyType);
         this.valueStatsConverter = new FieldStatsArraySerializer(valueType);
-        this.kvSerializer = new KeyValueSerializer(keyType, valueType);
+
         this.pathFactory = pathFactory;
         this.suggestedFileSize = suggestedFileSize;
 
         // Initialize the file writer factory.
+        KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
         this.fileWriterFactory =
                 MetricFileWriter.createFactory(
                         writerFactory,

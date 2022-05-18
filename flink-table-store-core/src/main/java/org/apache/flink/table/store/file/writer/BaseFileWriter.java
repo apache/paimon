@@ -78,6 +78,8 @@ public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
     public long length() throws IOException {
         if (writer != null) {
             return writer.length();
+        } else if (metric != null) {
+            return metric.length();
         }
         return 0;
     }

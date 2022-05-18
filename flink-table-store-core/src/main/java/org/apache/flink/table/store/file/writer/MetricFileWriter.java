@@ -58,6 +58,7 @@ public class MetricFileWriter<T> implements FileWriter<T, Metric> {
     private FieldStatsCollector fieldStatsCollector = null;
 
     private long recordCount;
+    private long length;
     private boolean closed = false;
 
     private MetricFileWriter(
@@ -78,6 +79,7 @@ public class MetricFileWriter<T> implements FileWriter<T, Metric> {
         }
 
         this.recordCount = 0L;
+        this.length = 0L;
     }
 
     @Override
@@ -128,7 +130,7 @@ public class MetricFileWriter<T> implements FileWriter<T, Metric> {
             stats = fieldStatsCollector.extractFieldStats();
         }
 
-        return new Metric(stats, recordCount);
+        return new Metric(stats, recordCount, length);
     }
 
     @Override
@@ -140,6 +142,7 @@ public class MetricFileWriter<T> implements FileWriter<T, Metric> {
             }
 
             if (out != null) {
+                length = out.getPos();
                 out.flush();
                 out.close();
             }
@@ -164,8 +167,7 @@ public class MetricFileWriter<T> implements FileWriter<T, Metric> {
                         factory.create(out), converter, out, path, writeSchema, fileStatsExtractor);
             } catch (Throwable e) {
                 LOG.warn(
-                        "Failed to open the bulk writer, closing the output stream and "
-                                + "throw the error.",
+                        "Failed to open the bulk writer, closing the output stream and throw the error.",
                         e);
 
                 IOUtils.closeQuietly(out);

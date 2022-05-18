@@ -75,7 +75,7 @@ public class ManifestFile {
         this.pathFactory = pathFactory;
         this.suggestedFileSize = suggestedFileSize;
 
-        // Initialize the metric file writer factory to write manifest entry and generic metrics.
+        // Initialize the metric file writer factory to write manifest entry and generate metrics.
         this.fileWriterFactory =
                 MetricFileWriter.createFactory(
                         writerFactory, serializer::toRow, entryType, fileStatsExtractor);
@@ -122,7 +122,7 @@ public class ManifestFile {
 
     private class ManifestEntryWriter extends BaseFileWriter<ManifestEntry, ManifestFileMeta> {
 
-        private final FieldStatsCollector fieldStatsCollector;
+        private final FieldStatsCollector partitionStatsCollector;
         private long numAddedFiles = 0;
         private long numDeletedFiles = 0;
 
@@ -130,7 +130,7 @@ public class ManifestFile {
                 throws IOException {
             super(writerFactory, path);
 
-            this.fieldStatsCollector = new FieldStatsCollector(partitionType);
+            this.partitionStatsCollector = new FieldStatsCollector(partitionType);
         }
 
         @Override
@@ -148,7 +148,7 @@ public class ManifestFile {
                     throw new UnsupportedOperationException("Unknown entry kind: " + entry.kind());
             }
 
-            fieldStatsCollector.collect(entry.partition());
+            partitionStatsCollector.collect(entry.partition());
         }
 
         @Override
@@ -160,7 +160,7 @@ public class ManifestFile {
                     path.getFileSystem().getFileStatus(path).getLen(),
                     numAddedFiles,
                     numDeletedFiles,
-                    fieldStatsCollector.extract());
+                    partitionStatsCollector.extract());
         }
     }
 

@@ -21,15 +21,19 @@ package org.apache.flink.table.store.file.writer;
 
 import org.apache.flink.table.store.file.stats.FieldStats;
 
-/** Metric information to describe the column's max-min values, record count etc. */
+/**
+ * Metric information to describe the column's max-min values, record count etc.
+ */
 public class Metric {
 
     private final FieldStats[] fieldStats;
     private final long recordCount;
+    private final long length;
 
-    public Metric(FieldStats[] stats, long recordCount) {
+    public Metric(FieldStats[] stats, long recordCount, long length) {
         this.fieldStats = stats;
         this.recordCount = recordCount;
+        this.length = length;
     }
 
     public FieldStats[] fieldStats() {
@@ -38,5 +42,9 @@ public class Metric {
 
     public long recordCount() {
         return recordCount;
+    }
+
+    public long length() {
+        return length;
     }
 }
