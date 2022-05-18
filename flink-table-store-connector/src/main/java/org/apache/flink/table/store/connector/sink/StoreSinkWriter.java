@@ -94,8 +94,9 @@ public class StoreSinkWriter<WriterStateT>
                 k ->
                         overwrite
                                 ? fileStoreWrite.createEmptyWriter(
-                                        partition, bucket, compactExecutor)
-                                : fileStoreWrite.createWriter(partition, bucket, compactExecutor));
+                                        partition.copy(), bucket, compactExecutor)
+                                : fileStoreWrite.createWriter(
+                                        partition.copy(), bucket, compactExecutor));
     }
 
     @Override
