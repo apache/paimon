@@ -35,6 +35,8 @@ import org.apache.flink.util.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.function.Function;
@@ -51,7 +53,7 @@ public class MetricFileWriter<T> implements FileWriter<T, Metric> {
     private final Function<T, RowData> converter;
     private final FSDataOutputStream out;
     private final Path path;
-    private final FileStatsExtractor fileStatsExtractor;
+    @Nullable private final FileStatsExtractor fileStatsExtractor;
 
     private FieldStatsCollector fieldStatsCollector = null;
 
@@ -64,7 +66,7 @@ public class MetricFileWriter<T> implements FileWriter<T, Metric> {
             FSDataOutputStream out,
             Path path,
             RowType writeSchema,
-            FileStatsExtractor fileStatsExtractor) {
+            @Nullable FileStatsExtractor fileStatsExtractor) {
         this.writer = writer;
         this.converter = converter;
         this.out = out;
@@ -150,45 +152,25 @@ public class MetricFileWriter<T> implements FileWriter<T, Metric> {
             BulkWriter.Factory<RowData> factory,
             Function<T, RowData> converter,
             RowType writeSchema,
-            FileStatsExtractor fileStatsExtractor) {
-        return new Factory<>(factory, converter, writeSchema, fileStatsExtractor);
-    }
+            @Nullable FileStatsExtractor fileStatsExtractor) {
 
-    private static class Factory<T> implements FileWriter.Factory<T, Metric> {
-        private final BulkWriter.Factory<RowData> factory;
-        private final Function<T, RowData> converter;
-        private final RowType writeSchema;
-        private final FileStatsExtractor fileStatsExtractor;
-
-        public Factory(
-                BulkWriter.Factory<RowData> factory,
-                Function<T, RowData> converter,
-                RowType writeSchema,
-                FileStatsExtractor fileStatsExtractor) {
-            this.factory = factory;
-            this.converter = converter;
-            this.writeSchema = writeSchema;
-            this.fileStatsExtractor = fileStatsExtractor;
-        }
-
-        @Override
-        public FileWriter<T, Metric> create(Path path) throws IOException {
+        return path -> {
+            // Open the output stream.
             FileSystem fs = path.getFileSystem();
             FSDataOutputStream out = fs.create(path, FileSystem.WriteMode.NO_OVERWRITE);
 
             try {
-                BulkWriter<RowData> bulkWriter = factory.create(out);
-
                 return new MetricFileWriter<>(
-                        bulkWriter, converter, out, path, writeSchema, fileStatsExtractor);
+                        factory.create(out), converter, out, path, writeSchema, fileStatsExtractor);
             } catch (Throwable e) {
                 LOG.warn(
-                        "Failed to open the bulk writer, closing the output stream and throw the error.",
+                        "Failed to open the bulk writer, closing the output stream and "
+                                + "throw the error.",
                         e);
 
                 IOUtils.closeQuietly(out);
                 throw e;
             }
-        }
+        };
     }
 }

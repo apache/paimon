@@ -87,7 +87,7 @@ public interface FileWriter<T, R> extends Closeable {
     /** @return the result for this closed file writer. */
     R result() throws IOException;
 
-    /** A factory that creates a {@link FormatWriter}. */
+    /** A factory that creates a {@link FileWriter}. */
     interface Factory<T, R> extends Serializable {
 
         /**

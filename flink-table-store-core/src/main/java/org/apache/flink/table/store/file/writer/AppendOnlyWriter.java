@@ -19,7 +19,6 @@
 
 package org.apache.flink.table.store.file.writer;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.ValueKind;
@@ -28,8 +27,7 @@ import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
-import org.apache.flink.table.store.file.stats.FieldStatsCollector;
-import org.apache.flink.table.store.file.stats.FileStatsExtractor;
+import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
@@ -45,11 +43,11 @@ import java.util.function.Supplier;
  * operations and don't have any unique keys or sort keys.
  */
 public class AppendOnlyWriter implements RecordWriter {
-    private final BulkWriter.Factory<RowData> writerFactory;
-    private final FileStatsExtractor fileStatsExtractor;
-    private final RowType writeSchema;
     private final long targetFileSize;
     private final DataFilePathFactory pathFactory;
+    private final FieldStatsArraySerializer statsArraySerializer;
+
+    private final FileWriter.Factory<RowData, Metric> fileWriterFactory;
     private long nextSeqNum;
 
     private RowRollingWriter writer;
@@ -61,13 +59,19 @@ public class AppendOnlyWriter implements RecordWriter {
             long maxWroteSeqNumber,
             DataFilePathFactory pathFactory) {
 
-        this.writerFactory = fileFormat.createWriterFactory(writeSchema);
-        this.fileStatsExtractor = fileFormat.createStatsExtractor(writeSchema).orElse(null);
         this.targetFileSize = targetFileSize;
-        this.writeSchema = writeSchema;
         this.pathFactory = pathFactory;
-        this.nextSeqNum = maxWroteSeqNumber + 1;
+        this.statsArraySerializer = new FieldStatsArraySerializer(writeSchema);
 
+        // Initialize the file writer factory to write records and generic metric.
+        this.fileWriterFactory =
+                MetricFileWriter.createFactory(
+                        fileFormat.createWriterFactory(writeSchema),
+                        Function.identity(),
+                        writeSchema,
+                        fileFormat.createStatsExtractor(writeSchema).orElse(null));
+
+        this.nextSeqNum = maxWroteSeqNumber + 1;
         this.writer = createRollingRowWriter();
     }
 
@@ -117,15 +121,9 @@ public class AppendOnlyWriter implements RecordWriter {
         return result;
     }
 
-    private FileWriter.Factory<RowData, Metric> createFileWriterFactory() {
-        return MetricFileWriter.createFactory(
-                writerFactory, Function.identity(), writeSchema, fileStatsExtractor);
-    }
-
     private RowRollingWriter createRollingRowWriter() {
         return new RowRollingWriter(
-                () -> new RowFileWriter(createFileWriterFactory(), pathFactory.newPath()),
-                targetFileSize);
+                () -> new RowFileWriter(fileWriterFactory, pathFactory.newPath()), targetFileSize);
     }
 
     private class RowRollingWriter extends RollingFileWriter<RowData, DataFileMeta> {
@@ -137,12 +135,10 @@ public class AppendOnlyWriter implements RecordWriter {
 
     private class RowFileWriter extends BaseFileWriter<RowData, DataFileMeta> {
         private final long minSeqNum;
-        private final FieldStatsCollector fieldStatsCollector;
 
         public RowFileWriter(FileWriter.Factory<RowData, Metric> writerFactory, Path path) {
             super(writerFactory, path);
             this.minSeqNum = nextSeqNum;
-            this.fieldStatsCollector = new FieldStatsCollector(writeSchema);
         }
 
         @Override
@@ -154,7 +150,7 @@ public class AppendOnlyWriter implements RecordWriter {
 
         @Override
         protected DataFileMeta createResult(Path path, Metric metric) throws IOException {
-            BinaryTableStats stats = fieldStatsCollector.toBinary(metric.fieldStats());
+            BinaryTableStats stats = statsArraySerializer.toBinary(metric.fieldStats());
 
             return DataFileMeta.forAppend(
                     path.getName(),

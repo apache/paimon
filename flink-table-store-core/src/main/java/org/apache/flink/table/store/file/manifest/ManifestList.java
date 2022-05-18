@@ -82,8 +82,9 @@ public class ManifestList {
     }
 
     private String write(List<ManifestFileMeta> metas, Path path) throws IOException {
-        try (FSDataOutputStream out =
-                path.getFileSystem().create(path, FileSystem.WriteMode.NO_OVERWRITE)) {
+        FileSystem fs = path.getFileSystem();
+        try (FSDataOutputStream out = fs.create(path, FileSystem.WriteMode.NO_OVERWRITE)) {
+            // Initialize the bulk writer to accept the ManifestFileMeta.
             BulkWriter<RowData> writer = writerFactory.create(out);
             try {
                 for (ManifestFileMeta manifest : metas) {

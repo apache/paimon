@@ -25,7 +25,6 @@ import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.format.FileFormat;
-import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.stats.FieldStatsCollector;
 import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -57,18 +56,17 @@ public class ManifestFile {
     private final RowType partitionType;
     private final RowType entryType;
     private final ManifestEntrySerializer serializer;
-    private final FieldStatsArraySerializer statsSerializer;
     private final BulkFormat<RowData, FileSourceSplit> readerFactory;
     private final BulkWriter.Factory<RowData> writerFactory;
     private final FileStatsExtractor fileStatsExtractor;
     private final FileStorePathFactory pathFactory;
     private final long suggestedFileSize;
+    private final FileWriter.Factory<ManifestEntry, Metric> fileWriterFactory;
 
     private ManifestFile(
             RowType partitionType,
             RowType entryType,
             ManifestEntrySerializer serializer,
-            FieldStatsArraySerializer statsSerializer,
             BulkFormat<RowData, FileSourceSplit> readerFactory,
             BulkWriter.Factory<RowData> writerFactory,
             FileStatsExtractor fileStatsExtractor,
@@ -77,12 +75,16 @@ public class ManifestFile {
         this.partitionType = partitionType;
         this.entryType = entryType;
         this.serializer = serializer;
-        this.statsSerializer = statsSerializer;
         this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
         this.fileStatsExtractor = fileStatsExtractor;
         this.pathFactory = pathFactory;
         this.suggestedFileSize = suggestedFileSize;
+
+        // Initialize the metric file writer factory to write manifest entry and generic metrics.
+        this.fileWriterFactory =
+                MetricFileWriter.createFactory(
+                        writerFactory, serializer::toRow, entryType, fileStatsExtractor);
     }
 
     @VisibleForTesting
@@ -122,11 +124,6 @@ public class ManifestFile {
 
     public void delete(String fileName) {
         FileUtils.deleteOrWarn(pathFactory.toManifestFilePath(fileName));
-    }
-
-    private FileWriter.Factory<ManifestEntry, Metric> createManifestEntryWriterFactory() {
-        return MetricFileWriter.createFactory(
-                writerFactory, serializer::toRow, entryType, fileStatsExtractor);
     }
 
     private class ManifestEntryWriter extends BaseFileWriter<ManifestEntry, ManifestFileMeta> {
@@ -185,8 +182,7 @@ public class ManifestFile {
     private Supplier<ManifestEntryWriter> createWriterFactory() {
         return () -> {
             try {
-                return new ManifestEntryWriter(
-                        createManifestEntryWriterFactory(), pathFactory.newManifestFile());
+                return new ManifestEntryWriter(fileWriterFactory, pathFactory.newManifestFile());
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
@@ -225,7 +221,6 @@ public class ManifestFile {
                     partitionType,
                     entryType,
                     new ManifestEntrySerializer(),
-                    new FieldStatsArraySerializer(entryType),
                     fileFormat.createReaderFactory(entryType),
                     fileFormat.createWriterFactory(entryType),
                     fileFormat.createStatsExtractor(entryType).orElse(null),
