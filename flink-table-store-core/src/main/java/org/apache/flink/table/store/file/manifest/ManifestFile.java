@@ -54,11 +54,8 @@ public class ManifestFile {
     private static final Logger LOG = LoggerFactory.getLogger(ManifestFile.class);
 
     private final RowType partitionType;
-    private final RowType entryType;
     private final ManifestEntrySerializer serializer;
     private final BulkFormat<RowData, FileSourceSplit> readerFactory;
-    private final BulkWriter.Factory<RowData> writerFactory;
-    private final FileStatsExtractor fileStatsExtractor;
     private final FileStorePathFactory pathFactory;
     private final long suggestedFileSize;
     private final FileWriter.Factory<ManifestEntry, Metric> fileWriterFactory;
@@ -73,11 +70,8 @@ public class ManifestFile {
             FileStorePathFactory pathFactory,
             long suggestedFileSize) {
         this.partitionType = partitionType;
-        this.entryType = entryType;
         this.serializer = serializer;
         this.readerFactory = readerFactory;
-        this.writerFactory = writerFactory;
-        this.fileStatsExtractor = fileStatsExtractor;
         this.pathFactory = pathFactory;
         this.suggestedFileSize = suggestedFileSize;
 
