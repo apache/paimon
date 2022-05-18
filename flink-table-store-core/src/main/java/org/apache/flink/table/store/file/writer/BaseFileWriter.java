@@ -19,9 +19,6 @@
 
 package org.apache.flink.table.store.file.writer;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.core.fs.FSDataOutputStream;
-import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.util.IOUtils;
@@ -37,20 +34,17 @@ import java.io.IOException;
  */
 public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
 
-    private final BulkWriter.Factory<T> writerFactory;
+    private final FileWriter.Factory<T, Metric> writerFactory;
     private final Path path;
 
-    private long recordCount;
-    private FSDataOutputStream currentOut = null;
-    private BulkWriter<T> currentWriter = null;
+    private FileWriter<T, Metric> writer = null;
+    private Metric metric = null;
 
     private boolean closed = false;
 
-    public BaseFileWriter(BulkWriter.Factory<T> writerFactory, Path path) {
+    public BaseFileWriter(FileWriter.Factory<T, Metric> writerFactory, Path path) {
         this.writerFactory = writerFactory;
         this.path = path;
-
-        this.recordCount = 0;
     }
 
     public Path path() {
@@ -58,34 +52,39 @@ public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
     }
 
     private void openCurrentWriter() throws IOException {
-        this.currentOut = path.getFileSystem().create(path, FileSystem.WriteMode.NO_OVERWRITE);
-        this.currentWriter = writerFactory.create(currentOut);
+        this.writer = writerFactory.create(path);
     }
 
     @Override
     public void write(T row) throws IOException {
-        if (currentWriter == null) {
+        if (writer == null) {
             openCurrentWriter();
         }
 
-        currentWriter.addElement(row);
-        recordCount += 1;
+        writer.write(row);
     }
 
     @Override
     public long recordCount() {
-        return recordCount;
+        if (writer != null) {
+            return writer.recordCount();
+        } else if (metric != null) {
+            return metric.recordCount();
+        }
+        return 0L;
     }
 
     @Override
     public long length() throws IOException {
-        if (currentOut != null) {
-            return currentOut.getPos();
+        if (writer != null) {
+            return writer.length();
+        } else if (metric != null) {
+            return metric.length();
         }
         return 0;
     }
 
-    protected abstract R createFileMeta(Path path) throws IOException;
+    protected abstract R createResult(Path path, Metric metric) throws IOException;
 
     @Override
     public void abort() {
@@ -98,21 +97,19 @@ public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
     @Override
     public R result() throws IOException {
         Preconditions.checkState(closed, "Cannot access the file meta unless close this writer.");
+        Preconditions.checkNotNull(metric, "Metric cannot be null.");
 
-        return createFileMeta(path);
+        return createResult(path, metric);
     }
 
     @Override
     public void close() throws IOException {
         if (!closed) {
-            if (currentWriter != null) {
-                currentWriter.finish();
-                currentWriter = null;
-            }
+            if (writer != null) {
+                writer.close();
+                metric = writer.result();
 
-            if (currentOut != null) {
-                currentOut.close();
-                currentOut = null;
+                writer = null;
             }
 
             closed = true;
