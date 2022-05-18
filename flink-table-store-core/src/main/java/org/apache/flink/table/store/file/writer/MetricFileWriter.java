@@ -142,8 +142,9 @@ public class MetricFileWriter<T> implements FileWriter<T, Metric> {
             }
 
             if (out != null) {
-                length = out.getPos();
                 out.flush();
+
+                length = out.getPos();
                 out.close();
             }
 
