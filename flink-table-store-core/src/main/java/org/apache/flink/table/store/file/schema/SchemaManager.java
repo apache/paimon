@@ -121,10 +121,10 @@ public class SchemaManager {
 
             Path temp = toTmpSchemaPath(id);
             Path finalFile = toSchemaPath(id);
-            FileUtils.writeFileUtf8(temp, schema.toString());
 
             boolean success = false;
             try {
+                FileUtils.writeFileUtf8(temp, schema.toString());
                 success = lock.runWithLock(() -> temp.getFileSystem().rename(temp, finalFile));
                 if (success) {
                     return schema;
