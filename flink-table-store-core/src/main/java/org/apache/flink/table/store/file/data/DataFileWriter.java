@@ -59,11 +59,12 @@ public class DataFileWriter {
 
     private final RowType keyType;
     private final RowType valueType;
+    private final BulkWriter.Factory<RowData> writerFactory;
+    private final FileStatsExtractor fileStatsExtractor;
     private final FieldStatsArraySerializer keyStatsConverter;
     private final FieldStatsArraySerializer valueStatsConverter;
     private final DataFilePathFactory pathFactory;
     private final long suggestedFileSize;
-    private final FileWriter.Factory<KeyValue, Metric> fileWriterFactory;
 
     private DataFileWriter(
             RowType keyType,
@@ -74,20 +75,13 @@ public class DataFileWriter {
             long suggestedFileSize) {
         this.keyType = keyType;
         this.valueType = valueType;
+        this.writerFactory = writerFactory;
+        this.fileStatsExtractor = fileStatsExtractor;
         this.keyStatsConverter = new FieldStatsArraySerializer(keyType);
         this.valueStatsConverter = new FieldStatsArraySerializer(valueType);
 
         this.pathFactory = pathFactory;
         this.suggestedFileSize = suggestedFileSize;
-
-        // Initialize the file writer factory.
-        KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
-        this.fileWriterFactory =
-                MetricFileWriter.createFactory(
-                        writerFactory,
-                        kvSerializer::toRow,
-                        KeyValue.schema(keyType, valueType),
-                        fileStatsExtractor);
     }
 
     public RowType keyType() {
@@ -219,6 +213,14 @@ public class DataFileWriter {
     private Supplier<KvFileWriter> createWriterFactory(int level) {
         return () -> {
             try {
+                KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
+                FileWriter.Factory<KeyValue, Metric> fileWriterFactory =
+                        MetricFileWriter.createFactory(
+                                writerFactory,
+                                kvSerializer::toRow,
+                                KeyValue.schema(keyType, valueType),
+                                fileStatsExtractor);
+
                 return new KvFileWriter(fileWriterFactory, pathFactory.newPath(), level);
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
