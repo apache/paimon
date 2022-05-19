@@ -118,11 +118,7 @@ public class FileStoreSource
                 } else {
                     valueCountModeProjects = projectedFields;
                 }
-            } else if (writeMode == WriteMode.APPEND_ONLY) {
-                // Append-only table will have a dummy empty row as the key, and use the whole row
-                // as the value. So it should use the value projection.
-                read.withValueProjection(projectedFields);
-            } else if (writeMode == WriteMode.CHANGE_LOG) {
+            } else {
                 read.withValueProjection(projectedFields);
             }
         }
