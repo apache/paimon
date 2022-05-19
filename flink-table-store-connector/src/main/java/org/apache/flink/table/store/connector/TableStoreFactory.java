@@ -38,6 +38,7 @@ import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.connector.source.TableStoreSource;
 import org.apache.flink.table.store.connector.utils.TableConfigUtils;
 import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -56,11 +57,13 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.WRITE_MODE;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
 import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
@@ -111,6 +114,17 @@ public class TableStoreFactory
             path.getFileSystem().mkdirs(path);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+
+        // Cannot define any primary key in an append-only table.
+        if (context.getCatalogTable().getResolvedSchema().getPrimaryKey().isPresent()) {
+            if (Objects.equals(
+                    WriteMode.APPEND_ONLY.toString(),
+                    options.getOrDefault(WRITE_MODE.key(), WRITE_MODE.defaultValue().toString()))) {
+                throw new TableException(
+                        "Cannot define any primary key in an append-only table. Set 'write-mode'='change-log' if "
+                                + "still want to keep the primary key definition.");
+            }
         }
 
         // update schema

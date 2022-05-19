@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector;
 
+import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
@@ -33,6 +34,19 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test case for append-only managed table. */
 public class AppendOnlyTableTest extends FileStoreTableITCase {
+
+    @Test
+    public void testCreateTableWithPrimaryKey() {
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CREATE TABLE pk_table (id INT PRIMARY KEY NOT ENFORCED, data STRING) "
+                                                + "WITH ('write-mode'='append-only')"))
+                .hasRootCauseInstanceOf(TableException.class)
+                .hasRootCauseMessage(
+                        "Cannot define any primary key in an append-only table. Set 'write-mode'='change-log' if still "
+                                + "want to keep the primary key definition.");
+    }
 
     @Test
     public void testReadWrite() {
