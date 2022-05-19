@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
-import org.apache.flink.table.store.file.WriteMode;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -59,11 +58,7 @@ public class FileStoreSourceReaderTest {
 
     private FileStoreSourceReader createReader(TestingReaderContext context) {
         return new FileStoreSourceReader(
-                WriteMode.CHANGE_LOG,
-                context,
-                new TestDataReadWrite(tempDir.toString(), null).createRead(),
-                false,
-                null);
+                context, new TestDataReadWrite(tempDir.toString(), null).createRead(), false, null);
     }
 
     private static FileStoreSourceSplit createTestFileSplit() {

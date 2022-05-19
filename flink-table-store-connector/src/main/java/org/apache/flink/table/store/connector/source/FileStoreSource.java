@@ -127,8 +127,7 @@ public class FileStoreSource
             }
         }
 
-        return new FileStoreSourceReader(
-                writeMode, context, read, valueCountMode, valueCountModeProjects);
+        return new FileStoreSourceReader(context, read, valueCountMode, valueCountModeProjects);
     }
 
     @Override

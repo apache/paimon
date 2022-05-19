@@ -23,7 +23,6 @@ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.connector.base.source.reader.SingleThreadMultiplexSourceReaderBase;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 
 import javax.annotation.Nullable;
@@ -39,7 +38,6 @@ public final class FileStoreSourceReader
                 FileStoreSourceSplitState> {
 
     public FileStoreSourceReader(
-            WriteMode writeMode,
             SourceReaderContext readerContext,
             FileStoreRead fileStoreRead,
             boolean valueCountMode,
@@ -47,7 +45,7 @@ public final class FileStoreSourceReader
         super(
                 () ->
                         new FileStoreSourceSplitReader(
-                                fileStoreRead, writeMode, valueCountMode, valueCountModeProjects),
+                                fileStoreRead, valueCountMode, valueCountModeProjects),
                 (element, output, splitState) -> {
                     output.collect(element.getRecord());
                     splitState.setPosition(element);
