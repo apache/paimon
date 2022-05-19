@@ -64,11 +64,7 @@ public abstract class FileStoreTableITCase extends AbstractTestBase {
 
     protected abstract List<String> ddl();
 
-    protected List<Row> sql(String query, Object... args) {
-        return sql(true, query, args);
-    }
-
-    protected List<Row> sql(boolean batch, String query, Object... args) {
+    protected List<Row> batchSql(String query, Object... args) {
         TableResult tableResult = bEnv.executeSql(String.format(query, args));
 
         try (CloseableIterator<Row> iter = tableResult.collect()) {

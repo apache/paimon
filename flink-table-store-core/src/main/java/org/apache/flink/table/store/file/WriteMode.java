@@ -18,28 +18,34 @@
 
 package org.apache.flink.table.store.file;
 
+import org.apache.flink.configuration.DescribedEnum;
+import org.apache.flink.configuration.description.InlineElement;
+
+import static org.apache.flink.configuration.description.TextElement.text;
+
 /** Defines the write mode for flink table store. */
-public enum WriteMode {
+public enum WriteMode implements DescribedEnum {
     APPEND_ONLY(
             "append-only",
-            "The table can only accept append-only insert operations. All rows will be "
-                    + "inserted into the table store without any deduplication or primary/unique key constraint."),
-    CHANGE_LOG("change-log", "The table can accept both insert/delete/update operations.");
+            "The table can only accept append-only insert operations. Neither data deduplication nor any "
+                    + "primary key constraints will be done when inserting rows into table store."),
+    CHANGE_LOG("change-log", "The table can accept insert/delete/update operations.");
 
-    private final String writeMode;
+    private final String value;
     private final String description;
 
-    WriteMode(String writeMode, String description) {
-        this.writeMode = writeMode;
+    WriteMode(String value, String description) {
+        this.value = value;
         this.description = description;
     }
 
     @Override
     public String toString() {
-        return writeMode;
+        return value;
     }
 
-    public String description() {
-        return description;
+    @Override
+    public InlineElement getDescription() {
+        return text(description);
     }
 }

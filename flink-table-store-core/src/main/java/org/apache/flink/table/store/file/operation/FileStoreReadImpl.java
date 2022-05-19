@@ -33,6 +33,8 @@ import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -44,17 +46,17 @@ public class FileStoreReadImpl implements FileStoreRead {
     private final DataFileReader.Factory dataFileReaderFactory;
     private final WriteMode writeMode;
     private final Comparator<RowData> keyComparator;
-    private final MergeFunction mergeFunction;
+    @Nullable private final MergeFunction mergeFunction;
 
     private boolean keyProjected;
-    private boolean dropDelete;
+    private boolean dropDelete = true;
 
     public FileStoreReadImpl(
             WriteMode writeMode,
             RowType keyType,
             RowType valueType,
             Comparator<RowData> keyComparator,
-            MergeFunction mergeFunction,
+            @Nullable MergeFunction mergeFunction,
             FileFormat fileFormat,
             FileStorePathFactory pathFactory) {
         this.dataFileReaderFactory =
@@ -64,11 +66,13 @@ public class FileStoreReadImpl implements FileStoreRead {
         this.mergeFunction = mergeFunction;
 
         this.keyProjected = false;
-        this.dropDelete = writeMode != WriteMode.APPEND_ONLY;
     }
 
     @Override
     public FileStoreRead withDropDelete(boolean dropDelete) {
+        Preconditions.checkArgument(
+                writeMode != WriteMode.APPEND_ONLY || !dropDelete,
+                "Cannot drop delete message for append-only table.");
         this.dropDelete = dropDelete;
         return this;
     }
@@ -94,7 +98,7 @@ public class FileStoreReadImpl implements FileStoreRead {
                 return createAppendOnlyReader(partition, bucket, files);
 
             case CHANGE_LOG:
-                return createLSMReader(partition, bucket, files);
+                return createMergeTreeReader(partition, bucket, files);
 
             default:
                 throw new UnsupportedOperationException("Unknown write mode: " + writeMode);
@@ -103,9 +107,6 @@ public class FileStoreReadImpl implements FileStoreRead {
 
     private RecordReader createAppendOnlyReader(
             BinaryRowData partition, int bucket, List<DataFileMeta> files) throws IOException {
-        Preconditions.checkArgument(
-                !dropDelete, "Cannot drop delete message for append-only table.");
-
         DataFileReader dataFileReader = dataFileReaderFactory.create(partition, bucket);
         List<ConcatRecordReader.ReaderSupplier> suppliers = new ArrayList<>();
         for (DataFileMeta file : files) {
@@ -115,7 +116,7 @@ public class FileStoreReadImpl implements FileStoreRead {
         return ConcatRecordReader.create(suppliers);
     }
 
-    private RecordReader createLSMReader(
+    private RecordReader createMergeTreeReader(
             BinaryRowData partition, int bucket, List<DataFileMeta> files) throws IOException {
         DataFileReader dataFileReader = dataFileReaderFactory.create(partition, bucket);
         if (keyProjected) {

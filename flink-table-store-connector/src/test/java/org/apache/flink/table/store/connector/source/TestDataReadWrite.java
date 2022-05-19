@@ -49,6 +49,7 @@ import static java.util.Collections.singletonList;
 
 /** Util class to read and write data for source tests. */
 public class TestDataReadWrite {
+
     private static final RowType KEY_TYPE =
             new RowType(singletonList(new RowType.RowField("k", new BigIntType())));
     private static final RowType VALUE_TYPE =

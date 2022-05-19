@@ -28,6 +28,8 @@ import org.apache.flink.table.store.file.WriteMode;
 import java.util.HashSet;
 import java.util.Set;
 
+import static org.apache.flink.table.store.utils.OptionsUtils.formatEnumOption;
+
 /** Options for {@link TableStoreFactory}. */
 public class TableStoreFactoryOptions {
 
@@ -67,17 +69,8 @@ public class TableStoreFactoryOptions {
                             Description.builder()
                                     .text("Specify the write mode for table.")
                                     .linebreak()
-                                    .text(
-                                            String.format(
-                                                    "%s: %s",
-                                                    WriteMode.APPEND_ONLY,
-                                                    WriteMode.APPEND_ONLY.description()))
-                                    .linebreak()
-                                    .text(
-                                            String.format(
-                                                    "%s: %s",
-                                                    WriteMode.CHANGE_LOG,
-                                                    WriteMode.CHANGE_LOG.description()))
+                                    .list(formatEnumOption(WriteMode.APPEND_ONLY))
+                                    .list(formatEnumOption(WriteMode.CHANGE_LOG))
                                     .build());
 
     public static final ConfigOption<Integer> SINK_PARALLELISM = FactoryUtil.SINK_PARALLELISM;

@@ -39,7 +39,7 @@ public class AppendOnlyTableTest extends FileStoreTableITCase {
     public void testCreateTableWithPrimaryKey() {
         assertThatThrownBy(
                         () ->
-                                sql(
+                                batchSql(
                                         "CREATE TABLE pk_table (id INT PRIMARY KEY NOT ENFORCED, data STRING) "
                                                 + "WITH ('write-mode'='append-only')"))
                 .hasRootCauseInstanceOf(TableException.class)
@@ -50,36 +50,36 @@ public class AppendOnlyTableTest extends FileStoreTableITCase {
 
     @Test
     public void testReadWrite() {
-        sql("INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')");
+        batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')");
 
-        List<Row> rows = sql("SELECT * FROM append_table");
+        List<Row> rows = batchSql("SELECT * FROM append_table");
         assertThat(rows.size()).isEqualTo(2);
         assertThat(rows).containsExactlyInAnyOrder(Row.of(1, "AAA"), Row.of(2, "BBB"));
 
-        rows = sql("SELECT id FROM append_table");
+        rows = batchSql("SELECT id FROM append_table");
         assertThat(rows.size()).isEqualTo(2);
         assertThat(rows).containsExactlyInAnyOrder(Row.of(1), Row.of(2));
 
-        rows = sql("SELECT data from append_table");
+        rows = batchSql("SELECT data from append_table");
         assertThat(rows.size()).isEqualTo(2);
         assertThat(rows).containsExactlyInAnyOrder(Row.of("AAA"), Row.of("BBB"));
     }
 
     @Test
     public void testSkipDedup() {
-        sql("INSERT INTO append_table VALUES (1, 'AAA'), (1, 'AAA'), (2, 'BBB'), (3, 'BBB')");
+        batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (1, 'AAA'), (2, 'BBB'), (3, 'BBB')");
 
-        List<Row> rows = sql("SELECT * FROM append_table");
+        List<Row> rows = batchSql("SELECT * FROM append_table");
         assertThat(rows.size()).isEqualTo(4);
         assertThat(rows)
                 .containsExactlyInAnyOrder(
                         Row.of(1, "AAA"), Row.of(1, "AAA"), Row.of(2, "BBB"), Row.of(3, "BBB"));
 
-        rows = sql("SELECT id FROM append_table");
+        rows = batchSql("SELECT id FROM append_table");
         assertThat(rows.size()).isEqualTo(4);
         assertThat(rows).containsExactlyInAnyOrder(Row.of(1), Row.of(1), Row.of(2), Row.of(3));
 
-        rows = sql("SELECT data FROM append_table");
+        rows = batchSql("SELECT data FROM append_table");
         assertThat(rows.size()).isEqualTo(4);
         assertThat(rows)
                 .containsExactlyInAnyOrder(
@@ -96,23 +96,23 @@ public class AppendOnlyTableTest extends FileStoreTableITCase {
                         Row.ofKind(RowKind.INSERT, 2, "AAA"));
 
         String id = TestValuesTableFactory.registerData(input);
-        sql(
+        batchSql(
                 "CREATE TABLE source (id INT, data STRING) WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
                 id);
 
-        sql("INSERT INTO append_table SELECT * FROM source");
+        batchSql("INSERT INTO append_table SELECT * FROM source");
 
-        List<Row> rows = sql("SELECT * FROM append_table");
+        List<Row> rows = batchSql("SELECT * FROM append_table");
         assertThat(rows.size()).isEqualTo(4);
         assertThat(rows)
                 .containsExactlyInAnyOrder(
                         Row.of(1, "AAA"), Row.of(1, "AAA"), Row.of(1, "BBB"), Row.of(2, "AAA"));
 
-        rows = sql("SELECT id FROM append_table");
+        rows = batchSql("SELECT id FROM append_table");
         assertThat(rows.size()).isEqualTo(4);
         assertThat(rows).containsExactlyInAnyOrder(Row.of(1), Row.of(1), Row.of(1), Row.of(2));
 
-        rows = sql("SELECT data FROM append_table");
+        rows = batchSql("SELECT data FROM append_table");
         assertThat(rows.size()).isEqualTo(4);
         assertThat(rows)
                 .containsExactlyInAnyOrder(
@@ -123,11 +123,11 @@ public class AppendOnlyTableTest extends FileStoreTableITCase {
         List<Row> input = Collections.singletonList(Row.ofKind(kind, 1, "AAA"));
 
         String id = TestValuesTableFactory.registerData(input);
-        sql(
+        batchSql(
                 "CREATE TABLE source (id INT, data STRING) WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
                 id);
 
-        assertThatThrownBy(() -> sql("INSERT INTO append_table SELECT * FROM source"))
+        assertThatThrownBy(() -> batchSql("INSERT INTO append_table SELECT * FROM source"))
                 .hasRootCauseInstanceOf(IllegalStateException.class)
                 .hasRootCauseMessage("Append only writer can not accept row with RowKind %s", kind);
     }

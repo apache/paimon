@@ -41,6 +41,8 @@ import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -55,7 +57,7 @@ public class FileStoreImpl implements FileStore {
     private final RowType partitionType;
     private final RowType keyType;
     private final RowType valueType;
-    private final MergeFunction mergeFunction;
+    @Nullable private final MergeFunction mergeFunction;
     private final GeneratedRecordComparator genRecordComparator;
 
     public FileStoreImpl(
@@ -67,7 +69,7 @@ public class FileStoreImpl implements FileStore {
             RowType partitionType,
             RowType keyType,
             RowType valueType,
-            MergeFunction mergeFunction) {
+            @Nullable MergeFunction mergeFunction) {
         this.tablePath = tablePath;
         this.schemaId = schemaId;
         this.options = options;
