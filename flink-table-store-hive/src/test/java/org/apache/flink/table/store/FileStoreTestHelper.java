@@ -26,6 +26,7 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.mergetree.Increment;
@@ -73,6 +74,7 @@ public class FileStoreTestHelper {
                         options.path(oi).toString(),
                         0,
                         options,
+                        WriteMode.CHANGE_LOG,
                         UUID.randomUUID().toString(),
                         partitionType,
                         keyType,

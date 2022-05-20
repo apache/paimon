@@ -48,6 +48,7 @@ import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.FileStoreOptions.MergeEngine;
+import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -175,10 +176,23 @@ public class TableStore {
         return options.get(MERGE_ENGINE);
     }
 
-    private FileStore buildFileStore() {
+    private FileStore buildAppendOnlyStore() {
+        FileStoreOptions fileStoreOptions = new FileStoreOptions(options);
+
+        return FileStoreImpl.createWithAppendOnly(
+                fileStoreOptions.path(tableIdentifier).toString(),
+                schema.id(),
+                fileStoreOptions,
+                user,
+                TypeUtils.project(type, partitionKeysIndex()),
+                type);
+    }
+
+    private FileStore buildLSMStore() {
         RowType partitionType = TypeUtils.project(type, partitionKeysIndex());
         FileStoreOptions fileStoreOptions = new FileStoreOptions(options);
         int[] trimmedPrimaryKeys = trimmedPrimaryKeysIndex();
+
         if (trimmedPrimaryKeys.length == 0) {
             return FileStoreImpl.createWithValueCount(
                     fileStoreOptions.path(tableIdentifier).toString(),
@@ -197,6 +211,21 @@ public class TableStore {
                     TypeUtils.project(type, trimmedPrimaryKeys),
                     type,
                     mergeEngine());
+        }
+    }
+
+    private FileStore buildFileStore() {
+        WriteMode writeMode = options.get(TableStoreFactoryOptions.WRITE_MODE);
+
+        switch (writeMode) {
+            case CHANGE_LOG:
+                return buildLSMStore();
+
+            case APPEND_ONLY:
+                return buildAppendOnlyStore();
+
+            default:
+                throw new UnsupportedOperationException("Unknown write mode: " + writeMode);
         }
     }
 
@@ -256,11 +285,31 @@ public class TableStore {
             return options.get(CONTINUOUS_DISCOVERY_INTERVAL).toMillis();
         }
 
+        private boolean getValueCountMode(WriteMode writeMode) {
+            // Decide the value count mode based on the write mode and primary key definitions.
+            boolean valueCountMode;
+            switch (writeMode) {
+                case APPEND_ONLY:
+                    valueCountMode = false;
+                    break;
+
+                case CHANGE_LOG:
+                    valueCountMode = schema.primaryKeys().isEmpty();
+                    break;
+
+                default:
+                    throw new UnsupportedOperationException("Unknown write mode: " + writeMode);
+            }
+            return valueCountMode;
+        }
+
         private FileStoreSource buildFileSource(
-                boolean isContinuous, boolean continuousScanLatest) {
+                boolean isContinuous, WriteMode writeMode, boolean continuousScanLatest) {
+
             return new FileStoreSource(
                     buildFileStore(),
-                    schema.primaryKeys().isEmpty(),
+                    writeMode,
+                    getValueCountMode(writeMode),
                     isContinuous,
                     discoveryIntervalMills(),
                     continuousScanLatest,
@@ -271,6 +320,7 @@ public class TableStore {
         }
 
         private Source<RowData, ?, ?> buildSource() {
+            WriteMode writeMode = options.get(TableStoreFactoryOptions.WRITE_MODE);
             if (isContinuous) {
                 if (schema.primaryKeys().size() > 0 && mergeEngine() == PARTIAL_UPDATE) {
                     throw new ValidationException(
@@ -279,20 +329,20 @@ public class TableStore {
 
                 LogStartupMode startupMode = logOptions().get(SCAN);
                 if (logSourceProvider == null) {
-                    return buildFileSource(true, startupMode == LogStartupMode.LATEST);
+                    return buildFileSource(true, writeMode, startupMode == LogStartupMode.LATEST);
                 } else {
                     if (startupMode != LogStartupMode.FULL) {
                         return logSourceProvider.createSource(null);
                     }
                     return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
-                                    buildFileSource(false, false))
+                                    buildFileSource(false, writeMode, false))
                             .addSource(
                                     new LogHybridSourceFactory(logSourceProvider),
                                     Boundedness.CONTINUOUS_UNBOUNDED)
                             .build();
                 }
             } else {
-                return buildFileSource(false, false);
+                return buildFileSource(false, writeMode, false);
             }
         }
 
@@ -361,6 +411,7 @@ public class TableStore {
         public DataStreamSink<?> build() {
             FileStore fileStore = buildFileStore();
             int numBucket = options.get(BUCKET);
+            WriteMode writeMode = options.get(TableStoreFactoryOptions.WRITE_MODE);
 
             BucketStreamPartitioner partitioner =
                     new BucketStreamPartitioner(
@@ -379,6 +430,7 @@ public class TableStore {
                     new StoreSink<>(
                             tableIdentifier,
                             fileStore,
+                            writeMode,
                             partitionKeysIndex(),
                             trimmedPrimaryKeysIndex(),
                             fullPrimaryKeysIndex(),

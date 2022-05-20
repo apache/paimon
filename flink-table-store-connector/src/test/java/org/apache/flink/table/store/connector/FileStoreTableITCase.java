@@ -21,8 +21,13 @@ package org.apache.flink.table.store.connector;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
+import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.test.util.AbstractTestBase;
+import org.apache.flink.types.Row;
+import org.apache.flink.util.CloseableIterator;
+
+import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 
 import org.junit.Before;
 
@@ -58,4 +63,14 @@ public abstract class FileStoreTableITCase extends AbstractTestBase {
     }
 
     protected abstract List<String> ddl();
+
+    protected List<Row> batchSql(String query, Object... args) {
+        TableResult tableResult = bEnv.executeSql(String.format(query, args));
+
+        try (CloseableIterator<Row> iter = tableResult.collect()) {
+            return ImmutableList.copyOf(iter);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to collect the table result.", e);
+        }
+    }
 }
