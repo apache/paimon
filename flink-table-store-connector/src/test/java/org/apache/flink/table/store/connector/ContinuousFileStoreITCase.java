@@ -74,7 +74,7 @@ public class ContinuousFileStoreITCase extends FileStoreTableITCase {
 
     private void testProjection(String table) throws TimeoutException {
         BlockingIterator<Row, Row> iterator =
-                BlockingIterator.of(streamSqlIter("SELECT * FROM %s", table));
+                BlockingIterator.of(streamSqlIter("SELECT b, c FROM %s", table));
 
         batchSql("INSERT INTO %s VALUES ('1', '2', '3'), ('4', '5', '6')", table);
         assertThat(iterator.collect(2))
