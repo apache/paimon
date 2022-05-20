@@ -28,6 +28,7 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -48,6 +49,8 @@ public class FileStoreSource
     private static final long serialVersionUID = 1L;
 
     private final FileStore fileStore;
+
+    private final WriteMode writeMode;
 
     private final boolean valueCountMode;
 
@@ -71,6 +74,7 @@ public class FileStoreSource
 
     public FileStoreSource(
             FileStore fileStore,
+            WriteMode writeMode,
             boolean valueCountMode,
             boolean isContinuous,
             long discoveryInterval,
@@ -80,6 +84,7 @@ public class FileStoreSource
             @Nullable Predicate fieldPredicate,
             @Nullable PartitionedManifestMeta specifiedPartManifests) {
         this.fileStore = fileStore;
+        this.writeMode = writeMode;
         this.valueCountMode = valueCountMode;
         this.isContinuous = isContinuous;
         this.discoveryInterval = discoveryInterval;
