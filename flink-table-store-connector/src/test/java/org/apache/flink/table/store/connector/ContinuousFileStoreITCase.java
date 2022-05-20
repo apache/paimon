@@ -25,7 +25,6 @@ import org.junit.Test;
 
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -61,67 +60,56 @@ public class ContinuousFileStoreITCase extends FileStoreTableITCase {
         testProjection("T2");
     }
 
-    private void testSimple(String table)
-            throws ExecutionException, InterruptedException, TimeoutException {
+    private void testSimple(String table) throws TimeoutException {
         BlockingIterator<Row, Row> iterator =
-                BlockingIterator.of(sEnv.executeSql("SELECT * FROM " + table).collect());
+                BlockingIterator.of(streamSqlIter("SELECT * FROM %s", table));
 
-        bEnv.executeSql(
-                        String.format(
-                                "INSERT INTO %s VALUES ('1', '2', '3'), ('4', '5', '6')", table))
-                .await();
+        batchSql("INSERT INTO %s VALUES ('1', '2', '3'), ('4', '5', '6')", table);
         assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
 
-        bEnv.executeSql(String.format("INSERT INTO %s VALUES ('7', '8', '9')", table)).await();
+        batchSql("INSERT INTO %s VALUES ('7', '8', '9')", table);
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("7", "8", "9"));
     }
 
-    private void testProjection(String table)
-            throws ExecutionException, InterruptedException, TimeoutException {
+    private void testProjection(String table) throws TimeoutException {
         BlockingIterator<Row, Row> iterator =
-                BlockingIterator.of(sEnv.executeSql("SELECT b, c FROM " + table).collect());
+                BlockingIterator.of(streamSqlIter("SELECT * FROM %s", table));
 
-        bEnv.executeSql(
-                        String.format(
-                                "INSERT INTO %s VALUES ('1', '2', '3'), ('4', '5', '6')", table))
-                .await();
+        batchSql("INSERT INTO %s VALUES ('1', '2', '3'), ('4', '5', '6')", table);
         assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(Row.of("2", "3"), Row.of("5", "6"));
 
-        bEnv.executeSql(String.format("INSERT INTO %s VALUES ('7', '8', '9')", table)).await();
+        batchSql("INSERT INTO %s VALUES ('7', '8', '9')", table);
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("8", "9"));
     }
 
     @Test
-    public void testContinuousLatest()
-            throws ExecutionException, InterruptedException, TimeoutException {
-        bEnv.executeSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')").await();
+    public void testContinuousLatest() throws TimeoutException {
+        batchSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')");
 
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(
-                        sEnv.executeSql("SELECT * FROM T1 /*+ OPTIONS('log.scan'='latest') */")
-                                .collect());
+                        streamSqlIter("SELECT * FROM T1 /*+ OPTIONS('log.scan'='latest') */"));
 
-        bEnv.executeSql("INSERT INTO T1 VALUES ('7', '8', '9'), ('10', '11', '12')").await();
+        batchSql("INSERT INTO T1 VALUES ('7', '8', '9'), ('10', '11', '12')");
         assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(Row.of("7", "8", "9"), Row.of("10", "11", "12"));
     }
 
     @Test
-    public void testIgnoreOverwrite()
-            throws ExecutionException, InterruptedException, TimeoutException {
+    public void testIgnoreOverwrite() throws TimeoutException {
         BlockingIterator<Row, Row> iterator =
-                BlockingIterator.of(sEnv.executeSql("SELECT * FROM T1").collect());
+                BlockingIterator.of(streamSqlIter("SELECT * FROM T1"));
 
-        bEnv.executeSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')").await();
+        batchSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')");
         assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
 
         // should ignore this overwrite
-        bEnv.executeSql("INSERT OVERWRITE T1 VALUES ('7', '8', '9')").await();
+        batchSql("INSERT OVERWRITE T1 VALUES ('7', '8', '9')");
 
-        bEnv.executeSql("INSERT INTO T1 VALUES ('9', '10', '11')").await();
+        batchSql("INSERT INTO T1 VALUES ('9', '10', '11')");
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("9", "10", "11"));
     }
 
@@ -129,9 +117,8 @@ public class ContinuousFileStoreITCase extends FileStoreTableITCase {
     public void testUnsupportedUpsert() {
         assertThatThrownBy(
                 () ->
-                        sEnv.executeSql(
-                                        "SELECT * FROM T1 /*+ OPTIONS('log.changelog-mode'='upsert') */")
-                                .collect(),
+                        streamSqlIter(
+                                "SELECT * FROM T1 /*+ OPTIONS('log.changelog-mode'='upsert') */"),
                 "File store continuous reading dose not support upsert changelog mode");
     }
 
@@ -139,19 +126,15 @@ public class ContinuousFileStoreITCase extends FileStoreTableITCase {
     public void testUnsupportedEventual() {
         assertThatThrownBy(
                 () ->
-                        sEnv.executeSql(
-                                        "SELECT * FROM T1 /*+ OPTIONS('log.consistency'='eventual') */")
-                                .collect(),
+                        streamSqlIter(
+                                "SELECT * FROM T1 /*+ OPTIONS('log.consistency'='eventual') */"),
                 "File store continuous reading dose not support eventual consistency mode");
     }
 
     @Test
     public void testUnsupportedStartupTimestamp() {
         assertThatThrownBy(
-                () ->
-                        sEnv.executeSql(
-                                        "SELECT * FROM T1 /*+ OPTIONS('log.scan'='from-timestamp') */")
-                                .collect(),
+                () -> streamSqlIter("SELECT * FROM T1 /*+ OPTIONS('log.scan'='from-timestamp') */"),
                 "File store continuous reading dose not support from_timestamp scan mode, "
                         + "you can add timestamp filters instead.");
     }
