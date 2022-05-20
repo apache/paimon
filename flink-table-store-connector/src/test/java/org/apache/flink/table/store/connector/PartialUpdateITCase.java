@@ -24,9 +24,7 @@ import org.junit.Test;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
 
-import static org.apache.flink.util.CollectionUtil.iteratorToList;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -42,46 +40,41 @@ public class PartialUpdateITCase extends FileStoreTableITCase {
     }
 
     @Test
-    public void testMergeInMemory() throws ExecutionException, InterruptedException {
-        bEnv.executeSql(
-                        "INSERT INTO T VALUES "
-                                + "(1, 2, 3, CAST(NULL AS INT), '5'), "
-                                + "(1, 2, CAST(NULL AS INT), 6, CAST(NULL AS STRING))")
-                .await();
-        List<Row> result = iteratorToList(bEnv.from("T").execute().collect());
+    public void testMergeInMemory() {
+        batchSql(
+                "INSERT INTO T VALUES "
+                        + "(1, 2, 3, CAST(NULL AS INT), '5'), "
+                        + "(1, 2, CAST(NULL AS INT), 6, CAST(NULL AS STRING))");
+        List<Row> result = batchSql("SELECT * FROM T");
         assertThat(result).containsExactlyInAnyOrder(Row.of(1, 2, 3, 6, "5"));
     }
 
     @Test
-    public void testMergeRead() throws ExecutionException, InterruptedException {
-        bEnv.executeSql("INSERT INTO T VALUES (1, 2, 3, CAST(NULL AS INT), CAST(NULL AS STRING))")
-                .await();
-        bEnv.executeSql("INSERT INTO T VALUES (1, 2, 4, 5, CAST(NULL AS STRING))").await();
-        bEnv.executeSql("INSERT INTO T VALUES (1, 2, 4, CAST(NULL AS INT), '6')").await();
+    public void testMergeRead() {
+        batchSql("INSERT INTO T VALUES (1, 2, 3, CAST(NULL AS INT), CAST(NULL AS STRING))");
+        batchSql("INSERT INTO T VALUES (1, 2, 4, 5, CAST(NULL AS STRING))");
+        batchSql("INSERT INTO T VALUES (1, 2, 4, CAST(NULL AS INT), '6')");
 
-        List<Row> result = iteratorToList(bEnv.from("T").execute().collect());
+        List<Row> result = batchSql("SELECT * FROM T");
         assertThat(result).containsExactlyInAnyOrder(Row.of(1, 2, 4, 5, "6"));
     }
 
     @Test
-    public void testMergeCompaction() throws ExecutionException, InterruptedException {
+    public void testMergeCompaction() {
         // Wait compaction
-        bEnv.executeSql("ALTER TABLE T SET ('commit.force-compact'='true')");
+        batchSql("ALTER TABLE T SET ('commit.force-compact'='true')");
 
         // key 1 2
-        bEnv.executeSql("INSERT INTO T VALUES (1, 2, 3, CAST(NULL AS INT), CAST(NULL AS STRING))")
-                .await();
-        bEnv.executeSql("INSERT INTO T VALUES (1, 2, 4, 5, CAST(NULL AS STRING))").await();
-        bEnv.executeSql("INSERT INTO T VALUES (1, 2, 4, CAST(NULL AS INT), '6')").await();
+        batchSql("INSERT INTO T VALUES (1, 2, 3, CAST(NULL AS INT), CAST(NULL AS STRING))");
+        batchSql("INSERT INTO T VALUES (1, 2, 4, 5, CAST(NULL AS STRING))");
+        batchSql("INSERT INTO T VALUES (1, 2, 4, CAST(NULL AS INT), '6')");
 
         // key 1 3
-        bEnv.executeSql("INSERT INTO T VALUES (1, 3, CAST(NULL AS INT), 1, '1')").await();
-        bEnv.executeSql("INSERT INTO T VALUES (1, 3, 2, 3, CAST(NULL AS STRING))").await();
-        bEnv.executeSql("INSERT INTO T VALUES (1, 3, CAST(NULL AS INT), 4, CAST(NULL AS STRING))")
-                .await();
+        batchSql("INSERT INTO T VALUES (1, 3, CAST(NULL AS INT), 1, '1')");
+        batchSql("INSERT INTO T VALUES (1, 3, 2, 3, CAST(NULL AS STRING))");
+        batchSql("INSERT INTO T VALUES (1, 3, CAST(NULL AS INT), 4, CAST(NULL AS STRING))");
 
-        List<Row> result = iteratorToList(bEnv.from("T").execute().collect());
-        assertThat(result)
+        assertThat(batchSql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(Row.of(1, 2, 4, 5, "6"), Row.of(1, 3, 2, 4, "1"));
     }
 

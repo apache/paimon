@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.table.store.file.utils.BlockingIterator;
-
 import org.junit.Test;
 
 import java.util.Collections;
@@ -41,48 +39,39 @@ public class ForceCompactionITCase extends FileStoreTableITCase {
     }
 
     @Test
-    public void testDynamicPartition() throws Exception {
-        bEnv.executeSql("ALTER TABLE T SET ('num-levels' = '3')");
-        bEnv.executeSql("ALTER TABLE T SET ('commit.force-compact' = 'true')");
-        bEnv.executeSql(
-                        "INSERT INTO T VALUES(1, 'Winter', 'Winter is Coming'),"
-                                + "(2, 'Winter', 'The First Snowflake'), "
-                                + "(2, 'Spring', 'The First Rose in Spring'), "
-                                + "(7, 'Summer', 'Summertime Sadness')")
-                .await();
-        bEnv.executeSql("INSERT INTO T VALUES(12, 'Winter', 'Last Christmas')").await();
-        bEnv.executeSql("INSERT INTO T VALUES(11, 'Winter', 'Winter is Coming')").await();
-        bEnv.executeSql("INSERT INTO T VALUES(10, 'Autumn', 'Refrain')").await();
-        bEnv.executeSql(
-                        "INSERT INTO T VALUES(6, 'Summer', 'Watermelon Sugar'), "
-                                + "(4, 'Spring', 'Spring Water')")
-                .await();
-        bEnv.executeSql(
-                        "INSERT INTO T VALUES(66, 'Summer', 'Summer Vibe'),"
-                                + " (9, 'Autumn', 'Wake Me Up When September Ends')")
-                .await();
-        bEnv.executeSql(
-                        "INSERT INTO T VALUES(666, 'Summer', 'Summer Vibe'),"
-                                + " (9, 'Autumn', 'Wake Me Up When September Ends')")
-                .await();
-        bEnv.executeSql(
-                        "INSERT INTO T VALUES(6666, 'Summer', 'Summer Vibe'),"
-                                + " (9, 'Autumn', 'Wake Me Up When September Ends')")
-                .await();
-        bEnv.executeSql(
-                        "INSERT INTO T VALUES(66666, 'Summer', 'Summer Vibe'),"
-                                + " (9, 'Autumn', 'Wake Me Up When September Ends')")
-                .await();
-        bEnv.executeSql(
-                        "INSERT INTO T VALUES(666666, 'Summer', 'Summer Vibe'),"
-                                + " (9, 'Autumn', 'Wake Me Up When September Ends')")
-                .await();
-        bEnv.executeSql(
-                        "INSERT INTO T VALUES(6666666, 'Summer', 'Summer Vibe'),"
-                                + " (9, 'Autumn', 'Wake Me Up When September Ends')")
-                .await();
+    public void testDynamicPartition() {
+        batchSql("ALTER TABLE T SET ('num-levels' = '3')");
+        batchSql("ALTER TABLE T SET ('commit.force-compact' = 'true')");
+        batchSql(
+                "INSERT INTO T VALUES(1, 'Winter', 'Winter is Coming'),"
+                        + "(2, 'Winter', 'The First Snowflake'), "
+                        + "(2, 'Spring', 'The First Rose in Spring'), "
+                        + "(7, 'Summer', 'Summertime Sadness')");
+        batchSql("INSERT INTO T VALUES(12, 'Winter', 'Last Christmas')");
+        batchSql("INSERT INTO T VALUES(11, 'Winter', 'Winter is Coming')");
+        batchSql("INSERT INTO T VALUES(10, 'Autumn', 'Refrain')");
+        batchSql(
+                "INSERT INTO T VALUES(6, 'Summer', 'Watermelon Sugar'), "
+                        + "(4, 'Spring', 'Spring Water')");
+        batchSql(
+                "INSERT INTO T VALUES(66, 'Summer', 'Summer Vibe'),"
+                        + " (9, 'Autumn', 'Wake Me Up When September Ends')");
+        batchSql(
+                "INSERT INTO T VALUES(666, 'Summer', 'Summer Vibe'),"
+                        + " (9, 'Autumn', 'Wake Me Up When September Ends')");
+        batchSql(
+                "INSERT INTO T VALUES(6666, 'Summer', 'Summer Vibe'),"
+                        + " (9, 'Autumn', 'Wake Me Up When September Ends')");
+        batchSql(
+                "INSERT INTO T VALUES(66666, 'Summer', 'Summer Vibe'),"
+                        + " (9, 'Autumn', 'Wake Me Up When September Ends')");
+        batchSql(
+                "INSERT INTO T VALUES(666666, 'Summer', 'Summer Vibe'),"
+                        + " (9, 'Autumn', 'Wake Me Up When September Ends')");
+        batchSql(
+                "INSERT INTO T VALUES(6666666, 'Summer', 'Summer Vibe'),"
+                        + " (9, 'Autumn', 'Wake Me Up When September Ends')");
 
-        assertThat(BlockingIterator.of(bEnv.executeSql("SELECT * FROM T").collect()).collect())
-                .hasSize(21);
+        assertThat(batchSql("SELECT * FROM T")).hasSize(21);
     }
 }
