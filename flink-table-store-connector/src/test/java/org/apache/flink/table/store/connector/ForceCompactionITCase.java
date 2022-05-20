@@ -110,7 +110,6 @@ public class ForceCompactionITCase extends FileStoreTableITCase {
                                 + "(9, 'Autumn', 'Wake Me Up When September Ends')")
                 .await();
 
-        assertThat(BlockingIterator.of(bEnv.executeSql("SELECT * FROM T1").collect()).collect())
-                .hasSize(15);
+        assertThat(batchSql("SELECT * FROM T1")).hasSize(15);
     }
 }
