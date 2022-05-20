@@ -50,7 +50,8 @@ public class SchemaSerializationTest {
         options.put("option-1", "value-1");
         options.put("option-2", "value-2");
 
-        Schema schema = new Schema(1, fields, 10, partitionKeys, primaryKeys, options);
+        Schema schema =
+                new Schema(1, fields, 10, partitionKeys, primaryKeys, options, "my_comment");
         String serialized = JsonSerdeUtil.toJson(schema);
 
         Schema deserialized = JsonSerdeUtil.fromJson(serialized, Schema.class);

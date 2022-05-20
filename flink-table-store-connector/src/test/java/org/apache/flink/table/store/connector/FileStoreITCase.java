@@ -361,7 +361,8 @@ public class FileStoreITCase extends AbstractTestBase {
                                 Arrays.stream(primaryKey)
                                         .mapToObj(i -> TABLE_TYPE.getFieldNames().get(i))
                                         .collect(Collectors.toList()),
-                                options.toMap()));
+                                options.toMap(),
+                                ""));
         return retryArtificialException(() -> new TableStore(identifier, options));
     }
 

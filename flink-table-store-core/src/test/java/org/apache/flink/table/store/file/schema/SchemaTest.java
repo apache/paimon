@@ -52,7 +52,7 @@ public class SchemaTest {
 
         Assertions.assertThrows(
                 IllegalStateException.class,
-                () -> new Schema(1, fields, 10, partitionKeys, primaryKeys, options));
+                () -> new Schema(1, fields, 10, partitionKeys, primaryKeys, options, ""));
     }
 
     @Test

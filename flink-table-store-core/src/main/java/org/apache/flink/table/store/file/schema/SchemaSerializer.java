@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.store.file.utils.JsonSerializer;
+import org.apache.flink.util.StringUtils;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
@@ -67,6 +68,10 @@ public class SchemaSerializer implements JsonSerializer<Schema> {
         }
         generator.writeEndObject();
 
+        if (!StringUtils.isNullOrWhitespaceOnly(schema.comment())) {
+            generator.writeStringField("comment", schema.comment());
+        }
+
         generator.writeEndObject();
     }
 
@@ -102,6 +107,12 @@ public class SchemaSerializer implements JsonSerializer<Schema> {
             options.put(key, optionsJson.get(key).asText());
         }
 
-        return new Schema(id, fields, highestFieldId, partitionKeys, primaryKeys, options);
+        JsonNode commentNode = node.get("comment");
+        String comment = "";
+        if (commentNode != null) {
+            comment = commentNode.asText();
+        }
+
+        return new Schema(id, fields, highestFieldId, partitionKeys, primaryKeys, options, comment);
     }
 }

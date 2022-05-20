@@ -18,12 +18,14 @@
 
 package org.apache.flink.table.store.file.schema;
 
+import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.MapType;
 import org.apache.flink.table.types.logical.MultisetType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.utils.TypeConversions;
 import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
@@ -52,19 +54,23 @@ public class Schema {
 
     private final Map<String, String> options;
 
+    private final String comment;
+
     public Schema(
             long id,
             List<DataField> fields,
             int highestFieldId,
             List<String> partitionKeys,
             List<String> primaryKeys,
-            Map<String, String> options) {
+            Map<String, String> options,
+            String comment) {
         this.id = id;
         this.fields = fields;
         this.highestFieldId = highestFieldId;
         this.partitionKeys = partitionKeys;
         this.primaryKeys = primaryKeys;
         this.options = Collections.unmodifiableMap(options);
+        this.comment = comment;
 
         // try to trim to validate primary keys
         trimmedPrimaryKeys();
@@ -118,6 +124,10 @@ public class Schema {
         return options;
     }
 
+    public String comment() {
+        return comment;
+    }
+
     public RowType logicalRowType() {
         return (RowType) new RowDataType(fields).logicalType;
     }
@@ -139,12 +149,25 @@ public class Schema {
         return Objects.equals(fields, schema.fields)
                 && Objects.equals(partitionKeys, schema.partitionKeys)
                 && Objects.equals(primaryKeys, schema.primaryKeys)
-                && Objects.equals(options, schema.options);
+                && Objects.equals(options, schema.options)
+                && Objects.equals(comment, schema.comment);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(fields, partitionKeys, primaryKeys, options);
+        return Objects.hash(fields, partitionKeys, primaryKeys, options, comment);
+    }
+
+    public TableSchema getTableSchema() {
+        TableSchema.Builder builder = TableSchema.builder();
+        for (DataField field : fields) {
+            builder.field(
+                    field.name(), TypeConversions.fromLogicalToDataType(field.type().logicalType));
+        }
+        if (primaryKeys.size() > 0) {
+            builder.primaryKey(primaryKeys.toArray(new String[0]));
+        }
+        return builder.build();
     }
 
     public static List<DataField> newFields(RowType rowType) {

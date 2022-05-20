@@ -59,7 +59,7 @@ public class SchemaManagerTest {
     private final Map<String, String> options = Collections.singletonMap("key", "value");
     private final RowType rowType = RowType.of(new IntType(), new BigIntType(), new VarCharType());
     private final UpdateSchema updateSchema =
-            new UpdateSchema(rowType, partitionKeys, primaryKeys, options);
+            new UpdateSchema(rowType, partitionKeys, primaryKeys, options, "");
 
     @BeforeEach
     public void beforeEach() throws IOException {
@@ -106,7 +106,7 @@ public class SchemaManagerTest {
         retryArtificialException(() -> manager.commitNewVersion(updateSchema));
         Map<String, String> newOptions = Collections.singletonMap("new_k", "new_v");
         UpdateSchema updateSchema =
-                new UpdateSchema(rowType, partitionKeys, primaryKeys, newOptions);
+                new UpdateSchema(rowType, partitionKeys, primaryKeys, newOptions, "my_comment_2");
         retryArtificialException(() -> manager.commitNewVersion(updateSchema));
         Optional<Schema> latest = retryArtificialException(() -> manager.latest());
         assertThat(latest.isPresent()).isTrue();
@@ -117,7 +117,8 @@ public class SchemaManagerTest {
     public void testUpdateSchema() throws Exception {
         retryArtificialException(() -> manager.commitNewVersion(updateSchema));
         RowType newType = RowType.of(new IntType(), new BigIntType());
-        UpdateSchema updateSchema = new UpdateSchema(newType, partitionKeys, primaryKeys, options);
+        UpdateSchema updateSchema =
+                new UpdateSchema(newType, partitionKeys, primaryKeys, options, "my_comment_3");
         assertThrows(
                 UnsupportedOperationException.class,
                 () -> retryArtificialException(() -> manager.commitNewVersion(updateSchema)));
@@ -143,7 +144,11 @@ public class SchemaManagerTest {
                                 options.put("id", String.valueOf(id));
                                 UpdateSchema updateSchema =
                                         new UpdateSchema(
-                                                rowType, partitionKeys, primaryKeys, options);
+                                                rowType,
+                                                partitionKeys,
+                                                primaryKeys,
+                                                options,
+                                                "my_comment_4");
                                 try {
                                     retryArtificialException(
                                             () -> manager.commitNewVersion(updateSchema));
