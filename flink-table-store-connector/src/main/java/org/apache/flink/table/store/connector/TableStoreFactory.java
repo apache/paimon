@@ -28,8 +28,6 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
-import org.apache.flink.table.catalog.ResolvedCatalogTable;
-import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.DynamicTableSourceFactory;
 import org.apache.flink.table.factories.FactoryUtil;
@@ -52,7 +50,6 @@ import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -133,7 +130,8 @@ public class TableStoreFactory
                         .path(context.getObjectIdentifier());
         // TODO pass lock
         try {
-            new SchemaManager(tablePath).commitNewVersion(newUpdateSchema(context));
+            new SchemaManager(tablePath)
+                    .commitNewVersion(UpdateSchema.fromCatalogTable(context.getCatalogTable()));
         } catch (IllegalStateException e) {
             throw e;
         } catch (Exception e) {
@@ -271,19 +269,6 @@ public class TableStoreFactory
                                 Map.Entry::getValue));
     }
 
-    private UpdateSchema newUpdateSchema(Context context) {
-        ResolvedCatalogTable catalogTable = context.getCatalogTable();
-        ResolvedSchema schema = catalogTable.getResolvedSchema();
-        RowType rowType = (RowType) schema.toPhysicalRowDataType().getLogicalType();
-        List<String> primaryKeys = new ArrayList<>();
-        if (schema.getPrimaryKey().isPresent()) {
-            primaryKeys = schema.getPrimaryKey().get().getColumns();
-        }
-
-        return new UpdateSchema(
-                rowType, catalogTable.getPartitionKeys(), primaryKeys, catalogTable.getOptions());
-    }
-
     @VisibleForTesting
     TableStore buildTableStore(Context context) {
         TableStore store =
@@ -293,7 +278,7 @@ public class TableStoreFactory
 
         Schema schema = store.schema();
 
-        UpdateSchema updateSchema = newUpdateSchema(context);
+        UpdateSchema updateSchema = UpdateSchema.fromCatalogTable(context.getCatalogTable());
 
         RowType rowType = updateSchema.rowType();
         List<String> partitionKeys = updateSchema.partitionKeys();

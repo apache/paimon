@@ -18,8 +18,12 @@
 
 package org.apache.flink.table.store.file.schema;
 
+import org.apache.flink.table.catalog.ResolvedCatalogTable;
+import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.types.logical.RowType;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -34,15 +38,35 @@ public class UpdateSchema {
 
     private final Map<String, String> options;
 
+    private final String comment;
+
+    public static UpdateSchema fromCatalogTable(ResolvedCatalogTable catalogTable) {
+        ResolvedSchema schema = catalogTable.getResolvedSchema();
+        RowType rowType = (RowType) schema.toPhysicalRowDataType().getLogicalType();
+        List<String> primaryKeys = new ArrayList<>();
+        if (schema.getPrimaryKey().isPresent()) {
+            primaryKeys = schema.getPrimaryKey().get().getColumns();
+        }
+
+        return new UpdateSchema(
+                rowType,
+                catalogTable.getPartitionKeys(),
+                primaryKeys,
+                catalogTable.getOptions(),
+                catalogTable.getComment());
+    }
+
     public UpdateSchema(
             RowType rowType,
             List<String> partitionKeys,
             List<String> primaryKeys,
-            Map<String, String> options) {
+            Map<String, String> options,
+            String comment) {
         this.rowType = rowType;
         this.partitionKeys = partitionKeys;
         this.primaryKeys = primaryKeys;
-        this.options = options;
+        this.options = new HashMap<>(options);
+        this.comment = comment;
     }
 
     public RowType rowType() {
@@ -61,6 +85,10 @@ public class UpdateSchema {
         return options;
     }
 
+    public String comment() {
+        return comment;
+    }
+
     @Override
     public String toString() {
         return "UpdateSchema{"
@@ -72,6 +100,8 @@ public class UpdateSchema {
                 + primaryKeys
                 + ", options="
                 + options
+                + ", comment="
+                + comment
                 + '}';
     }
 }
