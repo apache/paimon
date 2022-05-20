@@ -25,6 +25,7 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowDataUtil;
+import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
@@ -212,7 +213,11 @@ public class AppendOnlyWriterTest {
     }
 
     private DataFilePathFactory createPathFactory() {
-        return new DataFilePathFactory(new Path(tempDir.toString()), "dt=" + PART, 1);
+        return new DataFilePathFactory(
+                new Path(tempDir.toString()),
+                "dt=" + PART,
+                1,
+                FileStoreOptions.FILE_FORMAT.defaultValue());
     }
 
     private RecordWriter createWriter(long targetFileSize, RowType writeSchema, long maxSeqNum) {

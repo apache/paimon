@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.data;
 
+import org.apache.flink.connector.file.table.FileSystemConnectorOptions;
 import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
@@ -197,8 +198,13 @@ public class DataFileTest {
                                                 kv.value().getInt(1))));
     }
 
-    private DataFileWriter createDataFileWriter(String path, String format) {
-        FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(path));
+    protected DataFileWriter createDataFileWriter(String path, String format) {
+        FileStorePathFactory pathFactory =
+                new FileStorePathFactory(
+                        new Path(path),
+                        RowType.of(),
+                        FileSystemConnectorOptions.PARTITION_DEFAULT_NAME.defaultValue(),
+                        format);
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         return new DataFileWriter.Factory(
                         TestKeyValueGenerator.KEY_TYPE,

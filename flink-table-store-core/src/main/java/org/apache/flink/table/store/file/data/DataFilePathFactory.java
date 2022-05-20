@@ -34,12 +34,14 @@ public class DataFilePathFactory {
     private final String uuid;
 
     private final AtomicInteger pathCount;
+    private final String formatIdentifier;
 
-    public DataFilePathFactory(Path root, String partition, int bucket) {
+    public DataFilePathFactory(Path root, String partition, int bucket, String formatIdentifier) {
         this.bucketDir = new Path(root + "/" + partition + "/bucket-" + bucket);
         this.uuid = UUID.randomUUID().toString();
 
         this.pathCount = new AtomicInteger(0);
+        this.formatIdentifier = formatIdentifier;
     }
 
     public Path bucketPath() {
@@ -47,7 +49,15 @@ public class DataFilePathFactory {
     }
 
     public Path newPath() {
-        return new Path(bucketDir + "/data-" + uuid + "-" + pathCount.getAndIncrement());
+        String path =
+                bucketDir
+                        + "/data-"
+                        + uuid
+                        + "-"
+                        + pathCount.getAndIncrement()
+                        + "."
+                        + formatIdentifier;
+        return new Path(path);
     }
 
     public Path toPath(String fileName) {

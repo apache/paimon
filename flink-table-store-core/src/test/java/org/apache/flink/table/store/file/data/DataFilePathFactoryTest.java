@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.file.FileStoreOptions;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -33,7 +34,11 @@ public class DataFilePathFactoryTest {
     @Test
     public void testNoPartition() {
         DataFilePathFactory pathFactory =
-                new DataFilePathFactory(new Path(tempDir.toString()), "", 123);
+                new DataFilePathFactory(
+                        new Path(tempDir.toString()),
+                        "",
+                        123,
+                        FileStoreOptions.FILE_FORMAT.defaultValue());
         String uuid = pathFactory.uuid();
 
         for (int i = 0; i < 20; i++) {
@@ -47,7 +52,11 @@ public class DataFilePathFactoryTest {
     @Test
     public void testWithPartition() {
         DataFilePathFactory pathFactory =
-                new DataFilePathFactory(new Path(tempDir.toString()), "dt=20211224", 123);
+                new DataFilePathFactory(
+                        new Path(tempDir.toString()),
+                        "dt=20211224",
+                        123,
+                        FileStoreOptions.FILE_FORMAT.defaultValue());
         String uuid = pathFactory.uuid();
 
         for (int i = 0; i < 20; i++) {

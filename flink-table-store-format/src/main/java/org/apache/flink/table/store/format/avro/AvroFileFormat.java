@@ -32,6 +32,7 @@ public class AvroFileFormat extends FileFormat {
     private final ReadableConfig formatOptions;
 
     public AvroFileFormat(ReadableConfig formatOptions) {
+        super(org.apache.flink.formats.avro.AvroFileFormatFactory.IDENTIFIER);
         this.factory = new org.apache.flink.formats.avro.AvroFileFormatFactory();
         this.formatOptions = formatOptions;
     }
