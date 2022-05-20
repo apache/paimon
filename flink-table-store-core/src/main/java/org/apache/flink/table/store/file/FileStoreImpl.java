@@ -82,7 +82,9 @@ public class FileStoreImpl implements FileStore {
 
     public FileStorePathFactory pathFactory() {
         return new FileStorePathFactory(
-                options.path(), partitionType, options.partitionDefaultName());
+                partitionType,
+                options.partitionDefaultName(),
+                options.fileFormat().getFormatIdentifier());
     }
 
     @VisibleForTesting

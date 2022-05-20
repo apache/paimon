@@ -37,6 +37,7 @@ public class OrcFileFormat extends FileFormat {
     private final Configuration formatOptions;
 
     public OrcFileFormat(Configuration formatOptions) {
+        super(org.apache.flink.orc.OrcFileFormatFactory.IDENTIFIER);
         this.factory = new org.apache.flink.orc.OrcFileFormatFactory();
         this.formatOptions = formatOptions;
     }

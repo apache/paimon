@@ -53,9 +53,19 @@ import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDa
  */
 public abstract class FileFormat {
 
+    protected String formatIdentifier;
+
+    protected FileFormat(String formatIdentifier) {
+        this.formatIdentifier = formatIdentifier;
+    }
+
     protected abstract BulkDecodingFormat<RowData> getDecodingFormat();
 
     protected abstract EncodingFormat<BulkWriter.Factory<RowData>> getEncodingFormat();
+
+    public String getFormatIdentifier() {
+        return formatIdentifier;
+    }
 
     /**
      * Create a {@link BulkFormat} from the type, with projection pushed down.

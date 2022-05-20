@@ -23,6 +23,7 @@ import org.apache.flink.connector.file.table.FileSystemConnectorOptions;
 import org.apache.flink.connector.file.table.RowDataPartitionComputer;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
@@ -48,16 +49,22 @@ public class FileStorePathFactory {
     private final Path root;
     private final String uuid;
     private final RowDataPartitionComputer partitionComputer;
+    private final String formatIdentifier;
 
     private final AtomicInteger manifestFileCount;
     private final AtomicInteger manifestListCount;
 
     public FileStorePathFactory(Path root) {
-        this(root, RowType.of(), FileSystemConnectorOptions.PARTITION_DEFAULT_NAME.defaultValue());
+        this(
+                root,
+                RowType.of(),
+                FileSystemConnectorOptions.PARTITION_DEFAULT_NAME.defaultValue(),
+                FileStoreOptions.FILE_FORMAT.defaultValue());
     }
 
     // for tables without partition, partitionType should be a row type with 0 columns (not null)
-    public FileStorePathFactory(Path root, RowType partitionType, String defaultPartValue) {
+    public FileStorePathFactory(
+            Path root, RowType partitionType, String defaultPartValue, String formatIdentifier) {
         this.root = root;
         this.uuid = UUID.randomUUID().toString();
 
@@ -70,6 +77,7 @@ public class FileStorePathFactory {
                                 .map(f -> LogicalTypeDataTypeConverter.toDataType(f.getType()))
                                 .toArray(DataType[]::new),
                         partitionColumns);
+        this.formatIdentifier = formatIdentifier;
 
         this.manifestFileCount = new AtomicInteger(0);
         this.manifestListCount = new AtomicInteger(0);
@@ -106,7 +114,8 @@ public class FileStorePathFactory {
     }
 
     public DataFilePathFactory createDataFilePathFactory(BinaryRowData partition, int bucket) {
-        return new DataFilePathFactory(root, getPartitionString(partition), bucket);
+        return new DataFilePathFactory(
+                root, getPartitionString(partition), bucket, formatIdentifier);
     }
 
     /** IMPORTANT: This method is NOT THREAD SAFE. */
