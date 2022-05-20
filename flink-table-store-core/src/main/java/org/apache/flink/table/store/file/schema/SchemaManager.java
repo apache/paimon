@@ -68,9 +68,13 @@ public class SchemaManager {
 
     /** List all schema. */
     public List<Schema> listAll() {
+        return listAllIds().stream().map(this::schema).collect(Collectors.toList());
+    }
+
+    /** List all schema IDs. */
+    public List<Long> listAllIds() {
         try {
             return listVersionedFiles(schemaDirectory(), SCHEMA_PREFIX)
-                    .map(this::schema)
                     .collect(Collectors.toList());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -117,7 +121,14 @@ public class SchemaManager {
             }
 
             Schema schema =
-                    new Schema(id, fields, highestFieldId, partitionKeys, primaryKeys, options);
+                    new Schema(
+                            id,
+                            fields,
+                            highestFieldId,
+                            partitionKeys,
+                            primaryKeys,
+                            options,
+                            updateSchema.comment());
 
             Path temp = toTmpSchemaPath(id);
             Path finalFile = toSchemaPath(id);
