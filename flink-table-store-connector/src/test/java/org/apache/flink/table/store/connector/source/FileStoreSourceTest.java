@@ -89,6 +89,7 @@ public class FileStoreSourceTest {
                 new FileStoreSource(
                         fileStore,
                         WriteMode.CHANGE_LOG,
+                        FileStoreOptions.TARGET_TASK_SPLIT_SIZE.defaultValue().getBytes(),
                         !hasPk,
                         true,
                         Duration.ofSeconds(1).toMillis(),

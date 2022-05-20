@@ -309,6 +309,7 @@ public class TableStore {
             return new FileStoreSource(
                     buildFileStore(),
                     writeMode,
+                    options.get(FileStoreOptions.TARGET_TASK_SPLIT_SIZE).getBytes(),
                     getValueCountMode(writeMode),
                     isContinuous,
                     discoveryIntervalMills(),
