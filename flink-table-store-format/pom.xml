@@ -155,9 +155,23 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
+            <artifactId>flink-parquet</artifactId>
+            <version>${flink.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
             <artifactId>${flink.sql.parquet}</artifactId>
             <version>${flink.version}</version>
-            <scope>test</scope>
+            <scope>runtime</scope>
+            <optional>true</optional>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
@@ -207,6 +221,7 @@ under the License.
                                 <includes combine.children="append">
                                     <include>org.apache.flink:flink-sql-avro</include>
                                     <include>org.apache.flink:${flink.sql.orc}</include>
+                                    <include>org.apache.flink:${flink.sql.parquet}</include>
                                 </includes>
                             </artifactSet>
                             <filters>
@@ -243,6 +258,10 @@ under the License.
                                 <relocation>
                                     <pattern>org.apache.flink.formats.avro</pattern>
                                     <shadedPattern>org.apache.flink.table.store.shaded.org.apache.flink.formats.avro</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.flink.formats.parquet</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.flink.formats.parquet</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.apache.flink.orc</pattern>
