@@ -45,19 +45,15 @@ public class Levels {
         this.keyComparator = keyComparator;
 
         // in case the num of levels is not specified explicitly
-        numLevels =
+        int restoredMaxLevel =
                 Math.max(
                         numLevels,
-                        inputFiles.stream()
-                                        .map(DataFileMeta::level)
-                                        .max(Comparator.naturalOrder())
-                                        .orElse(-1)
-                                + 1);
-        checkArgument(numLevels > 1, "levels must be at least 2.");
+                        inputFiles.stream().mapToInt(DataFileMeta::level).max().orElse(-1) + 1);
+        checkArgument(restoredMaxLevel > 1, "levels must be at least 2.");
         this.level0 =
                 new TreeSet<>(Comparator.comparing(DataFileMeta::maxSequenceNumber).reversed());
         this.levels = new ArrayList<>();
-        for (int i = 1; i < numLevels; i++) {
+        for (int i = 1; i < restoredMaxLevel; i++) {
             levels.add(SortedRun.empty());
         }
 
