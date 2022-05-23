@@ -20,7 +20,7 @@ package org.apache.flink.table.store.connector;
 
 import org.junit.Test;
 
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -30,12 +30,17 @@ public class ForceCompactionITCase extends FileStoreTableITCase {
 
     @Override
     protected List<String> ddl() {
-        return Collections.singletonList(
+        return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS T (\n"
                         + "  f0 INT\n, "
                         + "  f1 STRING\n, "
                         + "  f2 STRING\n"
-                        + ") PARTITIONED BY (f1)");
+                        + ") PARTITIONED BY (f1)",
+                "CREATE TABLE IF NOT EXISTS T1 (\n"
+                        + "  f0 INT\n, "
+                        + "  f1 STRING\n, "
+                        + "  f2 STRING\n"
+                        + ")");
     }
 
     @Test
@@ -73,5 +78,38 @@ public class ForceCompactionITCase extends FileStoreTableITCase {
                         + " (9, 'Autumn', 'Wake Me Up When September Ends')");
 
         assertThat(batchSql("SELECT * FROM T")).hasSize(21);
+    }
+
+    @Test
+    public void testNoDefaultNumOfLevels() throws Exception {
+        bEnv.executeSql("ALTER TABLE T1 SET ('commit.force-compact' = 'true')");
+        bEnv.executeSql(
+                        "INSERT INTO T1 VALUES(1, 'Winter', 'Winter is Coming'),"
+                                + "(2, 'Winter', 'The First Snowflake'), "
+                                + "(2, 'Spring', 'The First Rose in Spring'), "
+                                + "(7, 'Summer', 'Summertime Sadness')")
+                .await();
+        bEnv.executeSql("INSERT INTO T1 VALUES(12, 'Winter', 'Last Christmas')").await();
+        bEnv.executeSql("INSERT INTO T1 VALUES(11, 'Winter', 'Winter is Coming')").await();
+        bEnv.executeSql("INSERT INTO T1 VALUES(10, 'Autumn', 'Refrain')").await();
+        bEnv.executeSql(
+                        "INSERT INTO T1 VALUES(6, 'Summer', 'Watermelon Sugar'), "
+                                + "(4, 'Spring', 'Spring Water')")
+                .await();
+        bEnv.executeSql(
+                        "INSERT INTO T1 VALUES(66, 'Summer', 'Summer Vibe'), "
+                                + "(9, 'Autumn', 'Wake Me Up When September Ends')")
+                .await();
+        bEnv.executeSql(
+                        "INSERT INTO T1 VALUES(666, 'Summer', 'Summer Vibe'), "
+                                + "(9, 'Autumn', 'Wake Me Up When September Ends')")
+                .await();
+        bEnv.executeSql("ALTER TABLE T1 SET ('num-sorted-run.compaction-trigger' = '2')");
+        bEnv.executeSql(
+                        "INSERT INTO T1 VALUES(666, 'Summer', 'Summer Vibe'), "
+                                + "(9, 'Autumn', 'Wake Me Up When September Ends')")
+                .await();
+
+        assertThat(batchSql("SELECT * FROM T1")).hasSize(15);
     }
 }
