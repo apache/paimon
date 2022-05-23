@@ -19,16 +19,17 @@
 package org.apache.flink.table.store.format.parquet;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.store.file.format.FileFormatFactory;
+import org.apache.flink.table.store.format.FileFormatFactory;
 
 import java.util.Properties;
 
 /** Factory to create {@link ParquetFileFormat}. */
 public class ParquetFileFormatFactory implements FileFormatFactory {
+    public static final String IDENTIFIER = "parquet";
 
     @Override
     public String identifier() {
-        return "parquet";
+        return IDENTIFIER;
     }
 
     @Override

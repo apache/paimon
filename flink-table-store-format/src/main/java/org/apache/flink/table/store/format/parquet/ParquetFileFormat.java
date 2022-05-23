@@ -21,23 +21,32 @@ package org.apache.flink.table.store.format.parquet;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.connector.file.table.format.BulkDecodingFormat;
-import org.apache.flink.table.connector.format.EncodingFormat;
+import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.connector.file.src.FileSourceSplit;
+import org.apache.flink.connector.file.src.reader.BulkFormat;
+import org.apache.flink.formats.parquet.row.ParquetRowDataBuilder;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.format.FileFormat;
-import org.apache.flink.table.store.file.stats.FileStatsExtractor;
+import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
+import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.format.FileStatsExtractor;
+import org.apache.flink.table.store.utils.Projection;
 import org.apache.flink.table.types.logical.RowType;
 
+import java.util.List;
 import java.util.Optional;
+import java.util.Properties;
 
-/** Orc {@link FileFormat}. */
+import static org.apache.flink.formats.parquet.ParquetFileFormatFactory.UTC_TIMEZONE;
+import static org.apache.flink.table.store.format.parquet.ParquetFileFormatFactory.IDENTIFIER;
+
+/** Parquet {@link FileFormat}. */
 public class ParquetFileFormat extends FileFormat {
 
-    private final org.apache.flink.formats.parquet.ParquetFileFormatFactory factory;
     private final Configuration formatOptions;
 
     public ParquetFileFormat(Configuration formatOptions) {
-        this.factory = new org.apache.flink.formats.parquet.ParquetFileFormatFactory();
+        super(IDENTIFIER);
         this.formatOptions = formatOptions;
     }
 
@@ -47,17 +56,35 @@ public class ParquetFileFormat extends FileFormat {
     }
 
     @Override
-    protected BulkDecodingFormat<RowData> getDecodingFormat() {
-        return factory.createDecodingFormat(null, formatOptions);
+    public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
+            RowType type, int[][] projection, List<Predicate> filters) {
+        return ParquetInputFormatFactory.create(
+                getParquetConfiguration(formatOptions),
+                (RowType) Projection.of(projection).project(type),
+                InternalTypeInfo.of(type),
+                formatOptions.get(UTC_TIMEZONE));
     }
 
     @Override
-    protected EncodingFormat<BulkWriter.Factory<RowData>> getEncodingFormat() {
-        return factory.createEncodingFormat(null, formatOptions);
+    public BulkWriter.Factory<RowData> createWriterFactory(RowType type) {
+        return ParquetRowDataBuilder.createWriterFactory(
+                type, getParquetConfiguration(formatOptions), formatOptions.get(UTC_TIMEZONE));
     }
 
     @Override
     public Optional<FileStatsExtractor> createStatsExtractor(RowType type) {
         return Optional.of(new ParquetFileStatsExtractor(type));
+    }
+
+    private static org.apache.hadoop.conf.Configuration getParquetConfiguration(
+            ReadableConfig options) {
+        org.apache.hadoop.conf.Configuration conf = new org.apache.hadoop.conf.Configuration();
+        Properties properties = new Properties();
+        ((org.apache.flink.configuration.Configuration) options).addAllToProperties(properties);
+        properties.forEach(
+                (k, v) -> {
+                    conf.set("parquet." + k, v.toString());
+                });
+        return conf;
     }
 }

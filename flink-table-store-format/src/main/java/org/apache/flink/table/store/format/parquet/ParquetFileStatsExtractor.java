@@ -19,13 +19,14 @@
 package org.apache.flink.table.store.format.parquet;
 
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.store.file.stats.FieldStats;
-import org.apache.flink.table.store.file.stats.FileStatsExtractor;
+import org.apache.flink.table.store.format.FieldStats;
+import org.apache.flink.table.store.format.FileStatsExtractor;
+import org.apache.flink.table.store.utils.DateTimeUtils;
 import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.LogicalTypeRoot;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.utils.DateTimeUtils;
 
 import org.apache.parquet.column.statistics.BinaryStatistics;
 import org.apache.parquet.column.statistics.BooleanStatistics;
@@ -38,6 +39,8 @@ import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.PrimitiveType;
 
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -46,7 +49,6 @@ import java.util.Map;
 import java.util.stream.IntStream;
 
 import static org.apache.flink.table.store.format.parquet.ParquetUtil.assertStatsClass;
-import static org.apache.flink.table.store.format.parquet.ParquetUtil.convertStatsToDecimalFieldStats;
 
 /** {@link FileStatsExtractor} for parquet files. */
 public class ParquetFileStatsExtractor implements FileStatsExtractor {
@@ -149,6 +151,51 @@ public class ParquetFileStatsExtractor implements FileStatsExtractor {
                 return new FieldStats(
                         DateTimeUtils.toInternal(EPOCH_DAY.plusDays(dateStats.getMin())),
                         DateTimeUtils.toInternal(EPOCH_DAY.plusDays(dateStats.getMax())),
+                        nullCount);
+            default:
+                return new FieldStats(null, null, nullCount);
+        }
+    }
+
+    /**
+     * parquet cannot provide statistics for decimal fields directly, but we can extract them from
+     * primitive statistics.
+     */
+    private FieldStats convertStatsToDecimalFieldStats(
+            PrimitiveType primitive,
+            RowType.RowField field,
+            Statistics stats,
+            int precision,
+            int scale,
+            long nullCount) {
+        switch (primitive.getPrimitiveTypeName()) {
+            case BINARY:
+            case FIXED_LEN_BYTE_ARRAY:
+                assertStatsClass(field, stats, BinaryStatistics.class);
+                BinaryStatistics decimalStats = (BinaryStatistics) stats;
+                return new FieldStats(
+                        DecimalData.fromBigDecimal(
+                                new BigDecimal(new BigInteger(decimalStats.getMinBytes()), scale),
+                                precision,
+                                scale),
+                        DecimalData.fromBigDecimal(
+                                new BigDecimal(new BigInteger(decimalStats.getMaxBytes()), scale),
+                                precision,
+                                scale),
+                        nullCount);
+            case INT64:
+                assertStatsClass(field, stats, LongStatistics.class);
+                LongStatistics longStats = (LongStatistics) stats;
+                return new FieldStats(
+                        DecimalData.fromUnscaledLong(longStats.getMin(), precision, scale),
+                        DecimalData.fromUnscaledLong(longStats.getMax(), precision, scale),
+                        nullCount);
+            case INT32:
+                assertStatsClass(field, stats, IntStatistics.class);
+                IntStatistics intStats = (IntStatistics) stats;
+                return new FieldStats(
+                        DecimalData.fromUnscaledLong(intStats.getMin(), precision, scale),
+                        DecimalData.fromUnscaledLong(intStats.getMax(), precision, scale),
                         nullCount);
             default:
                 return new FieldStats(null, null, nullCount);

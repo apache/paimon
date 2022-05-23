@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.format.parquet;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.store.file.format.FileFormat;
-import org.apache.flink.table.store.file.stats.FileStatsExtractorTestBase;
+import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.format.FileStatsExtractorTestBase;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.BooleanType;
 import org.apache.flink.table.types.logical.CharType;
@@ -39,10 +39,7 @@ public class ParquetFileStatsExtractorTest extends FileStatsExtractorTestBase {
 
     @Override
     protected FileFormat createFormat() {
-        return FileFormat.fromIdentifier(
-                ParquetFileStatsExtractorTest.class.getClassLoader(),
-                "parquet",
-                new Configuration());
+        return FileFormat.fromIdentifier("parquet", new Configuration());
     }
 
     @Override

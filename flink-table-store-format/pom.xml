@@ -155,7 +155,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-parquet</artifactId>
+            <artifactId>${flink.parquet}</artifactId>
             <version>${flink.version}</version>
             <scope>provided</scope>
         </dependency>

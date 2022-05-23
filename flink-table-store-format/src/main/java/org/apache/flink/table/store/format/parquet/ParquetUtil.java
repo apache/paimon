@@ -18,27 +18,19 @@
 
 package org.apache.flink.table.store.format.parquet;
 
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.store.file.stats.FieldStats;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.ParquetReadOptions;
-import org.apache.parquet.column.statistics.BinaryStatistics;
-import org.apache.parquet.column.statistics.IntStatistics;
-import org.apache.parquet.column.statistics.LongStatistics;
 import org.apache.parquet.column.statistics.Statistics;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.hadoop.util.HadoopInputFile;
-import org.apache.parquet.schema.PrimitiveType;
 
 import java.io.IOException;
-import java.math.BigDecimal;
-import java.math.BigInteger;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,7 +52,7 @@ public class ParquetUtil {
             List<ColumnChunkMetaData> columnChunkMetaDataList = blockMetaData.getColumns();
             for (ColumnChunkMetaData columnChunkMetaData : columnChunkMetaDataList) {
                 Statistics stats = columnChunkMetaData.getStatistics();
-                String columnName = columnChunkMetaData.getPrimitiveType().getName();
+                String columnName = columnChunkMetaData.getPath().toDotString();
                 Statistics midStats;
                 if (!resultStats.containsKey(columnName)) {
                     midStats = stats;
@@ -82,51 +74,6 @@ public class ParquetUtil {
     public static ParquetFileReader getParquetReader(Path path) throws IOException {
         HadoopInputFile hadoopInputFile = HadoopInputFile.fromPath(path, new Configuration());
         return ParquetFileReader.open(hadoopInputFile, ParquetReadOptions.builder().build());
-    }
-
-    /**
-     * parquet cannot provide statistics for decimal fields directly, but we can extract them from
-     * primitive statistics.
-     */
-    public static FieldStats convertStatsToDecimalFieldStats(
-            PrimitiveType primitive,
-            RowType.RowField field,
-            Statistics stats,
-            int precision,
-            int scale,
-            long nullCount) {
-        switch (primitive.getPrimitiveTypeName()) {
-            case BINARY:
-            case FIXED_LEN_BYTE_ARRAY:
-                assertStatsClass(field, stats, BinaryStatistics.class);
-                BinaryStatistics decimalStats = (BinaryStatistics) stats;
-                return new FieldStats(
-                        DecimalData.fromBigDecimal(
-                                new BigDecimal(new BigInteger(decimalStats.getMinBytes()), scale),
-                                precision,
-                                scale),
-                        DecimalData.fromBigDecimal(
-                                new BigDecimal(new BigInteger(decimalStats.getMaxBytes()), scale),
-                                precision,
-                                scale),
-                        nullCount);
-            case INT64:
-                assertStatsClass(field, stats, LongStatistics.class);
-                LongStatistics longStats = (LongStatistics) stats;
-                return new FieldStats(
-                        DecimalData.fromUnscaledLong(longStats.getMin(), precision, scale),
-                        DecimalData.fromUnscaledLong(longStats.getMax(), precision, scale),
-                        nullCount);
-            case INT32:
-                assertStatsClass(field, stats, IntStatistics.class);
-                IntStatistics intStats = (IntStatistics) stats;
-                return new FieldStats(
-                        DecimalData.fromUnscaledLong(intStats.getMin(), precision, scale),
-                        DecimalData.fromUnscaledLong(intStats.getMax(), precision, scale),
-                        nullCount);
-            default:
-                return new FieldStats(null, null, nullCount);
-        }
     }
 
     static void assertStatsClass(
