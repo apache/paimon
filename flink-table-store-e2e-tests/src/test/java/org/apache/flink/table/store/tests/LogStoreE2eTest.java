@@ -38,7 +38,7 @@ public class LogStoreE2eTest extends E2eTestBase {
                         + "    PRIMARY KEY (k) NOT ENFORCED\n"
                         + ") WITH (\n"
                         + "    'bucket' = '3',\n"
-                        + "    'path' = '%s'\n"
+                        + "    'root-path' = '%s'\n"
                         + ");";
         String tableStoreDir = UUID.randomUUID().toString() + ".store";
         tableStoreBatchDdl = String.format(tableStoreBatchDdl, TEST_DATA_DIR + "/" + tableStoreDir);
@@ -57,7 +57,7 @@ public class LogStoreE2eTest extends E2eTestBase {
                         + ") WITH (\n"
                         + "    'connector' = 'filesystem',\n"
                         + "    'format' = 'csv',\n"
-                        + "    'path' = '%s'\n,"
+                        + "    'root-path' = '%s'\n,"
                         + "    'source.monitor-interval' = '3s'\n"
                         + ");";
         String testDataSourceDir = UUID.randomUUID().toString() + ".data";
@@ -71,7 +71,7 @@ public class LogStoreE2eTest extends E2eTestBase {
                         + "    PRIMARY KEY (k) NOT ENFORCED\n"
                         + ") WITH (\n"
                         + "    'bucket' = '3',\n"
-                        + "    'path' = '%s',\n"
+                        + "    'root-path' = '%s',\n"
                         + "    'log.consistency' = 'eventual',\n"
                         + "    'log.system' = 'kafka',\n"
                         + "    'log.kafka.bootstrap.servers' = '%s'\n"

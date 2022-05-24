@@ -58,6 +58,7 @@ import static org.apache.flink.table.store.connector.ShowCreateUtil.buildSelectQ
 import static org.apache.flink.table.store.connector.ShowCreateUtil.buildSimpleSelectQuery;
 import static org.apache.flink.table.store.connector.ShowCreateUtil.createTableLikeDDL;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -288,7 +289,7 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
             throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
         rootPath = TEMPORARY_FOLDER.newFolder().getPath();
-        tableOptions.put(FileStoreOptions.PATH.key(), rootPath);
+        tableOptions.put(ROOT_PATH.key(), rootPath);
         if (enableLogStore) {
             tableOptions.put(LOG_SYSTEM.key(), "kafka");
             tableOptions.put(LOG_PREFIX + BOOTSTRAP_SERVERS.key(), getBootstrapServers());

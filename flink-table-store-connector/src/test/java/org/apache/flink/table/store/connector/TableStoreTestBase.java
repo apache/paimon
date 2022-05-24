@@ -51,7 +51,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
-import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
@@ -109,7 +109,7 @@ public abstract class TableStoreTestBase extends KafkaTableTestBase {
 
     protected void prepareSessionContext() {
         Configuration configuration = tEnv.getConfig().getConfiguration();
-        configuration.setString(TABLE_STORE_PREFIX + PATH.key(), rootPath);
+        configuration.setString(TABLE_STORE_PREFIX + ROOT_PATH.key(), rootPath);
         configuration.setString(
                 TABLE_STORE_PREFIX + LOG_PREFIX + BOOTSTRAP_SERVERS.key(), getBootstrapServers());
         if (enableLogStore) {

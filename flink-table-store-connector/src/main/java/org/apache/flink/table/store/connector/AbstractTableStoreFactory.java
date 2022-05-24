@@ -18,167 +18,44 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.DelegatingConfiguration;
 import org.apache.flink.configuration.ExecutionOptions;
-import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
-import org.apache.flink.table.catalog.CatalogPartitionSpec;
+import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.DynamicTableSourceFactory;
 import org.apache.flink.table.factories.FactoryUtil;
-import org.apache.flink.table.factories.ManagedTableFactory;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.connector.source.TableStoreSource;
-import org.apache.flink.table.store.connector.utils.TableConfigUtils;
 import org.apache.flink.table.store.file.FileStoreOptions;
-import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.schema.Schema;
-import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.log.LogOptions.LogChangelogMode;
-import org.apache.flink.table.store.log.LogOptions.LogConsistency;
-import org.apache.flink.table.store.log.LogOptions.LogStartupMode;
+import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.WRITE_MODE;
-import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
-import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
 import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
 import static org.apache.flink.table.store.log.LogOptions.CONSISTENCY;
 import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 import static org.apache.flink.table.store.log.LogOptions.SCAN;
 import static org.apache.flink.table.store.log.LogStoreTableFactory.discoverLogStoreFactory;
 
-/** Default implementation of {@link ManagedTableFactory}. */
-public class TableStoreFactory
-        implements ManagedTableFactory, DynamicTableSourceFactory, DynamicTableSinkFactory {
-
-    @Override
-    public Map<String, String> enrichOptions(Context context) {
-        Map<String, String> enrichedOptions = new HashMap<>(context.getCatalogTable().getOptions());
-        TableConfigUtils.extractConfiguration(context.getConfiguration())
-                .toMap()
-                .forEach(
-                        (k, v) -> {
-                            if (k.startsWith(TABLE_STORE_PREFIX)) {
-                                enrichedOptions.putIfAbsent(
-                                        k.substring(TABLE_STORE_PREFIX.length()), v);
-                            }
-                        });
-        return enrichedOptions;
-    }
-
-    @Override
-    public void onCreateTable(Context context, boolean ignoreIfExists) {
-        Map<String, String> options = context.getCatalogTable().getOptions();
-        Path path = FileStoreOptions.path(options, context.getObjectIdentifier());
-        try {
-            if (path.getFileSystem().exists(path) && !ignoreIfExists) {
-                throw new TableException(
-                        String.format(
-                                "Failed to create file store path. "
-                                        + "Reason: directory %s exists for table %s. "
-                                        + "Suggestion: please try `DESCRIBE TABLE %s` to "
-                                        + "first check whether table exists in current catalog. "
-                                        + "If table exists in catalog, and data files under current path "
-                                        + "are valid, please use `CREATE TABLE IF NOT EXISTS` ddl instead. "
-                                        + "Otherwise, please choose another table name "
-                                        + "or manually delete the current path and try again.",
-                                path,
-                                context.getObjectIdentifier().asSerializableString(),
-                                context.getObjectIdentifier().asSerializableString()));
-            }
-            path.getFileSystem().mkdirs(path);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-
-        // Cannot define any primary key in an append-only table.
-        if (context.getCatalogTable().getResolvedSchema().getPrimaryKey().isPresent()) {
-            if (Objects.equals(
-                    WriteMode.APPEND_ONLY.toString(),
-                    options.getOrDefault(WRITE_MODE.key(), WRITE_MODE.defaultValue().toString()))) {
-                throw new TableException(
-                        "Cannot define any primary key in an append-only table. Set 'write-mode'='change-log' if "
-                                + "still want to keep the primary key definition.");
-            }
-        }
-
-        // update schema
-        Path tablePath =
-                new FileStoreOptions(context.getCatalogTable().getOptions())
-                        .path(context.getObjectIdentifier());
-        // TODO pass lock
-        try {
-            new SchemaManager(tablePath)
-                    .commitNewVersion(UpdateSchema.fromCatalogTable(context.getCatalogTable()));
-        } catch (IllegalStateException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-
-        createOptionalLogStoreFactory(context)
-                .ifPresent(
-                        factory ->
-                                factory.onCreateTable(
-                                        createLogContext(context),
-                                        Integer.parseInt(
-                                                options.getOrDefault(
-                                                        BUCKET.key(),
-                                                        BUCKET.defaultValue().toString())),
-                                        ignoreIfExists));
-    }
-
-    @Override
-    public void onDropTable(Context context, boolean ignoreIfNotExists) {
-        Map<String, String> options = context.getCatalogTable().getOptions();
-        Path path = FileStoreOptions.path(options, context.getObjectIdentifier());
-        try {
-            if (path.getFileSystem().exists(path)) {
-                path.getFileSystem().delete(path, true);
-            } else if (!ignoreIfNotExists) {
-                throw new TableException(
-                        String.format(
-                                "Failed to delete file store path. "
-                                        + "Reason: directory %s doesn't exist for table %s. "
-                                        + "Suggestion: please try `DROP TABLE IF EXISTS` ddl instead.",
-                                path, context.getObjectIdentifier().asSerializableString()));
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        createOptionalLogStoreFactory(context)
-                .ifPresent(
-                        factory ->
-                                factory.onDropTable(createLogContext(context), ignoreIfNotExists));
-    }
-
-    @Override
-    public Map<String, String> onCompactTable(
-            Context context, CatalogPartitionSpec catalogPartitionSpec) {
-        throw new UnsupportedOperationException("Not implement yet");
-    }
+/** Abstract table store factory to create table source and table sink. */
+public abstract class AbstractTableStoreFactory
+        implements DynamicTableSourceFactory, DynamicTableSinkFactory {
 
     @Override
     public TableStoreSource createDynamicTableSource(Context context) {
@@ -213,7 +90,8 @@ public class TableStoreFactory
 
     // ~ Tools ------------------------------------------------------------------
 
-    private static Optional<LogStoreTableFactory> createOptionalLogStoreFactory(Context context) {
+    static Optional<LogStoreTableFactory> createOptionalLogStoreFactory(
+            DynamicTableFactory.Context context) {
         Configuration options = new Configuration();
         context.getCatalogTable().getOptions().forEach(options::setString);
 
@@ -229,25 +107,25 @@ public class TableStoreFactory
 
     private static void validateFileStoreContinuous(Configuration options) {
         Configuration logOptions = new DelegatingConfiguration(options, LOG_PREFIX);
-        LogChangelogMode changelogMode = logOptions.get(CHANGELOG_MODE);
-        if (changelogMode == LogChangelogMode.UPSERT) {
+        LogOptions.LogChangelogMode changelogMode = logOptions.get(CHANGELOG_MODE);
+        if (changelogMode == LogOptions.LogChangelogMode.UPSERT) {
             throw new ValidationException(
                     "File store continuous reading dose not support upsert changelog mode.");
         }
-        LogConsistency consistency = logOptions.get(CONSISTENCY);
-        if (consistency == LogConsistency.EVENTUAL) {
+        LogOptions.LogConsistency consistency = logOptions.get(CONSISTENCY);
+        if (consistency == LogOptions.LogConsistency.EVENTUAL) {
             throw new ValidationException(
                     "File store continuous reading dose not support eventual consistency mode.");
         }
-        LogStartupMode startupMode = logOptions.get(SCAN);
-        if (startupMode == LogStartupMode.FROM_TIMESTAMP) {
+        LogOptions.LogStartupMode startupMode = logOptions.get(SCAN);
+        if (startupMode == LogOptions.LogStartupMode.FROM_TIMESTAMP) {
             throw new ValidationException(
                     "File store continuous reading dose not support from_timestamp scan mode, "
                             + "you can add timestamp filters instead.");
         }
     }
 
-    private static Context createLogContext(Context context) {
+    static DynamicTableFactory.Context createLogContext(DynamicTableFactory.Context context) {
         return new FactoryUtil.DefaultDynamicTableContext(
                 context.getObjectIdentifier(),
                 context.getCatalogTable()
@@ -258,7 +136,6 @@ public class TableStoreFactory
                 context.isTemporary());
     }
 
-    @VisibleForTesting
     static Map<String, String> filterLogStoreOptions(Map<String, String> options) {
         return options.entrySet().stream()
                 .filter(entry -> !entry.getKey().equals(LOG_SYSTEM.key())) // exclude log.system
@@ -269,8 +146,7 @@ public class TableStoreFactory
                                 Map.Entry::getValue));
     }
 
-    @VisibleForTesting
-    TableStore buildTableStore(Context context) {
+    static TableStore buildTableStore(DynamicTableFactory.Context context) {
         TableStore store =
                 new TableStore(
                         context.getObjectIdentifier(),

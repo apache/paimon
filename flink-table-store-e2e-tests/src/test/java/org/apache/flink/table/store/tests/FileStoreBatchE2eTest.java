@@ -62,7 +62,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
                         + ") WITH (\n"
                         + "    'connector' = 'filesystem',\n"
                         + "    'format' = 'csv',\n"
-                        + "    'path' = '%s'\n"
+                        + "    'root-path' = '%s'\n"
                         + ");";
         String testDataSourceFile = UUID.randomUUID().toString() + ".csv";
         testDataSourceDdl =
@@ -77,7 +77,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
                         + "    price INT\n"
                         + ") PARTITIONED BY (dt, hr) WITH (\n"
                         + "    'bucket' = '3',\n"
-                        + "    'path' = '%s'\n"
+                        + "    'root-path' = '%s'\n"
                         + ");";
         tableStoreDdl =
                 String.format(
