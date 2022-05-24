@@ -92,17 +92,22 @@ public abstract class AbstractTableStoreFactory
 
     static Optional<LogStoreTableFactory> createOptionalLogStoreFactory(
             DynamicTableFactory.Context context) {
-        Configuration options = new Configuration();
-        context.getCatalogTable().getOptions().forEach(options::setString);
+        return createOptionalLogStoreFactory(
+                context.getClassLoader(), context.getCatalogTable().getOptions());
+    }
 
-        if (options.get(LOG_SYSTEM) == null) {
+    static Optional<LogStoreTableFactory> createOptionalLogStoreFactory(
+            ClassLoader classLoader, Map<String, String> options) {
+        Configuration configOptions = new Configuration();
+        options.forEach(configOptions::setString);
+
+        if (configOptions.get(LOG_SYSTEM) == null) {
             // Use file store continuous reading
-            validateFileStoreContinuous(options);
+            validateFileStoreContinuous(configOptions);
             return Optional.empty();
         }
 
-        return Optional.of(
-                discoverLogStoreFactory(context.getClassLoader(), options.get(LOG_SYSTEM)));
+        return Optional.of(discoverLogStoreFactory(classLoader, configOptions.get(LOG_SYSTEM)));
     }
 
     private static void validateFileStoreContinuous(Configuration options) {
@@ -126,10 +131,14 @@ public abstract class AbstractTableStoreFactory
     }
 
     static DynamicTableFactory.Context createLogContext(DynamicTableFactory.Context context) {
+        return createLogContext(context, context.getCatalogTable().getOptions());
+    }
+
+    static DynamicTableFactory.Context createLogContext(
+            DynamicTableFactory.Context context, Map<String, String> options) {
         return new FactoryUtil.DefaultDynamicTableContext(
                 context.getObjectIdentifier(),
-                context.getCatalogTable()
-                        .copy(filterLogStoreOptions(context.getCatalogTable().getOptions())),
+                context.getCatalogTable().copy(filterLogStoreOptions(options)),
                 filterLogStoreOptions(context.getEnrichmentOptions()),
                 context.getConfiguration(),
                 context.getClassLoader(),

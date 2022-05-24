@@ -396,4 +396,26 @@ public class TableStoreManagedFactoryTest {
                 .hasMessage(
                         "Please specify a root path by setting session level configuration as `SET 'table-store.root-path' = '...'`.");
     }
+
+    @Test
+    public void testEnrichKafkaTopic() {
+        Map<String, String> sessionMap = new HashMap<>();
+        sessionMap.put("table-store.root-path", "my_path");
+        sessionMap.put("table-store.log.system", "kafka");
+        sessionMap.put("table-store.log.topic", "my_topic");
+        context = createTableContext(sessionMap, emptyMap());
+        assertThatThrownBy(() -> tableStoreManagedFactory.enrichOptions(context))
+                .hasMessage(
+                        "Managed table can not contains custom topic. You need to remove topic in table options or session config.");
+
+        sessionMap.remove("table-store.log.topic");
+        context = createTableContext(sessionMap, emptyMap());
+        Map<String, String> enriched = tableStoreManagedFactory.enrichOptions(context);
+
+        Map<String, String> expected = new HashMap<>();
+        expected.put("path", "my_path/catalog.catalog/database.db/table");
+        expected.put("log.system", "kafka");
+        expected.put("log.topic", "catalog.database.table");
+        assertThat(enriched).containsExactlyEntriesOf(expected);
+    }
 }

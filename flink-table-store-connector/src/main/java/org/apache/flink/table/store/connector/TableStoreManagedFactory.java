@@ -29,6 +29,7 @@ import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
@@ -36,12 +37,14 @@ import java.io.UncheckedIOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.WRITE_MODE;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
+import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 
 /** Default implementation of {@link ManagedTableFactory}. */
 public class TableStoreManagedFactory extends AbstractTableStoreFactory
@@ -75,6 +78,13 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
 
         Path path = new Path(rootPath, relativeTablePath(context.getObjectIdentifier()));
         enrichedOptions.put(PATH.key(), path.toString());
+
+        Optional<LogStoreTableFactory> logFactory =
+                createOptionalLogStoreFactory(context.getClassLoader(), enrichedOptions);
+        logFactory.ifPresent(
+                factory ->
+                        factory.enrichOptions(createLogContext(context, enrichedOptions))
+                                .forEach((k, v) -> enrichedOptions.putIfAbsent(LOG_PREFIX + k, v)));
 
         return enrichedOptions;
     }

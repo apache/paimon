@@ -31,6 +31,7 @@ import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.utils.DataTypeUtils;
+import org.apache.flink.util.Preconditions;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -51,6 +52,7 @@ import java.util.concurrent.ExecutionException;
 
 import static org.apache.flink.table.factories.FactoryUtil.createTableFactoryHelper;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
+import static org.apache.flink.table.store.kafka.KafkaLogOptions.TOPIC;
 import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
 import static org.apache.flink.table.store.log.LogOptions.CONSISTENCY;
 import static org.apache.flink.table.store.log.LogOptions.FORMAT;
@@ -84,6 +86,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
     public Set<ConfigOption<?>> optionalOptions() {
         Set<ConfigOption<?>> options = new HashSet<>();
         options.add(SCAN);
+        options.add(TOPIC);
         options.add(SCAN_TIMESTAMP_MILLS);
         options.add(RETENTION);
         options.add(CONSISTENCY);
@@ -91,6 +94,23 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
         options.add(KEY_FORMAT);
         options.add(FORMAT);
         return options;
+    }
+
+    @Override
+    public Map<String, String> enrichOptions(Context context) {
+        Map<String, String> options = new HashMap<>(context.getCatalogTable().getOptions());
+        Preconditions.checkArgument(
+                !options.containsKey(TOPIC.key()),
+                "Managed table can not contains custom topic. "
+                        + "You need to remove topic in table options or session config.");
+
+        String topic = context.getObjectIdentifier().asSummaryString();
+        options.put(TOPIC.key(), topic);
+        return options;
+    }
+
+    private String topic(Context context) {
+        return context.getCatalogTable().getOptions().get(TOPIC.key());
     }
 
     @Override
@@ -215,10 +235,6 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                 valueSerializer,
                 helper.getOptions().get(CONSISTENCY),
                 helper.getOptions().get(CHANGELOG_MODE));
-    }
-
-    private static String topic(DynamicTableFactory.Context context) {
-        return context.getObjectIdentifier().asSummaryString();
     }
 
     public static Properties toKafkaProperties(ReadableConfig options) {
