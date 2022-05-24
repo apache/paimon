@@ -62,7 +62,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
                         + ") WITH (\n"
                         + "    'connector' = 'filesystem',\n"
                         + "    'format' = 'csv',\n"
-                        + "    'root-path' = '%s'\n"
+                        + "    'path' = '%s'\n"
                         + ");";
         String testDataSourceFile = UUID.randomUUID().toString() + ".csv";
         testDataSourceDdl =

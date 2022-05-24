@@ -34,7 +34,7 @@ public class FileStoreStreamE2eTest extends E2eTestBase {
                         + ") WITH (\n"
                         + "    'connector' = 'filesystem',\n"
                         + "    'format' = 'csv',\n"
-                        + "    'root-path' = '%s'\n,"
+                        + "    'path' = '%s'\n,"
                         + "    'source.monitor-interval' = '3s'\n"
                         + ");";
         String testDataSourceDir = UUID.randomUUID().toString() + ".data";
