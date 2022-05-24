@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.mergetree.compact;
 import java.io.Serializable;
 
 /** Custom column aggregation abstract class. */
-public interface AggregateFunction<T> extends Serializable {
+public interface SumAggregateFunction<T> extends Serializable {
     T getResult();
 
     void reset();
@@ -33,7 +33,7 @@ public interface AggregateFunction<T> extends Serializable {
     void reset(Object value);
 }
 
-class DoubleAggregateFunction implements AggregateFunction<Double> {
+class DoubleSumAggregateFunction implements SumAggregateFunction<Double> {
     Double aggregator;
 
     @Override
@@ -62,7 +62,7 @@ class DoubleAggregateFunction implements AggregateFunction<Double> {
     }
 }
 
-class LongAggregateFunction implements AggregateFunction<Long> {
+class LongSumAggregateFunction implements SumAggregateFunction<Long> {
 
     Long aggregator;
 
@@ -92,7 +92,7 @@ class LongAggregateFunction implements AggregateFunction<Long> {
     }
 }
 
-class IntegerAggregateFunction implements AggregateFunction<Integer> {
+class IntegerSumAggregateFunction implements SumAggregateFunction<Integer> {
     Integer aggregator;
 
     @Override
@@ -121,7 +121,7 @@ class IntegerAggregateFunction implements AggregateFunction<Integer> {
     }
 }
 
-class FloatAggregateFunction implements AggregateFunction<Float> {
+class FloatSumAggregateFunction implements SumAggregateFunction<Float> {
     Float aggregator;
 
     @Override

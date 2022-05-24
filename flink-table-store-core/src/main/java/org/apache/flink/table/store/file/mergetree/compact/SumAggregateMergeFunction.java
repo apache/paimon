@@ -34,21 +34,21 @@ import java.util.Set;
  * non-null fields on merge.
  */
 @SuppressWarnings("checkstyle:RegexpSingleline")
-public class AggregationMergeFunction implements MergeFunction {
+public class SumAggregateMergeFunction implements MergeFunction {
 
     private static final long serialVersionUID = 1L;
 
     private final RowData.FieldGetter[] getters;
 
     private final RowType rowType;
-    private final ArrayList<AggregateFunction<?>> aggregateFunctions;
+    private final ArrayList<SumAggregateFunction<?>> aggregateFunctions;
     private final boolean[] isPrimaryKey;
     private final RowType primaryKeyType;
     private transient GenericRowData row;
 
     private final Set<String> aggregateColumnNames;
 
-    public AggregationMergeFunction(
+    public SumAggregateMergeFunction(
             RowType primaryKeyType, RowType rowType, Set<String> aggregateColumnNames) {
         this.primaryKeyType = primaryKeyType;
         this.rowType = rowType;
@@ -68,9 +68,12 @@ public class AggregationMergeFunction implements MergeFunction {
 
         this.aggregateFunctions = new ArrayList<>(rowType.getFieldCount());
         for (int i = 0; i < rowType.getFieldCount(); i++) {
-            AggregateFunction<?> f = null;
+            SumAggregateFunction<?> f = null;
             if (aggregateColumnNames.contains(rowNames.get(i))) {
-                f = choiceRightAggregateFunction(rowType.getTypeAt(i).getDefaultConversion());
+                f =
+                        AggregateFunctionFactory.SumAggregateFunctionFactory
+                                .choiceRightAggregateFunction(
+                                        rowType.getTypeAt(i).getDefaultConversion());
             } else {
                 if (!isPrimaryKey[i]) {
                     throw new IllegalArgumentException(
@@ -79,20 +82,6 @@ public class AggregationMergeFunction implements MergeFunction {
             }
             aggregateFunctions.add(f);
         }
-    }
-
-    private AggregateFunction<?> choiceRightAggregateFunction(Class<?> c) {
-        AggregateFunction<?> f = null;
-        if (Double.class.equals(c)) {
-            f = new DoubleAggregateFunction();
-        } else if (Long.class.equals(c)) {
-            f = new LongAggregateFunction();
-        } else if (Integer.class.equals(c)) {
-            f = new IntegerAggregateFunction();
-        } else if (Float.class.equals(c)) {
-            f = new FloatAggregateFunction();
-        }
-        return f;
     }
 
     @Override
@@ -104,7 +93,7 @@ public class AggregationMergeFunction implements MergeFunction {
     public void add(RowData value) {
         for (int i = 0; i < getters.length; i++) {
             Object currentField = getters[i].getFieldOrNull(value);
-            AggregateFunction<?> f = aggregateFunctions.get(i);
+            SumAggregateFunction<?> f = aggregateFunctions.get(i);
             if (isPrimaryKey[i]) {
                 // primary key
                 if (currentField != null) {
@@ -148,6 +137,6 @@ public class AggregationMergeFunction implements MergeFunction {
     @Override
     public MergeFunction copy() {
         // RowData.FieldGetter is thread safe
-        return new AggregationMergeFunction(primaryKeyType, rowType, aggregateColumnNames);
+        return new SumAggregateMergeFunction(primaryKeyType, rowType, aggregateColumnNames);
     }
 }

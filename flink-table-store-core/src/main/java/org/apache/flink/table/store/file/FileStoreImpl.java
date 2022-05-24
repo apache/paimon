@@ -26,10 +26,11 @@ import org.apache.flink.table.runtime.generated.RecordComparator;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
-import org.apache.flink.table.store.file.mergetree.compact.AggregationMergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.AggregateFunctionFactory;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.SumAggregateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.operation.FileStoreCommitImpl;
 import org.apache.flink.table.store.file.operation.FileStoreExpireImpl;
@@ -43,7 +44,6 @@ import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -240,18 +240,24 @@ public class FileStoreImpl implements FileStore {
             case AGGREGATION:
                 Map<String, String> rightConfMap =
                         options.getFilterConf(e -> e.getKey().endsWith(".aggregate-function"));
-                Set<String> valueSet = new HashSet<>(rightConfMap.values());
-                if (valueSet.size() != 1 || !valueSet.contains("sum")) {
-                    throw new IllegalArgumentException(
-                            "Aggregate function must be the same for all columns");
-                }
                 Set<String> aggregateColumnNames =
                         rightConfMap.keySet().stream()
                                 .distinct()
                                 .flatMap(s -> Stream.of(s.split(".aggregate-function")[0]))
                                 .collect(Collectors.toSet());
-                mergeFunction =
-                        new AggregationMergeFunction(primaryKeyType, rowType, aggregateColumnNames);
+                switch (AggregateFunctionFactory.getAggregationKind(rightConfMap.values())) {
+                    case Sum:
+                        mergeFunction =
+                                new SumAggregateMergeFunction(
+                                        primaryKeyType, rowType, aggregateColumnNames);
+                        break;
+                    case Avg:
+                    case Max:
+                    case Min:
+                    default:
+                        throw new UnsupportedOperationException(
+                                "merge-function values un supposed");
+                }
                 break;
             default:
                 throw new UnsupportedOperationException("Unsupported merge engine: " + mergeEngine);
