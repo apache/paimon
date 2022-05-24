@@ -71,6 +71,11 @@ public class AggregationMergeFunction implements MergeFunction {
             AggregateFunction<?> f = null;
             if (aggregateColumnNames.contains(rowNames.get(i))) {
                 f = choiceRightAggregateFunction(rowType.getTypeAt(i).getDefaultConversion());
+            } else {
+                if (!isPrimaryKey[i]) {
+                    throw new IllegalArgumentException(
+                            "should  set aggregate function for every column not part of primary key");
+                }
             }
             aggregateFunctions.add(f);
         }

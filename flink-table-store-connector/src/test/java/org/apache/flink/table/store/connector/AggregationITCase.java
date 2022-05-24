@@ -56,10 +56,36 @@ public class AggregationITCase extends FileStoreTableITCase {
                         + " 'merge-engine'='aggregation',"
                         + " 'c.aggregate-function' = 'sum'"
                         + " );";
+        String ddl3 =
+                "CREATE TABLE IF NOT EXISTS T5 ( "
+                        + " a STRING,"
+                        + " b INT,"
+                        + " c DOUBLE,"
+                        + " PRIMARY KEY (a) NOT ENFORCED )"
+                        + " WITH ("
+                        + " 'merge-engine'='aggregation',"
+                        + " 'b.aggregate-function' = 'sum'"
+                        + " );";
         List<String> lists = new ArrayList<>();
         lists.add(ddl1);
         lists.add(ddl2);
+        lists.add(ddl3);
         return lists;
+    }
+
+    @Test
+    public void testCreateAggregateFunction() throws ExecutionException, InterruptedException {
+        List<Row> result;
+
+        // T5
+        try {
+            bEnv.executeSql("INSERT INTO T5 VALUES " + "('pk1',1, 2.0), " + "('pk1',1, 2.0)")
+                    .await();
+            throw new AssertionError("create table T5 should failed");
+        } catch (IllegalArgumentException e) {
+            assert ("should  set aggregate function for every column not part of primary key"
+                    .equals(e.getLocalizedMessage()));
+        }
     }
 
     @Test
