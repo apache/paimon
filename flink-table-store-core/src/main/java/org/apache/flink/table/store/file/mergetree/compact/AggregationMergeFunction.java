@@ -26,7 +26,6 @@ import org.apache.flink.table.types.logical.RowType;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 
@@ -62,7 +61,6 @@ public class AggregationMergeFunction implements MergeFunction {
         }
 
         this.isPrimaryKey = new boolean[this.getters.length];
-        Arrays.fill(isPrimaryKey, false);
         List<String> rowNames = rowType.getFieldNames();
         for (String primaryKeyName : primaryKeyType.getFieldNames()) {
             isPrimaryKey[rowNames.indexOf(primaryKeyName)] = true;
@@ -119,7 +117,7 @@ public class AggregationMergeFunction implements MergeFunction {
                             f.aggregate(currentField);
                             break;
                         case DELETE:
-                            f.aggregate(currentField, false);
+                            f.retract(currentField);
                             break;
                         case UPDATE_AFTER:
                         case UPDATE_BEFORE:

@@ -20,27 +20,15 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import java.io.Serializable;
 
-/**
- * 自定义的列聚合抽象类.
- *
- * @param <T>
- */
+/** Custom column aggregation abstract class. */
 public interface AggregateFunction<T> extends Serializable {
-    //     T aggregator;
-
     T getResult();
-
-    default void init() {
-        reset();
-    }
 
     void reset();
 
-    default void aggregate(Object value) {
-        aggregate(value, true);
-    }
+    void aggregate(Object value);
 
-    void aggregate(Object value, boolean add);
+    void retract(Object value);
 
     void reset(Object value);
 }
@@ -59,12 +47,13 @@ class DoubleAggregateFunction implements AggregateFunction<Double> {
     }
 
     @Override
-    public void aggregate(Object value, boolean add) {
-        if (add) {
-            aggregator += (Double) value;
-        } else {
-            aggregator -= (Double) value;
-        }
+    public void aggregate(Object value) {
+        aggregator += (Double) value;
+    }
+
+    @Override
+    public void retract(Object value) {
+        aggregator -= (Double) value;
     }
 
     @Override
@@ -88,12 +77,13 @@ class LongAggregateFunction implements AggregateFunction<Long> {
     }
 
     @Override
-    public void aggregate(Object value, boolean add) {
-        if (add) {
-            aggregator += (Long) value;
-        } else {
-            aggregator -= (Long) value;
-        }
+    public void aggregate(Object value) {
+        aggregator += (Long) value;
+    }
+
+    @Override
+    public void retract(Object value) {
+        aggregator -= (Long) value;
     }
 
     @Override
@@ -116,12 +106,13 @@ class IntegerAggregateFunction implements AggregateFunction<Integer> {
     }
 
     @Override
-    public void aggregate(Object value, boolean add) {
-        if (add) {
-            aggregator += (Integer) value;
-        } else {
-            aggregator -= (Integer) value;
-        }
+    public void aggregate(Object value) {
+        aggregator += (Integer) value;
+    }
+
+    @Override
+    public void retract(Object value) {
+        aggregator -= (Integer) value;
     }
 
     @Override
@@ -144,12 +135,13 @@ class FloatAggregateFunction implements AggregateFunction<Float> {
     }
 
     @Override
-    public void aggregate(Object value, boolean add) {
-        if (add) {
-            aggregator += (Float) value;
-        } else {
-            aggregator -= (Float) value;
-        }
+    public void aggregate(Object value) {
+        aggregator += (Float) value;
+    }
+
+    @Override
+    public void retract(Object value) {
+        aggregator -= (Float) value;
     }
 
     @Override

@@ -230,8 +230,6 @@ public class FileStoreImpl implements FileStore {
                                 .collect(Collectors.toList()));
 
         MergeFunction mergeFunction;
-        Map<String, String> rightConfMap =
-                options.getFilterConf(e -> e.getKey().endsWith(".aggregate-function"));
         switch (mergeEngine) {
             case DEDUPLICATE:
                 mergeFunction = new DeduplicateMergeFunction();
@@ -240,6 +238,8 @@ public class FileStoreImpl implements FileStore {
                 mergeFunction = new PartialUpdateMergeFunction(rowType);
                 break;
             case AGGREGATION:
+                Map<String, String> rightConfMap =
+                        options.getFilterConf(e -> e.getKey().endsWith(".aggregate-function"));
                 Set<String> valueSet = new HashSet<>(rightConfMap.values());
                 if (valueSet.size() != 1 || !valueSet.contains("sum")) {
                     throw new IllegalArgumentException(
