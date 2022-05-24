@@ -117,7 +117,7 @@ public class AggregationMergeFunction implements MergeFunction {
                     if (oldValue != null) {
                         f.aggregate(oldValue);
                     }
-                    switch (row.getRowKind()) {
+                    switch (value.getRowKind()) {
                         case INSERT:
                             f.aggregate(currentField);
                             break;
