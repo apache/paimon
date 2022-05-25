@@ -73,7 +73,7 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
 
         Preconditions.checkArgument(
                 !enrichedOptions.containsKey(PATH.key()),
-                "Managed table can not contains table path. "
+                "Managed table can not contain table path. "
                         + "You need to remove path in table options or session config.");
 
         Path path = new Path(rootPath, relativeTablePath(context.getObjectIdentifier()));

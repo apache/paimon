@@ -95,7 +95,7 @@ public class TableStoreManagedFactoryTest {
         context = createTableContext(sessionMap, emptyMap());
         assertThatThrownBy(() -> tableStoreManagedFactory.enrichOptions(context))
                 .hasMessage(
-                        "Managed table can not contains table path. You need to remove path in table options or session config.");
+                        "Managed table can not contain table path. You need to remove path in table options or session config.");
 
         context = createTableContext(emptyMap(), emptyMap());
         assertThatThrownBy(() -> tableStoreManagedFactory.enrichOptions(context))
@@ -112,7 +112,7 @@ public class TableStoreManagedFactoryTest {
         context = createTableContext(sessionMap, emptyMap());
         assertThatThrownBy(() -> tableStoreManagedFactory.enrichOptions(context))
                 .hasMessage(
-                        "Managed table can not contains custom topic. You need to remove topic in table options or session config.");
+                        "Managed table can not contain custom topic. You need to remove topic in table options or session config.");
 
         sessionMap.remove("table-store.log.topic");
         context = createTableContext(sessionMap, emptyMap());
