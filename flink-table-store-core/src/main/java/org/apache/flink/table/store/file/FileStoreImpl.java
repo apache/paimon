@@ -34,6 +34,7 @@ import org.apache.flink.table.store.file.operation.FileStoreScanImpl;
 import org.apache.flink.table.store.file.operation.FileStoreWriteImpl;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.KeyComparatorSupplier;
+import org.apache.flink.table.store.file.utils.PartitionedManifestMeta;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -56,8 +57,9 @@ public class FileStoreImpl implements FileStore {
     private final RowType partitionType;
     private final RowType keyType;
     private final RowType valueType;
-    @Nullable private final MergeFunction mergeFunction;
     private final Supplier<Comparator<RowData>> keyComparatorSupplier;
+    @Nullable private final MergeFunction mergeFunction;
+    @Nullable private final PartitionedManifestMeta specifiedPartitionedMeta;
 
     public FileStoreImpl(
             String tablePath,
@@ -68,7 +70,8 @@ public class FileStoreImpl implements FileStore {
             RowType partitionType,
             RowType keyType,
             RowType valueType,
-            @Nullable MergeFunction mergeFunction) {
+            @Nullable MergeFunction mergeFunction,
+            @Nullable PartitionedManifestMeta specifiedPartitionedMeta) {
         this.tablePath = tablePath;
         this.schemaId = schemaId;
         this.options = options;
@@ -78,7 +81,13 @@ public class FileStoreImpl implements FileStore {
         this.keyType = keyType;
         this.valueType = valueType;
         this.mergeFunction = mergeFunction;
+        this.specifiedPartitionedMeta = specifiedPartitionedMeta;
         this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
+    }
+
+    @Nullable
+    public PartitionedManifestMeta getSpecifiedPartitionedMeta() {
+        return specifiedPartitionedMeta;
     }
 
     public FileStorePathFactory pathFactory() {
@@ -111,7 +120,8 @@ public class FileStoreImpl implements FileStore {
                 options.fileFormat(),
                 pathFactory(),
                 newScan(),
-                options.mergeTreeOptions());
+                options.mergeTreeOptions(),
+                specifiedPartitionedMeta);
     }
 
     @Override
@@ -195,6 +205,7 @@ public class FileStoreImpl implements FileStore {
                 partitionType,
                 RowType.of(),
                 rowType,
+                null,
                 null);
     }
 
@@ -206,7 +217,8 @@ public class FileStoreImpl implements FileStore {
             RowType partitionType,
             RowType primaryKeyType,
             RowType rowType,
-            FileStoreOptions.MergeEngine mergeEngine) {
+            FileStoreOptions.MergeEngine mergeEngine,
+            @Nullable PartitionedManifestMeta specifiedPartitionedMeta) {
         // add _KEY_ prefix to avoid conflict with value
         RowType keyType =
                 new RowType(
@@ -245,7 +257,8 @@ public class FileStoreImpl implements FileStore {
                 partitionType,
                 keyType,
                 rowType,
-                mergeFunction);
+                mergeFunction,
+                specifiedPartitionedMeta);
     }
 
     public static FileStoreImpl createWithValueCount(
@@ -254,7 +267,8 @@ public class FileStoreImpl implements FileStore {
             FileStoreOptions options,
             String user,
             RowType partitionType,
-            RowType rowType) {
+            RowType rowType,
+            @Nullable PartitionedManifestMeta specifiedPartitionedMeta) {
         RowType countType =
                 RowType.of(
                         new LogicalType[] {new BigIntType(false)}, new String[] {"_VALUE_COUNT"});
@@ -268,6 +282,7 @@ public class FileStoreImpl implements FileStore {
                 partitionType,
                 rowType,
                 countType,
-                mergeFunction);
+                mergeFunction,
+                specifiedPartitionedMeta);
     }
 }

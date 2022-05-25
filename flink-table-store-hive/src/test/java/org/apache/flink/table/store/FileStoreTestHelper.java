@@ -77,7 +77,8 @@ public class FileStoreTestHelper {
                         partitionType,
                         keyType,
                         valueType,
-                        mergeFunction);
+                        mergeFunction,
+                        null);
         this.partitionCalculator = partitionCalculator;
         this.bucketCalculator = bucketCalculator;
         this.writers = new HashMap<>();

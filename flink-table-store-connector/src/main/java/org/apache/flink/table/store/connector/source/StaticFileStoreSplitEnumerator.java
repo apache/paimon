@@ -44,7 +44,7 @@ public class StaticFileStoreSplitEnumerator
 
     public StaticFileStoreSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
-            Snapshot snapshot,
+            @Nullable Snapshot snapshot,
             Collection<FileStoreSourceSplit> splits) {
         this.context = context;
         this.snapshot = snapshot;

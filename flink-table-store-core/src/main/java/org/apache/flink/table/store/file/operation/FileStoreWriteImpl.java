@@ -37,12 +37,15 @@ import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.file.utils.PartitionedManifestMeta;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.writer.AppendOnlyWriter;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Lists;
+
+import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.Comparator;
@@ -63,6 +66,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
     private final FileStorePathFactory pathFactory;
     private final FileStoreScan scan;
     private final MergeTreeOptions options;
+    @Nullable private final PartitionedManifestMeta specifiedPartitionedMeta;
 
     public FileStoreWriteImpl(
             WriteMode writeMode,
@@ -73,7 +77,8 @@ public class FileStoreWriteImpl implements FileStoreWrite {
             FileFormat fileFormat,
             FileStorePathFactory pathFactory,
             FileStoreScan scan,
-            MergeTreeOptions options) {
+            MergeTreeOptions options,
+            @Nullable PartitionedManifestMeta specifiedFileMeta) {
         this.valueType = valueType;
         this.dataFileReaderFactory =
                 new DataFileReader.Factory(keyType, valueType, fileFormat, pathFactory);
@@ -87,6 +92,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
         this.pathFactory = pathFactory;
         this.scan = scan;
         this.options = options;
+        this.specifiedPartitionedMeta = specifiedFileMeta;
     }
 
     @Override
@@ -96,13 +102,17 @@ public class FileStoreWriteImpl implements FileStoreWrite {
         List<DataFileMeta> existingFileMetas = Lists.newArrayList();
         if (latestSnapshotId != null) {
             // Concat all the DataFileMeta of existing files into existingFileMetas.
-            scan.withSnapshot(latestSnapshotId)
-                    .withPartitionFilter(Collections.singletonList(partition)).withBucket(bucket)
-                    .plan().files().stream()
-                    .map(ManifestEntry::file)
-                    .forEach(existingFileMetas::add);
+            if (specifiedPartitionedMeta != null) {
+                existingFileMetas.addAll(
+                        specifiedPartitionedMeta.getManifestEntries().get(partition).get(bucket));
+            } else {
+                scan.withSnapshot(latestSnapshotId)
+                        .withPartitionFilter(Collections.singletonList(partition))
+                        .withBucket(bucket).plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .forEach(existingFileMetas::add);
+            }
         }
-
         switch (writeMode) {
             case APPEND_ONLY:
                 DataFilePathFactory factory =
@@ -160,7 +170,8 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                 mergeFunction.copy(),
                 dataFileWriter,
                 options.commitForceCompact,
-                options.numSortedRunStopTrigger);
+                options.numSortedRunStopTrigger,
+                specifiedPartitionedMeta != null);
     }
 
     private CompactManager createCompactManager(

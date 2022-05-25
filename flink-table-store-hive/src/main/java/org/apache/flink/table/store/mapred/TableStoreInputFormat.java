@@ -172,7 +172,8 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
                                 partitionType,
                                 primaryKeyType,
                                 rowType,
-                                options.get(FileStoreOptions.MERGE_ENGINE));
+                                options.get(FileStoreOptions.MERGE_ENGINE),
+                                null); // TODO
                 valueCountMode = false;
             } else {
                 store =
@@ -182,7 +183,8 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
                                 new FileStoreOptions(options),
                                 user,
                                 partitionType,
-                                rowType);
+                                rowType,
+                                null); // TODO
                 valueCountMode = true;
             }
         }
