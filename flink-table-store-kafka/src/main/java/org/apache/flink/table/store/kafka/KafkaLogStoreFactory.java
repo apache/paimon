@@ -101,7 +101,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
         Map<String, String> options = new HashMap<>(context.getCatalogTable().getOptions());
         Preconditions.checkArgument(
                 !options.containsKey(TOPIC.key()),
-                "Managed table can not contains custom topic. "
+                "Managed table can not contain custom topic. "
                         + "You need to remove topic in table options or session config.");
 
         String topic = context.getObjectIdentifier().asSummaryString();
