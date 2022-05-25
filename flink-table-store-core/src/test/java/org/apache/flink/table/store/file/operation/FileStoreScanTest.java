@@ -65,9 +65,9 @@ public class FileStoreScanTest {
                         "avro",
                         tempDir.toString(),
                         NUM_BUCKETS,
-                        TestKeyValueGenerator.PARTITION_TYPE,
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
                         TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.ROW_TYPE,
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                         new DeduplicateMergeFunction());
         pathFactory = store.pathFactory();
     }

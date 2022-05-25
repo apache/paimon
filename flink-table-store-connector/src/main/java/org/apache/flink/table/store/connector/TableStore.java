@@ -214,7 +214,7 @@ public class TableStore {
         }
     }
 
-    private FileStore buildFileStore() {
+    FileStore buildFileStore() {
         WriteMode writeMode = options.get(TableStoreFactoryOptions.WRITE_MODE);
 
         switch (writeMode) {

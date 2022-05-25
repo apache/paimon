@@ -83,7 +83,7 @@ public class ManifestTestDataGenerator {
                 !entries.isEmpty(), "Manifest entries are empty. Invalid test data.");
 
         FieldStatsCollector collector =
-                new FieldStatsCollector(TestKeyValueGenerator.PARTITION_TYPE);
+                new FieldStatsCollector(TestKeyValueGenerator.DEFAULT_PART_TYPE);
 
         long numAddedFiles = 0;
         long numDeletedFiles = 0;

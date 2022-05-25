@@ -38,6 +38,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED;
+
 /** Testing {@link Thread}s to perform concurrent commits. */
 public class TestCommitThread extends Thread {
 
@@ -114,7 +116,7 @@ public class TestCommitThread extends Thread {
                 committable,
                 () ->
                         commit.overwrite(
-                                TestKeyValueGenerator.toPartitionMap(partition),
+                                TestKeyValueGenerator.toPartitionMap(partition, MULTI_PARTITIONED),
                                 committable,
                                 Collections.emptyMap()));
     }

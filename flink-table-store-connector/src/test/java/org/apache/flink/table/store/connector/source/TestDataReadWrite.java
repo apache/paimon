@@ -77,7 +77,7 @@ public class TestDataReadWrite {
                 WriteMode.CHANGE_LOG,
                 KEY_TYPE,
                 VALUE_TYPE,
-                COMPARATOR,
+                () -> COMPARATOR,
                 new DeduplicateMergeFunction(),
                 avro,
                 pathFactory);

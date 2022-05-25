@@ -25,7 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** A files unit for compaction. */
-interface CompactUnit {
+public interface CompactUnit {
 
     int outputLevel();
 
