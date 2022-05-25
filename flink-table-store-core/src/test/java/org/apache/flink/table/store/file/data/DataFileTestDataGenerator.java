@@ -102,7 +102,7 @@ public class DataFileTestDataGenerator {
         FieldStatsCollector keyStatsCollector =
                 new FieldStatsCollector(TestKeyValueGenerator.KEY_TYPE);
         FieldStatsCollector valueStatsCollector =
-                new FieldStatsCollector(TestKeyValueGenerator.ROW_TYPE);
+                new FieldStatsCollector(TestKeyValueGenerator.DEFAULT_ROW_TYPE);
         long totalSize = 0;
         BinaryRowData minKey = null;
         BinaryRowData maxKey = null;

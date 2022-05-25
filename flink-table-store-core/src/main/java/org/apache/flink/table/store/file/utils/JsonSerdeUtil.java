@@ -73,6 +73,8 @@ public class JsonSerdeUtil {
         SimpleModule module = new SimpleModule("Table store");
         registerJsonObjects(module, Schema.class, SchemaSerializer.INSTANCE);
         registerJsonObjects(module, DataField.class, DataFieldSerializer.INSTANCE);
+        registerJsonObjects(
+                module, PartitionedManifestMeta.class, PartitionedManifestMetaSerializer.INSTANCE);
         return module;
     }
 

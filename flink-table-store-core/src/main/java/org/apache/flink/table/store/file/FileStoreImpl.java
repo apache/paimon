@@ -20,10 +20,8 @@ package org.apache.flink.table.store.file;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.api.TableConfig;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.generated.GeneratedRecordComparator;
-import org.apache.flink.table.runtime.generated.RecordComparator;
-import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
@@ -36,13 +34,16 @@ import org.apache.flink.table.store.file.operation.FileStoreReadImpl;
 import org.apache.flink.table.store.file.operation.FileStoreScanImpl;
 import org.apache.flink.table.store.file.operation.FileStoreWriteImpl;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.file.utils.KeyComparatorSupplier;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
+import java.util.Comparator;
 import java.util.List;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /** File store implementation. */
@@ -56,7 +57,7 @@ public class FileStoreImpl implements FileStore {
     private final RowType keyType;
     private final RowType valueType;
     @Nullable private final MergeFunction mergeFunction;
-    private final GeneratedRecordComparator genRecordComparator;
+    private final Supplier<Comparator<RowData>> keyComparatorSupplier;
 
     public FileStoreImpl(
             long schemaId,
@@ -75,9 +76,7 @@ public class FileStoreImpl implements FileStore {
         this.keyType = keyType;
         this.valueType = valueType;
         this.mergeFunction = mergeFunction;
-        this.genRecordComparator =
-                CodeGenUtils.generateRecordComparator(
-                        new TableConfig(), keyType.getChildren(), "KeyComparator");
+        this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
     }
 
     public FileStorePathFactory pathFactory() {
@@ -106,17 +105,13 @@ public class FileStoreImpl implements FileStore {
         return new ManifestList.Factory(partitionType, options.manifestFormat(), pathFactory());
     }
 
-    private RecordComparator newKeyComparator() {
-        return genRecordComparator.newInstance(Thread.currentThread().getContextClassLoader());
-    }
-
     @Override
     public FileStoreWriteImpl newWrite() {
         return new FileStoreWriteImpl(
                 writeMode,
                 keyType,
                 valueType,
-                this::newKeyComparator,
+                keyComparatorSupplier,
                 mergeFunction,
                 options.fileFormat(),
                 pathFactory(),
@@ -130,7 +125,7 @@ public class FileStoreImpl implements FileStore {
                 writeMode,
                 keyType,
                 valueType,
-                newKeyComparator(),
+                keyComparatorSupplier.get(),
                 mergeFunction,
                 options.fileFormat(),
                 pathFactory());

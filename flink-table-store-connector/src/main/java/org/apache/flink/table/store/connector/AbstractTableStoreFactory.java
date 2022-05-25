@@ -155,7 +155,7 @@ public abstract class AbstractTableStoreFactory
                                 Map.Entry::getValue));
     }
 
-    static TableStore buildTableStore(DynamicTableFactory.Context context) {
+    TableStore buildTableStore(DynamicTableFactory.Context context) {
         TableStore store =
                 new TableStore(
                         context.getObjectIdentifier(),
