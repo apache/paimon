@@ -57,7 +57,7 @@ public class TypeE2eTest extends E2eTestBase {
                                 schema,
                                 ") WITH (",
                                 "  'bucket' = '1',",
-                                "  'path' = '%s'",
+                                "  'root-path' = '%s'",
                                 ");"));
         tableStoreDdl =
                 String.format(
@@ -128,7 +128,7 @@ public class TypeE2eTest extends E2eTestBase {
                                 "PRIMARY KEY (pk) NOT ENFORCED",
                                 ") WITH (",
                                 "  'bucket' = '1',",
-                                "  'path' = '%s'",
+                                "  'root-path' = '%s'",
                                 ");"));
         tableStoreDdl =
                 String.format(

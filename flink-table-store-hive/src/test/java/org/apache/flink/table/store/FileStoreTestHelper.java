@@ -20,7 +20,6 @@ package org.apache.flink.table.store;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileStoreImpl;
@@ -60,7 +59,6 @@ public class FileStoreTestHelper {
     private final ExecutorService compactExecutor;
 
     public FileStoreTestHelper(
-            ObjectIdentifier oi,
             Configuration conf,
             RowType partitionType,
             RowType keyType,
@@ -71,7 +69,7 @@ public class FileStoreTestHelper {
         FileStoreOptions options = new FileStoreOptions(conf);
         this.store =
                 new FileStoreImpl(
-                        options.path(oi).toString(),
+                        options.path().toString(),
                         0,
                         options,
                         WriteMode.CHANGE_LOG,

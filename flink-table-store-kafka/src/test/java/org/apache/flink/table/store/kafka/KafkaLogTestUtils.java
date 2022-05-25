@@ -49,12 +49,14 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.flink.table.data.binary.BinaryRowDataUtil.EMPTY_ROW;
 import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
+import static org.apache.flink.table.store.kafka.KafkaLogOptions.TOPIC;
 import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
 import static org.apache.flink.table.store.log.LogOptions.CONSISTENCY;
 import static org.apache.flink.table.store.log.LogOptions.LogChangelogMode;
@@ -189,6 +191,7 @@ public class KafkaLogTestUtils {
         options.put(CHANGELOG_MODE.key(), changelogMode.toString());
         options.put(CONSISTENCY.key(), consistency.toString());
         options.put(BOOTSTRAP_SERVERS.key(), servers);
+        options.put(TOPIC.key(), UUID.randomUUID().toString());
         return createContext(name, type, keys, options);
     }
 

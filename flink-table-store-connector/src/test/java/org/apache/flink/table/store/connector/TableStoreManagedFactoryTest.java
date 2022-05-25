@@ -49,6 +49,9 @@ import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
+import static java.util.Collections.emptyMap;
+import static java.util.Collections.singletonMap;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
 import static org.apache.flink.table.store.connector.TableStoreTestBase.createResolvedTable;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
@@ -60,13 +63,14 @@ import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Test cases for {@link TableStoreFactory}. */
-public class TableStoreFactoryTest {
+/** Test cases for {@link TableStoreManagedFactory}. */
+public class TableStoreManagedFactoryTest {
 
     private static final ObjectIdentifier TABLE_IDENTIFIER =
             ObjectIdentifier.of("catalog", "database", "table");
 
-    private final TableStoreFactory tableStoreFactory = new TableStoreFactory();
+    private final TableStoreManagedFactory tableStoreManagedFactory =
+            new TableStoreManagedFactory();
 
     @TempDir private static java.nio.file.Path sharedTempDir;
     private DynamicTableFactory.Context context;
@@ -78,25 +82,63 @@ public class TableStoreFactoryTest {
             Map<String, String> tableOptions,
             Map<String, String> expectedEnrichedOptions) {
         context = createTableContext(sessionOptions, tableOptions);
-        Map<String, String> actualEnrichedOptions = tableStoreFactory.enrichOptions(context);
+        Map<String, String> actualEnrichedOptions = tableStoreManagedFactory.enrichOptions(context);
         assertThat(actualEnrichedOptions)
                 .containsExactlyInAnyOrderEntriesOf(expectedEnrichedOptions);
+    }
+
+    @Test
+    public void testErrorEnrichOptions() {
+        Map<String, String> sessionMap = new HashMap<>();
+        sessionMap.put("table-store.root-path", "my_path");
+        sessionMap.put("table-store.path", "another_path");
+        context = createTableContext(sessionMap, emptyMap());
+        assertThatThrownBy(() -> tableStoreManagedFactory.enrichOptions(context))
+                .hasMessage(
+                        "Managed table can not contain table path. You need to remove path in table options or session config.");
+
+        context = createTableContext(emptyMap(), emptyMap());
+        assertThatThrownBy(() -> tableStoreManagedFactory.enrichOptions(context))
+                .hasMessage(
+                        "Please specify a root path by setting session level configuration as `SET 'table-store.root-path' = '...'`.");
+    }
+
+    @Test
+    public void testEnrichKafkaTopic() {
+        Map<String, String> sessionMap = new HashMap<>();
+        sessionMap.put("table-store.root-path", "my_path");
+        sessionMap.put("table-store.log.system", "kafka");
+        sessionMap.put("table-store.log.topic", "my_topic");
+        context = createTableContext(sessionMap, emptyMap());
+        assertThatThrownBy(() -> tableStoreManagedFactory.enrichOptions(context))
+                .hasMessage(
+                        "Managed table can not contain custom topic. You need to remove topic in table options or session config.");
+
+        sessionMap.remove("table-store.log.topic");
+        context = createTableContext(sessionMap, emptyMap());
+        Map<String, String> enriched = tableStoreManagedFactory.enrichOptions(context);
+
+        Map<String, String> expected = new HashMap<>();
+        expected.put("path", "my_path/catalog.catalog/database.db/table");
+        expected.put("log.system", "kafka");
+        expected.put("log.topic", "catalog.database.table");
+        assertThat(enriched).containsExactlyEntriesOf(expected);
     }
 
     @ParameterizedTest
     @MethodSource("providingEnrichedOptionsForCreation")
     public void testOnCreateTable(Map<String, String> enrichedOptions, boolean ignoreIfExists) {
-        context = createTableContext(Collections.emptyMap(), enrichedOptions);
+        context = enrichContext(createTableContext(emptyMap(), enrichedOptions));
         Path expectedPath =
                 Paths.get(
                         sharedTempDir.toAbsolutePath().toString(),
                         relativeTablePath(TABLE_IDENTIFIER));
         boolean exist = expectedPath.toFile().exists();
         if (ignoreIfExists || !exist) {
-            tableStoreFactory.onCreateTable(context, ignoreIfExists);
+            tableStoreManagedFactory.onCreateTable(context, ignoreIfExists);
             assertThat(expectedPath).exists();
         } else {
-            assertThatThrownBy(() -> tableStoreFactory.onCreateTable(context, false))
+            assertThatThrownBy(() -> tableStoreManagedFactory.onCreateTable(context, false))
                     .isInstanceOf(TableException.class)
                     .hasMessageContaining(
                             String.format(
@@ -114,20 +156,32 @@ public class TableStoreFactoryTest {
         }
     }
 
+    private DynamicTableFactory.Context enrichContext(DynamicTableFactory.Context context) {
+        Map<String, String> newOptions = tableStoreManagedFactory.enrichOptions(context);
+        ResolvedCatalogTable table = context.getCatalogTable().copy(newOptions);
+        return new FactoryUtil.DefaultDynamicTableContext(
+                context.getObjectIdentifier(),
+                table,
+                emptyMap(),
+                context.getConfiguration(),
+                context.getClassLoader(),
+                context.isTemporary());
+    }
+
     @ParameterizedTest
     @MethodSource("providingEnrichedOptionsForDrop")
     public void testOnDropTable(Map<String, String> enrichedOptions, boolean ignoreIfNotExists) {
-        context = createTableContext(Collections.emptyMap(), enrichedOptions);
+        context = enrichContext(createTableContext(emptyMap(), enrichedOptions));
         Path expectedPath =
                 Paths.get(
                         sharedTempDir.toAbsolutePath().toString(),
                         relativeTablePath(TABLE_IDENTIFIER));
         boolean exist = expectedPath.toFile().exists();
         if (exist || ignoreIfNotExists) {
-            tableStoreFactory.onDropTable(context, ignoreIfNotExists);
+            tableStoreManagedFactory.onDropTable(context, ignoreIfNotExists);
             assertThat(expectedPath).doesNotExist();
         } else {
-            assertThatThrownBy(() -> tableStoreFactory.onDropTable(context, false))
+            assertThatThrownBy(() -> tableStoreManagedFactory.onDropTable(context, false))
                     .isInstanceOf(TableException.class)
                     .hasMessageContaining(
                             String.format(
@@ -155,7 +209,7 @@ public class TableStoreFactoryTest {
                 addPrefix(expectedLogOptions, LOG_PREFIX, (key) -> true);
         enrichedOptions.put("foo", "bar");
 
-        assertThat(TableStoreFactory.filterLogStoreOptions(enrichedOptions))
+        assertThat(TableStoreManagedFactory.filterLogStoreOptions(enrichedOptions))
                 .containsExactlyInAnyOrderEntriesOf(expectedLogOptions);
     }
 
@@ -168,7 +222,7 @@ public class TableStoreFactoryTest {
             TableStoreTestBase.ExpectedResult expectedResult) {
         ResolvedCatalogTable catalogTable =
                 createResolvedTable(
-                        Collections.singletonMap(
+                        singletonMap(
                                 "path", sharedTempDir.toAbsolutePath() + "/" + UUID.randomUUID()),
                         rowType,
                         partitions,
@@ -177,13 +231,13 @@ public class TableStoreFactoryTest {
                 new FactoryUtil.DefaultDynamicTableContext(
                         TABLE_IDENTIFIER,
                         catalogTable,
-                        Collections.emptyMap(),
-                        Configuration.fromMap(Collections.emptyMap()),
+                        emptyMap(),
+                        Configuration.fromMap(emptyMap()),
                         Thread.currentThread().getContextClassLoader(),
                         false);
         if (expectedResult.success) {
-            tableStoreFactory.onCreateTable(context, false);
-            TableStore tableStore = tableStoreFactory.buildTableStore(context);
+            tableStoreManagedFactory.onCreateTable(context, false);
+            TableStore tableStore = AbstractTableStoreFactory.buildTableStore(context);
             assertThat(tableStore.partitioned()).isEqualTo(catalogTable.isPartitioned());
             assertThat(tableStore.valueCountMode())
                     .isEqualTo(catalogTable.getResolvedSchema().getPrimaryKeyIndexes().length == 0);
@@ -196,7 +250,7 @@ public class TableStoreFactoryTest {
                         .isTrue();
             }
         } else {
-            assertThatThrownBy(() -> tableStoreFactory.onCreateTable(context, false))
+            assertThatThrownBy(() -> tableStoreManagedFactory.onCreateTable(context, false))
                     .isInstanceOf(expectedResult.expectedType)
                     .hasMessageContaining(expectedResult.expectedMessage);
         }
@@ -209,31 +263,27 @@ public class TableStoreFactoryTest {
                 of(
                         BUCKET.key(),
                         BUCKET.defaultValue().toString(),
-                        PATH.key(),
+                        ROOT_PATH.key(),
                         sharedTempDir.toString(),
                         LOG_PREFIX + BOOTSTRAP_SERVERS.key(),
                         "localhost:9092",
                         LOG_PREFIX + CONSISTENCY.key(),
                         CONSISTENCY.defaultValue().name());
 
-        // default
-        Arguments arg0 =
-                Arguments.of(
-                        Collections.emptyMap(), Collections.emptyMap(), Collections.emptyMap());
-
         // set configuration under session level
         Arguments arg1 =
                 Arguments.of(
                         addPrefix(enrichedOptions, TABLE_STORE_PREFIX, (key) -> true),
-                        Collections.emptyMap(),
-                        enrichedOptions);
+                        emptyMap(),
+                        generateTablePath(enrichedOptions));
 
         // set configuration under table level
-        Arguments arg2 = Arguments.of(Collections.emptyMap(), enrichedOptions, enrichedOptions);
+        Arguments arg2 =
+                Arguments.of(emptyMap(), enrichedOptions, generateTablePath(enrichedOptions));
 
         // set both session and table level configuration to test options combination
         Map<String, String> tableOptions = new HashMap<>(enrichedOptions);
-        tableOptions.remove(PATH.key());
+        tableOptions.remove(ROOT_PATH.key());
         tableOptions.remove(CONSISTENCY.key());
         Arguments arg3 =
                 Arguments.of(
@@ -242,19 +292,32 @@ public class TableStoreFactoryTest {
                                 TABLE_STORE_PREFIX,
                                 (key) -> !tableOptions.containsKey(key)),
                         tableOptions,
-                        enrichedOptions);
+                        generateTablePath(enrichedOptions));
 
         // set same key with different value to test table configuration take precedence
         Map<String, String> sessionOptions = new HashMap<>();
         sessionOptions.put(
                 TABLE_STORE_PREFIX + BUCKET.key(), String.valueOf(BUCKET.defaultValue() + 1));
-        Arguments arg4 = Arguments.of(sessionOptions, enrichedOptions, enrichedOptions);
-        return Stream.of(arg0, arg1, arg2, arg3, arg4);
+
+        Arguments arg4 =
+                Arguments.of(sessionOptions, enrichedOptions, generateTablePath(enrichedOptions));
+        return Stream.of(arg1, arg2, arg3, arg4);
+    }
+
+    private static Map<String, String> generateTablePath(Map<String, String> enrichedOptions) {
+        Map<String, String> expected = new HashMap<>(enrichedOptions);
+        String rootPath = expected.remove(ROOT_PATH.key());
+        if (rootPath != null) {
+            String path =
+                    rootPath + "/" + TableStoreManagedFactory.relativeTablePath(TABLE_IDENTIFIER);
+            expected.put(PATH.key(), path);
+        }
+        return expected;
     }
 
     private static Stream<Arguments> providingEnrichedOptionsForCreation() {
         Map<String, String> enrichedOptions = new HashMap<>();
-        enrichedOptions.put(PATH.key(), sharedTempDir.toAbsolutePath().toString());
+        enrichedOptions.put(ROOT_PATH.key(), sharedTempDir.toAbsolutePath().toString());
         return Stream.of(
                 Arguments.of(enrichedOptions, false),
                 Arguments.of(enrichedOptions, true),
@@ -271,7 +334,7 @@ public class TableStoreFactoryTest {
             tablePath.mkdirs();
         }
         Map<String, String> enrichedOptions = new HashMap<>();
-        enrichedOptions.put(PATH.key(), sharedTempDir.toAbsolutePath().toString());
+        enrichedOptions.put(ROOT_PATH.key(), sharedTempDir.toAbsolutePath().toString());
         return Stream.of(
                 Arguments.of(enrichedOptions, false),
                 Arguments.of(enrichedOptions, true),
@@ -341,7 +404,7 @@ public class TableStoreFactoryTest {
         return new FactoryUtil.DefaultDynamicTableContext(
                 TABLE_IDENTIFIER,
                 resolvedCatalogTable,
-                Collections.emptyMap(),
+                emptyMap(),
                 Configuration.fromMap(sessionOptions),
                 Thread.currentThread().getContextClassLoader(),
                 false);

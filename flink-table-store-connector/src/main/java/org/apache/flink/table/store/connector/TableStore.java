@@ -92,7 +92,7 @@ public class TableStore {
         this.tableIdentifier = tableIdentifier;
         this.options = options;
 
-        Path tablePath = new FileStoreOptions(options).path(tableIdentifier);
+        Path tablePath = FileStoreOptions.path(options);
         this.schema =
                 new SchemaManager(tablePath)
                         .latest()
@@ -180,7 +180,7 @@ public class TableStore {
         FileStoreOptions fileStoreOptions = new FileStoreOptions(options);
 
         return FileStoreImpl.createWithAppendOnly(
-                fileStoreOptions.path(tableIdentifier).toString(),
+                fileStoreOptions.path().toString(),
                 schema.id(),
                 fileStoreOptions,
                 user,
@@ -195,7 +195,7 @@ public class TableStore {
 
         if (trimmedPrimaryKeys.length == 0) {
             return FileStoreImpl.createWithValueCount(
-                    fileStoreOptions.path(tableIdentifier).toString(),
+                    fileStoreOptions.path().toString(),
                     schema.id(),
                     fileStoreOptions,
                     user,
@@ -203,7 +203,7 @@ public class TableStore {
                     type);
         } else {
             return FileStoreImpl.createWithPrimaryKey(
-                    fileStoreOptions.path(tableIdentifier).toString(),
+                    fileStoreOptions.path().toString(),
                     schema.id(),
                     fileStoreOptions,
                     user,

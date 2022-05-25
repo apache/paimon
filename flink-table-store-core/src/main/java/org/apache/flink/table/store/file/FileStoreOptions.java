@@ -56,7 +56,7 @@ public class FileStoreOptions implements Serializable {
             ConfigOptions.key("path")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("The root file path of the table store in the filesystem.");
+                    .withDescription("The file path of this table in the filesystem.");
 
     public static final ConfigOption<String> FILE_FORMAT =
             ConfigOptions.key("file.format")
@@ -167,21 +167,16 @@ public class FileStoreOptions implements Serializable {
         return options.get(BUCKET);
     }
 
-    public Path path(ObjectIdentifier tableIdentifier) {
-        return path(options.toMap(), tableIdentifier);
+    public Path path() {
+        return path(options.toMap());
     }
 
-    public static Path path(Map<String, String> options, ObjectIdentifier tableIdentifier) {
-        Preconditions.checkArgument(
-                options.containsKey(PATH.key()),
-                String.format(
-                        "Failed to create file store path. "
-                                + "Please specify a root dir by setting session level configuration "
-                                + "as `SET 'table-store.%s' = '...'`. "
-                                + "Alternatively, you can use a per-table root dir "
-                                + "as `CREATE TABLE ${table} (...) WITH ('%s' = '...')`",
-                        PATH.key(), PATH.key()));
-        return new Path(options.get(PATH.key()), relativeTablePath(tableIdentifier));
+    public static Path path(Map<String, String> options) {
+        return new Path(options.get(PATH.key()));
+    }
+
+    public static Path path(Configuration options) {
+        return new Path(options.get(PATH));
     }
 
     public static String relativeTablePath(ObjectIdentifier tableIdentifier) {

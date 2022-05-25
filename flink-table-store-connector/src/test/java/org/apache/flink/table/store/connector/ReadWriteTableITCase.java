@@ -35,7 +35,6 @@ import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.runtime.connector.sink.SinkRuntimeProviderContext;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
-import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -46,6 +45,7 @@ import org.junit.Test;
 
 import javax.annotation.Nullable;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
@@ -62,6 +62,7 @@ import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.dail
 import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.dailyRatesChangelogWithoutUB;
 import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.rates;
 import static org.apache.flink.table.store.connector.ShowCreateUtil.buildSimpleSelectQuery;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.SCAN_PARALLELISM;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.SINK_PARALLELISM;
 import static org.apache.flink.table.store.connector.TableStoreTestBase.createResolvedTable;
@@ -1218,7 +1219,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                         id));
         tEnv.executeSql(
                 String.format(
-                        "create table managed_table with ('path' = '%s') "
+                        "create table managed_table with ('root-path' = '%s') "
                                 + "like dummy_source (excluding options)",
                         rootPath));
         tEnv.executeSql("insert into managed_table select * from dummy_source").await();
@@ -1258,7 +1259,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                                 + "'%s' = '%s'"
                                 + ") like `helper_source_%s` "
                                 + "(excluding options)",
-                        randomSinkId, FileStoreOptions.PATH.key(), rootPath, randomSourceId));
+                        randomSinkId, ROOT_PATH.key(), rootPath, randomSourceId));
 
         // insert multiple times
         tEnv.executeSql(
@@ -1374,7 +1375,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                                 + "'%s' = '%s'"
                                 + ") like `helper_source_%s` "
                                 + "(excluding options)",
-                        randomSinkId, FileStoreOptions.PATH.key(), rootPath, randomSourceId));
+                        randomSinkId, ROOT_PATH.key(), rootPath, randomSourceId));
         tEnv.executeSql(
                         String.format(
                                 "insert into `managed_table_%s` select * from `helper_source_%s`",
@@ -1421,7 +1422,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                                 + " rate BIGINT\n"
                                 + ") WITH (\n"
                                 + " 'bucket' = '2',\n"
-                                + " 'path' = '%s'\n"
+                                + " 'root-path' = '%s'\n"
                                 + ")",
                         rootPath));
         tEnv.executeSql("INSERT INTO rates VALUES('US Dollar', 102)").await();
@@ -1578,13 +1579,14 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
             throws IOException {
         // 1. create a mock table sink
         Map<String, String> options = new HashMap<>();
-        options.put(FileStoreOptions.PATH.key(), "/fake/path");
         if (configParallelism != null) {
             options.put(SINK_PARALLELISM.key(), configParallelism.toString());
         }
         options.put(
                 "path",
-                TEMPORARY_FOLDER.newFolder(UUID.randomUUID().toString()).toURI().toString());
+                new File(TEMPORARY_FOLDER.newFolder(), UUID.randomUUID().toString())
+                        .toURI()
+                        .toString());
 
         DynamicTableFactory.Context context =
                 new FactoryUtil.DefaultDynamicTableContext(
@@ -1600,8 +1602,8 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                         new Configuration(),
                         Thread.currentThread().getContextClassLoader(),
                         false);
-        new TableStoreFactory().onCreateTable(context, false);
-        DynamicTableSink tableSink = new TableStoreFactory().createDynamicTableSink(context);
+        new TableStoreManagedFactory().onCreateTable(context, false);
+        DynamicTableSink tableSink = new TableStoreManagedFactory().createDynamicTableSink(context);
         assertThat(tableSink).isInstanceOf(TableStoreSink.class);
 
         // 2. get sink provider

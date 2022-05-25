@@ -38,6 +38,8 @@ import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
 
+import java.util.Map;
+
 /**
  * Base interface for configuring a default log table connector. The log table is used by managed
  * table factory.
@@ -46,6 +48,9 @@ import javax.annotation.Nullable;
  * writing.
  */
 public interface LogStoreTableFactory extends DynamicTableFactory {
+
+    /** Enrich options from catalog and session information. */
+    Map<String, String> enrichOptions(Context context);
 
     /** Notifies the listener that a table creation occurred. */
     void onCreateTable(Context context, int numBucket, boolean ignoreIfExists);

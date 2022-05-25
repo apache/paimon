@@ -21,7 +21,6 @@ package org.apache.flink.table.store.file;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.data.DataFileMeta;
@@ -112,7 +111,7 @@ public class TestFileStore extends FileStoreImpl {
             RowType valueType,
             MergeFunction mergeFunction) {
         super(
-                options.path(ObjectIdentifier.of("catalog", "database", "table")).toString(),
+                options.path().toString(),
                 0L,
                 options,
                 WriteMode.CHANGE_LOG,
