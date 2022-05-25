@@ -36,7 +36,7 @@ public class FileStoreFlinkFormatE2eTest extends E2eTestBase {
                         + "    b VARCHAR\n"
                         + ") WITH (\n"
                         + "    'bucket' = '3',\n"
-                        + "    'path' = '%s',\n"
+                        + "    'root-path' = '%s',\n"
                         + "    'file.format' = 'csv'\n"
                         + ");";
         tableStoreDdl =

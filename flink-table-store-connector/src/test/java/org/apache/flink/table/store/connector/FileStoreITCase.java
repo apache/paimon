@@ -350,7 +350,7 @@ public class FileStoreITCase extends AbstractTestBase {
             throws Exception {
         ObjectIdentifier identifier = ObjectIdentifier.of("catalog", "db", "t");
         Configuration options = buildConfiguration(noFail, temporaryFolder.newFolder());
-        Path tablePath = new FileStoreOptions(options).path(identifier);
+        Path tablePath = new FileStoreOptions(options).path();
         new SchemaManager(tablePath)
                 .commitNewVersion(
                         new UpdateSchema(

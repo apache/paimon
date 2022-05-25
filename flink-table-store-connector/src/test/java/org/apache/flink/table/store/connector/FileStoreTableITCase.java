@@ -36,7 +36,7 @@ import java.time.Duration;
 import java.util.List;
 
 import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
-import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
 
 /** ITCase for file store table api. */
@@ -58,7 +58,7 @@ public abstract class FileStoreTableITCase extends AbstractTestBase {
     private void prepareEnv(TableEnvironment env, String path) {
         Configuration config = env.getConfig().getConfiguration();
         config.set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 2);
-        config.setString(TABLE_STORE_PREFIX + PATH.key(), path);
+        config.setString(TABLE_STORE_PREFIX + ROOT_PATH.key(), path);
         ddl().forEach(env::executeSql);
     }
 

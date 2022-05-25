@@ -48,7 +48,7 @@ public class FileStoreStreamE2eTest extends E2eTestBase {
                         + "    rn BIGINT\n"
                         + ") WITH (\n"
                         + "    'bucket' = '3',\n"
-                        + "    'path' = '%s'\n"
+                        + "    'root-path' = '%s'\n"
                         + ");";
         tableStoreDdl =
                 String.format(

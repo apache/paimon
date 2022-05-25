@@ -30,8 +30,14 @@ import java.util.Set;
 
 import static org.apache.flink.table.store.utils.OptionsUtils.formatEnumOption;
 
-/** Options for {@link TableStoreFactory}. */
+/** Options for {@link TableStoreManagedFactory}. */
 public class TableStoreFactoryOptions {
+
+    public static final ConfigOption<String> ROOT_PATH =
+            ConfigOptions.key("root-path")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("The root file path of the table store in the filesystem.");
 
     public static final ConfigOption<Boolean> COMPACTION_RESCALE_BUCKET =
             ConfigOptions.key("compaction.rescale-bucket")

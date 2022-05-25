@@ -21,7 +21,6 @@ package org.apache.flink.table.store.hive;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connectors.hive.FlinkEmbeddedHiveRunner;
 import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
@@ -83,14 +82,13 @@ public class TableStoreHiveStorageHandlerITCase {
 
     @Test
     public void testReadExternalTableWithPk() throws Exception {
-        String root = folder.getRoot().getPath();
+        String path = folder.newFolder().toURI().toString();
         Configuration conf = new Configuration();
-        conf.setString(FileStoreOptions.PATH, root);
+        conf.setString(FileStoreOptions.PATH, path);
         conf.setInteger(FileStoreOptions.BUCKET, 2);
         conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
         FileStoreTestHelper helper =
                 new FileStoreTestHelper(
-                        ObjectIdentifier.of("test_catalog", "test_db", "test_table"),
                         conf,
                         RowType.of(),
                         RowType.of(
@@ -146,9 +144,7 @@ public class TableStoreHiveStorageHandlerITCase {
                                 "  c STRING",
                                 ")",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
-                                "LOCATION '"
-                                        + root
-                                        + "/test_catalog.catalog/test_db.db/test_table'",
+                                "LOCATION '" + path + "'",
                                 "TBLPROPERTIES (",
                                 "  'table-store.catalog' = 'test_catalog',",
                                 "  'table-store.primary-keys' = 'a,b',",
@@ -162,14 +158,13 @@ public class TableStoreHiveStorageHandlerITCase {
 
     @Test
     public void testReadExternalTableWithoutPk() throws Exception {
-        String root = folder.getRoot().getPath();
+        String path = folder.newFolder().toURI().toString();
         Configuration conf = new Configuration();
-        conf.setString(FileStoreOptions.PATH, root);
+        conf.setString(FileStoreOptions.PATH, path);
         conf.setInteger(FileStoreOptions.BUCKET, 2);
         conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
         FileStoreTestHelper helper =
                 new FileStoreTestHelper(
-                        ObjectIdentifier.of("test_catalog", "test_db", "test_table"),
                         conf,
                         RowType.of(),
                         RowType.of(
@@ -222,9 +217,7 @@ public class TableStoreHiveStorageHandlerITCase {
                                 "  c STRING",
                                 ")",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
-                                "LOCATION '"
-                                        + root
-                                        + "/test_catalog.catalog/test_db.db/test_table'",
+                                "LOCATION '" + path + "'",
                                 "TBLPROPERTIES (",
                                 "  'table-store.catalog' = 'test_catalog',",
                                 "  'table-store.bucket' = '2',",
@@ -244,7 +237,6 @@ public class TableStoreHiveStorageHandlerITCase {
         conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
         FileStoreTestHelper helper =
                 new FileStoreTestHelper(
-                        ObjectIdentifier.of("test_catalog", "test_db", "test_table"),
                         conf,
                         RowType.of(),
                         RowType.of(
@@ -300,9 +292,7 @@ public class TableStoreHiveStorageHandlerITCase {
                                 ddl.toString(),
                                 ")",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
-                                "LOCATION '"
-                                        + root
-                                        + "/test_catalog.catalog/test_db.db/test_table'",
+                                "LOCATION '" + root + "'",
                                 "TBLPROPERTIES (",
                                 "  'table-store.catalog' = 'test_catalog',",
                                 "  'table-store.primary-keys' = 'f_int',",
@@ -385,13 +375,12 @@ public class TableStoreHiveStorageHandlerITCase {
 
     @Test
     public void testPredicatePushDown() throws Exception {
-        String root = folder.getRoot().getPath();
+        String path = folder.newFolder().toURI().toString();
         Configuration conf = new Configuration();
-        conf.setString(FileStoreOptions.PATH, root);
+        conf.setString(FileStoreOptions.PATH, path);
         conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
         FileStoreTestHelper helper =
                 new FileStoreTestHelper(
-                        ObjectIdentifier.of("test_catalog", "test_db", "test_table"),
                         conf,
                         RowType.of(),
                         RowType.of(
@@ -427,9 +416,7 @@ public class TableStoreHiveStorageHandlerITCase {
                                 "  a INT",
                                 ")",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
-                                "LOCATION '"
-                                        + root
-                                        + "/test_catalog.catalog/test_db.db/test_table'",
+                                "LOCATION '" + path + "'",
                                 "TBLPROPERTIES (",
                                 "  'table-store.catalog' = 'test_catalog',",
                                 "  'table-store.file.format' = 'avro'",
@@ -480,13 +467,12 @@ public class TableStoreHiveStorageHandlerITCase {
 
     @Test
     public void testDateAndTimestamp() throws Exception {
-        String root = folder.getRoot().getPath();
+        String path = folder.newFolder().toURI().toString();
         Configuration conf = new Configuration();
-        conf.setString(FileStoreOptions.PATH, root);
+        conf.setString(FileStoreOptions.PATH, path);
         conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
         FileStoreTestHelper helper =
                 new FileStoreTestHelper(
-                        ObjectIdentifier.of("test_catalog", "test_db", "test_table"),
                         conf,
                         RowType.of(),
                         RowType.of(
@@ -532,9 +518,7 @@ public class TableStoreHiveStorageHandlerITCase {
                                 "  ts TIMESTAMP",
                                 ")",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
-                                "LOCATION '"
-                                        + root
-                                        + "/test_catalog.catalog/test_db.db/test_table'",
+                                "LOCATION '" + path + "'",
                                 "TBLPROPERTIES (",
                                 "  'table-store.catalog' = 'test_catalog',",
                                 "  'table-store.file.format' = 'avro'",

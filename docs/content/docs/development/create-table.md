@@ -106,7 +106,7 @@ Important options include the following:
     </thead>
     <tbody>
     <tr>
-      <td><h5>path</h5></td>
+      <td><h5>root-path</h5></td>
       <td>Yes</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>
@@ -147,7 +147,7 @@ Important options include the following:
 
 Creating a table will create the corresponding physical storage:
 - The table's FileStore directory will be created under:
-  `${path}/${catalog_name}.catalog/${database_name}.db/${table_name}`
+  `${root-path}/${catalog_name}.catalog/${database_name}.db/${table_name}`
 - If `log.system` is configured as Kafka, a Topic named
   "${catalog_name}.${database_name}.${table_name}" will be created
   automatically when the table is created.

@@ -29,4 +29,10 @@ public class KafkaLogOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("Required Kafka server connection string");
+
+    public static final ConfigOption<String> TOPIC =
+            ConfigOptions.key("topic")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Topic of this kafka table.");
 }

@@ -21,7 +21,6 @@ package org.apache.flink.table.store.mapred;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
@@ -58,7 +57,6 @@ public class TableStoreRecordReaderTest {
         conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
         FileStoreTestHelper helper =
                 new FileStoreTestHelper(
-                        ObjectIdentifier.of("test_catalog", "test_db", "test_table"),
                         conf,
                         RowType.of(),
                         RowType.of(
@@ -119,7 +117,6 @@ public class TableStoreRecordReaderTest {
         conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
         FileStoreTestHelper helper =
                 new FileStoreTestHelper(
-                        ObjectIdentifier.of("test_catalog", "test_db", "test_table"),
                         conf,
                         RowType.of(),
                         RowType.of(

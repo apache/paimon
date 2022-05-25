@@ -77,7 +77,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
                         + "    price INT\n"
                         + ") PARTITIONED BY (dt, hr) WITH (\n"
                         + "    'bucket' = '3',\n"
-                        + "    'path' = '%s'\n"
+                        + "    'root-path' = '%s'\n"
                         + ");";
         tableStoreDdl =
                 String.format(
