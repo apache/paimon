@@ -155,7 +155,7 @@ public class FileSystemCatalog extends TableStoreCatalog {
 
         List<String> tables = new ArrayList<>();
         for (FileStatus status : uncheck(() -> fs.listStatus(databasePath(databaseName)))) {
-            if (status.isDir() && isTable(status.getPath())) {
+            if (status.isDir() && tableExists(status.getPath())) {
                 tables.add(status.getPath().getName());
             }
         }
@@ -181,14 +181,18 @@ public class FileSystemCatalog extends TableStoreCatalog {
 
     @Override
     public boolean tableExists(ObjectPath tablePath) throws CatalogException {
-        return isTable(tablePath(tablePath));
+        return tableExists(tablePath(tablePath));
+    }
+
+    private boolean tableExists(Path tablePath) {
+        return new SchemaManager(tablePath).listAllIds().size() > 0;
     }
 
     @Override
     public void dropTable(ObjectPath tablePath, boolean ignoreIfNotExists)
             throws TableNotExistException, CatalogException {
         Path path = tablePath(tablePath);
-        if (!uncheck(() -> fs.exists(path))) {
+        if (!tableExists(path)) {
             if (ignoreIfNotExists) {
                 return;
             }
@@ -207,7 +211,7 @@ public class FileSystemCatalog extends TableStoreCatalog {
         }
 
         Path path = tablePath(tablePath);
-        if (uncheck(() -> fs.exists(path))) {
+        if (tableExists(path)) {
             if (ignoreIfExists) {
                 return;
             }
@@ -223,7 +227,7 @@ public class FileSystemCatalog extends TableStoreCatalog {
             ObjectPath tablePath, CatalogBaseTable newTable, boolean ignoreIfNotExists)
             throws TableNotExistException, CatalogException {
         Path path = tablePath(tablePath);
-        if (uncheck(() -> !fs.exists(path))) {
+        if (!tableExists(path)) {
             if (ignoreIfNotExists) {
                 return;
             }
@@ -265,10 +269,6 @@ public class FileSystemCatalog extends TableStoreCatalog {
 
     private Path databasePath(String database) {
         return new Path(root, database + DB_SUFFIX);
-    }
-
-    private static boolean isTable(Path path) {
-        return new SchemaManager(path).listAllIds().size() > 0;
     }
 
     private Path tablePath(ObjectPath objectPath) {
