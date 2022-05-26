@@ -24,10 +24,9 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogDatabase;
 import org.apache.flink.table.catalog.CatalogDatabaseImpl;
-import org.apache.flink.table.catalog.CatalogTableImpl;
+import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
-import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.catalog.exceptions.CatalogException;
 import org.apache.flink.table.catalog.exceptions.DatabaseAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
@@ -44,7 +43,6 @@ import org.apache.flink.util.function.RunnableWithException;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -171,12 +169,10 @@ public class FileSystemCatalog extends TableStoreCatalog {
                         .latest()
                         .orElseThrow(() -> new TableNotExistException(getName(), tablePath));
 
-        Map<String, String> options = new HashMap<>(schema.options());
-        options.put(PATH.key(), path.toString());
-
-        //noinspection deprecation
-        return new CatalogTableImpl(
-                schema.getTableSchema(), schema.partitionKeys(), options, schema.comment());
+        CatalogTable table = schema.toUpdateSchema().toCatalogTable();
+        // add path to source and sink
+        table.getOptions().put(PATH.key(), path.toString());
+        return table;
     }
 
     @Override
@@ -242,16 +238,19 @@ public class FileSystemCatalog extends TableStoreCatalog {
         try {
             return callable.call();
         } catch (Exception e) {
+            if (e instanceof RuntimeException) {
+                throw (RuntimeException) e;
+            }
             throw new CatalogException(e);
         }
     }
 
     private static void uncheck(RunnableWithException runnable) {
-        try {
-            runnable.run();
-        } catch (Exception e) {
-            throw new CatalogException(e);
-        }
+        FileSystemCatalog.uncheck(
+                () -> {
+                    runnable.run();
+                    return null;
+                });
     }
 
     private static ClassLoader classLoader() {
@@ -275,43 +274,25 @@ public class FileSystemCatalog extends TableStoreCatalog {
         return new Path(databasePath(objectPath.getDatabaseName()), objectPath.getObjectName());
     }
 
-    private void commitTableChange(Path tablePath, CatalogBaseTable table) {
-        SchemaManager schemaManager = new SchemaManager(tablePath);
-        UpdateSchema updateSchema = createUpdateSchema(table, tablePath);
-        uncheck(() -> schemaManager.commitNewVersion(updateSchema));
-    }
-
-    private ResolvedCatalogTable castToResolved(CatalogBaseTable table) {
-        if (!(table instanceof ResolvedCatalogTable)) {
+    private void commitTableChange(Path tablePath, CatalogBaseTable baseTable) {
+        if (!(baseTable instanceof ResolvedCatalogTable)) {
             throw new UnsupportedOperationException(
-                    "Only support ResolvedCatalogTable, but is: " + table.getClass());
+                    "Only support ResolvedCatalogTable, but is: " + baseTable.getClass());
         }
-
-        return (ResolvedCatalogTable) table;
-    }
-
-    private UpdateSchema createUpdateSchema(CatalogBaseTable table, Path tablePath) {
-        ResolvedCatalogTable resolvedTable = castToResolved(table);
-        ResolvedSchema resolvedSchema = resolvedTable.getResolvedSchema();
-        if (resolvedSchema.getColumns().stream().anyMatch(column -> !column.isPhysical())) {
-            throw new UnsupportedOperationException("TODO: Non physical column is unsupported.");
-        }
-
-        if (resolvedSchema.getWatermarkSpecs().size() > 0) {
-            throw new UnsupportedOperationException("TODO: Watermark is unsupported.");
-        }
+        ResolvedCatalogTable table = (ResolvedCatalogTable) baseTable;
 
         // remove table path
-        Map<String, String> options = resolvedTable.getOptions();
+        Map<String, String> options = table.getOptions();
         String specific = options.remove(PATH.key());
         if (specific != null) {
             if (!tablePath.equals(new Path(specific))) {
                 throw new IllegalArgumentException(
                         "Illegal table path in table options: " + specific);
             }
-            resolvedTable = resolvedTable.copy(options);
+            table = table.copy(options);
         }
 
-        return UpdateSchema.fromCatalogTable(resolvedTable);
+        UpdateSchema updateSchema = UpdateSchema.fromCatalogTable(table);
+        uncheck(() -> new SchemaManager(tablePath).commitNewVersion(updateSchema));
     }
 }

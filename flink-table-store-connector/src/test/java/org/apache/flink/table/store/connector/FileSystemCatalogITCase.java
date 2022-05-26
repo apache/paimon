@@ -78,4 +78,34 @@ public class FileSystemCatalogITCase extends KafkaTableTestBase {
         List<Row> result = iterator.collectAndClose(2);
         assertThat(result).containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
     }
+
+    @Test
+    public void testLogWriteReadWithVirtual() throws Exception {
+        String topic = UUID.randomUUID().toString();
+        createTopicIfNotExists(topic, 1);
+
+        try {
+            tEnv.executeSql(
+                    String.format(
+                            "CREATE TABLE T ("
+                                    + "a STRING, "
+                                    + "b STRING, "
+                                    + "c STRING, "
+                                    + "d AS CAST(c as INT) + 1"
+                                    + ") WITH ("
+                                    + "'log.system'='kafka', "
+                                    + "'log.kafka.bootstrap.servers'='%s',"
+                                    + "'log.topic'='%s'"
+                                    + ")",
+                            getBootstrapServers(), topic));
+            BlockingIterator<Row, Row> iterator =
+                    BlockingIterator.of(tEnv.from("T").execute().collect());
+            tEnv.executeSql("INSERT INTO T VALUES ('1', '2', '3'), ('4', '5', '6')").await();
+            List<Row> result = iterator.collectAndClose(2);
+            assertThat(result)
+                    .containsExactlyInAnyOrder(Row.of("1", "2", "3", 4), Row.of("4", "5", "6", 7));
+        } finally {
+            deleteTopicIfExists(topic);
+        }
+    }
 }

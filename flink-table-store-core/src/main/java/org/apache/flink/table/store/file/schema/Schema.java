@@ -18,14 +18,12 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.MapType;
 import org.apache.flink.table.types.logical.MultisetType;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.utils.TypeConversions;
 import org.apache.flink.util.Preconditions;
 
 import java.io.Serializable;
@@ -188,16 +186,8 @@ public class Schema implements Serializable {
         return Objects.hash(fields, partitionKeys, primaryKeys, options, comment);
     }
 
-    public TableSchema getTableSchema() {
-        TableSchema.Builder builder = TableSchema.builder();
-        for (DataField field : fields) {
-            builder.field(
-                    field.name(), TypeConversions.fromLogicalToDataType(field.type().logicalType));
-        }
-        if (primaryKeys.size() > 0) {
-            builder.primaryKey(primaryKeys.toArray(new String[0]));
-        }
-        return builder.build();
+    public UpdateSchema toUpdateSchema() {
+        return new UpdateSchema(logicalRowType(), partitionKeys, primaryKeys, options, comment);
     }
 
     public static List<DataField> newFields(RowType rowType) {
