@@ -28,5 +28,5 @@ public interface JsonSerializer<T> {
 
     void serialize(T t, JsonGenerator generator) throws IOException;
 
-    T deserialize(JsonNode node) throws IOException;
+    T deserialize(JsonNode node);
 }

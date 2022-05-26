@@ -21,10 +21,13 @@ package org.apache.flink.table.store.file.utils;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileTestDataGenerator;
+import org.apache.flink.util.InstantiationUtil;
 
 import org.junit.jupiter.api.RepeatedTest;
 
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,18 +36,21 @@ import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** JSON serialization test for {@link PartitionedManifestMeta}. */
+/** Serialization test for {@link PartitionedManifestMeta}. */
 public class PartitionedManifestMetaSerializationTest {
 
     @RepeatedTest(10)
-    public void testJsonSerDe() {
+    public void testJsonSerDe() throws IOException, ClassNotFoundException {
         PartitionedManifestMeta partitionedMeta =
                 new PartitionedManifestMeta(new Random().nextLong(), genManifestEntries());
-        assertThat(
-                        JsonSerdeUtil.fromJson(
-                                JsonSerdeUtil.toJson(partitionedMeta),
-                                PartitionedManifestMeta.class))
-                .isEqualTo(partitionedMeta);
+        String serialized =
+                Base64.getEncoder()
+                        .encodeToString(InstantiationUtil.serializeObject(partitionedMeta));
+        Object deserialized =
+                InstantiationUtil.deserializeObject(
+                        Base64.getDecoder().decode(serialized),
+                        Thread.currentThread().getContextClassLoader());
+        assertThat(deserialized).isEqualTo(partitionedMeta);
     }
 
     private static Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> genManifestEntries() {

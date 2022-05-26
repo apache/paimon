@@ -32,27 +32,31 @@ import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.mergetree.Levels;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
-import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
+import org.apache.flink.table.store.file.mergetree.SortedRun;
+import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.PredicateConverter;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.file.utils.KeyComparatorSupplier;
 import org.apache.flink.table.store.file.utils.PartitionedManifestMeta;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
+import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.Base64;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_RESCALE_BUCKET;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_SCANNED_MANIFEST;
@@ -226,9 +230,17 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
                                     .mergeTreeOptions(),
                             new KeyComparatorSupplier(fileStore.partitionType()).get());
         }
-        newOptions.put(
-                COMPACTION_SCANNED_MANIFEST.key(),
-                JsonSerdeUtil.toJson(new PartitionedManifestMeta(plan.snapshotId(), groupBy)));
+        try {
+            newOptions.put(
+                    COMPACTION_SCANNED_MANIFEST.key(),
+                    Base64.getEncoder()
+                            .encodeToString(
+                                    InstantiationUtil.serializeObject(
+                                            new PartitionedManifestMeta(
+                                                    plan.snapshotId(), groupBy))));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
         return newOptions;
     }
 
@@ -238,27 +250,33 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
             MergeTreeOptions options,
             Comparator<RowData> keyComparator) {
         Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> filtered = new HashMap<>();
-        UniversalCompaction compaction =
-                new UniversalCompaction(
-                        options.maxSizeAmplificationPercent,
-                        options.sizeRatio,
-                        options.numSortedRunCompactionTrigger);
 
         for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> partEntry :
                 groupBy.entrySet()) {
             Map<Integer, List<DataFileMeta>> manifests = new HashMap<>();
             for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry :
                     partEntry.getValue().entrySet()) {
-                Levels levels =
-                        new Levels(keyComparator, bucketEntry.getValue(), options.numLevels);
-                compaction
-                        .pick(levels.numberOfLevels(), levels.levelSortedRuns())
-                        .ifPresent(
-                                unit -> {
-                                    if (unit.files().size() > 0) {
-                                        manifests.put(bucketEntry.getKey(), unit.files());
-                                    }
-                                });
+                List<DataFileMeta> smallFiles =
+                        bucketEntry.getValue().stream()
+                                .filter(fileMeta -> fileMeta.fileSize() < options.targetFileSize)
+                                .collect(Collectors.toList());
+                List<DataFileMeta> intersectedFiles =
+                        new IntervalPartition(bucketEntry.getValue(), keyComparator)
+                                .partition().stream()
+                                        .filter(section -> section.size() > 1)
+                                        .flatMap(Collection::stream)
+                                        .map(SortedRun::files)
+                                        .flatMap(Collection::stream)
+                                        .collect(Collectors.toList());
+
+                List<DataFileMeta> filteredFiles =
+                        Stream.concat(smallFiles.stream(), intersectedFiles.stream())
+                                .distinct()
+                                .collect(Collectors.toList());
+
+                if (filteredFiles.size() > 0) {
+                    manifests.put(bucketEntry.getKey(), filteredFiles);
+                }
             }
             if (manifests.size() > 0) {
                 filtered.put(partEntry.getKey(), manifests);

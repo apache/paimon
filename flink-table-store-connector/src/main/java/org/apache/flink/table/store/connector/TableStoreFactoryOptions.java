@@ -52,10 +52,9 @@ public class TableStoreFactoryOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "The serialized json string of manifest entries which are scanned during manual compaction "
-                                    + "planning phase and injected back into enriched options. The json format contains "
-                                    + "snapshot id and each partition's data file meta list (among which "
-                                    + "each data file meta is encoded by Base64 format) tagged with bucket id.");
+                            "The base64 string of manifest entries which are scanned during manual compaction "
+                                    + "planning phase and injected back into enriched options. The format contains "
+                                    + "snapshot id and each partition's data file meta list tagged with bucket id.");
 
     public static final ConfigOption<String> LOG_SYSTEM =
             ConfigOptions.key("log.system")
