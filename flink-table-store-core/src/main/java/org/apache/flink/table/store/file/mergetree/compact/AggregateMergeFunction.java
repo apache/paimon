@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -27,32 +28,34 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
- * A {@link MergeFunction} where key is primary key (unique) and value is the partial record, update
- * non-null fields on merge.
+ * A {@link MergeFunction} where key is primary key (unique) and value is the partial record,
+ * aggregate specifies field on merge.
  */
 @SuppressWarnings("checkstyle:RegexpSingleline")
-public class SumAggregateMergeFunction implements MergeFunction {
+public class AggregateMergeFunction implements MergeFunction {
 
     private static final long serialVersionUID = 1L;
 
     private final RowData.FieldGetter[] getters;
 
     private final RowType rowType;
-    private final ArrayList<SumAggregateFunction<?>> aggregateFunctions;
+    private final ArrayList<ColumnAggregateFunction<?>> aggregateFunctions;
     private final boolean[] isPrimaryKey;
     private final RowType primaryKeyType;
     private transient GenericRowData row;
+    private final Map<String, AggregationKind> aggregationKindMap;
 
-    private final Set<String> aggregateColumnNames;
-
-    public SumAggregateMergeFunction(
-            RowType primaryKeyType, RowType rowType, Set<String> aggregateColumnNames) {
+    public AggregateMergeFunction(
+            RowType primaryKeyType,
+            RowType rowType,
+            Map<String, AggregationKind> aggregationKindMap) {
         this.primaryKeyType = primaryKeyType;
         this.rowType = rowType;
-        this.aggregateColumnNames = aggregateColumnNames;
+        this.aggregationKindMap = aggregationKindMap;
 
         List<LogicalType> fieldTypes = rowType.getChildren();
         this.getters = new RowData.FieldGetter[fieldTypes.size()];
@@ -68,12 +71,11 @@ public class SumAggregateMergeFunction implements MergeFunction {
 
         this.aggregateFunctions = new ArrayList<>(rowType.getFieldCount());
         for (int i = 0; i < rowType.getFieldCount(); i++) {
-            SumAggregateFunction<?> f = null;
-            if (aggregateColumnNames.contains(rowNames.get(i))) {
+            ColumnAggregateFunction<?> f = null;
+            if (aggregationKindMap.containsKey(rowNames.get(i))) {
                 f =
-                        AggregateFunctionFactory.SumAggregateFunctionFactory
-                                .choiceRightAggregateFunction(
-                                        rowType.getTypeAt(i).getDefaultConversion());
+                        ColumnAggregateFunctionFactory.getColumnAggregateFunction(
+                                aggregationKindMap.get(rowNames.get(i)), rowType.getTypeAt(i));
             } else {
                 if (!isPrimaryKey[i]) {
                     throw new IllegalArgumentException(
@@ -93,7 +95,7 @@ public class SumAggregateMergeFunction implements MergeFunction {
     public void add(RowData value) {
         for (int i = 0; i < getters.length; i++) {
             Object currentField = getters[i].getFieldOrNull(value);
-            SumAggregateFunction<?> f = aggregateFunctions.get(i);
+            ColumnAggregateFunction<?> f = aggregateFunctions.get(i);
             if (isPrimaryKey[i]) {
                 // primary key
                 if (currentField != null) {
@@ -111,8 +113,6 @@ public class SumAggregateMergeFunction implements MergeFunction {
                             f.aggregate(currentField);
                             break;
                         case DELETE:
-                            f.retract(currentField);
-                            break;
                         case UPDATE_AFTER:
                         case UPDATE_BEFORE:
                         default:
@@ -137,6 +137,29 @@ public class SumAggregateMergeFunction implements MergeFunction {
     @Override
     public MergeFunction copy() {
         // RowData.FieldGetter is thread safe
-        return new SumAggregateMergeFunction(primaryKeyType, rowType, aggregateColumnNames);
+        return new AggregateMergeFunction(primaryKeyType, rowType, aggregationKindMap);
+    }
+
+    /**
+     * used to get the merge function by configuration.
+     *
+     * @param options the options
+     * @param primaryKeyType the primary key type
+     * @param rowType the row type
+     * @return the merge function
+     */
+    public static MergeFunction getAggregateFunction(
+            FileStoreOptions options, RowType primaryKeyType, RowType rowType) {
+
+        Map<String, String> rightConfMap =
+                options.getFilterConf(e -> e.getKey().endsWith(".aggregate-function"));
+        Map<String, AggregationKind> aggregationKindMap =
+                rightConfMap.entrySet().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        e -> e.getKey().split(".aggregate-function")[0],
+                                        e -> AggregationKind.fromString(e.getValue())));
+
+        return new AggregateMergeFunction(primaryKeyType, rowType, aggregationKindMap);
     }
 }

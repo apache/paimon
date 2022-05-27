@@ -280,7 +280,9 @@ CREATE TABLE MyTable (
   c INT,
   PRIMARY KEY (a) NOT ENFORCED 
 ) WITH (
-  'merge-engine'='aggregation'
+      'merge-engine' = 'aggregation',
+      'b.aggregate-function' = 'sum',
+      'c.aggregate-function' = 'sum'
 );
 ```
 {{< hint info >}}
@@ -292,7 +294,11 @@ __Note:__Aggregate updates do not support streaming consumption.
 {{< /hint >}}
 
 {{< hint info >}}
-__Note:__currently returns null for data types that do not support aggregation
+__Note:__currently throw exception for data types that do not support aggregation
+{{< /hint >}}
+
+{{< hint info >}}
+__Note:__currently aggregate functions must be set for all non-primary key columns
 {{< /hint >}}
 
 The value field is updated to the result of the summation under the same primary key.

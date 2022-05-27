@@ -20,20 +20,23 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import java.io.Serializable;
 
-/** Custom column aggregation abstract class. */
-public interface SumAggregateFunction<T> extends Serializable {
+/** Custom column aggregation interface. */
+public interface ColumnAggregateFunction<T> extends Serializable {
     T getResult();
 
     void reset();
 
     void aggregate(Object value);
 
-    void retract(Object value);
-
     void reset(Object value);
 }
 
-class DoubleSumAggregateFunction implements SumAggregateFunction<Double> {
+/** Sum column aggregation interface. */
+interface SumColumnAggregateFunction<T> extends ColumnAggregateFunction<T> {
+    void retract(Object value);
+}
+
+class DoubleSumColumnAggregateFunction implements SumColumnAggregateFunction<Double> {
     Double aggregator;
 
     @Override
@@ -62,7 +65,7 @@ class DoubleSumAggregateFunction implements SumAggregateFunction<Double> {
     }
 }
 
-class LongSumAggregateFunction implements SumAggregateFunction<Long> {
+class LongSumColumnAggregateFunction implements SumColumnAggregateFunction<Long> {
 
     Long aggregator;
 
@@ -92,7 +95,7 @@ class LongSumAggregateFunction implements SumAggregateFunction<Long> {
     }
 }
 
-class IntegerSumAggregateFunction implements SumAggregateFunction<Integer> {
+class IntegerSumColumnAggregateFunction implements SumColumnAggregateFunction<Integer> {
     Integer aggregator;
 
     @Override
@@ -121,7 +124,7 @@ class IntegerSumAggregateFunction implements SumAggregateFunction<Integer> {
     }
 }
 
-class FloatSumAggregateFunction implements SumAggregateFunction<Float> {
+class FloatSumColumnAggregateFunction implements SumColumnAggregateFunction<Float> {
     Float aggregator;
 
     @Override
