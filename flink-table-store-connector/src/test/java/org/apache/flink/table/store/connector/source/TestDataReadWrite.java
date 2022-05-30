@@ -82,7 +82,7 @@ public class TestDataReadWrite {
                 WriteMode.CHANGE_LOG,
                 KEY_TYPE,
                 VALUE_TYPE,
-                () -> COMPARATOR,
+                COMPARATOR,
                 new DeduplicateMergeFunction(),
                 avro,
                 pathFactory);
@@ -112,7 +112,8 @@ public class TestDataReadWrite {
                         avro,
                         pathFactory,
                         null, // not used, we only create an empty writer
-                        options)
+                        options,
+                        null)
                 .createEmptyWriter(partition, bucket, service);
     }
 }

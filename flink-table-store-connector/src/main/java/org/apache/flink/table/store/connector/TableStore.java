@@ -52,20 +52,25 @@ import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.utils.PartitionedManifestMeta;
 import org.apache.flink.table.store.log.LogOptions.LogStartupMode;
 import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.InstantiationUtil;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_SCANNED_MANIFEST;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.flink.table.store.file.FileStoreOptions.MERGE_ENGINE;
@@ -116,6 +121,10 @@ public class TableStore {
 
     public boolean partitioned() {
         return schema.partitionKeys().size() > 0;
+    }
+
+    public boolean isCompactionTask() {
+        return options.get(COMPACTION_SCANNED_MANIFEST) != null;
     }
 
     public boolean valueCountMode() {
@@ -176,6 +185,20 @@ public class TableStore {
         return options.get(MERGE_ENGINE);
     }
 
+    @Nullable
+    private PartitionedManifestMeta getCompactionMeta() {
+        String json = options.get(COMPACTION_SCANNED_MANIFEST);
+        try {
+            return json == null
+                    ? null
+                    : InstantiationUtil.deserializeObject(
+                            Base64.getDecoder().decode(json),
+                            Thread.currentThread().getContextClassLoader());
+        } catch (IOException | ClassNotFoundException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     private FileStore buildAppendOnlyStore() {
         FileStoreOptions fileStoreOptions = new FileStoreOptions(options);
 
@@ -191,10 +214,18 @@ public class TableStore {
         RowType partitionType = TypeUtils.project(type, partitionKeysIndex());
         FileStoreOptions fileStoreOptions = new FileStoreOptions(options);
         int[] trimmedPrimaryKeys = trimmedPrimaryKeysIndex();
+        PartitionedManifestMeta manifestMeta = getCompactionMeta();
 
         if (trimmedPrimaryKeys.length == 0) {
             return FileStoreImpl.createWithValueCount(
                     schema.id(), fileStoreOptions, user, partitionType, type);
+                    fileStoreOptions.path().toString(),
+                    schema.id(),
+                    fileStoreOptions,
+                    user,
+                    partitionType,
+                    type,
+                    manifestMeta);
         } else {
             return FileStoreImpl.createWithPrimaryKey(
                     schema.id(),
@@ -203,7 +234,8 @@ public class TableStore {
                     partitionType,
                     TypeUtils.project(type, trimmedPrimaryKeys),
                     type,
-                    mergeEngine());
+                    mergeEngine(),
+                    manifestMeta);
         }
     }
 
@@ -309,7 +341,7 @@ public class TableStore {
                     projectedFields,
                     partitionPredicate,
                     fieldPredicate,
-                    null);
+                    getCompactionMeta());
         }
 
         private Source<RowData, ?, ?> buildSource() {

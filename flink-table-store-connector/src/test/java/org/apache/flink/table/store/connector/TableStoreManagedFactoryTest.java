@@ -73,6 +73,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import static java.util.Collections.emptyList;
@@ -689,29 +690,35 @@ public class TableStoreManagedFactoryTest {
     }
 
     public static Stream<Arguments> provideManifest() {
-        RowDataSerializer partitionSerializer = new RowDataSerializer(SINGLE_PARTITIONED_PART_TYPE);
+        RowDataSerializer partSerializer = new RowDataSerializer(SINGLE_PARTITIONED_PART_TYPE);
+        int repeatedNum = 20;
+        return Stream.of(
+                IntStream.range(0, repeatedNum)
+                        .boxed()
+                        .map(i -> genArguments(partSerializer))
+                        .toArray(Arguments[]::new));
+    }
+
+    private static Arguments genArguments(RowDataSerializer partSerializer) {
         List<BinaryRowData> partitions =
                 genPartitionValues().stream()
-                        .map(
-                                value ->
-                                        partitionSerializer
-                                                .toBinaryRow(GenericRowData.of(value))
-                                                .copy())
+                        .map(value -> partSerializer.toBinaryRow(GenericRowData.of(value)).copy())
                         .collect(Collectors.toList());
         Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> origin = new HashMap<>();
         Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> expected = new HashMap<>();
+        Random random = new Random();
         for (BinaryRowData partition : partitions) {
             Map<Integer, List<DataFileMeta>> bucketEntry = new HashMap<>();
             Map<Integer, List<DataFileMeta>> expectedBucketEntry = new HashMap<>();
             for (int bucket = 0; bucket < NUM_OF_BUCKETS; bucket++) {
-                boolean genBySize = new Random().nextBoolean();
-                boolean triggerCompaction = new Random().nextBoolean();
-                int fileSize = new Random().nextInt(10);
+                boolean genBySize = random.nextBoolean();
+                boolean triggerCompaction = random.nextBoolean();
+                int fileSize = random.nextInt(10);
                 List<DataFileMeta> fileMetas = new ArrayList<>();
                 BinaryRowData previousMin = null;
                 BinaryRowData previousMax = null;
                 for (int i = 0; i < fileSize; i++) {
-                    int level = new Random().nextInt(NUM_OF_LEVELS);
+                    int level = random.nextInt(NUM_OF_LEVELS);
                     fileMetas.add(
                             genBySize
                                     ? genFileBySize(level, triggerCompaction, previousMax)
@@ -732,14 +739,15 @@ public class TableStoreManagedFactoryTest {
                 expected.put(partition, expectedBucketEntry);
             }
         }
-        return Stream.of(Arguments.of(origin, expected));
+        return Arguments.of(origin, expected);
     }
 
     private static Set<StringData> genPartitionValues() {
-        int size = new Random().nextInt(10);
+        Random random = new Random();
+        int size = random.nextInt(10);
         Set<StringData> values = new HashSet<>();
         for (int i = 0; i < size; i++) {
-            values.add(StringData.fromString(String.valueOf(new Random().nextInt(100) + 20211110)));
+            values.add(StringData.fromString(String.valueOf(random.nextInt(100) + 20211110)));
         }
         return values;
     }
@@ -748,13 +756,14 @@ public class TableStoreManagedFactoryTest {
             int level, boolean smallFile, @Nullable BinaryRowData previousMax) {
         BinaryRowData minKey = genMinKey(false, null, previousMax);
         BinaryRowData maxKey = genMaxKey(minKey);
+        Random random = new Random();
         return new DataFileMeta(
                 "data-file-level" + level + "-" + UUID.randomUUID(),
                 smallFile
-                        ? (long) new Random().nextInt(100)
+                        ? (long) random.nextInt(100)
                         : MergeTreeOptions.TARGET_FILE_SIZE.defaultValue().getBytes()
-                                + new Random().nextInt(100),
-                new Random().nextInt(100),
+                                + random.nextInt(100),
+                random.nextInt(100),
                 minKey,
                 maxKey,
                 null,
@@ -771,11 +780,11 @@ public class TableStoreManagedFactoryTest {
             @Nullable BinaryRowData previousMax) {
         BinaryRowData minKey = genMinKey(overlap, previousMin, previousMax);
         BinaryRowData maxKey = genMaxKey(minKey);
+        Random random = new Random();
         return new DataFileMeta(
                 "data-file-level" + level + "-" + UUID.randomUUID(),
-                MergeTreeOptions.TARGET_FILE_SIZE.defaultValue().getBytes()
-                        + new Random().nextInt(100),
-                new Random().nextInt(100),
+                MergeTreeOptions.TARGET_FILE_SIZE.defaultValue().getBytes() + random.nextInt(100),
+                random.nextInt(100),
                 minKey,
                 maxKey,
                 null,
@@ -789,15 +798,16 @@ public class TableStoreManagedFactoryTest {
             boolean overlap,
             @Nullable BinaryRowData previousMin,
             @Nullable BinaryRowData previousMax) {
+        Random random = new Random();
         BinaryRowData minKey;
         if (previousMax == null) {
-            return genKey(new Random().nextInt(100), (long) new Random().nextInt(100));
+            return genKey(random.nextInt(100), (long) random.nextInt(100));
         }
         int prevMax1 = previousMax.getInt(0);
         long prevMax2 = previousMax.getLong(1);
         if (overlap) {
             assert previousMin != null;
-            double percent = new Random().nextDouble();
+            double percent = random.nextDouble();
             int prevMin1 = previousMin.getInt(0);
             long prevMin2 = previousMin.getLong(1);
             minKey =
@@ -805,7 +815,7 @@ public class TableStoreManagedFactoryTest {
                             (int) (prevMin1 + (prevMax1 - prevMin1) * percent),
                             (long) (prevMin2 + (prevMax2 - prevMin2) * percent));
         } else {
-            int offset = new Random().nextInt(100);
+            int offset = random.nextInt(100);
             minKey = genKey(prevMax1 + 1 + offset, prevMax2 + 1 + offset);
         }
         return minKey;

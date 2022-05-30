@@ -253,7 +253,7 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
 
         for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> partEntry :
                 groupBy.entrySet()) {
-            Map<Integer, List<DataFileMeta>> manifests = new HashMap<>();
+            Map<Integer, List<DataFileMeta>> partFiles = new HashMap<>();
             for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry :
                     partEntry.getValue().entrySet()) {
                 List<DataFileMeta> smallFiles =
@@ -269,17 +269,17 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
                                         .flatMap(Collection::stream)
                                         .collect(Collectors.toList());
 
-                List<DataFileMeta> filteredFiles =
+                List<DataFileMeta> bucketFiles =
                         Stream.concat(smallFiles.stream(), intersectedFiles.stream())
                                 .distinct()
                                 .collect(Collectors.toList());
 
-                if (filteredFiles.size() > 0) {
-                    manifests.put(bucketEntry.getKey(), filteredFiles);
+                if (bucketFiles.size() > 0) {
+                    partFiles.put(bucketEntry.getKey(), bucketFiles);
                 }
             }
-            if (manifests.size() > 0) {
-                filtered.put(partEntry.getKey(), manifests);
+            if (partFiles.size() > 0) {
+                filtered.put(partEntry.getKey(), partFiles);
             }
         }
         return filtered;

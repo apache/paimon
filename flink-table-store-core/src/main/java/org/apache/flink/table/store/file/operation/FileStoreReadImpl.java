@@ -40,14 +40,13 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.function.Supplier;
 
 /** Default implementation of {@link FileStoreRead}. */
 public class FileStoreReadImpl implements FileStoreRead {
 
     private final DataFileReader.Factory dataFileReaderFactory;
     private final WriteMode writeMode;
-    private final Supplier<Comparator<RowData>> keyComparatorSupplier;
+    private final Comparator<RowData> keyComparator;
     @Nullable private final MergeFunction mergeFunction;
 
     private boolean keyProjected;
@@ -57,14 +56,14 @@ public class FileStoreReadImpl implements FileStoreRead {
             WriteMode writeMode,
             RowType keyType,
             RowType valueType,
-            Supplier<Comparator<RowData>> keyComparatorSupplier,
+            Comparator<RowData> keyComparator,
             @Nullable MergeFunction mergeFunction,
             FileFormat fileFormat,
             FileStorePathFactory pathFactory) {
         this.dataFileReaderFactory =
                 new DataFileReader.Factory(keyType, valueType, fileFormat, pathFactory);
         this.writeMode = writeMode;
-        this.keyComparatorSupplier = keyComparatorSupplier;
+        this.keyComparator = keyComparator;
         this.mergeFunction = mergeFunction;
 
         this.keyProjected = false;
@@ -138,7 +137,6 @@ public class FileStoreReadImpl implements FileStoreRead {
         } else {
             // key projection is not applied, so data file readers will return key-values in order,
             // in this case merge tree can merge records with same key for us
-            Comparator<RowData> keyComparator = keyComparatorSupplier.get();
             return new MergeTreeReader(
                     new IntervalPartition(files, keyComparator).partition(),
                     dropDelete,

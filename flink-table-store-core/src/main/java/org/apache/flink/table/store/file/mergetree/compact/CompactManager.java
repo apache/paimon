@@ -97,23 +97,25 @@ public class CompactManager {
 
                             if (LOG.isDebugEnabled()) {
                                 LOG.debug(
-                                        "Submit compaction with files (level, size): "
+                                        "Submit compaction with files (name, level, size): "
                                                 + levels.levelSortedRuns().stream()
                                                         .flatMap(lsr -> lsr.run().files().stream())
                                                         .map(
                                                                 file ->
                                                                         String.format(
-                                                                                "(%d, %d)",
+                                                                                "(%s, %d, %d)",
+                                                                                file.fileName(),
                                                                                 file.level(),
                                                                                 file.fileSize()))
                                                         .collect(Collectors.joining(", ")));
                                 LOG.debug(
-                                        "Pick these files (level, size) for compaction: "
+                                        "Pick these files (name, level, size) for compaction: "
                                                 + unit.files().stream()
                                                         .map(
                                                                 file ->
                                                                         String.format(
-                                                                                "(%d, %d)",
+                                                                                "(%s, %d, %d)",
+                                                                                file.fileName(),
                                                                                 file.level(),
                                                                                 file.fileSize()))
                                                         .collect(Collectors.joining(", ")));
