@@ -24,6 +24,7 @@ import java.io.Serializable;
 public class ColumnAggregateFunction<T, R> implements Serializable {
     protected ColumnAggregateNumberType<T> numberType;
     protected Long count = 0L;
+    protected boolean isNull = true;
 
     public ColumnAggregateFunction(ColumnAggregateNumberType<T> numberType) {
         if (numberType == null) {
@@ -31,21 +32,27 @@ public class ColumnAggregateFunction<T, R> implements Serializable {
         }
         this.numberType = numberType;
         this.count = 0L;
+        this.isNull = true;
     }
 
     public R getResult() {
+        if (isNull) {
+            return null;
+        }
         return (R) numberType.getValue();
     }
 
     public void reset() {
         numberType.reset();
         count = 0L;
+        isNull = true;
     }
 
     public void aggregate(Object value) {
         if (value != null) {
             numberType.add(value);
             count++;
+            isNull = false;
         }
     }
 
@@ -69,21 +76,28 @@ class AvgColumnAggregateFunction<T> extends ColumnAggregateFunction<T, Double> {
 
     @Override
     public Double getResult() {
+        if (isNull) {
+            return null;
+        }
         return numberType.getAvg(count);
     }
 }
 
 /** Max column aggregation interface. */
 class MaxColumnAggregateFunction<T> extends ColumnAggregateFunction<T, T> {
-
     @Override
     public void aggregate(Object value) {
         if (value != null) {
-            if (numberType.compareTo((T) value) < 0) {
-                numberType.reset();
+            if (isNull) {
                 numberType.add(value);
+            } else {
+                if (numberType.compareTo((T) value) < 0) {
+                    numberType.reset();
+                    numberType.add(value);
+                }
             }
             count++;
+            isNull = false;
         }
     }
 
@@ -98,11 +112,16 @@ class MinColumnAggregateFunction<T> extends ColumnAggregateFunction<T, T> {
     @Override
     public void aggregate(Object value) {
         if (value != null) {
-            if (numberType.compareTo((T) value) > 0) {
-                numberType.reset();
+            if (isNull) {
                 numberType.add(value);
+            } else {
+                if (numberType.compareTo((T) value) > 0) {
+                    numberType.reset();
+                    numberType.add(value);
+                }
             }
             count++;
+            isNull = false;
         }
     }
 

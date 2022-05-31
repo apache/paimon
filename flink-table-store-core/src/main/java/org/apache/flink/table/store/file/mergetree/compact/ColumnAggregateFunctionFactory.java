@@ -26,20 +26,21 @@ public class ColumnAggregateFunctionFactory {
      * Determine the column aggregation function .
      *
      * @param kind the kind of aggregation
-     * @param typeAt the type of the column
+     * @param type the type of the column
      * @return the column aggregation function
      */
     public static ColumnAggregateFunction<?, ?> getColumnAggregateFunction(
             AggregationKind kind, LogicalType type) {
+        ColumnAggregateNumberType<?> numberType = getNumberType(type);
         switch (kind) {
             case SUM:
-                return new SumColumnAggregateFunction<>(getNumberType(type));
+                return new SumColumnAggregateFunction<>(numberType);
             case AVG:
-                return new AvgColumnAggregateFunction<>(getNumberType(type));
+                return new AvgColumnAggregateFunction<>(numberType);
             case MAX:
-                return new MaxColumnAggregateFunction<>(getNumberType(type));
+                return new MaxColumnAggregateFunction<>(numberType);
             case MIN:
-                return new MinColumnAggregateFunction<>(getNumberType(type));
+                return new MinColumnAggregateFunction<>(numberType);
             default:
                 throw new IllegalArgumentException("Aggregation kind " + kind + " not supported");
         }
@@ -51,7 +52,7 @@ public class ColumnAggregateFunctionFactory {
      * @param type the row type of the column
      * @return the column data types that can be aggregated
      */
-    static ColumnAggregateNumberType<?> getNumberType(LogicalType type) {
+    private static ColumnAggregateNumberType<?> getNumberType(LogicalType type) {
         switch (type.getTypeRoot()) {
             case INTEGER:
                 return new IntegerNumberType();

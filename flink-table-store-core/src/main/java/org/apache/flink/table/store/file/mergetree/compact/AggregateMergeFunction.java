@@ -90,6 +90,11 @@ public class AggregateMergeFunction implements MergeFunction {
 
     @Override
     public void reset() {
+        for (ColumnAggregateFunction<?, ?> f : aggregateFunctions) {
+            if (f != null) {
+                f.reset();
+            }
+        }
         this.row = new GenericRowData(getters.length);
     }
 
@@ -104,11 +109,6 @@ public class AggregateMergeFunction implements MergeFunction {
                     row.setField(i, currentField);
                 }
             } else {
-                f.reset();
-                Object oldValue = row.getField(i);
-                if (oldValue != null) {
-                    f.aggregate(oldValue);
-                }
                 switch (value.getRowKind()) {
                     case INSERT:
                         f.aggregate(currentField);
@@ -120,7 +120,6 @@ public class AggregateMergeFunction implements MergeFunction {
                         throw new UnsupportedOperationException(
                                 "Unsupported row kind: " + row.getRowKind());
                 }
-                row.setField(i, f.getResult());
             }
         }
     }
@@ -128,6 +127,13 @@ public class AggregateMergeFunction implements MergeFunction {
     @Override
     @Nullable
     public RowData getValue() {
+        for (int i = 0; i < getters.length; i++) {
+            if (isPrimaryKey[i]) {
+                row.setField(i, row.getField(i));
+            } else {
+                row.setField(i, aggregateFunctions.get(i).getResult());
+            }
+        }
         return row;
     }
 
@@ -150,13 +156,19 @@ public class AggregateMergeFunction implements MergeFunction {
 
         Map<String, String> rightConfMap =
                 options.getFilterConf(e -> e.getKey().endsWith(".aggregate-function"));
-        Map<String, AggregationKind> aggregationKindMap =
-                rightConfMap.entrySet().stream()
-                        .collect(
-                                Collectors.toMap(
-                                        e -> e.getKey().split(".aggregate-function")[0],
-                                        e -> AggregationKind.valueOf(e.getValue().toUpperCase())));
-
-        return new AggregateMergeFunction(primaryKeyType, rowType, aggregationKindMap);
+        try {
+            Map<String, AggregationKind> aggregationKindMap =
+                    rightConfMap.entrySet().stream()
+                            .collect(
+                                    Collectors.toMap(
+                                            e -> e.getKey().split(".aggregate-function")[0],
+                                            e ->
+                                                    AggregationKind.valueOf(
+                                                            e.getValue().toUpperCase())));
+            return new AggregateMergeFunction(primaryKeyType, rowType, aggregationKindMap);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                    "Aggregate function is not supported, please check your configuration");
+        }
     }
 }
