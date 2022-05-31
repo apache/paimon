@@ -43,7 +43,15 @@ public class DataFilePathFactoryTest {
 
         for (int i = 0; i < 20; i++) {
             assertThat(pathFactory.newPath())
-                    .isEqualTo(new Path(tempDir.toString() + "/bucket-123/data-" + uuid + "-" + i));
+                    .isEqualTo(
+                            new Path(
+                                    tempDir.toString()
+                                            + "/bucket-123/data-"
+                                            + uuid
+                                            + "-"
+                                            + i
+                                            + "."
+                                            + FileStoreOptions.FILE_FORMAT.defaultValue()));
         }
         assertThat(pathFactory.toPath("my-data-file-name"))
                 .isEqualTo(new Path(tempDir.toString() + "/bucket-123/my-data-file-name"));
@@ -67,7 +75,9 @@ public class DataFilePathFactoryTest {
                                             + "/dt=20211224/bucket-123/data-"
                                             + uuid
                                             + "-"
-                                            + i));
+                                            + i
+                                            + "."
+                                            + FileStoreOptions.FILE_FORMAT.defaultValue()));
         }
         assertThat(pathFactory.toPath("my-data-file-name"))
                 .isEqualTo(
