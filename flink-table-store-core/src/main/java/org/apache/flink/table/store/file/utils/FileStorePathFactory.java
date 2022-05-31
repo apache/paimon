@@ -74,6 +74,7 @@ public class FileStorePathFactory {
         this.manifestListCount = new AtomicInteger(0);
     }
 
+    @VisibleForTesting
     public static RowDataPartitionComputer getPartitionComputer(
             RowType partitionType, String defaultPartValue) {
         String[] partitionColumns = partitionType.getFieldNames().toArray(new String[0]);

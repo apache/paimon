@@ -260,7 +260,7 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
                         bucketEntry.getValue().stream()
                                 .filter(fileMeta -> fileMeta.fileSize() < options.targetFileSize)
                                 .collect(Collectors.toList());
-                List<DataFileMeta> intersectedFiles =
+                List<DataFileMeta> overlappedFiles =
                         new IntervalPartition(bucketEntry.getValue(), keyComparator)
                                 .partition().stream()
                                         .filter(section -> section.size() > 1)
@@ -270,7 +270,7 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
                                         .collect(Collectors.toList());
 
                 List<DataFileMeta> bucketFiles =
-                        Stream.concat(smallFiles.stream(), intersectedFiles.stream())
+                        Stream.concat(smallFiles.stream(), overlappedFiles.stream())
                                 .distinct()
                                 .collect(Collectors.toList());
 
