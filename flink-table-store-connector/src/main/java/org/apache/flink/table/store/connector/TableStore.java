@@ -61,6 +61,7 @@ import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -69,6 +70,7 @@ import java.util.UUID;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.flink.table.store.file.FileStoreOptions.MERGE_ENGINE;
+import static org.apache.flink.table.store.file.FileStoreOptions.MergeEngine.AGGREGATION;
 import static org.apache.flink.table.store.file.FileStoreOptions.MergeEngine.PARTIAL_UPDATE;
 import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 import static org.apache.flink.table.store.log.LogOptions.SCAN;
@@ -322,9 +324,13 @@ public class TableStore {
         private Source<RowData, ?, ?> buildSource() {
             WriteMode writeMode = options.get(TableStoreFactoryOptions.WRITE_MODE);
             if (isContinuous) {
-                if (schema.primaryKeys().size() > 0 && mergeEngine() == PARTIAL_UPDATE) {
+                List<MergeEngine> unSupportedMergeEngines = new ArrayList<>();
+                unSupportedMergeEngines.add(PARTIAL_UPDATE);
+                unSupportedMergeEngines.add(AGGREGATION);
+                MergeEngine me = mergeEngine();
+                if (schema.primaryKeys().size() > 0 && unSupportedMergeEngines.contains(me)) {
                     throw new ValidationException(
-                            "Partial update continuous reading is not supported.");
+                            me.name() + " continuous reading is not supported.");
                 }
 
                 LogStartupMode startupMode = logOptions().get(SCAN);

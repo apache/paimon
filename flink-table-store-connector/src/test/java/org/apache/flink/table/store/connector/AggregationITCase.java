@@ -28,6 +28,7 @@ import java.util.concurrent.ExecutionException;
 
 import static org.apache.flink.util.CollectionUtil.iteratorToList;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for partial update. */
 public class AggregationITCase extends FileStoreTableITCase {
@@ -166,4 +167,10 @@ public class AggregationITCase extends FileStoreTableITCase {
                         Row.of("pk2", 2, 7.0));
     }
 
+    @Test
+    public void testStreamingRead() {
+        assertThatThrownBy(
+                () -> sEnv.from("T3").execute().print(),
+                "Aggregation update continuous reading is not supported");
+    }
 }
