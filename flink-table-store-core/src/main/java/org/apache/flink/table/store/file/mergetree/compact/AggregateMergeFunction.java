@@ -43,7 +43,7 @@ public class AggregateMergeFunction implements MergeFunction {
     private final RowData.FieldGetter[] getters;
 
     private final RowType rowType;
-    private final ArrayList<ColumnAggregateFunction<?>> aggregateFunctions;
+    private final ArrayList<ColumnAggregateFunction<?, ?>> aggregateFunctions;
     private final boolean[] isPrimaryKey;
     private final RowType primaryKeyType;
     private transient GenericRowData row;
@@ -71,7 +71,7 @@ public class AggregateMergeFunction implements MergeFunction {
 
         this.aggregateFunctions = new ArrayList<>(rowType.getFieldCount());
         for (int i = 0; i < rowType.getFieldCount(); i++) {
-            ColumnAggregateFunction<?> f = null;
+            ColumnAggregateFunction<?, ?> f = null;
             if (aggregationKindMap.containsKey(rowNames.get(i))) {
                 f =
                         ColumnAggregateFunctionFactory.getColumnAggregateFunction(
@@ -97,7 +97,7 @@ public class AggregateMergeFunction implements MergeFunction {
     public void add(RowData value) {
         for (int i = 0; i < getters.length; i++) {
             Object currentField = getters[i].getFieldOrNull(value);
-            ColumnAggregateFunction<?> f = aggregateFunctions.get(i);
+            ColumnAggregateFunction<?, ?> f = aggregateFunctions.get(i);
             if (isPrimaryKey[i]) {
                 // primary key
                 if (currentField != null) {

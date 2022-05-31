@@ -21,497 +21,92 @@ package org.apache.flink.table.store.file.mergetree.compact;
 import java.io.Serializable;
 
 /** Custom column aggregation interface. */
-public interface ColumnAggregateFunction<T> extends Serializable {
-    T getResult();
+public class ColumnAggregateFunction<T, R> implements Serializable {
+    protected ColumnAggregateNumberType<T> numberType;
+    protected Long count = 0L;
 
-    void reset();
+    public ColumnAggregateFunction(ColumnAggregateNumberType<T> numberType) {
+        if (numberType == null) {
+            throw new IllegalArgumentException("NumberType cannot be null");
+        }
+        this.numberType = numberType;
+        this.count = 0L;
+    }
 
-    void aggregate(Object value);
+    public R getResult() {
+        return (R) numberType.getValue();
+    }
+
+    public void reset() {
+        numberType.reset();
+        count = 0L;
+    }
+
+    public void aggregate(Object value) {
+        if (value != null) {
+            numberType.add(value);
+            count++;
+        }
+    }
+
+    public Long getCount() {
+        return count;
+    }
 }
 
 /** Sum column aggregation interface. */
-interface SumColumnAggregateFunction<T> extends ColumnAggregateFunction<T> {
-    void retract(Object value);
-
-    void reset(Object value);
-}
-
-class DoubleSumColumnAggregateFunction implements SumColumnAggregateFunction<Double> {
-    Double aggregator;
-
-    @Override
-    public Double getResult() {
-        return aggregator;
-    }
-
-    @Override
-    public void reset() {
-        aggregator = 0.0;
-    }
-
-    @Override
-    public void aggregate(Object value) {
-        aggregator += (Double) value;
-    }
-
-    @Override
-    public void retract(Object value) {
-        aggregator -= (Double) value;
-    }
-
-    @Override
-    public void reset(Object value) {
-        aggregator = (Double) value;
-    }
-}
-
-class LongSumColumnAggregateFunction implements SumColumnAggregateFunction<Long> {
-
-    Long aggregator;
-
-    @Override
-    public Long getResult() {
-        return aggregator;
-    }
-
-    @Override
-    public void reset() {
-        aggregator = 0L;
-    }
-
-    @Override
-    public void aggregate(Object value) {
-        aggregator += (Long) value;
-    }
-
-    @Override
-    public void retract(Object value) {
-        aggregator -= (Long) value;
-    }
-
-    @Override
-    public void reset(Object value) {
-        aggregator = (Long) value;
-    }
-}
-
-class IntegerSumColumnAggregateFunction implements SumColumnAggregateFunction<Integer> {
-    Integer aggregator;
-
-    @Override
-    public Integer getResult() {
-        return aggregator;
-    }
-
-    @Override
-    public void reset() {
-        aggregator = 0;
-    }
-
-    @Override
-    public void aggregate(Object value) {
-        aggregator += (Integer) value;
-    }
-
-    @Override
-    public void retract(Object value) {
-        aggregator -= (Integer) value;
-    }
-
-    @Override
-    public void reset(Object value) {
-        aggregator = (Integer) value;
-    }
-}
-
-class FloatSumColumnAggregateFunction implements SumColumnAggregateFunction<Float> {
-    Float aggregator;
-
-    @Override
-    public Float getResult() {
-        return aggregator;
-    }
-
-    @Override
-    public void reset() {
-        aggregator = 0.0f;
-    }
-
-    @Override
-    public void aggregate(Object value) {
-        aggregator += (Float) value;
-    }
-
-    @Override
-    public void retract(Object value) {
-        aggregator -= (Float) value;
-    }
-
-    @Override
-    public void reset(Object value) {
-        aggregator = (Float) value;
+class SumColumnAggregateFunction<T> extends ColumnAggregateFunction<T, T> {
+    public SumColumnAggregateFunction(ColumnAggregateNumberType<T> numberType) {
+        super(numberType);
     }
 }
 
 /** Avg column aggregation interface. */
-interface AvgColumnAggregateFunction<T> extends ColumnAggregateFunction<T> {
-    void retract(Object value);
-
-    Double getAvgResult();
-
-    Long getCount();
-}
-
-class DoubleAvgColumnAggregateFunction implements AvgColumnAggregateFunction<Double> {
-    Double aggregator;
-    long count = 0L;
+class AvgColumnAggregateFunction<T> extends ColumnAggregateFunction<T, Double> {
+    public AvgColumnAggregateFunction(ColumnAggregateNumberType<T> numberType) {
+        super(numberType);
+    }
 
     @Override
     public Double getResult() {
-        return aggregator;
-    }
-
-    @Override
-    public void reset() {
-        aggregator = 0.0;
-        count = 0L;
-    }
-
-    @Override
-    public void aggregate(Object value) {
-        aggregator += (Double) value;
-        count++;
-    }
-
-    @Override
-    public void retract(Object value) {
-        aggregator -= (Double) value;
-        count++;
-    }
-
-    @Override
-    public Double getAvgResult() {
-        return (double) aggregator / (double) count;
-    }
-
-    @Override
-    public Long getCount() {
-        return count;
-    }
-}
-
-class LongAvgColumnAggregateFunction implements AvgColumnAggregateFunction<Long> {
-
-    Long aggregator;
-    long count = 0L;
-
-    @Override
-    public Long getResult() {
-        return aggregator;
-    }
-
-    @Override
-    public void reset() {
-        aggregator = 0L;
-        count = 0L;
-    }
-
-    @Override
-    public void aggregate(Object value) {
-        aggregator += (Long) value;
-        count++;
-    }
-
-    @Override
-    public void retract(Object value) {
-        aggregator -= (Long) value;
-        count++;
-    }
-
-    @Override
-    public Double getAvgResult() {
-        return (double) aggregator / (double) count;
-    }
-
-    @Override
-    public Long getCount() {
-        return count;
-    }
-}
-
-class IntegerAvgColumnAggregateFunction implements AvgColumnAggregateFunction<Integer> {
-    Integer aggregator;
-    long count = 0L;
-
-    @Override
-    public Integer getResult() {
-        return aggregator;
-    }
-
-    @Override
-    public void reset() {
-        aggregator = 0;
-        count = 0L;
-    }
-
-    @Override
-    public void aggregate(Object value) {
-        aggregator += (Integer) value;
-        count++;
-    }
-
-    @Override
-    public void retract(Object value) {
-        aggregator -= (Integer) value;
-        count++;
-    }
-
-    @Override
-    public Double getAvgResult() {
-        return (double) aggregator / (double) count;
-    }
-
-    @Override
-    public Long getCount() {
-        return count;
-    }
-}
-
-class FloatAvgColumnAggregateFunction implements AvgColumnAggregateFunction<Float> {
-    Float aggregator;
-    long count = 0L;
-
-    @Override
-    public Float getResult() {
-        return aggregator;
-    }
-
-    @Override
-    public void reset() {
-        aggregator = 0.0f;
-    }
-
-    @Override
-    public void aggregate(Object value) {
-        aggregator += (Float) value;
-    }
-
-    @Override
-    public void retract(Object value) {
-        aggregator -= (Float) value;
-    }
-
-    @Override
-    public Double getAvgResult() {
-        return (double) aggregator / (double) count;
-    }
-
-    @Override
-    public Long getCount() {
-        return count;
+        return numberType.getAvg(count);
     }
 }
 
 /** Max column aggregation interface. */
-interface MaxColumnAggregateFunction<T> extends ColumnAggregateFunction<T> {
-    void reset(Object value);
-}
-
-class DoubleMaxColumnAggregateFunction implements MaxColumnAggregateFunction<Double> {
-    Double aggregator;
-
-    @Override
-    public Double getResult() {
-        return aggregator;
-    }
-
-    @Override
-    public void reset() {
-        aggregator = 0.0;
-    }
+class MaxColumnAggregateFunction<T> extends ColumnAggregateFunction<T, T> {
 
     @Override
     public void aggregate(Object value) {
-        aggregator = aggregator.compareTo((Double) value) < 0 ? (Double) value : aggregator;
+        if (value != null) {
+            if (numberType.compareTo((T) value) < 0) {
+                numberType.reset();
+                numberType.add(value);
+            }
+            count++;
+        }
     }
 
-    @Override
-    public void reset(Object value) {
-        aggregator = (Double) value;
-    }
-}
-
-class LongMaxColumnAggregateFunction implements MaxColumnAggregateFunction<Long> {
-
-    Long aggregator;
-
-    @Override
-    public Long getResult() {
-        return aggregator;
-    }
-
-    @Override
-    public void reset() {
-        aggregator = 0L;
-    }
-
-    @Override
-    public void aggregate(Object value) {
-        aggregator = aggregator.compareTo((Long) value) < 0 ? (Long) value : aggregator;
-    }
-
-    @Override
-    public void reset(Object value) {
-        aggregator = (Long) value;
-    }
-}
-
-class IntegerMaxColumnAggregateFunction implements MaxColumnAggregateFunction<Integer> {
-    Integer aggregator;
-
-    @Override
-    public Integer getResult() {
-        return aggregator;
-    }
-
-    @Override
-    public void reset() {
-        aggregator = 0;
-    }
-
-    @Override
-    public void aggregate(Object value) {
-        aggregator = aggregator.compareTo((Integer) value) < 0 ? (Integer) value : aggregator;
-    }
-
-    @Override
-    public void reset(Object value) {
-        aggregator = (Integer) value;
-    }
-}
-
-class FloatMaxColumnAggregateFunction implements MaxColumnAggregateFunction<Float> {
-    Float aggregator;
-
-    @Override
-    public Float getResult() {
-        return aggregator;
-    }
-
-    @Override
-    public void reset() {
-        aggregator = 0.0f;
-    }
-
-    @Override
-    public void aggregate(Object value) {
-        aggregator = aggregator.compareTo((Float) value) < 0 ? (Float) value : aggregator;
-    }
-
-    @Override
-    public void reset(Object value) {
-        aggregator = (Float) value;
+    public MaxColumnAggregateFunction(ColumnAggregateNumberType<T> numberType) {
+        super(numberType);
     }
 }
 
 /** Min column aggregation interface. */
-interface MinColumnAggregateFunction<T> extends ColumnAggregateFunction<T> {
-    void reset(Object value);
-}
-
-class DoubleMinColumnAggregateFunction implements MinColumnAggregateFunction<Double> {
-    Double aggregator;
-
-    @Override
-    public Double getResult() {
-        return aggregator;
-    }
-
-    @Override
-    public void reset() {
-        aggregator = 0.0;
-    }
+class MinColumnAggregateFunction<T> extends ColumnAggregateFunction<T, T> {
 
     @Override
     public void aggregate(Object value) {
-        aggregator = aggregator.compareTo((Double) value) > 0 ? (Double) value : aggregator;
+        if (value != null) {
+            if (numberType.compareTo((T) value) > 0) {
+                numberType.reset();
+                numberType.add(value);
+            }
+            count++;
+        }
     }
 
-    @Override
-    public void reset(Object value) {
-        aggregator = (Double) value;
-    }
-}
-
-class LongMinColumnAggregateFunction implements MinColumnAggregateFunction<Long> {
-
-    Long aggregator;
-
-    @Override
-    public Long getResult() {
-        return aggregator;
-    }
-
-    @Override
-    public void reset() {
-        aggregator = 0L;
-    }
-
-    @Override
-    public void aggregate(Object value) {
-        aggregator = aggregator.compareTo((Long) value) > 0 ? (Long) value : aggregator;
-    }
-
-    @Override
-    public void reset(Object value) {
-        aggregator = (Long) value;
-    }
-}
-
-class IntegerMinColumnAggregateFunction implements MinColumnAggregateFunction<Integer> {
-    Integer aggregator;
-
-    @Override
-    public Integer getResult() {
-        return aggregator;
-    }
-
-    @Override
-    public void reset() {
-        aggregator = 0;
-    }
-
-    @Override
-    public void aggregate(Object value) {
-        aggregator = aggregator.compareTo((Integer) value) > 0 ? (Integer) value : aggregator;
-    }
-
-    @Override
-    public void reset(Object value) {
-        aggregator = (Integer) value;
-    }
-}
-
-class FloatMinColumnAggregateFunction implements MinColumnAggregateFunction<Float> {
-    Float aggregator;
-
-    @Override
-    public Float getResult() {
-        return aggregator;
-    }
-
-    @Override
-    public void reset() {
-        aggregator = 0.0f;
-    }
-
-    @Override
-    public void aggregate(Object value) {
-        aggregator = aggregator.compareTo((Float) value) > 0 ? (Float) value : aggregator;
-    }
-
-    @Override
-    public void reset(Object value) {
-        aggregator = (Float) value;
+    public MinColumnAggregateFunction(ColumnAggregateNumberType<T> numberType) {
+        super(numberType);
     }
 }

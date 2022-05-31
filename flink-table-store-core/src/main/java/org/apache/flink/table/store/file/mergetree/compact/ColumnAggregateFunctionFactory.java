@@ -29,123 +29,51 @@ public class ColumnAggregateFunctionFactory {
      * @param typeAt the type of the column
      * @return the column aggregation function
      */
-    public static ColumnAggregateFunction<?> getColumnAggregateFunction(
-            AggregationKind kind, LogicalType typeAt) {
+    public static ColumnAggregateFunction<?, ?> getColumnAggregateFunction(
+            AggregationKind kind, LogicalType type) {
         switch (kind) {
             case SUM:
-                return SumColumnAggregateFunctionFactory.getColumnAggregateFunction(typeAt);
+                return new SumColumnAggregateFunction<>(getNumberType(type));
             case AVG:
-                return AvgColumnAggregateFunctionFactory.getColumnAggregateFunction(typeAt);
+                return new AvgColumnAggregateFunction<>(getNumberType(type));
             case MAX:
-                return MaxColumnAggregateFunctionFactory.getColumnAggregateFunction(typeAt);
+                return new MaxColumnAggregateFunction<>(getNumberType(type));
             case MIN:
-                return MinColumnAggregateFunctionFactory.getColumnAggregateFunction(typeAt);
+                return new MinColumnAggregateFunction<>(getNumberType(type));
             default:
                 throw new IllegalArgumentException("Aggregation kind " + kind + " not supported");
         }
     }
 
-    /** AggregateKind is Sum. Determine the column aggregation function . */
-    private static class SumColumnAggregateFunctionFactory {
-        static SumColumnAggregateFunction<?> getColumnAggregateFunction(LogicalType type) {
-            switch (type.getTypeRoot()) {
-                case CHAR:
-                case VARCHAR:
-                case BOOLEAN:
-                case BINARY:
-                case VARBINARY:
-                case DECIMAL:
-                case TINYINT:
-                case SMALLINT:
-                default:
-                    throw new UnsupportedOperationException("Unsupported type " + type.toString());
-                case INTEGER:
-                    return new IntegerSumColumnAggregateFunction();
-                case BIGINT:
-                    return new LongSumColumnAggregateFunction();
-                case FLOAT:
-                    return new FloatSumColumnAggregateFunction();
-                case DOUBLE:
-                    return new DoubleSumColumnAggregateFunction();
-            }
-        }
-    }
-
-    /** AggregateKind is Max. Determine the column aggregation function . */
-    private static class MaxColumnAggregateFunctionFactory {
-        static MaxColumnAggregateFunction<?> getColumnAggregateFunction(LogicalType type) {
-            switch (type.getTypeRoot()) {
-                case CHAR:
-                case VARCHAR:
-                case BOOLEAN:
-                case BINARY:
-                case VARBINARY:
-                case DECIMAL:
-                case TINYINT:
-                case SMALLINT:
-                default:
-                    throw new UnsupportedOperationException("Unsupported type " + type.toString());
-                case INTEGER:
-                    return new IntegerMaxColumnAggregateFunction();
-                case BIGINT:
-                    return new LongMaxColumnAggregateFunction();
-                case FLOAT:
-                    return new FloatMaxColumnAggregateFunction();
-                case DOUBLE:
-                    return new DoubleMaxColumnAggregateFunction();
-            }
-        }
-    }
-
-    /** AggregateKind is Min. Determine the column aggregation function . */
-    private static class MinColumnAggregateFunctionFactory {
-        static MinColumnAggregateFunction<?> getColumnAggregateFunction(LogicalType type) {
-            switch (type.getTypeRoot()) {
-                case CHAR:
-                case VARCHAR:
-                case BOOLEAN:
-                case BINARY:
-                case VARBINARY:
-                case DECIMAL:
-                case TINYINT:
-                case SMALLINT:
-                default:
-                    throw new UnsupportedOperationException("Unsupported type " + type.toString());
-                case INTEGER:
-                    return new IntegerMinColumnAggregateFunction();
-                case BIGINT:
-                    return new LongMinColumnAggregateFunction();
-                case FLOAT:
-                    return new FloatMinColumnAggregateFunction();
-                case DOUBLE:
-                    return new DoubleMinColumnAggregateFunction();
-            }
-        }
-    }
-
-    /** AggregateKind is Avg. Determine the column aggregation function . */
-    private static class AvgColumnAggregateFunctionFactory {
-        static AvgColumnAggregateFunction<?> getColumnAggregateFunction(LogicalType type) {
-            switch (type.getTypeRoot()) {
-                case CHAR:
-                case VARCHAR:
-                case BOOLEAN:
-                case BINARY:
-                case VARBINARY:
-                case DECIMAL:
-                case TINYINT:
-                case SMALLINT:
-                default:
-                    throw new UnsupportedOperationException("Unsupported type " + type.toString());
-                case INTEGER:
-                    return new IntegerAvgColumnAggregateFunction();
-                case BIGINT:
-                    return new LongAvgColumnAggregateFunction();
-                case FLOAT:
-                    return new FloatAvgColumnAggregateFunction();
-                case DOUBLE:
-                    return new DoubleAvgColumnAggregateFunction();
-            }
+    /**
+     * Determine the column data types that can be aggregated.
+     *
+     * @param type the row type of the column
+     * @return the column data types that can be aggregated
+     */
+    static ColumnAggregateNumberType<?> getNumberType(LogicalType type) {
+        switch (type.getTypeRoot()) {
+            case INTEGER:
+                return new IntegerNumberType();
+            case BIGINT:
+                return new LongNumberType();
+            case FLOAT:
+                return new FloatNumberType();
+            case DOUBLE:
+                return new DoubleNumberType();
+            case DECIMAL:
+                return new DecimalDataNumberType(null);
+            case TINYINT:
+                return new ByteNumberType();
+            case SMALLINT:
+                return new ShortNumberType();
+            case CHAR:
+            case VARCHAR:
+            case BOOLEAN:
+            case BINARY:
+            case VARBINARY:
+            default:
+                throw new UnsupportedOperationException("Unsupported type " + type.toString());
         }
     }
 }
