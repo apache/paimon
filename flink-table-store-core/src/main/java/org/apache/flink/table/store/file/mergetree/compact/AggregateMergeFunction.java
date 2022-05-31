@@ -82,6 +82,8 @@ public class AggregateMergeFunction implements MergeFunction {
                             "should  set aggregate function for every column not part of primary key");
                 }
             }
+            // PrimaryKey column 's aggregateFunction is null
+            // Any other column must have aggregateFunction
             aggregateFunctions.add(f);
         }
     }
@@ -102,28 +104,23 @@ public class AggregateMergeFunction implements MergeFunction {
                     row.setField(i, currentField);
                 }
             } else {
-                if (f != null) {
-                    f.reset();
-                    Object oldValue = row.getField(i);
-                    if (oldValue != null) {
-                        f.aggregate(oldValue);
-                    }
-                    switch (value.getRowKind()) {
-                        case INSERT:
-                            f.aggregate(currentField);
-                            break;
-                        case DELETE:
-                        case UPDATE_AFTER:
-                        case UPDATE_BEFORE:
-                        default:
-                            throw new UnsupportedOperationException(
-                                    "Unsupported row kind: " + row.getRowKind());
-                    }
-                    Object result = f.getResult();
-                    if (result != null) {
-                        row.setField(i, result);
-                    }
+                f.reset();
+                Object oldValue = row.getField(i);
+                if (oldValue != null) {
+                    f.aggregate(oldValue);
                 }
+                switch (value.getRowKind()) {
+                    case INSERT:
+                        f.aggregate(currentField);
+                        break;
+                    case DELETE:
+                    case UPDATE_AFTER:
+                    case UPDATE_BEFORE:
+                    default:
+                        throw new UnsupportedOperationException(
+                                "Unsupported row kind: " + row.getRowKind());
+                }
+                row.setField(i, f.getResult());
             }
         }
     }
