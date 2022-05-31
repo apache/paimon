@@ -23,28 +23,23 @@ import org.apache.flink.table.store.file.stats.FieldStats;
 
 import java.util.Optional;
 
-/** A {@link Predicate} to evaluate {@code filter like 'abc%' or filter like 'abc_'}. */
-public class StartsWith implements Predicate {
+/**
+ * A {@link LeafPredicate.Function} to evaluate {@code filter like 'abc%' or filter like 'abc_'}.
+ */
+public class StartsWith implements LeafPredicate.Function {
 
-    private static final long serialVersionUID = 1L;
+    public static final StartsWith INSTANCE = new StartsWith();
 
-    private final int index;
-
-    private final Literal patternLiteral;
-
-    public StartsWith(int index, Literal patternLiteral) {
-        this.index = index;
-        this.patternLiteral = patternLiteral;
-    }
+    private StartsWith() {}
 
     @Override
-    public boolean test(Object[] values) {
+    public boolean test(Object[] values, int index, Literal patternLiteral) {
         BinaryStringData field = (BinaryStringData) values[index];
         return field != null && field.startsWith((BinaryStringData) patternLiteral.value());
     }
 
     @Override
-    public boolean test(long rowCount, FieldStats[] fieldStats) {
+    public boolean test(long rowCount, FieldStats[] fieldStats, int index, Literal patternLiteral) {
         FieldStats stats = fieldStats[index];
         if (rowCount == stats.nullCount()) {
             return false;
@@ -57,7 +52,12 @@ public class StartsWith implements Predicate {
     }
 
     @Override
-    public Optional<Predicate> negate() {
+    public Optional<Predicate> negate(int index, Literal literal) {
         return Optional.empty();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof StartsWith;
     }
 }

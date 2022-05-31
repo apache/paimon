@@ -20,57 +20,40 @@ package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.file.stats.FieldStats;
 
-import java.util.Objects;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
-/** A {@link Predicate} to eval and. */
-public class And implements Predicate {
+/** A {@link CompoundPredicate.Function} to eval and. */
+public class And implements CompoundPredicate.Function {
 
     private static final long serialVersionUID = 1L;
 
-    private final Predicate predicate1;
-    private final Predicate predicate2;
+    public static final And INSTANCE = new And();
 
-    public And(Predicate predicate1, Predicate predicate2) {
-        this.predicate1 = predicate1;
-        this.predicate2 = predicate2;
+    private And() {}
+
+    @Override
+    public boolean test(Object[] values, List<Predicate> children) {
+        return children.stream().allMatch(p -> p.test(values));
     }
 
     @Override
-    public boolean test(Object[] values) {
-        return predicate1.test(values) && predicate2.test(values);
+    public boolean test(long rowCount, FieldStats[] fieldStats, List<Predicate> children) {
+        return children.stream().allMatch(p -> p.test(rowCount, fieldStats));
     }
 
     @Override
-    public boolean test(long rowCount, FieldStats[] fieldStats) {
-        return predicate1.test(rowCount, fieldStats) && predicate2.test(rowCount, fieldStats);
-    }
-
-    @Override
-    public Optional<Predicate> negate() {
-        Optional<Predicate> negate1 = predicate1.negate();
-        Optional<Predicate> negate2 = predicate2.negate();
-        if (negate1.isPresent() && negate2.isPresent()) {
-            return Optional.of(new Or(negate1.get(), negate2.get()));
-        } else {
-            return Optional.empty();
+    public Optional<Predicate> negate(List<Predicate> children) {
+        List<Predicate> negatedChildren = new ArrayList<>();
+        for (Predicate child : children) {
+            Optional<Predicate> negatedChild = child.negate();
+            if (negatedChild.isPresent()) {
+                negatedChildren.add(negatedChild.get());
+            } else {
+                return Optional.empty();
+            }
         }
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (!(o instanceof And)) {
-            return false;
-        }
-        And and = (And) o;
-        return predicate1.equals(and.predicate1) && predicate2.equals(and.predicate2);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(predicate1, predicate2);
+        return Optional.of(new CompoundPredicate(Or.INSTANCE, negatedChildren));
     }
 }

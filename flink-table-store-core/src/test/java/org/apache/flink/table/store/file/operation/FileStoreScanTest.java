@@ -26,8 +26,8 @@ import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.flink.table.store.file.predicate.Equal;
 import org.apache.flink.table.store.file.predicate.Literal;
+import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.types.logical.IntType;
 
@@ -115,7 +115,8 @@ public class FileStoreScanTest {
 
         FileStoreScan scan = store.newScan();
         scan.withSnapshot(snapshot.id());
-        scan.withKeyFilter(new Equal(0, new Literal(new IntType(false), wantedShopId)));
+        scan.withKeyFilter(
+                PredicateBuilder.equal(0, new Literal(new IntType(false), wantedShopId)));
 
         Map<BinaryRowData, BinaryRowData> expected =
                 store.toKvMap(
@@ -135,7 +136,8 @@ public class FileStoreScanTest {
 
         FileStoreScan scan = store.newScan();
         scan.withSnapshot(snapshot.id());
-        scan.withValueFilter(new Equal(2, new Literal(new IntType(false), wantedShopId)));
+        scan.withValueFilter(
+                PredicateBuilder.equal(2, new Literal(new IntType(false), wantedShopId)));
 
         Map<BinaryRowData, BinaryRowData> expected =
                 store.toKvMap(
