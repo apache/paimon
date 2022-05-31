@@ -32,13 +32,13 @@ public class ColumnAggregateFunctionFactory {
     public static ColumnAggregateFunction<?> getColumnAggregateFunction(
             AggregationKind kind, LogicalType typeAt) {
         switch (kind) {
-            case Sum:
+            case SUM:
                 return SumColumnAggregateFunctionFactory.getColumnAggregateFunction(typeAt);
-            case Avg:
+            case AVG:
                 return AvgColumnAggregateFunctionFactory.getColumnAggregateFunction(typeAt);
-            case Max:
+            case MAX:
                 return MaxColumnAggregateFunctionFactory.getColumnAggregateFunction(typeAt);
-            case Min:
+            case MIN:
                 return MinColumnAggregateFunctionFactory.getColumnAggregateFunction(typeAt);
             default:
                 throw new IllegalArgumentException("Aggregation kind " + kind + " not supported");

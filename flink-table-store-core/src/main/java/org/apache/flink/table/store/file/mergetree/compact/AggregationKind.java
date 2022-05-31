@@ -18,27 +18,10 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import java.util.Locale;
-
 /** Aggregate kinds. */
 public enum AggregationKind {
-    Sum,
-    Max,
-    Min,
-    Avg;
-
-    public static AggregationKind fromString(String name) {
-        switch (name.toLowerCase(Locale.ROOT)) {
-            case "sum":
-                return Sum;
-            case "max":
-                return Max;
-            case "min":
-                return Min;
-            case "avg":
-                return Avg;
-            default:
-                throw new IllegalArgumentException("Unknown aggregation kind: " + name);
-        }
-    }
+    SUM,
+    MAX,
+    MIN,
+    AVG;
 }

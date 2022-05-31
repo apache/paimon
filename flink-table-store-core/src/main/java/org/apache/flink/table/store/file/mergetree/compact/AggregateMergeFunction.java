@@ -158,7 +158,7 @@ public class AggregateMergeFunction implements MergeFunction {
                         .collect(
                                 Collectors.toMap(
                                         e -> e.getKey().split(".aggregate-function")[0],
-                                        e -> AggregationKind.fromString(e.getValue())));
+                                        e -> AggregationKind.valueOf(e.getValue().toUpperCase())));
 
         return new AggregateMergeFunction(primaryKeyType, rowType, aggregationKindMap);
     }
