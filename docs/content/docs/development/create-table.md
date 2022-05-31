@@ -271,7 +271,7 @@ Output:
 
 ## Aggregation Update
 
-You can configure partial update from options:
+You can configure aggregation update from options:
 
 ```sql
 CREATE TABLE MyTable (
