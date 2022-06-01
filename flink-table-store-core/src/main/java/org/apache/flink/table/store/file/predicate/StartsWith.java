@@ -55,9 +55,4 @@ public class StartsWith implements LeafPredicate.Function {
     public Optional<Predicate> negate(int index, Literal literal) {
         return Optional.empty();
     }
-
-    @Override
-    public boolean equals(Object o) {
-        return o instanceof StartsWith;
-    }
 }
