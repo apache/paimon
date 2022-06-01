@@ -114,7 +114,7 @@ class IntegerNumberType implements ColumnAggregateNumberType<Integer> {
 
     @Override
     public Double getAvg(Long count) {
-        return value / count.doubleValue();
+        return value.doubleValue() / count.doubleValue();
     }
 
     @Override
@@ -157,7 +157,7 @@ class LongNumberType implements ColumnAggregateNumberType<Long> {
 
     @Override
     public Double getAvg(Long count) {
-        return value / count.doubleValue();
+        return value.doubleValue() / count.doubleValue();
     }
 
     @Override
@@ -201,7 +201,7 @@ class FloatNumberType implements ColumnAggregateNumberType<Float> {
 
     @Override
     public Double getAvg(Long count) {
-        return value / count.doubleValue();
+        return value.doubleValue() / count.doubleValue();
     }
 
     @Override
@@ -223,16 +223,12 @@ class DecimalDataNumberType implements ColumnAggregateNumberType<DecimalData> {
         this.value = value;
     }
 
-    public DecimalDataNumberType(int precision, int scale) {
-        this.value = DecimalData.zero(precision, scale);
-    }
-
     @Override
     public DecimalData reset() {
         if (value == null) {
-            throw new IllegalArgumentException("Value cannot be null");
+            return null;
         }
-        return value = DecimalData.zero(value.precision(), value.scale());
+        return value = null;
     }
 
     @Override
@@ -241,16 +237,13 @@ class DecimalDataNumberType implements ColumnAggregateNumberType<DecimalData> {
             throw new IllegalArgumentException("Value and args cannot be null");
         }
         if (value == null) {
-            this.value = DecimalData.zero(((DecimalData) a).precision(), ((DecimalData) a).scale());
-            this.value =
-                    DecimalDataUtils.add(
-                            value,
-                            (DecimalData) a,
+            value =
+                    DecimalData.fromBigDecimal(
+                            ((DecimalData) a).toBigDecimal(),
                             ((DecimalData) a).precision(),
                             ((DecimalData) a).scale());
         } else {
-            this.value =
-                    DecimalDataUtils.add(value, (DecimalData) a, value.precision(), value.scale());
+            value = DecimalDataUtils.add(value, (DecimalData) a, value.precision(), value.scale());
         }
         return value;
     }
@@ -278,6 +271,9 @@ class DecimalDataNumberType implements ColumnAggregateNumberType<DecimalData> {
 
     @Override
     public Double getAvg(Long count) {
+        if (value == null) {
+            return null;
+        }
         return DecimalDataUtils.doubleValue(value) / count.doubleValue();
     }
 
@@ -322,7 +318,7 @@ class ByteNumberType implements ColumnAggregateNumberType<Byte> {
 
     @Override
     public Double getAvg(Long count) {
-        return value / count.doubleValue();
+        return value.doubleValue() / count.doubleValue();
     }
 
     @Override
@@ -365,7 +361,7 @@ class ShortNumberType implements ColumnAggregateNumberType<Short> {
 
     @Override
     public Double getAvg(Long count) {
-        return value / count.doubleValue();
+        return value.doubleValue() / count.doubleValue();
     }
 
     @Override

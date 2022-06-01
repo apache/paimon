@@ -35,12 +35,15 @@ public class ColumnAggregateFunctionFactory {
         switch (kind) {
             case SUM:
                 return new SumColumnAggregateFunction<>(numberType);
-            case AVG:
-                return new AvgColumnAggregateFunction<>(numberType);
             case MAX:
                 return new MaxColumnAggregateFunction<>(numberType);
             case MIN:
                 return new MinColumnAggregateFunction<>(numberType);
+            case AVG:
+                if (numberType.getClass() != DoubleNumberType.class) {
+                    throw new UnsupportedOperationException("only double column can do avg merge");
+                }
+                return new AvgColumnAggregateFunction<>(numberType);
             default:
                 throw new IllegalArgumentException("Aggregation kind " + kind + " not supported");
         }

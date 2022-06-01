@@ -282,7 +282,7 @@ CREATE TABLE MyTable (
 ) WITH (
       'merge-engine' = 'aggregation',
       'b.aggregate-function' = 'sum',
-      'c.aggregate-function' = 'sum'
+      'c.aggregate-function' = 'max'
 );
 ```
 {{< hint info >}}
@@ -303,10 +303,16 @@ __Note:__currently aggregate functions must be set for all non-primary key colum
 
 The value field is updated to the result of the summation under the same primary key.
 
+now you can set 'column.aggregate-function=max|min|sum|avg' when you create table.
+
+ps:
+1. `avg` only supposed `double` type column now.
+2. only `INTEGER/BIGINT/FLOAT/DOUBLE/DECIMAL/TINYINT/SMALLINT` type column can be set aggregate function now.
+
 For example, the inputs: 
 - <'a', 3, 2>
 - <'a', 2, 0>
 - <'a', 2, 5>
 
 Output: 
-- <'a', 7, 7>
+- <'a', 7, 5>
