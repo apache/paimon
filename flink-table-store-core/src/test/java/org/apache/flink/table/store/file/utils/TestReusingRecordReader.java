@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * sizes (possibly empty). {@link KeyValue}s produced by the same reader is reused to test that
  * other components correctly handles the reusing.
  */
-public class TestReusingRecordReader implements RecordReader {
+public class TestReusingRecordReader implements RecordReader<KeyValue> {
 
     private final List<ReusingTestData> testData;
     private final ReusingKeyValue reuse;
@@ -58,7 +58,7 @@ public class TestReusingRecordReader implements RecordReader {
 
     @Nullable
     @Override
-    public RecordIterator readBatch() {
+    public RecordIterator<KeyValue> readBatch() {
         assertThat(nextLowerBound != -1).isTrue();
         if (nextLowerBound == testData.size() && random.nextBoolean()) {
             nextLowerBound = -1;
@@ -83,7 +83,7 @@ public class TestReusingRecordReader implements RecordReader {
         }
     }
 
-    private class TestRecordIterator implements RecordIterator {
+    private class TestRecordIterator implements RecordIterator<KeyValue> {
 
         private final int upperBound;
 

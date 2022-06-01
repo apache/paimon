@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
+import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.ReusingTestData;
 import org.apache.flink.table.store.file.utils.TestReusingRecordReader;
@@ -34,7 +35,7 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
     protected abstract MergeFunction createMergeFunction();
 
     @Override
-    protected RecordReader createRecordReader(List<TestReusingRecordReader> readers) {
+    protected RecordReader<KeyValue> createRecordReader(List<TestReusingRecordReader> readers) {
         return new SortMergeReader(new ArrayList<>(readers), KEY_COMPARATOR, createMergeFunction());
     }
 

@@ -24,6 +24,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
@@ -122,12 +123,13 @@ public class FileStoreTestHelper {
         commit.commit(committable, Collections.emptyMap());
     }
 
-    public Tuple2<RecordReader, Long> read(BinaryRowData partition, int bucket) throws Exception {
+    public Tuple2<RecordReader<KeyValue>, Long> read(BinaryRowData partition, int bucket)
+            throws Exception {
         FileStoreScanImpl scan = store.newScan();
         scan.withPartitionFilter(Collections.singletonList(partition)).withBucket(bucket);
         List<ManifestEntry> files = scan.plan().files();
         FileStoreReadImpl read = store.newRead();
-        RecordReader wrapped =
+        RecordReader<KeyValue> wrapped =
                 read.createReader(
                         partition,
                         bucket,

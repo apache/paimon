@@ -61,11 +61,11 @@ public class DataFileReader {
         this.pathFactory = pathFactory;
     }
 
-    public RecordReader read(String fileName) throws IOException {
+    public RecordReader<KeyValue> read(String fileName) throws IOException {
         return new DataFileRecordReader(pathFactory.toPath(fileName));
     }
 
-    private class DataFileRecordReader implements RecordReader {
+    private class DataFileRecordReader implements RecordReader<KeyValue> {
 
         private final BulkFormat.Reader<RowData> reader;
         private final KeyValueSerializer serializer;
@@ -79,7 +79,7 @@ public class DataFileReader {
 
         @Nullable
         @Override
-        public RecordIterator readBatch() throws IOException {
+        public RecordIterator<KeyValue> readBatch() throws IOException {
             BulkFormat.RecordIterator<RowData> iterator = reader.readBatch();
             return iterator == null ? null : new DataFileRecordIterator(iterator, serializer);
         }
@@ -90,7 +90,7 @@ public class DataFileReader {
         }
     }
 
-    private static class DataFileRecordIterator implements RecordReader.RecordIterator {
+    private static class DataFileRecordIterator implements RecordReader.RecordIterator<KeyValue> {
 
         private final BulkFormat.RecordIterator<RowData> iterator;
         private final KeyValueSerializer serializer;

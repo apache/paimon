@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
@@ -175,7 +176,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
         CompactManager.Rewriter rewriter =
                 (outputLevel, dropDelete, sections) ->
                         dataFileWriter.write(
-                                new RecordReaderIterator(
+                                new RecordReaderIterator<KeyValue>(
                                         new MergeTreeReader(
                                                 sections,
                                                 dropDelete,

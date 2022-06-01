@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
+import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.util.Preconditions;
 
@@ -33,11 +34,11 @@ import java.util.Queue;
  * input list is already sorted by key and sequence number, and the key intervals do not overlap
  * each other.
  */
-public class ConcatRecordReader implements RecordReader {
+public class ConcatRecordReader implements RecordReader<KeyValue> {
 
     private final Queue<ReaderSupplier> queue;
 
-    private RecordReader current;
+    private RecordReader<KeyValue> current;
 
     protected ConcatRecordReader(List<ReaderSupplier> readerFactories) {
         readerFactories.forEach(
@@ -46,16 +47,16 @@ public class ConcatRecordReader implements RecordReader {
         this.queue = new LinkedList<>(readerFactories);
     }
 
-    public static RecordReader create(List<ReaderSupplier> readers) throws IOException {
+    public static RecordReader<KeyValue> create(List<ReaderSupplier> readers) throws IOException {
         return readers.size() == 1 ? readers.get(0).get() : new ConcatRecordReader(readers);
     }
 
     @Nullable
     @Override
-    public RecordIterator readBatch() throws IOException {
+    public RecordIterator<KeyValue> readBatch() throws IOException {
         while (true) {
             if (current != null) {
-                RecordIterator iterator = current.readBatch();
+                RecordIterator<KeyValue> iterator = current.readBatch();
                 if (iterator != null) {
                     return iterator;
                 }
@@ -79,6 +80,6 @@ public class ConcatRecordReader implements RecordReader {
     /** Supplier to get {@link RecordReader}. */
     @FunctionalInterface
     public interface ReaderSupplier {
-        RecordReader get() throws IOException;
+        RecordReader<KeyValue> get() throws IOException;
     }
 }
