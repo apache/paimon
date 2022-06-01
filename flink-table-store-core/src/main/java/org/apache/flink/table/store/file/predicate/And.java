@@ -35,12 +35,22 @@ public class And implements CompoundPredicate.Function {
 
     @Override
     public boolean test(Object[] values, List<Predicate> children) {
-        return children.stream().allMatch(p -> p.test(values));
+        for (Predicate child : children) {
+            if (!child.test(values)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
     public boolean test(long rowCount, FieldStats[] fieldStats, List<Predicate> children) {
-        return children.stream().allMatch(p -> p.test(rowCount, fieldStats));
+        for (Predicate child : children) {
+            if (!child.test(rowCount, fieldStats)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override

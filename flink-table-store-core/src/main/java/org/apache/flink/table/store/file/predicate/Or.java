@@ -35,12 +35,22 @@ public class Or implements CompoundPredicate.Function {
 
     @Override
     public boolean test(Object[] values, List<Predicate> children) {
-        return children.stream().anyMatch(p -> p.test(values));
+        for (Predicate child : children) {
+            if (child.test(values)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
     public boolean test(long rowCount, FieldStats[] fieldStats, List<Predicate> children) {
-        return children.stream().anyMatch(p -> p.test(rowCount, fieldStats));
+        for (Predicate child : children) {
+            if (child.test(rowCount, fieldStats)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
