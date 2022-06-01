@@ -46,7 +46,8 @@ public abstract class CombiningRecordReaderTestBase {
 
     protected abstract List<ReusingTestData> getExpected(List<ReusingTestData> input);
 
-    protected abstract RecordReader createRecordReader(List<TestReusingRecordReader> readers);
+    protected abstract RecordReader<KeyValue> createRecordReader(
+            List<TestReusingRecordReader> readers);
 
     @RepeatedTest(100)
     public void testRandom() throws IOException {
@@ -84,9 +85,9 @@ public abstract class CombiningRecordReaderTestBase {
         for (List<ReusingTestData> readerData : readersData) {
             readers.add(new TestReusingRecordReader(readerData));
         }
-        RecordReader recordReader = createRecordReader(readers);
+        RecordReader<KeyValue> recordReader = createRecordReader(readers);
 
-        RecordReader.RecordIterator batch;
+        RecordReader.RecordIterator<KeyValue> batch;
         while ((batch = recordReader.readBatch()) != null) {
             KeyValue kv;
             while ((kv = batch.next()) != null) {

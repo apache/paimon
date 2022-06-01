@@ -18,20 +18,19 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.util.CloseableIterator;
 
 import java.io.IOException;
 
 /** Wrap a {@link RecordReader} as an {@link CloseableIterator}. */
-public class RecordReaderIterator implements CloseableIterator<KeyValue> {
+public class RecordReaderIterator<T> implements CloseableIterator<T> {
 
-    private final RecordReader reader;
-    private RecordReader.RecordIterator currentIterator;
+    private final RecordReader<T> reader;
+    private RecordReader.RecordIterator<T> currentIterator;
     private boolean advanced;
-    private KeyValue currentResult;
+    private T currentResult;
 
-    public RecordReaderIterator(RecordReader reader) {
+    public RecordReaderIterator(RecordReader<T> reader) {
         this.reader = reader;
         try {
             this.currentIterator = reader.readBatch();
@@ -56,7 +55,7 @@ public class RecordReaderIterator implements CloseableIterator<KeyValue> {
     }
 
     @Override
-    public KeyValue next() {
+    public T next() {
         if (!hasNext()) {
             return null;
         }

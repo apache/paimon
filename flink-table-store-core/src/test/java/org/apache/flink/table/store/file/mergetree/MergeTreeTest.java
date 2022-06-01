@@ -279,7 +279,7 @@ public class MergeTreeTest {
         CompactManager.Rewriter rewriter =
                 (outputLevel, dropDelete, sections) ->
                         dataFileWriter.write(
-                                new RecordReaderIterator(
+                                new RecordReaderIterator<KeyValue>(
                                         new MergeTreeReader(
                                                 sections,
                                                 dropDelete,
@@ -353,7 +353,7 @@ public class MergeTreeTest {
 
     private List<TestRecord> readAll(List<DataFileMeta> files, boolean dropDelete)
             throws Exception {
-        RecordReader reader =
+        RecordReader<KeyValue> reader =
                 new MergeTreeReader(
                         new IntervalPartition(files, comparator).partition(),
                         dropDelete,
@@ -361,7 +361,7 @@ public class MergeTreeTest {
                         comparator,
                         new DeduplicateMergeFunction());
         List<TestRecord> records = new ArrayList<>();
-        try (RecordReaderIterator iterator = new RecordReaderIterator(reader)) {
+        try (RecordReaderIterator<KeyValue> iterator = new RecordReaderIterator<KeyValue>(reader)) {
             while (iterator.hasNext()) {
                 KeyValue kv = iterator.next();
                 records.add(

@@ -36,17 +36,17 @@ import java.util.function.Supplier;
  */
 public class TableStoreRecordReader implements RecordReader<Void, RowDataContainer> {
 
-    private final RecordReaderIterator iterator;
+    private final RecordReaderIterator<KeyValue> iterator;
     private final Supplier<RowData> rowDataSupplier;
     private final long splitLength;
 
     private float progress;
 
     public TableStoreRecordReader(
-            org.apache.flink.table.store.file.utils.RecordReader wrapped,
+            org.apache.flink.table.store.file.utils.RecordReader<KeyValue> wrapped,
             boolean valueCountMode,
             long splitLength) {
-        this.iterator = new RecordReaderIterator(wrapped);
+        this.iterator = new RecordReaderIterator<>(wrapped);
         this.rowDataSupplier =
                 valueCountMode
                         ? new ValueCountRowDataSupplier(iterator::next)

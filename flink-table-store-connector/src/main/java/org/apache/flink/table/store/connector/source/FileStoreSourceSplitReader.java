@@ -57,10 +57,10 @@ public class FileStoreSourceSplitReader
 
     private final Pool<FileStoreRecordIterator> pool;
 
-    @Nullable private RecordReader currentReader;
+    @Nullable private RecordReader<KeyValue> currentReader;
     @Nullable private String currentSplitId;
     private long currentNumRead;
-    private RecordReader.RecordIterator currentFirstBatch;
+    private RecordReader.RecordIterator<KeyValue> currentFirstBatch;
 
     @VisibleForTesting
     public FileStoreSourceSplitReader(FileStoreRead fileStoreRead, boolean valueCountMode) {
@@ -87,7 +87,7 @@ public class FileStoreSourceSplitReader
         // to be read at the same time
         FileStoreRecordIterator iterator = pool();
 
-        RecordReader.RecordIterator nextBatch;
+        RecordReader.RecordIterator<KeyValue> nextBatch;
         if (currentFirstBatch != null) {
             nextBatch = currentFirstBatch;
             currentFirstBatch = null;
@@ -154,7 +154,7 @@ public class FileStoreSourceSplitReader
 
     private void seek(long toSkip) throws IOException {
         while (true) {
-            RecordReader.RecordIterator nextBatch = currentReader.readBatch();
+            RecordReader.RecordIterator<KeyValue> nextBatch = currentReader.readBatch();
             if (nextBatch == null) {
                 throw new RuntimeException(
                         String.format(
@@ -191,7 +191,7 @@ public class FileStoreSourceSplitReader
 
         private final Supplier<RowData> rowDataSupplier;
 
-        private RecordReader.RecordIterator iterator;
+        private RecordReader.RecordIterator<KeyValue> iterator;
 
         private final MutableRecordAndPosition<RowData> recordAndPosition =
                 new MutableRecordAndPosition<>();
@@ -209,7 +209,7 @@ public class FileStoreSourceSplitReader
                             : new PrimaryKeyRowDataSupplier(this::nextKeyValue);
         }
 
-        public FileStoreRecordIterator replace(RecordReader.RecordIterator iterator) {
+        public FileStoreRecordIterator replace(RecordReader.RecordIterator<KeyValue> iterator) {
             this.iterator = iterator;
             this.recordAndPosition.set(null, RecordAndPosition.NO_OFFSET, currentNumRead);
             return this;
