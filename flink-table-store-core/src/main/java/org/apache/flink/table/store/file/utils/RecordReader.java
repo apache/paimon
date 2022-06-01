@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.store.file.KeyValue;
-
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
@@ -27,7 +25,7 @@ import java.io.IOException;
 import java.util.Iterator;
 
 /** The reader that reads the batches of records. */
-public interface RecordReader extends Closeable {
+public interface RecordReader<T> extends Closeable {
 
     /**
      * Reads one batch. The method should return null when reaching the end of the input.
@@ -36,7 +34,7 @@ public interface RecordReader extends Closeable {
      * some time, so it should not be immediately reused by the reader.
      */
     @Nullable
-    RecordIterator readBatch() throws IOException;
+    RecordIterator<T> readBatch() throws IOException;
 
     /** Closes the reader and should release all resources. */
     @Override
@@ -45,13 +43,13 @@ public interface RecordReader extends Closeable {
     /**
      * An internal iterator interface which presents a more restrictive API than {@link Iterator}.
      */
-    interface RecordIterator {
+    interface RecordIterator<T> {
 
         /**
          * Gets the next record from the iterator. Returns null if this iterator has no more
          * elements.
          */
-        KeyValue next() throws IOException;
+        T next() throws IOException;
 
         /**
          * Releases the batch that this iterator iterated over. This is not supposed to close the

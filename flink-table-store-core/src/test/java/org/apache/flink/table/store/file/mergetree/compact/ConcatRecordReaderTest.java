@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
+import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.ReusingTestData;
 import org.apache.flink.table.store.file.utils.TestReusingRecordReader;
@@ -42,7 +43,7 @@ public class ConcatRecordReaderTest extends CombiningRecordReaderTestBase {
     }
 
     @Override
-    protected RecordReader createRecordReader(List<TestReusingRecordReader> readers) {
+    protected RecordReader<KeyValue> createRecordReader(List<TestReusingRecordReader> readers) {
         return new ConcatRecordReader(
                 readers.stream()
                         .map(r -> (ConcatRecordReader.ReaderSupplier) () -> r)

@@ -274,8 +274,8 @@ public class TestFileStore extends FileStoreImpl {
                 filesPerPartitionAndBucket.entrySet()) {
             for (Map.Entry<Integer, List<DataFileMeta>> entryWithBucket :
                     entryWithPartition.getValue().entrySet()) {
-                RecordReaderIterator iterator =
-                        new RecordReaderIterator(
+                RecordReaderIterator<KeyValue> iterator =
+                        new RecordReaderIterator<>(
                                 read.createReader(
                                         entryWithPartition.getKey(),
                                         entryWithBucket.getKey(),

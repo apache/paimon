@@ -38,9 +38,9 @@ import java.util.PriorityQueue;
  *
  * <p>NOTE: {@link KeyValue}s from the same {@link RecordReader} must not contain the same key.
  */
-public class SortMergeReader implements RecordReader {
+public class SortMergeReader implements RecordReader<KeyValue> {
 
-    private final List<RecordReader> nextBatchReaders;
+    private final List<RecordReader<KeyValue>> nextBatchReaders;
     private final Comparator<RowData> userKeyComparator;
     private final MergeFunction mergeFunction;
 
@@ -48,7 +48,7 @@ public class SortMergeReader implements RecordReader {
     private final List<Element> polled;
 
     protected SortMergeReader(
-            List<RecordReader> readers,
+            List<RecordReader<KeyValue>> readers,
             Comparator<RowData> userKeyComparator,
             MergeFunction mergeFunction) {
         this.nextBatchReaders = new ArrayList<>(readers);
@@ -67,8 +67,8 @@ public class SortMergeReader implements RecordReader {
         this.polled = new ArrayList<>();
     }
 
-    public static RecordReader create(
-            List<RecordReader> readers,
+    public static RecordReader<KeyValue> create(
+            List<RecordReader<KeyValue>> readers,
             Comparator<RowData> userKeyComparator,
             MergeFunction mergeFunction) {
         return readers.size() == 1
@@ -78,10 +78,10 @@ public class SortMergeReader implements RecordReader {
 
     @Nullable
     @Override
-    public RecordIterator readBatch() throws IOException {
-        for (RecordReader reader : nextBatchReaders) {
+    public RecordIterator<KeyValue> readBatch() throws IOException {
+        for (RecordReader<KeyValue> reader : nextBatchReaders) {
             while (true) {
-                RecordIterator iterator = reader.readBatch();
+                RecordIterator<KeyValue> iterator = reader.readBatch();
                 if (iterator == null) {
                     // no more batches, permanently remove this reader
                     reader.close();
@@ -105,7 +105,7 @@ public class SortMergeReader implements RecordReader {
 
     @Override
     public void close() throws IOException {
-        for (RecordReader reader : nextBatchReaders) {
+        for (RecordReader<KeyValue> reader : nextBatchReaders) {
             reader.close();
         }
         for (Element element : minHeap) {
@@ -119,7 +119,7 @@ public class SortMergeReader implements RecordReader {
     }
 
     /** The iterator iterates on {@link SortMergeReader}. */
-    private class SortMergeIterator implements RecordIterator {
+    private class SortMergeIterator implements RecordIterator<KeyValue> {
 
         private boolean released = false;
 
@@ -191,10 +191,11 @@ public class SortMergeReader implements RecordReader {
 
     private static class Element {
         private KeyValue kv;
-        private final RecordIterator iterator;
-        private final RecordReader reader;
+        private final RecordIterator<KeyValue> iterator;
+        private final RecordReader<KeyValue> reader;
 
-        private Element(KeyValue kv, RecordIterator iterator, RecordReader reader) {
+        private Element(
+                KeyValue kv, RecordIterator<KeyValue> iterator, RecordReader<KeyValue> reader) {
             this.kv = kv;
             this.iterator = iterator;
             this.reader = reader;

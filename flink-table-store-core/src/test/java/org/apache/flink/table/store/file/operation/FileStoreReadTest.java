@@ -200,14 +200,14 @@ public class FileStoreReadTest {
         List<KeyValue> result = new ArrayList<>();
         for (Map.Entry<BinaryRowData, List<ManifestEntry>> entry :
                 filesGroupedByPartition.entrySet()) {
-            RecordReader reader =
+            RecordReader<KeyValue> reader =
                     read.createReader(
                             entry.getKey(),
                             0,
                             entry.getValue().stream()
                                     .map(ManifestEntry::file)
                                     .collect(Collectors.toList()));
-            RecordReaderIterator actualIterator = new RecordReaderIterator(reader);
+            RecordReaderIterator<KeyValue> actualIterator = new RecordReaderIterator<>(reader);
             while (actualIterator.hasNext()) {
                 result.add(
                         actualIterator

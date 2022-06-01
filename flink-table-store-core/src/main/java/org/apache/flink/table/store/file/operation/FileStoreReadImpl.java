@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileReader;
@@ -91,8 +92,8 @@ public class FileStoreReadImpl implements FileStoreRead {
     }
 
     @Override
-    public RecordReader createReader(BinaryRowData partition, int bucket, List<DataFileMeta> files)
-            throws IOException {
+    public RecordReader<KeyValue> createReader(
+            BinaryRowData partition, int bucket, List<DataFileMeta> files) throws IOException {
         switch (writeMode) {
             case APPEND_ONLY:
                 return createAppendOnlyReader(partition, bucket, files);
@@ -105,7 +106,7 @@ public class FileStoreReadImpl implements FileStoreRead {
         }
     }
 
-    private RecordReader createAppendOnlyReader(
+    private RecordReader<KeyValue> createAppendOnlyReader(
             BinaryRowData partition, int bucket, List<DataFileMeta> files) throws IOException {
         DataFileReader dataFileReader = dataFileReaderFactory.create(partition, bucket);
         List<ConcatRecordReader.ReaderSupplier> suppliers = new ArrayList<>();
@@ -116,7 +117,7 @@ public class FileStoreReadImpl implements FileStoreRead {
         return ConcatRecordReader.create(suppliers);
     }
 
-    private RecordReader createMergeTreeReader(
+    private RecordReader<KeyValue> createMergeTreeReader(
             BinaryRowData partition, int bucket, List<DataFileMeta> files) throws IOException {
         DataFileReader dataFileReader = dataFileReaderFactory.create(partition, bucket);
         if (keyProjected) {

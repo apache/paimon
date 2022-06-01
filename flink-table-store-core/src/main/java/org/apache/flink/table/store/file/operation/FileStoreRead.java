@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.utils.RecordReader;
 
@@ -49,6 +50,6 @@ public interface FileStoreRead {
      *       reader is guaranteed to be ordered by keys and does not contain duplicated keys.
      * </ul>
      */
-    RecordReader createReader(BinaryRowData partition, int bucket, List<DataFileMeta> files)
-            throws IOException;
+    RecordReader<KeyValue> createReader(
+            BinaryRowData partition, int bucket, List<DataFileMeta> files) throws IOException;
 }

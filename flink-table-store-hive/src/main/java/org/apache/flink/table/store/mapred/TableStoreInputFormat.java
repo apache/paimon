@@ -25,6 +25,7 @@ import org.apache.flink.table.store.SearchArgumentToPredicateConverter;
 import org.apache.flink.table.store.TableStoreJobConf;
 import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
@@ -91,7 +92,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
         FileStoreWrapper wrapper = new FileStoreWrapper(jobConf);
         FileStoreRead read = wrapper.store.newRead();
         TableStoreInputSplit split = (TableStoreInputSplit) inputSplit;
-        org.apache.flink.table.store.file.utils.RecordReader wrapped =
+        org.apache.flink.table.store.file.utils.RecordReader<KeyValue> wrapped =
                 read.withDropDelete(true)
                         .createReader(split.partition(), split.bucket(), split.files());
         long splitLength = split.getLength();

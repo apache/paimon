@@ -28,6 +28,7 @@ import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.FileStoreTestHelper;
 import org.apache.flink.table.store.RowDataContainer;
 import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
@@ -94,7 +95,7 @@ public class TableStoreRecordReaderTest {
                 GenericRowData.of(2L, StringData.fromString("Hello")));
         helper.commit();
 
-        Tuple2<RecordReader, Long> tuple = helper.read(BinaryRowDataUtil.EMPTY_ROW, 0);
+        Tuple2<RecordReader<KeyValue>, Long> tuple = helper.read(BinaryRowDataUtil.EMPTY_ROW, 0);
         TableStoreRecordReader reader = new TableStoreRecordReader(tuple.f0, false, tuple.f1);
         RowDataContainer container = reader.createValue();
         Set<String> actual = new HashSet<>();
@@ -158,7 +159,7 @@ public class TableStoreRecordReaderTest {
                 GenericRowData.of(1L));
         helper.commit();
 
-        Tuple2<RecordReader, Long> tuple = helper.read(BinaryRowDataUtil.EMPTY_ROW, 0);
+        Tuple2<RecordReader<KeyValue>, Long> tuple = helper.read(BinaryRowDataUtil.EMPTY_ROW, 0);
         TableStoreRecordReader reader = new TableStoreRecordReader(tuple.f0, true, tuple.f1);
         RowDataContainer container = reader.createValue();
         Map<String, Integer> actual = new HashMap<>();

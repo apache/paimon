@@ -243,7 +243,7 @@ public class DataFileTest {
         for (DataFileMeta meta : actualMetas) {
             // check the contents of data file
             CloseableIterator<KeyValue> actualKvsIterator =
-                    new RecordReaderIterator(fileReader.read(meta.fileName()));
+                    new RecordReaderIterator<>(fileReader.read(meta.fileName()));
             while (actualKvsIterator.hasNext()) {
                 assertThat(expectedIterator.hasNext()).isTrue();
                 KeyValue actualKv = actualKvsIterator.next();

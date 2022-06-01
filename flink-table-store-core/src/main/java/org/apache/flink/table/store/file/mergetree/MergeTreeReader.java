@@ -37,9 +37,9 @@ import java.util.Comparator;
 import java.util.List;
 
 /** A {@link RecordReader} to read merge tree sections. */
-public class MergeTreeReader implements RecordReader {
+public class MergeTreeReader implements RecordReader<KeyValue> {
 
-    private final RecordReader reader;
+    private final RecordReader<KeyValue> reader;
 
     private final boolean dropDelete;
 
@@ -64,8 +64,8 @@ public class MergeTreeReader implements RecordReader {
 
     @Nullable
     @Override
-    public RecordIterator readBatch() throws IOException {
-        RecordIterator batch = reader.readBatch();
+    public RecordIterator<KeyValue> readBatch() throws IOException {
+        RecordIterator<KeyValue> batch = reader.readBatch();
 
         if (!dropDelete) {
             return batch;
@@ -75,7 +75,7 @@ public class MergeTreeReader implements RecordReader {
             return null;
         }
 
-        return new RecordIterator() {
+        return new RecordIterator<KeyValue>() {
             @Override
             public KeyValue next() throws IOException {
                 while (true) {
@@ -102,20 +102,20 @@ public class MergeTreeReader implements RecordReader {
         reader.close();
     }
 
-    public static RecordReader readerForSection(
+    public static RecordReader<KeyValue> readerForSection(
             List<SortedRun> section,
             DataFileReader dataFileReader,
             Comparator<RowData> userKeyComparator,
             MergeFunction mergeFunction)
             throws IOException {
-        List<RecordReader> readers = new ArrayList<>();
+        List<RecordReader<KeyValue>> readers = new ArrayList<>();
         for (SortedRun run : section) {
             readers.add(readerForRun(run, dataFileReader));
         }
         return SortMergeReader.create(readers, userKeyComparator, mergeFunction);
     }
 
-    public static RecordReader readerForRun(SortedRun run, DataFileReader dataFileReader)
+    public static RecordReader<KeyValue> readerForRun(SortedRun run, DataFileReader dataFileReader)
             throws IOException {
         List<ReaderSupplier> readers = new ArrayList<>();
         for (DataFileMeta file : run.files()) {
