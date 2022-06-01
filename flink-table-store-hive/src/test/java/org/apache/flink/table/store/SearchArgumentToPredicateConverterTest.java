@@ -22,18 +22,9 @@ import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.store.file.predicate.And;
-import org.apache.flink.table.store.file.predicate.Equal;
-import org.apache.flink.table.store.file.predicate.GreaterOrEqual;
-import org.apache.flink.table.store.file.predicate.GreaterThan;
-import org.apache.flink.table.store.file.predicate.IsNotNull;
-import org.apache.flink.table.store.file.predicate.IsNull;
-import org.apache.flink.table.store.file.predicate.LessOrEqual;
-import org.apache.flink.table.store.file.predicate.LessThan;
 import org.apache.flink.table.store.file.predicate.Literal;
-import org.apache.flink.table.store.file.predicate.NotEqual;
-import org.apache.flink.table.store.file.predicate.Or;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.types.logical.LogicalType;
 
 import org.apache.hadoop.hive.common.type.HiveDecimal;
@@ -103,7 +94,7 @@ public class SearchArgumentToPredicateConverterTest {
                 new SearchArgumentToPredicateConverter(
                         sarg, Collections.singletonList("a"), Collections.singletonList(flinkType));
 
-        Predicate expected = new Equal(0, new Literal(flinkType, flinkLiteral));
+        Predicate expected = PredicateBuilder.equal(0, new Literal(flinkType, flinkLiteral));
         Predicate actual = converter.convert().orElse(null);
         assertThat(actual).isEqualTo(expected);
     }
@@ -120,7 +111,7 @@ public class SearchArgumentToPredicateConverterTest {
     public void testEqual() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg = builder.equals("f_bigint", PredicateLeaf.Type.LONG, 100L).build();
-        Predicate expected = new Equal(1, new Literal(BIGINT_TYPE, 100L));
+        Predicate expected = PredicateBuilder.equal(1, new Literal(BIGINT_TYPE, 100L));
         assertExpected(sarg, expected);
     }
 
@@ -129,7 +120,7 @@ public class SearchArgumentToPredicateConverterTest {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.startNot().equals("f_bigint", PredicateLeaf.Type.LONG, 100L).end().build();
-        Predicate expected = new NotEqual(1, new Literal(BIGINT_TYPE, 100L));
+        Predicate expected = PredicateBuilder.notEqual(1, new Literal(BIGINT_TYPE, 100L));
         assertExpected(sarg, expected);
     }
 
@@ -137,7 +128,7 @@ public class SearchArgumentToPredicateConverterTest {
     public void testLessThan() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg = builder.lessThan("f_bigint", PredicateLeaf.Type.LONG, 100L).build();
-        Predicate expected = new LessThan(1, new Literal(BIGINT_TYPE, 100L));
+        Predicate expected = PredicateBuilder.lessThan(1, new Literal(BIGINT_TYPE, 100L));
         assertExpected(sarg, expected);
     }
 
@@ -149,7 +140,7 @@ public class SearchArgumentToPredicateConverterTest {
                         .lessThan("f_bigint", PredicateLeaf.Type.LONG, 100L)
                         .end()
                         .build();
-        Predicate expected = new GreaterOrEqual(1, new Literal(BIGINT_TYPE, 100L));
+        Predicate expected = PredicateBuilder.greaterOrEqual(1, new Literal(BIGINT_TYPE, 100L));
         assertExpected(sarg, expected);
     }
 
@@ -158,7 +149,7 @@ public class SearchArgumentToPredicateConverterTest {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.lessThanEquals("f_bigint", PredicateLeaf.Type.LONG, 100L).build();
-        Predicate expected = new LessOrEqual(1, new Literal(BIGINT_TYPE, 100L));
+        Predicate expected = PredicateBuilder.lessOrEqual(1, new Literal(BIGINT_TYPE, 100L));
         assertExpected(sarg, expected);
     }
 
@@ -170,7 +161,7 @@ public class SearchArgumentToPredicateConverterTest {
                         .lessThanEquals("f_bigint", PredicateLeaf.Type.LONG, 100L)
                         .end()
                         .build();
-        Predicate expected = new GreaterThan(1, new Literal(BIGINT_TYPE, 100L));
+        Predicate expected = PredicateBuilder.greaterThan(1, new Literal(BIGINT_TYPE, 100L));
         assertExpected(sarg, expected);
     }
 
@@ -180,11 +171,10 @@ public class SearchArgumentToPredicateConverterTest {
         SearchArgument sarg =
                 builder.in("f_bigint", PredicateLeaf.Type.LONG, 100L, 200L, 300L).build();
         Predicate expected =
-                new Or(
-                        new Or(
-                                new Equal(1, new Literal(BIGINT_TYPE, 100L)),
-                                new Equal(1, new Literal(BIGINT_TYPE, 200L))),
-                        new Equal(1, new Literal(BIGINT_TYPE, 300L)));
+                PredicateBuilder.or(
+                        PredicateBuilder.equal(1, new Literal(BIGINT_TYPE, 100L)),
+                        PredicateBuilder.equal(1, new Literal(BIGINT_TYPE, 200L)),
+                        PredicateBuilder.equal(1, new Literal(BIGINT_TYPE, 300L)));
         assertExpected(sarg, expected);
     }
 
@@ -197,11 +187,10 @@ public class SearchArgumentToPredicateConverterTest {
                         .end()
                         .build();
         Predicate expected =
-                new And(
-                        new And(
-                                new NotEqual(1, new Literal(BIGINT_TYPE, 100L)),
-                                new NotEqual(1, new Literal(BIGINT_TYPE, 200L))),
-                        new NotEqual(1, new Literal(BIGINT_TYPE, 300L)));
+                PredicateBuilder.and(
+                        PredicateBuilder.notEqual(1, new Literal(BIGINT_TYPE, 100L)),
+                        PredicateBuilder.notEqual(1, new Literal(BIGINT_TYPE, 200L)),
+                        PredicateBuilder.notEqual(1, new Literal(BIGINT_TYPE, 300L)));
         assertExpected(sarg, expected);
     }
 
@@ -211,9 +200,9 @@ public class SearchArgumentToPredicateConverterTest {
         SearchArgument sarg =
                 builder.between("f_bigint", PredicateLeaf.Type.LONG, 100L, 200L).build();
         Predicate expected =
-                new And(
-                        new GreaterOrEqual(1, new Literal(BIGINT_TYPE, 100L)),
-                        new LessOrEqual(1, new Literal(BIGINT_TYPE, 200L)));
+                PredicateBuilder.and(
+                        PredicateBuilder.greaterOrEqual(1, new Literal(BIGINT_TYPE, 100L)),
+                        PredicateBuilder.lessOrEqual(1, new Literal(BIGINT_TYPE, 200L)));
         assertExpected(sarg, expected);
     }
 
@@ -226,9 +215,9 @@ public class SearchArgumentToPredicateConverterTest {
                         .end()
                         .build();
         Predicate expected =
-                new Or(
-                        new LessThan(1, new Literal(BIGINT_TYPE, 100L)),
-                        new GreaterThan(1, new Literal(BIGINT_TYPE, 200L)));
+                PredicateBuilder.or(
+                        PredicateBuilder.lessThan(1, new Literal(BIGINT_TYPE, 100L)),
+                        PredicateBuilder.greaterThan(1, new Literal(BIGINT_TYPE, 200L)));
         assertExpected(sarg, expected);
     }
 
@@ -236,7 +225,7 @@ public class SearchArgumentToPredicateConverterTest {
     public void testIsNull() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg = builder.isNull("f_bigint", PredicateLeaf.Type.LONG).build();
-        Predicate expected = new IsNull(1);
+        Predicate expected = PredicateBuilder.isNull(1);
         assertExpected(sarg, expected);
     }
 
@@ -245,7 +234,7 @@ public class SearchArgumentToPredicateConverterTest {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.startNot().isNull("f_bigint", PredicateLeaf.Type.LONG).end().build();
-        Predicate expected = new IsNotNull(1);
+        Predicate expected = PredicateBuilder.isNotNull(1);
         assertExpected(sarg, expected);
     }
 
@@ -260,11 +249,10 @@ public class SearchArgumentToPredicateConverterTest {
                         .end()
                         .build();
         Predicate expected =
-                new Or(
-                        new Or(
-                                new Equal(1, new Literal(BIGINT_TYPE, 100L)),
-                                new Equal(1, new Literal(BIGINT_TYPE, 200L))),
-                        new Equal(1, new Literal(BIGINT_TYPE, 300L)));
+                PredicateBuilder.or(
+                        PredicateBuilder.equal(1, new Literal(BIGINT_TYPE, 100L)),
+                        PredicateBuilder.equal(1, new Literal(BIGINT_TYPE, 200L)),
+                        PredicateBuilder.equal(1, new Literal(BIGINT_TYPE, 300L)));
         assertExpected(sarg, expected);
     }
 
@@ -281,11 +269,10 @@ public class SearchArgumentToPredicateConverterTest {
                         .end()
                         .build();
         Predicate expected =
-                new And(
-                        new And(
-                                new NotEqual(1, new Literal(BIGINT_TYPE, 100L)),
-                                new NotEqual(1, new Literal(BIGINT_TYPE, 200L))),
-                        new NotEqual(1, new Literal(BIGINT_TYPE, 300L)));
+                PredicateBuilder.and(
+                        PredicateBuilder.notEqual(1, new Literal(BIGINT_TYPE, 100L)),
+                        PredicateBuilder.notEqual(1, new Literal(BIGINT_TYPE, 200L)),
+                        PredicateBuilder.notEqual(1, new Literal(BIGINT_TYPE, 300L)));
         assertExpected(sarg, expected);
     }
 
@@ -306,11 +293,10 @@ public class SearchArgumentToPredicateConverterTest {
                         .end()
                         .build();
         Predicate expected =
-                new And(
-                        new And(
-                                new NotEqual(1, new Literal(BIGINT_TYPE, 100L)),
-                                new NotEqual(1, new Literal(BIGINT_TYPE, 200L))),
-                        new NotEqual(1, new Literal(BIGINT_TYPE, 300L)));
+                PredicateBuilder.and(
+                        PredicateBuilder.notEqual(1, new Literal(BIGINT_TYPE, 100L)),
+                        PredicateBuilder.notEqual(1, new Literal(BIGINT_TYPE, 200L)),
+                        PredicateBuilder.notEqual(1, new Literal(BIGINT_TYPE, 300L)));
         assertExpected(sarg, expected);
     }
 
@@ -333,11 +319,10 @@ public class SearchArgumentToPredicateConverterTest {
                         .end()
                         .build();
         Predicate expected =
-                new Or(
-                        new Or(
-                                new Equal(1, new Literal(BIGINT_TYPE, 100L)),
-                                new Equal(1, new Literal(BIGINT_TYPE, 200L))),
-                        new Equal(1, new Literal(BIGINT_TYPE, 300L)));
+                PredicateBuilder.or(
+                        PredicateBuilder.equal(1, new Literal(BIGINT_TYPE, 100L)),
+                        PredicateBuilder.equal(1, new Literal(BIGINT_TYPE, 200L)),
+                        PredicateBuilder.equal(1, new Literal(BIGINT_TYPE, 300L)));
         assertExpected(sarg, expected);
     }
 

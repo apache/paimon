@@ -65,9 +65,9 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             LogicalType type = rowType.getTypeAt(idx);
             Literal literal = new Literal(type, TypeUtils.castFromString(entry.getValue(), type));
             if (predicate == null) {
-                predicate = new Equal(idx, literal);
+                predicate = PredicateBuilder.equal(idx, literal);
             } else {
-                predicate = new And(predicate, new Equal(idx, literal));
+                predicate = PredicateBuilder.and(predicate, PredicateBuilder.equal(idx, literal));
             }
         }
         return predicate;
@@ -79,30 +79,35 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         List<Expression> children = call.getChildren();
 
         if (func == BuiltInFunctionDefinitions.AND) {
-            return new And(children.get(0).accept(this), children.get(1).accept(this));
+            return PredicateBuilder.and(children.get(0).accept(this), children.get(1).accept(this));
         } else if (func == BuiltInFunctionDefinitions.OR) {
-            return new Or(children.get(0).accept(this), children.get(1).accept(this));
+            return PredicateBuilder.or(children.get(0).accept(this), children.get(1).accept(this));
         } else if (func == BuiltInFunctionDefinitions.EQUALS) {
-            return visitBiFunction(children, Equal::new, Equal::new);
+            return visitBiFunction(children, PredicateBuilder::equal, PredicateBuilder::equal);
         } else if (func == BuiltInFunctionDefinitions.NOT_EQUALS) {
-            return visitBiFunction(children, NotEqual::new, NotEqual::new);
+            return visitBiFunction(
+                    children, PredicateBuilder::notEqual, PredicateBuilder::notEqual);
         } else if (func == BuiltInFunctionDefinitions.GREATER_THAN) {
-            return visitBiFunction(children, GreaterThan::new, LessThan::new);
+            return visitBiFunction(
+                    children, PredicateBuilder::greaterThan, PredicateBuilder::lessThan);
         } else if (func == BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL) {
-            return visitBiFunction(children, GreaterOrEqual::new, LessOrEqual::new);
+            return visitBiFunction(
+                    children, PredicateBuilder::greaterOrEqual, PredicateBuilder::lessOrEqual);
         } else if (func == BuiltInFunctionDefinitions.LESS_THAN) {
-            return visitBiFunction(children, LessThan::new, GreaterThan::new);
+            return visitBiFunction(
+                    children, PredicateBuilder::lessThan, PredicateBuilder::greaterThan);
         } else if (func == BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL) {
-            return visitBiFunction(children, LessOrEqual::new, GreaterOrEqual::new);
+            return visitBiFunction(
+                    children, PredicateBuilder::lessOrEqual, PredicateBuilder::greaterOrEqual);
         } else if (func == BuiltInFunctionDefinitions.IS_NULL) {
             return extractFieldReference(children.get(0))
                     .map(FieldReferenceExpression::getFieldIndex)
-                    .map(IsNull::new)
+                    .map(PredicateBuilder::isNull)
                     .orElseThrow(UnsupportedExpression::new);
         } else if (func == BuiltInFunctionDefinitions.IS_NOT_NULL) {
             return extractFieldReference(children.get(0))
                     .map(FieldReferenceExpression::getFieldIndex)
-                    .map(IsNotNull::new)
+                    .map(PredicateBuilder::isNotNull)
                     .orElseThrow(UnsupportedExpression::new);
         } else if (func == BuiltInFunctionDefinitions.LIKE) {
             FieldReferenceExpression fieldRefExpr =
@@ -165,7 +170,7 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                 if (allowQuick) {
                     Matcher beginMatcher = BEGIN_PATTERN.matcher(escapedSqlPattern);
                     if (beginMatcher.matches()) {
-                        return new StartsWith(
+                        return PredicateBuilder.startsWith(
                                 fieldRefExpr.getFieldIndex(),
                                 new Literal(
                                         VarCharType.STRING_TYPE,

@@ -20,33 +20,23 @@ package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.file.stats.FieldStats;
 
-import java.util.Objects;
 import java.util.Optional;
 
-import static org.apache.flink.util.Preconditions.checkNotNull;
+/** A {@link LeafPredicate.Function} to eval greater or equal. */
+public class GreaterOrEqual implements LeafPredicate.Function {
 
-/** A {@link Predicate} to eval greater or equal. */
-public class GreaterOrEqual implements Predicate {
+    public static final GreaterOrEqual INSTANCE = new GreaterOrEqual();
 
-    private static final long serialVersionUID = 1L;
-
-    private final int index;
-
-    private final Literal literal;
-
-    public GreaterOrEqual(int index, Literal literal) {
-        this.index = index;
-        this.literal = checkNotNull(literal);
-    }
+    private GreaterOrEqual() {}
 
     @Override
-    public boolean test(Object[] values) {
+    public boolean test(Object[] values, int index, Literal literal) {
         Object field = values[index];
         return field != null && literal.compareValueTo(field) <= 0;
     }
 
     @Override
-    public boolean test(long rowCount, FieldStats[] fieldStats) {
+    public boolean test(long rowCount, FieldStats[] fieldStats, int index, Literal literal) {
         FieldStats stats = fieldStats[index];
         if (rowCount == stats.nullCount()) {
             return false;
@@ -55,24 +45,7 @@ public class GreaterOrEqual implements Predicate {
     }
 
     @Override
-    public Optional<Predicate> negate() {
-        return Optional.of(new LessThan(index, literal));
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (!(o instanceof GreaterOrEqual)) {
-            return false;
-        }
-        GreaterOrEqual that = (GreaterOrEqual) o;
-        return index == that.index && literal.equals(that.literal);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(index, literal);
+    public Optional<Predicate> negate(int index, Literal literal) {
+        return Optional.of(new LeafPredicate(LessThan.INSTANCE, index, literal));
     }
 }

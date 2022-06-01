@@ -25,7 +25,6 @@ import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
-import org.apache.flink.table.store.file.predicate.Equal;
 import org.apache.flink.table.store.file.predicate.Literal;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
@@ -125,7 +124,7 @@ public class FileStoreScanImpl implements FileStoreScan {
                                 new Literal(
                                         partitionConverter.rowType().getTypeAt(i),
                                         partitionObjects[i]);
-                        fieldPredicates.add(new Equal(i, l));
+                        fieldPredicates.add(PredicateBuilder.equal(i, l));
                     }
                     return PredicateBuilder.and(fieldPredicates);
                 };

@@ -72,50 +72,50 @@ public class PredicateConverterTest {
                                 BuiltInFunctionDefinitions.IS_NULL,
                                 Collections.singletonList(longRefExpr),
                                 DataTypes.BOOLEAN()),
-                        new IsNull(0)),
+                        PredicateBuilder.isNull(0)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.IS_NOT_NULL,
                                 Collections.singletonList(doubleRefExpr),
                                 DataTypes.BOOLEAN()),
-                        new IsNotNull(1)),
+                        PredicateBuilder.isNotNull(1)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.EQUALS,
                                 // test literal on left
                                 Arrays.asList(intLitExpr, longRefExpr),
                                 DataTypes.BOOLEAN()),
-                        new Equal(0, longLit)),
+                        PredicateBuilder.equal(0, longLit)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.NOT_EQUALS,
                                 Arrays.asList(longRefExpr, intLitExpr),
                                 DataTypes.BOOLEAN()),
-                        new NotEqual(0, longLit)),
+                        PredicateBuilder.notEqual(0, longLit)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.GREATER_THAN,
                                 Arrays.asList(longRefExpr, intLitExpr),
                                 DataTypes.BOOLEAN()),
-                        new GreaterThan(0, longLit)),
+                        PredicateBuilder.greaterThan(0, longLit)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL,
                                 Arrays.asList(longRefExpr, intLitExpr),
                                 DataTypes.BOOLEAN()),
-                        new GreaterOrEqual(0, longLit)),
+                        PredicateBuilder.greaterOrEqual(0, longLit)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.LESS_THAN,
                                 Arrays.asList(longRefExpr, intLitExpr),
                                 DataTypes.BOOLEAN()),
-                        new LessThan(0, longLit)),
+                        PredicateBuilder.lessThan(0, longLit)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL,
                                 Arrays.asList(longRefExpr, intLitExpr),
                                 DataTypes.BOOLEAN()),
-                        new LessOrEqual(0, longLit)),
+                        PredicateBuilder.lessOrEqual(0, longLit)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.AND,
@@ -129,7 +129,9 @@ public class PredicateConverterTest {
                                                 Arrays.asList(doubleRefExpr, floatLitExpr),
                                                 DataTypes.BOOLEAN())),
                                 DataTypes.BOOLEAN()),
-                        new And(new LessOrEqual(0, longLit), new Equal(1, doubleLit))),
+                        PredicateBuilder.and(
+                                PredicateBuilder.lessOrEqual(0, longLit),
+                                PredicateBuilder.equal(1, doubleLit))),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.OR,
@@ -143,6 +145,8 @@ public class PredicateConverterTest {
                                                 Arrays.asList(doubleRefExpr, floatLitExpr),
                                                 DataTypes.BOOLEAN())),
                                 DataTypes.BOOLEAN()),
-                        new Or(new NotEqual(0, longLit), new Equal(1, doubleLit))));
+                        PredicateBuilder.or(
+                                PredicateBuilder.notEqual(0, longLit),
+                                PredicateBuilder.equal(1, doubleLit))));
     }
 }
