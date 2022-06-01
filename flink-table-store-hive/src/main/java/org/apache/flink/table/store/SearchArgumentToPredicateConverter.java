@@ -21,10 +21,6 @@ package org.apache.flink.table.store;
 import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.store.file.predicate.Equal;
-import org.apache.flink.table.store.file.predicate.IsNull;
-import org.apache.flink.table.store.file.predicate.LessOrEqual;
-import org.apache.flink.table.store.file.predicate.LessThan;
 import org.apache.flink.table.store.file.predicate.Literal;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
@@ -112,11 +108,11 @@ public class SearchArgumentToPredicateConverter {
         LogicalType columnType = columnTypes.get(idx);
         switch (leaf.getOperator()) {
             case EQUALS:
-                return new Equal(idx, toLiteral(columnType, leaf.getLiteral()));
+                return PredicateBuilder.equal(idx, toLiteral(columnType, leaf.getLiteral()));
             case LESS_THAN:
-                return new LessThan(idx, toLiteral(columnType, leaf.getLiteral()));
+                return PredicateBuilder.lessThan(idx, toLiteral(columnType, leaf.getLiteral()));
             case LESS_THAN_EQUALS:
-                return new LessOrEqual(idx, toLiteral(columnType, leaf.getLiteral()));
+                return PredicateBuilder.lessOrEqual(idx, toLiteral(columnType, leaf.getLiteral()));
             case IN:
                 return PredicateBuilder.in(
                         idx,
@@ -130,7 +126,7 @@ public class SearchArgumentToPredicateConverter {
                         toLiteral(columnType, literalList.get(0)),
                         toLiteral(columnType, literalList.get(1)));
             case IS_NULL:
-                return new IsNull(idx);
+                return PredicateBuilder.isNull(idx);
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported operator " + leaf.getOperator());

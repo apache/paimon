@@ -20,49 +20,27 @@ package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.file.stats.FieldStats;
 
-import java.util.Objects;
 import java.util.Optional;
 
-/** A {@link Predicate} to eval is not null. */
-public class IsNotNull implements Predicate {
+/** A {@link LeafPredicate.Function} to eval is not null. */
+public class IsNotNull implements LeafPredicate.Function {
 
-    private static final long serialVersionUID = 1L;
+    public static final IsNotNull INSTANCE = new IsNotNull();
 
-    private final int index;
-
-    public IsNotNull(int index) {
-        this.index = index;
-    }
+    private IsNotNull() {}
 
     @Override
-    public boolean test(Object[] values) {
+    public boolean test(Object[] values, int index, Literal literal) {
         return values[index] != null;
     }
 
     @Override
-    public boolean test(long rowCount, FieldStats[] fieldStats) {
+    public boolean test(long rowCount, FieldStats[] fieldStats, int index, Literal literal) {
         return fieldStats[index].nullCount() < rowCount;
     }
 
     @Override
-    public Optional<Predicate> negate() {
-        return Optional.of(new IsNull(index));
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (!(o instanceof IsNotNull)) {
-            return false;
-        }
-        IsNotNull isNotNull = (IsNotNull) o;
-        return index == isNotNull.index;
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(index);
+    public Optional<Predicate> negate(int index, Literal literal) {
+        return Optional.of(new LeafPredicate(IsNull.INSTANCE, index, literal));
     }
 }

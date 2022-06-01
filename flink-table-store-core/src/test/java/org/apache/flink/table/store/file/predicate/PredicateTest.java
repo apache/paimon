@@ -82,7 +82,9 @@ public class PredicateTest {
                 .isEqualTo(false);
 
         assertThat(predicate.negate().orElse(null))
-                .isEqualTo(new NotEqual(0, new Literal(DataTypes.INT().getLogicalType(), 5)));
+                .isEqualTo(
+                        PredicateBuilder.notEqual(
+                                0, new Literal(DataTypes.INT().getLogicalType(), 5)));
     }
 
     @Test
@@ -103,7 +105,9 @@ public class PredicateTest {
                 .isEqualTo(false);
 
         assertThat(predicate.negate().orElse(null))
-                .isEqualTo(new Equal(0, new Literal(DataTypes.INT().getLogicalType(), 5)));
+                .isEqualTo(
+                        PredicateBuilder.equal(
+                                0, new Literal(DataTypes.INT().getLogicalType(), 5)));
     }
 
     @Test
@@ -128,7 +132,9 @@ public class PredicateTest {
                 .isEqualTo(false);
 
         assertThat(predicate.negate().orElse(null))
-                .isEqualTo(new LessOrEqual(0, new Literal(DataTypes.INT().getLogicalType(), 5)));
+                .isEqualTo(
+                        PredicateBuilder.lessOrEqual(
+                                0, new Literal(DataTypes.INT().getLogicalType(), 5)));
     }
 
     @Test
@@ -153,7 +159,9 @@ public class PredicateTest {
                 .isEqualTo(false);
 
         assertThat(predicate.negate().orElse(null))
-                .isEqualTo(new LessThan(0, new Literal(DataTypes.INT().getLogicalType(), 5)));
+                .isEqualTo(
+                        PredicateBuilder.lessThan(
+                                0, new Literal(DataTypes.INT().getLogicalType(), 5)));
     }
 
     @Test
@@ -174,7 +182,9 @@ public class PredicateTest {
                 .isEqualTo(false);
 
         assertThat(predicate.negate().orElse(null))
-                .isEqualTo(new GreaterOrEqual(0, new Literal(DataTypes.INT().getLogicalType(), 5)));
+                .isEqualTo(
+                        PredicateBuilder.greaterOrEqual(
+                                0, new Literal(DataTypes.INT().getLogicalType(), 5)));
     }
 
     @Test
@@ -198,7 +208,9 @@ public class PredicateTest {
                 .isEqualTo(false);
 
         assertThat(predicate.negate().orElse(null))
-                .isEqualTo(new GreaterThan(0, new Literal(DataTypes.INT().getLogicalType(), 5)));
+                .isEqualTo(
+                        PredicateBuilder.greaterThan(
+                                0, new Literal(DataTypes.INT().getLogicalType(), 5)));
     }
 
     @Test
@@ -216,7 +228,7 @@ public class PredicateTest {
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(6, 7, 0)})).isEqualTo(false);
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(5, 7, 1)})).isEqualTo(true);
 
-        assertThat(predicate.negate().orElse(null)).isEqualTo(new IsNotNull(0));
+        assertThat(predicate.negate().orElse(null)).isEqualTo(PredicateBuilder.isNotNull(0));
     }
 
     @Test
@@ -236,7 +248,7 @@ public class PredicateTest {
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(null, null, 3)}))
                 .isEqualTo(false);
 
-        assertThat(predicate.negate().orElse(null)).isEqualTo(new IsNull(0));
+        assertThat(predicate.negate().orElse(null)).isEqualTo(PredicateBuilder.isNull(0));
     }
 
     @Test
@@ -283,9 +295,11 @@ public class PredicateTest {
 
         assertThat(predicate.negate().orElse(null))
                 .isEqualTo(
-                        new Or(
-                                new NotEqual(0, new Literal(DataTypes.INT().getLogicalType(), 3)),
-                                new NotEqual(1, new Literal(DataTypes.INT().getLogicalType(), 5))));
+                        PredicateBuilder.or(
+                                PredicateBuilder.notEqual(
+                                        0, new Literal(DataTypes.INT().getLogicalType(), 3)),
+                                PredicateBuilder.notEqual(
+                                        1, new Literal(DataTypes.INT().getLogicalType(), 5))));
     }
 
     @Test
@@ -332,9 +346,11 @@ public class PredicateTest {
 
         assertThat(predicate.negate().orElse(null))
                 .isEqualTo(
-                        new And(
-                                new NotEqual(0, new Literal(DataTypes.INT().getLogicalType(), 3)),
-                                new NotEqual(1, new Literal(DataTypes.INT().getLogicalType(), 5))));
+                        PredicateBuilder.and(
+                                PredicateBuilder.notEqual(
+                                        0, new Literal(DataTypes.INT().getLogicalType(), 3)),
+                                PredicateBuilder.notEqual(
+                                        1, new Literal(DataTypes.INT().getLogicalType(), 5))));
     }
 
     @MethodSource("provideLikeExpressions")
