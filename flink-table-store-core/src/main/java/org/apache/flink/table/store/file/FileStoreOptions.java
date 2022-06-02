@@ -129,6 +129,18 @@ public class FileStoreOptions implements Serializable {
                                             formatEnumOption(MergeEngine.PARTIAL_UPDATE))
                                     .build());
 
+    public static final ConfigOption<WriteMode> WRITE_MODE =
+            ConfigOptions.key("write-mode")
+                    .enumType(WriteMode.class)
+                    .defaultValue(WriteMode.CHANGE_LOG)
+                    .withDescription(
+                            Description.builder()
+                                    .text("Specify the write mode for table.")
+                                    .linebreak()
+                                    .list(formatEnumOption(WriteMode.APPEND_ONLY))
+                                    .list(formatEnumOption(WriteMode.CHANGE_LOG))
+                                    .build());
+
     private final Configuration options;
 
     public static Set<ConfigOption<?>> allOptions() {

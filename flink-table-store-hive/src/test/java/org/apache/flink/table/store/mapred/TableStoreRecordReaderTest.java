@@ -28,10 +28,7 @@ import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.FileStoreTestHelper;
 import org.apache.flink.table.store.RowDataContainer;
 import org.apache.flink.table.store.file.FileStoreOptions;
-import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -39,6 +36,7 @@ import org.apache.flink.table.types.logical.RowType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -59,17 +57,14 @@ public class TableStoreRecordReaderTest {
         FileStoreTestHelper helper =
                 new FileStoreTestHelper(
                         conf,
-                        RowType.of(),
-                        RowType.of(
-                                new LogicalType[] {DataTypes.BIGINT().getLogicalType()},
-                                new String[] {"_KEY_a"}),
                         RowType.of(
                                 new LogicalType[] {
                                     DataTypes.BIGINT().getLogicalType(),
                                     DataTypes.STRING().getLogicalType()
                                 },
                                 new String[] {"a", "b"}),
-                        new DeduplicateMergeFunction(),
+                        Collections.emptyList(),
+                        Collections.singletonList("a"),
                         (k, v) -> BinaryRowDataUtil.EMPTY_ROW,
                         k -> 0);
 
@@ -95,8 +90,8 @@ public class TableStoreRecordReaderTest {
                 GenericRowData.of(2L, StringData.fromString("Hello")));
         helper.commit();
 
-        Tuple2<RecordReader<KeyValue>, Long> tuple = helper.read(BinaryRowDataUtil.EMPTY_ROW, 0);
-        TableStoreRecordReader reader = new TableStoreRecordReader(tuple.f0, false, tuple.f1);
+        Tuple2<RecordReader<RowData>, Long> tuple = helper.read(BinaryRowDataUtil.EMPTY_ROW, 0);
+        TableStoreRecordReader reader = new TableStoreRecordReader(tuple.f0, tuple.f1);
         RowDataContainer container = reader.createValue();
         Set<String> actual = new HashSet<>();
         while (reader.next(null, container)) {
@@ -119,17 +114,14 @@ public class TableStoreRecordReaderTest {
         FileStoreTestHelper helper =
                 new FileStoreTestHelper(
                         conf,
-                        RowType.of(),
                         RowType.of(
                                 new LogicalType[] {
                                     DataTypes.INT().getLogicalType(),
                                     DataTypes.STRING().getLogicalType()
                                 },
-                                new String[] {"_KEY_a", "_KEY_b"}),
-                        RowType.of(
-                                new LogicalType[] {DataTypes.BIGINT().getLogicalType()},
-                                new String[] {"_VALUE_COUNT"}),
-                        new ValueCountMergeFunction(),
+                                new String[] {"a", "b"}),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
                         (k, v) -> BinaryRowDataUtil.EMPTY_ROW,
                         k -> 0);
 
@@ -159,8 +151,8 @@ public class TableStoreRecordReaderTest {
                 GenericRowData.of(1L));
         helper.commit();
 
-        Tuple2<RecordReader<KeyValue>, Long> tuple = helper.read(BinaryRowDataUtil.EMPTY_ROW, 0);
-        TableStoreRecordReader reader = new TableStoreRecordReader(tuple.f0, true, tuple.f1);
+        Tuple2<RecordReader<RowData>, Long> tuple = helper.read(BinaryRowDataUtil.EMPTY_ROW, 0);
+        TableStoreRecordReader reader = new TableStoreRecordReader(tuple.f0, tuple.f1);
         RowDataContainer container = reader.createValue();
         Map<String, Integer> actual = new HashMap<>();
         while (reader.next(null, container)) {

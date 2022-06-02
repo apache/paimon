@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.file;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.generated.GeneratedRecordComparator;
@@ -49,7 +48,6 @@ import java.util.stream.Collectors;
 /** File store implementation. */
 public class FileStoreImpl implements FileStore {
 
-    private final String tablePath;
     private final long schemaId;
     private final WriteMode writeMode;
     private final FileStoreOptions options;
@@ -61,7 +59,6 @@ public class FileStoreImpl implements FileStore {
     private final GeneratedRecordComparator genRecordComparator;
 
     public FileStoreImpl(
-            String tablePath,
             long schemaId,
             FileStoreOptions options,
             WriteMode writeMode,
@@ -70,7 +67,6 @@ public class FileStoreImpl implements FileStore {
             RowType keyType,
             RowType valueType,
             @Nullable MergeFunction mergeFunction) {
-        this.tablePath = tablePath;
         this.schemaId = schemaId;
         this.options = options;
         this.writeMode = writeMode;
@@ -86,7 +82,7 @@ public class FileStoreImpl implements FileStore {
 
     public FileStorePathFactory pathFactory() {
         return new FileStorePathFactory(
-                new Path(tablePath), partitionType, options.partitionDefaultName());
+                options.path(), partitionType, options.partitionDefaultName());
     }
 
     @VisibleForTesting
@@ -187,14 +183,12 @@ public class FileStoreImpl implements FileStore {
     }
 
     public static FileStoreImpl createWithAppendOnly(
-            String tablePath,
             long schemaId,
             FileStoreOptions options,
             String user,
             RowType partitionType,
             RowType rowType) {
         return new FileStoreImpl(
-                tablePath,
                 schemaId,
                 options,
                 WriteMode.APPEND_ONLY,
@@ -206,7 +200,6 @@ public class FileStoreImpl implements FileStore {
     }
 
     public static FileStoreImpl createWithPrimaryKey(
-            String tablePath,
             long schemaId,
             FileStoreOptions options,
             String user,
@@ -244,7 +237,6 @@ public class FileStoreImpl implements FileStore {
         }
 
         return new FileStoreImpl(
-                tablePath,
                 schemaId,
                 options,
                 WriteMode.CHANGE_LOG,
@@ -256,7 +248,6 @@ public class FileStoreImpl implements FileStore {
     }
 
     public static FileStoreImpl createWithValueCount(
-            String tablePath,
             long schemaId,
             FileStoreOptions options,
             String user,
@@ -267,7 +258,6 @@ public class FileStoreImpl implements FileStore {
                         new LogicalType[] {new BigIntType(false)}, new String[] {"_VALUE_COUNT"});
         MergeFunction mergeFunction = new ValueCountMergeFunction();
         return new FileStoreImpl(
-                tablePath,
                 schemaId,
                 options,
                 WriteMode.CHANGE_LOG,

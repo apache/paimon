@@ -24,6 +24,7 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.SerializationUtils;
+import org.apache.flink.table.store.table.TableScan;
 
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.mapred.FileSplit;
@@ -61,6 +62,11 @@ public class TableStoreInputSplit extends FileSplit {
         this.files = files;
 
         this.bucketPath = bucketPath;
+    }
+
+    public static TableStoreInputSplit create(TableScan.Split split) {
+        return new TableStoreInputSplit(
+                split.partition, split.bucket, split.files, split.bucketPath.toString());
     }
 
     public BinaryRowData partition() {
