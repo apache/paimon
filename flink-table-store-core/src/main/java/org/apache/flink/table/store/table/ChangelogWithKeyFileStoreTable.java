@@ -29,6 +29,7 @@ import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunct
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
+import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -45,14 +46,10 @@ import java.util.stream.Collectors;
 public class ChangelogWithKeyFileStoreTable implements FileStoreTable {
 
     private final Schema schema;
-    private final boolean isStreaming;
     private final FileStoreImpl store;
 
-    ChangelogWithKeyFileStoreTable(
-            Schema schema, boolean isStreaming, Configuration conf, String user) {
+    ChangelogWithKeyFileStoreTable(Schema schema, Configuration conf, String user) {
         this.schema = schema;
-        this.isStreaming = isStreaming;
-
         RowType rowType = schema.logicalRowType();
 
         // add _KEY_ prefix to avoid conflict with value
@@ -98,8 +95,13 @@ public class ChangelogWithKeyFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public TableScan newScan() {
-        return new TableScan(store.newScan(), schema, store.pathFactory()) {
+    public TableScan newScan(boolean isStreaming) {
+        FileStoreScan scan = store.newScan();
+        if (isStreaming) {
+            scan.withIncremental(true);
+        }
+
+        return new TableScan(scan, schema, store.pathFactory()) {
             @Override
             protected void withNonPartitionFilter(Predicate predicate) {
                 scan.withValueFilter(predicate);
@@ -108,7 +110,7 @@ public class ChangelogWithKeyFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public TableRead newRead() {
+    public TableRead newRead(boolean isStreaming) {
         FileStoreRead read = store.newRead();
         if (isStreaming) {
             read.withDropDelete(false);

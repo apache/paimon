@@ -75,7 +75,7 @@ public class FileStoreTestHelper {
                         .commitNewVersion(
                                 new UpdateSchema(
                                         rowType, partitionKeys, primaryKeys, new HashMap<>(), ""));
-        this.table = FileStoreTable.create(schema, false, conf, "user");
+        this.table = FileStoreTable.create(schema, conf, "user");
         this.store = table.fileStore();
         this.partitionCalculator = partitionCalculator;
         this.bucketCalculator = bucketCalculator;
@@ -123,10 +123,10 @@ public class FileStoreTestHelper {
 
     public Tuple2<RecordReader<RowData>, Long> read(BinaryRowData partition, int bucket)
             throws Exception {
-        for (TableScan.Split split : table.newScan().plan().splits) {
+        for (TableScan.Split split : table.newScan(false).plan().splits) {
             if (split.partition.equals(partition) && split.bucket == bucket) {
                 return Tuple2.of(
-                        table.newRead().createReader(partition, bucket, split.files),
+                        table.newRead(false).createReader(partition, bucket, split.files),
                         split.files.stream().mapToLong(DataFileMeta::fileSize).sum());
             }
         }

@@ -55,11 +55,6 @@ public abstract class TableScan {
         return this;
     }
 
-    public TableScan withIncremental(boolean isIncremental) {
-        scan.withIncremental(isIncremental);
-        return this;
-    }
-
     public TableScan withFilter(Predicate predicate) {
         List<Predicate> partitionFilters = new ArrayList<>();
         List<Predicate> nonPartitionFilters = new ArrayList<>();

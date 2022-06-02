@@ -52,7 +52,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
     @Override
     public InputSplit[] getSplits(JobConf jobConf, int numSplits) throws IOException {
         FileStoreTable table = createFileStoreTable(jobConf);
-        TableScan scan = table.newScan();
+        TableScan scan = table.newScan(false);
         createPredicate(jobConf).ifPresent(scan::withFilter);
         return scan.plan().splits.stream()
                 .map(TableStoreInputSplit::create)
@@ -66,7 +66,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
         TableStoreInputSplit split = (TableStoreInputSplit) inputSplit;
         long splitLength = split.getLength();
         return new TableStoreRecordReader(
-                table.newRead().createReader(split.partition(), split.bucket(), split.files()),
+                table.newRead(false).createReader(split.partition(), split.bucket(), split.files()),
                 splitLength);
     }
 
@@ -85,7 +85,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
                                                         + ". Please create table first."));
         Configuration conf = new Configuration();
         wrapper.updateFileStoreOptions(conf);
-        return FileStoreTable.create(schema, false, conf, wrapper.getFileStoreUser());
+        return FileStoreTable.create(schema, conf, wrapper.getFileStoreUser());
     }
 
     private Optional<Predicate> createPredicate(JobConf jobConf) {

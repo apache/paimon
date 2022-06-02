@@ -33,23 +33,22 @@ import org.apache.flink.table.store.table.source.TableScan;
  */
 public interface FileStoreTable {
 
-    TableScan newScan();
+    TableScan newScan(boolean isStreaming);
 
-    TableRead newRead();
+    TableRead newRead(boolean isStreaming);
 
     // TODO remove this once TableWrite is introduced
     @VisibleForTesting
     FileStore fileStore();
 
-    static FileStoreTable create(
-            Schema schema, boolean isStreaming, Configuration conf, String user) {
+    static FileStoreTable create(Schema schema, Configuration conf, String user) {
         if (conf.get(FileStoreOptions.WRITE_MODE) == WriteMode.APPEND_ONLY) {
-            return new AppendOnlyFileStoreTable(schema, isStreaming, conf, user);
+            return new AppendOnlyFileStoreTable(schema, conf, user);
         } else {
             if (schema.primaryKeys().isEmpty()) {
-                return new ChangelogValueCountFileStoreTable(schema, isStreaming, conf, user);
+                return new ChangelogValueCountFileStoreTable(schema, conf, user);
             } else {
-                return new ChangelogWithKeyFileStoreTable(schema, isStreaming, conf, user);
+                return new ChangelogWithKeyFileStoreTable(schema, conf, user);
             }
         }
     }
