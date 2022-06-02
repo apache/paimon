@@ -16,51 +16,46 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.table;
+package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.utils.ProjectedRowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.types.RowKind;
 
-import javax.annotation.Nullable;
-
 import java.util.Iterator;
 
-/**
- * An {@link Iterator} mapping a {@link KeyValue} to several {@link RowData} according to its key.
- * These {@link RowData}s are the same. The number of rows depends on the value of {@link KeyValue}.
- */
-public class ValueCountRowDataIterator implements Iterator<RowData> {
+/** An {@link Iterator} mapping a {@link KeyValue} to its value. */
+public class ValueContentRowDataIterator implements Iterator<RowData> {
 
     private final RowData rowData;
-    private long count;
+    private boolean hasNext;
 
-    public ValueCountRowDataIterator(KeyValue kv, @Nullable int[][] projection) {
-        if (projection == null) {
-            rowData = kv.key();
-        } else {
-            rowData = ProjectedRowData.from(projection).replaceRow(kv.key());
-        }
-        long value = kv.value().getLong(0);
+    public ValueContentRowDataIterator(KeyValue kv) {
+        rowData = kv.value();
         // kv.value() is reused, so we need to set row kind each time
-        if (value > 0) {
-            rowData.setRowKind(RowKind.INSERT);
-        } else {
-            rowData.setRowKind(RowKind.DELETE);
+        switch (kv.valueKind()) {
+            case ADD:
+                rowData.setRowKind(RowKind.INSERT);
+                break;
+            case DELETE:
+                rowData.setRowKind(RowKind.DELETE);
+                break;
+            default:
+                throw new UnsupportedOperationException(
+                        "Unknown value kind " + kv.valueKind().name());
         }
-        count = Math.abs(value);
+        hasNext = true;
     }
 
     @Override
     public boolean hasNext() {
-        return count > 0;
+        return hasNext;
     }
 
     @Override
     public RowData next() {
-        if (count > 0) {
-            count--;
+        if (hasNext) {
+            hasNext = false;
             return rowData;
         } else {
             return null;
