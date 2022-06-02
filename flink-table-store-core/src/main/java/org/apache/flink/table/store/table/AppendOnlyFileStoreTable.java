@@ -25,16 +25,14 @@ import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
-import org.apache.flink.table.store.table.source.ValueContentRowDataIterator;
+import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
 import org.apache.flink.table.types.logical.RowType;
-
-import java.util.Iterator;
 
 /** {@link FileStoreTable} for {@link WriteMode#APPEND_ONLY} write mode. */
 public class AppendOnlyFileStoreTable implements FileStoreTable {
@@ -57,12 +55,8 @@ public class AppendOnlyFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public TableScan newScan(boolean isStreaming) {
-        FileStoreScan scan = store.newScan();
-        if (isStreaming) {
-            scan.withIncremental(true);
-        }
-
+    public TableScan newScan(boolean incremental) {
+        FileStoreScan scan = store.newScan().withIncremental(incremental);
         return new TableScan(scan, schema, store.pathFactory()) {
             @Override
             protected void withNonPartitionFilter(Predicate predicate) {
@@ -72,21 +66,18 @@ public class AppendOnlyFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public TableRead newRead(boolean isStreaming) {
-        FileStoreRead read = store.newRead();
-        if (isStreaming) {
-            read.withDropDelete(false);
-        }
-
-        return new TableRead(read) {
+    public TableRead newRead(boolean incremental) {
+        return new TableRead(store.newRead()) {
             @Override
-            protected void withProjectionImpl(int[][] projection) {
+            public TableRead withProjection(int[][] projection) {
                 read.withValueProjection(projection);
+                return this;
             }
 
             @Override
-            protected Iterator<RowData> rowDataIteratorFromKv(KeyValue kv) {
-                return new ValueContentRowDataIterator(kv);
+            protected RecordReader.RecordIterator<RowData> rowDataRecordIteratorFromKv(
+                    RecordReader.RecordIterator<KeyValue> kvRecordIterator) {
+                return new ValueContentRowDataRecordIterator(kvRecordIterator);
             }
         };
     }

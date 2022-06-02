@@ -28,7 +28,6 @@ import org.apache.flink.table.store.file.utils.RecordReader;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Iterator;
 import java.util.List;
 
 /** An abstraction layer above {@link FileStoreRead} to provide reading of {@link RowData}. */
@@ -40,19 +39,15 @@ public abstract class TableRead {
         this.read = read;
     }
 
-    public TableRead withProjection(int[][] projection) {
-        withProjectionImpl(projection);
-        return this;
-    }
-
-    protected abstract void withProjectionImpl(int[][] projection);
+    public abstract TableRead withProjection(int[][] projection);
 
     public RecordReader<RowData> createReader(
             BinaryRowData partition, int bucket, List<DataFileMeta> files) throws IOException {
         return new RowDataRecordReader(read.createReader(partition, bucket, files));
     }
 
-    protected abstract Iterator<RowData> rowDataIteratorFromKv(KeyValue kv);
+    protected abstract RecordReader.RecordIterator<RowData> rowDataRecordIteratorFromKv(
+            RecordReader.RecordIterator<KeyValue> kvRecordIterator);
 
     private class RowDataRecordReader implements RecordReader<RowData> {
 
@@ -66,42 +61,12 @@ public abstract class TableRead {
         @Override
         public RecordIterator<RowData> readBatch() throws IOException {
             RecordIterator<KeyValue> batch = wrapped.readBatch();
-            return batch == null ? null : new RowDataRecordIterator(batch);
+            return batch == null ? null : rowDataRecordIteratorFromKv(batch);
         }
 
         @Override
         public void close() throws IOException {
             wrapped.close();
-        }
-    }
-
-    private class RowDataRecordIterator implements RecordReader.RecordIterator<RowData> {
-
-        private final RecordReader.RecordIterator<KeyValue> wrapped;
-        private Iterator<RowData> iterator;
-
-        private RowDataRecordIterator(RecordReader.RecordIterator<KeyValue> wrapped) {
-            this.wrapped = wrapped;
-            this.iterator = null;
-        }
-
-        @Override
-        public RowData next() throws IOException {
-            while (true) {
-                if (iterator != null && iterator.hasNext()) {
-                    return iterator.next();
-                }
-                KeyValue kv = wrapped.next();
-                if (kv == null) {
-                    return null;
-                }
-                iterator = rowDataIteratorFromKv(kv);
-            }
-        }
-
-        @Override
-        public void releaseBatch() {
-            wrapped.releaseBatch();
         }
     }
 }

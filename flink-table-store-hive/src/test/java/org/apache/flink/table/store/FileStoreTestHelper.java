@@ -32,13 +32,13 @@ import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
-import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.source.TableScan;
+import org.apache.flink.table.store.table.FileStoreTableFactory;
+import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.Collections;
@@ -70,12 +70,10 @@ public class FileStoreTestHelper {
             Function<RowData, Integer> bucketCalculator)
             throws Exception {
         Path tablePath = FileStoreOptions.path(conf);
-        Schema schema =
-                new SchemaManager(tablePath)
-                        .commitNewVersion(
-                                new UpdateSchema(
-                                        rowType, partitionKeys, primaryKeys, new HashMap<>(), ""));
-        this.table = FileStoreTable.create(schema, conf, "user");
+        new SchemaManager(tablePath)
+                .commitNewVersion(
+                        new UpdateSchema(rowType, partitionKeys, primaryKeys, new HashMap<>(), ""));
+        this.table = FileStoreTableFactory.create(conf, "user");
         this.store = table.fileStore();
         this.partitionCalculator = partitionCalculator;
         this.bucketCalculator = bucketCalculator;
@@ -123,11 +121,11 @@ public class FileStoreTestHelper {
 
     public Tuple2<RecordReader<RowData>, Long> read(BinaryRowData partition, int bucket)
             throws Exception {
-        for (TableScan.Split split : table.newScan(false).plan().splits) {
-            if (split.partition.equals(partition) && split.bucket == bucket) {
+        for (Split split : table.newScan(false).plan().splits) {
+            if (split.partition().equals(partition) && split.bucket() == bucket) {
                 return Tuple2.of(
-                        table.newRead(false).createReader(partition, bucket, split.files),
-                        split.files.stream().mapToLong(DataFileMeta::fileSize).sum());
+                        table.newRead(false).createReader(partition, bucket, split.files()),
+                        split.files().stream().mapToLong(DataFileMeta::fileSize).sum());
             }
         }
         throw new IllegalArgumentException(

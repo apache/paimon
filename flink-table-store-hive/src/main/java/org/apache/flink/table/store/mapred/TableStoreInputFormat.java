@@ -19,14 +19,12 @@
 package org.apache.flink.table.store.mapred;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.RowDataContainer;
 import org.apache.flink.table.store.SearchArgumentToPredicateConverter;
 import org.apache.flink.table.store.TableStoreJobConf;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.schema.Schema;
-import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.source.TableScan;
 
 import org.apache.hadoop.hive.ql.exec.SerializationUtilities;
@@ -72,20 +70,9 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
 
     private FileStoreTable createFileStoreTable(JobConf jobConf) {
         TableStoreJobConf wrapper = new TableStoreJobConf(jobConf);
-
-        String tableLocation = wrapper.getLocation();
-        Schema schema =
-                new SchemaManager(new Path(tableLocation))
-                        .latest()
-                        .orElseThrow(
-                                () ->
-                                        new IllegalArgumentException(
-                                                "Schema file not found in location "
-                                                        + tableLocation
-                                                        + ". Please create table first."));
         Configuration conf = new Configuration();
         wrapper.updateFileStoreOptions(conf);
-        return FileStoreTable.create(schema, conf, wrapper.getFileStoreUser());
+        return FileStoreTableFactory.create(conf, wrapper.getFileStoreUser());
     }
 
     private Optional<Predicate> createPredicate(JobConf jobConf) {

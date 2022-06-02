@@ -16,24 +16,19 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.table;
+package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.table.store.file.FileStore;
-import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.table.source.TableScan;
+import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.data.DataFileMeta;
+
+import java.util.List;
+import java.util.Map;
 
 /**
- * An abstraction layer above {@link org.apache.flink.table.store.file.FileStore} to provide reading
- * and writing of {@link org.apache.flink.table.data.RowData}.
+ * Generate {@link Split}s from a map with partition and bucket as keys and {@link DataFileMeta}s as
+ * values.
  */
-public interface FileStoreTable {
+public interface SplitGenerator {
 
-    TableScan newScan(boolean incremental);
-
-    TableRead newRead(boolean incremental);
-
-    // TODO remove this once TableWrite is introduced
-    @VisibleForTesting
-    FileStore fileStore();
+    List<Split> generate(Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupedDataFileMetas);
 }

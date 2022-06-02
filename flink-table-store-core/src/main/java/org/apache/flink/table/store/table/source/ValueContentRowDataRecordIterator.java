@@ -20,18 +20,28 @@ package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.types.RowKind;
 
-import java.util.Iterator;
+import java.io.IOException;
 
-/** An {@link Iterator} mapping a {@link KeyValue} to its value. */
-public class ValueContentRowDataIterator implements Iterator<RowData> {
+/** A {@link RecordReader.RecordIterator} mapping a {@link KeyValue} to its value. */
+public class ValueContentRowDataRecordIterator implements RecordReader.RecordIterator<RowData> {
 
-    private final RowData rowData;
-    private boolean hasNext;
+    private final RecordReader.RecordIterator<KeyValue> kvIterator;
 
-    public ValueContentRowDataIterator(KeyValue kv) {
-        rowData = kv.value();
+    public ValueContentRowDataRecordIterator(RecordReader.RecordIterator<KeyValue> kvIterator) {
+        this.kvIterator = kvIterator;
+    }
+
+    @Override
+    public RowData next() throws IOException {
+        KeyValue kv = kvIterator.next();
+        if (kv == null) {
+            return null;
+        }
+
+        RowData rowData = kv.value();
         // kv.value() is reused, so we need to set row kind each time
         switch (kv.valueKind()) {
             case ADD:
@@ -44,21 +54,11 @@ public class ValueContentRowDataIterator implements Iterator<RowData> {
                 throw new UnsupportedOperationException(
                         "Unknown value kind " + kv.valueKind().name());
         }
-        hasNext = true;
+        return rowData;
     }
 
     @Override
-    public boolean hasNext() {
-        return hasNext;
-    }
-
-    @Override
-    public RowData next() {
-        if (hasNext) {
-            hasNext = false;
-            return rowData;
-        } else {
-            return null;
-        }
+    public void releaseBatch() {
+        kvIterator.releaseBatch();
     }
 }

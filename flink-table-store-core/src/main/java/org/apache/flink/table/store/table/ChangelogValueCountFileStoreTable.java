@@ -31,14 +31,13 @@ import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
-import org.apache.flink.table.store.table.source.ValueCountRowDataIterator;
+import org.apache.flink.table.store.table.source.ValueCountRowDataRecordIterator;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
-
-import java.util.Iterator;
 
 /** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode without primary keys. */
 public class ChangelogValueCountFileStoreTable implements FileStoreTable {
@@ -65,12 +64,8 @@ public class ChangelogValueCountFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public TableScan newScan(boolean isStreaming) {
-        FileStoreScan scan = store.newScan();
-        if (isStreaming) {
-            scan.withIncremental(true);
-        }
-
+    public TableScan newScan(boolean incremental) {
+        FileStoreScan scan = store.newScan().withIncremental(incremental);
         return new TableScan(scan, schema, store.pathFactory()) {
             @Override
             protected void withNonPartitionFilter(Predicate predicate) {
@@ -80,27 +75,25 @@ public class ChangelogValueCountFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public TableRead newRead(boolean isStreaming) {
-        FileStoreRead read = store.newRead();
-        if (isStreaming) {
-            read.withDropDelete(false);
-        }
-
+    public TableRead newRead(boolean incremental) {
+        FileStoreRead read = store.newRead().withDropDelete(!incremental);
         return new TableRead(read) {
             private int[][] projection = null;
 
             @Override
-            protected void withProjectionImpl(int[][] projection) {
-                if (isStreaming) {
+            public TableRead withProjection(int[][] projection) {
+                if (incremental) {
                     read.withKeyProjection(projection);
                 } else {
                     this.projection = projection;
                 }
+                return this;
             }
 
             @Override
-            protected Iterator<RowData> rowDataIteratorFromKv(KeyValue kv) {
-                return new ValueCountRowDataIterator(kv, projection);
+            protected RecordReader.RecordIterator<RowData> rowDataRecordIteratorFromKv(
+                    RecordReader.RecordIterator<KeyValue> kvRecordIterator) {
+                return new ValueCountRowDataRecordIterator(kvRecordIterator, projection);
             }
         };
     }

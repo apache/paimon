@@ -18,9 +18,6 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.And;
 import org.apache.flink.table.store.file.predicate.CompoundPredicate;
@@ -32,21 +29,18 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 /** An abstraction layer above {@link FileStoreScan} to provide input split generation. */
 public abstract class TableScan {
 
     protected final FileStoreScan scan;
-    private final int[] fieldIdxToPartitionIdx;
+    private final Schema schema;
     private final FileStorePathFactory pathFactory;
 
     protected TableScan(FileStoreScan scan, Schema schema, FileStorePathFactory pathFactory) {
         this.scan = scan;
-        List<String> partitionKeys = schema.partitionKeys();
-        this.fieldIdxToPartitionIdx =
-                schema.fields().stream().mapToInt(f -> partitionKeys.indexOf(f.name())).toArray();
+        this.schema = schema;
         this.pathFactory = pathFactory;
     }
 
@@ -56,10 +50,14 @@ public abstract class TableScan {
     }
 
     public TableScan withFilter(Predicate predicate) {
+        List<String> partitionKeys = schema.partitionKeys();
+        int[] fieldIdxToPartitionIdx =
+                schema.fields().stream().mapToInt(f -> partitionKeys.indexOf(f.name())).toArray();
+
         List<Predicate> partitionFilters = new ArrayList<>();
         List<Predicate> nonPartitionFilters = new ArrayList<>();
         for (Predicate p : PredicateBuilder.splitAnd(predicate)) {
-            Optional<Predicate> mapped = mapToPartitionFilter(p);
+            Optional<Predicate> mapped = mapToPartitionFilter(p, fieldIdxToPartitionIdx);
             if (mapped.isPresent()) {
                 partitionFilters.add(mapped.get());
             } else {
@@ -74,34 +72,20 @@ public abstract class TableScan {
 
     public Plan plan() {
         FileStoreScan.Plan plan = scan.plan();
-        List<Split> splits = new ArrayList<>();
-        for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> entryWithPartition :
-                plan.groupByPartFiles().entrySet()) {
-            BinaryRowData partition = entryWithPartition.getKey();
-            for (Map.Entry<Integer, List<DataFileMeta>> entryWithBucket :
-                    entryWithPartition.getValue().entrySet()) {
-                int bucket = entryWithBucket.getKey();
-                splits.add(
-                        new Split(
-                                partition,
-                                bucket,
-                                entryWithBucket.getValue(),
-                                pathFactory
-                                        .createDataFilePathFactory(partition, bucket)
-                                        .bucketPath()));
-            }
-        }
-        return new Plan(plan.snapshotId(), splits);
+        return new Plan(
+                plan.snapshotId(),
+                new DefaultSplitGenerator(pathFactory).generate(plan.groupByPartFiles()));
     }
 
     protected abstract void withNonPartitionFilter(Predicate predicate);
 
-    private Optional<Predicate> mapToPartitionFilter(Predicate predicate) {
+    private Optional<Predicate> mapToPartitionFilter(
+            Predicate predicate, int[] fieldIdxToPartitionIdx) {
         if (predicate instanceof CompoundPredicate) {
             CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
             List<Predicate> children = new ArrayList<>();
             for (Predicate child : compoundPredicate.children()) {
-                Optional<Predicate> mapped = mapToPartitionFilter(child);
+                Optional<Predicate> mapped = mapToPartitionFilter(child, fieldIdxToPartitionIdx);
                 if (mapped.isPresent()) {
                     children.add(mapped.get());
                 } else {
@@ -130,22 +114,6 @@ public abstract class TableScan {
         private Plan(long snapshotId, List<Split> splits) {
             this.snapshotId = snapshotId;
             this.splits = splits;
-        }
-    }
-
-    /** Input splits. Needed by most batch computation engines. */
-    public static class Split {
-        public final BinaryRowData partition;
-        public final int bucket;
-        public final List<DataFileMeta> files;
-        public final Path bucketPath;
-
-        private Split(
-                BinaryRowData partition, int bucket, List<DataFileMeta> files, Path bucketPath) {
-            this.partition = partition;
-            this.bucket = bucket;
-            this.files = files;
-            this.bucketPath = bucketPath;
         }
     }
 }
