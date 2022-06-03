@@ -33,9 +33,8 @@ import java.io.IOException;
  * according to its key. These {@link RowData}s are the same. The number of rows depends on the
  * value of {@link KeyValue}.
  */
-public class ValueCountRowDataRecordIterator implements RecordReader.RecordIterator<RowData> {
+public class ValueCountRowDataRecordIterator extends ResetRowKindRecordIterator {
 
-    private final RecordReader.RecordIterator<KeyValue> kvIterator;
     private final @Nullable ProjectedRowData projectedRowData;
 
     private RowData rowData;
@@ -43,7 +42,7 @@ public class ValueCountRowDataRecordIterator implements RecordReader.RecordItera
 
     public ValueCountRowDataRecordIterator(
             RecordReader.RecordIterator<KeyValue> kvIterator, @Nullable int[][] projection) {
-        this.kvIterator = kvIterator;
+        super(kvIterator);
         this.projectedRowData = projection == null ? null : ProjectedRowData.from(projection);
 
         this.rowData = null;
@@ -57,30 +56,19 @@ public class ValueCountRowDataRecordIterator implements RecordReader.RecordItera
                 count--;
                 return rowData;
             } else {
-                KeyValue kv = kvIterator.next();
+                KeyValue kv = nextKeyValue();
                 if (kv == null) {
                     return null;
                 }
 
-                if (projectedRowData == null) {
-                    rowData = kv.key();
-                } else {
-                    rowData = projectedRowData.replaceRow(kv.key());
-                }
+                rowData =
+                        projectedRowData == null ? kv.key() : projectedRowData.replaceRow(kv.key());
                 long value = kv.value().getLong(0);
-                // kv.value() is reused, so we need to set row kind each time
-                if (value > 0) {
-                    rowData.setRowKind(RowKind.INSERT);
-                } else {
+                if (value < 0) {
                     rowData.setRowKind(RowKind.DELETE);
                 }
                 count = Math.abs(value);
             }
         }
-    }
-
-    @Override
-    public void releaseBatch() {
-        kvIterator.releaseBatch();
     }
 }

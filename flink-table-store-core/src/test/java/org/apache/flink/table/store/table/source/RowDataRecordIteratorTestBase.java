@@ -23,10 +23,14 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.ReusingTestData;
 import org.apache.flink.table.store.file.utils.TestReusingRecordReader;
+import org.apache.flink.types.RowKind;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link RecordReader.RecordIterator} of {@link RowData}. */
 public abstract class RowDataRecordIteratorTestBase {
@@ -44,8 +48,31 @@ public abstract class RowDataRecordIteratorTestBase {
             if (kvIterator == null) {
                 break;
             }
+
+            RecordReader.RecordIterator<KeyValue> assertKvIterator =
+                    new RecordReader.RecordIterator<KeyValue>() {
+
+                        KeyValue previous;
+
+                        @Override
+                        public KeyValue next() throws IOException {
+                            // check
+                            if (previous != null) {
+                                assertThat(previous.key().getRowKind()).isEqualTo(RowKind.INSERT);
+                                assertThat(previous.value().getRowKind()).isEqualTo(RowKind.INSERT);
+                            }
+                            previous = kvIterator.next();
+                            return previous;
+                        }
+
+                        @Override
+                        public void releaseBatch() {
+                            kvIterator.releaseBatch();
+                        }
+                    };
+
             RecordReader.RecordIterator<RowData> rowDataIterator =
-                    rowDataIteratorSupplier.apply(kvIterator);
+                    rowDataIteratorSupplier.apply(assertKvIterator);
             RowData rowData;
             while (true) {
                 rowData = rowDataIterator.next();
