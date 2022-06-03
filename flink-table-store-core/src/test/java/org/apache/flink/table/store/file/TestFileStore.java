@@ -111,7 +111,6 @@ public class TestFileStore extends FileStoreImpl {
             RowType valueType,
             MergeFunction mergeFunction) {
         super(
-                options.path().toString(),
                 0L,
                 options,
                 WriteMode.CHANGE_LOG,

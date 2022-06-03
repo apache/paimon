@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.util.Preconditions;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -105,5 +106,22 @@ public class PredicateBuilder {
                 Arrays.asList(
                         greaterOrEqual(idx, includedLowerBound),
                         lessOrEqual(idx, includedUpperBound)));
+    }
+
+    public static List<Predicate> splitAnd(Predicate predicate) {
+        List<Predicate> result = new ArrayList<>();
+        splitAnd(predicate, result);
+        return result;
+    }
+
+    private static void splitAnd(Predicate predicate, List<Predicate> result) {
+        if (predicate instanceof CompoundPredicate
+                && ((CompoundPredicate) predicate).function().equals(And.INSTANCE)) {
+            for (Predicate child : ((CompoundPredicate) predicate).children()) {
+                splitAnd(child, result);
+            }
+        } else {
+            result.add(predicate);
+        }
     }
 }

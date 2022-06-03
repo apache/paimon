@@ -180,7 +180,6 @@ public class TableStore {
         FileStoreOptions fileStoreOptions = new FileStoreOptions(options);
 
         return FileStoreImpl.createWithAppendOnly(
-                fileStoreOptions.path().toString(),
                 schema.id(),
                 fileStoreOptions,
                 user,
@@ -195,15 +194,9 @@ public class TableStore {
 
         if (trimmedPrimaryKeys.length == 0) {
             return FileStoreImpl.createWithValueCount(
-                    fileStoreOptions.path().toString(),
-                    schema.id(),
-                    fileStoreOptions,
-                    user,
-                    partitionType,
-                    type);
+                    schema.id(), fileStoreOptions, user, partitionType, type);
         } else {
             return FileStoreImpl.createWithPrimaryKey(
-                    fileStoreOptions.path().toString(),
                     schema.id(),
                     fileStoreOptions,
                     user,
@@ -215,7 +208,7 @@ public class TableStore {
     }
 
     private FileStore buildFileStore() {
-        WriteMode writeMode = options.get(TableStoreFactoryOptions.WRITE_MODE);
+        WriteMode writeMode = options.get(FileStoreOptions.WRITE_MODE);
 
         switch (writeMode) {
             case CHANGE_LOG:
@@ -320,7 +313,7 @@ public class TableStore {
         }
 
         private Source<RowData, ?, ?> buildSource() {
-            WriteMode writeMode = options.get(TableStoreFactoryOptions.WRITE_MODE);
+            WriteMode writeMode = options.get(FileStoreOptions.WRITE_MODE);
             if (isContinuous) {
                 if (schema.primaryKeys().size() > 0 && mergeEngine() == PARTIAL_UPDATE) {
                     throw new ValidationException(
@@ -411,7 +404,7 @@ public class TableStore {
         public DataStreamSink<?> build() {
             FileStore fileStore = buildFileStore();
             int numBucket = options.get(BUCKET);
-            WriteMode writeMode = options.get(TableStoreFactoryOptions.WRITE_MODE);
+            WriteMode writeMode = options.get(FileStoreOptions.WRITE_MODE);
 
             BucketStreamPartitioner partitioner =
                     new BucketStreamPartitioner(

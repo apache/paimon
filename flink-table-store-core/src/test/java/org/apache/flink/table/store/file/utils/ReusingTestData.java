@@ -33,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * A simple test data structure which is mainly used for testing if other components handle reuse of
- * {@link KeyValue} correctly. Use along with {@link ReusingTestData}.
+ * {@link KeyValue} correctly. Use along with {@link ReusingKeyValue}.
  */
 public class ReusingTestData implements Comparable<ReusingTestData> {
 

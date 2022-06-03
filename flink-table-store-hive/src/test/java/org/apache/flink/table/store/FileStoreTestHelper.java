@@ -20,23 +20,25 @@ package org.apache.flink.table.store;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.FileStoreOptions;
-import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.WriteMode;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
-import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.mergetree.Increment;
-import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
-import org.apache.flink.table.store.file.operation.FileStoreCommitImpl;
-import org.apache.flink.table.store.file.operation.FileStoreReadImpl;
-import org.apache.flink.table.store.file.operation.FileStoreScanImpl;
-import org.apache.flink.table.store.file.operation.FileStoreWriteImpl;
+import org.apache.flink.table.store.file.operation.FileStoreCommit;
+import org.apache.flink.table.store.file.operation.FileStoreWrite;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.FileStoreTableFactory;
+import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.Collections;
@@ -48,12 +50,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.BiFunction;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 /** Helper class to write and read {@link RowData} with {@link FileStoreImpl}. */
 public class FileStoreTestHelper {
 
-    private final FileStoreImpl store;
+    private final FileStoreTable table;
+    private final FileStore store;
     private final BiFunction<RowData, RowData, BinaryRowData> partitionCalculator;
     private final Function<RowData, Integer> bucketCalculator;
     private final Map<BinaryRowData, Map<Integer, RecordWriter>> writers;
@@ -61,24 +63,18 @@ public class FileStoreTestHelper {
 
     public FileStoreTestHelper(
             Configuration conf,
-            RowType partitionType,
-            RowType keyType,
-            RowType valueType,
-            MergeFunction mergeFunction,
+            RowType rowType,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
             BiFunction<RowData, RowData, BinaryRowData> partitionCalculator,
-            Function<RowData, Integer> bucketCalculator) {
-        FileStoreOptions options = new FileStoreOptions(conf);
-        this.store =
-                new FileStoreImpl(
-                        options.path().toString(),
-                        0,
-                        options,
-                        WriteMode.CHANGE_LOG,
-                        UUID.randomUUID().toString(),
-                        partitionType,
-                        keyType,
-                        valueType,
-                        mergeFunction);
+            Function<RowData, Integer> bucketCalculator)
+            throws Exception {
+        Path tablePath = FileStoreOptions.path(conf);
+        new SchemaManager(tablePath)
+                .commitNewVersion(
+                        new UpdateSchema(rowType, partitionKeys, primaryKeys, new HashMap<>(), ""));
+        this.table = FileStoreTableFactory.create(conf, "user");
+        this.store = table.fileStore();
         this.partitionCalculator = partitionCalculator;
         this.bucketCalculator = bucketCalculator;
         this.writers = new HashMap<>();
@@ -94,7 +90,7 @@ public class FileStoreTestHelper {
                                 bucket,
                                 (b, w) -> {
                                     if (w == null) {
-                                        FileStoreWriteImpl write = store.newWrite();
+                                        FileStoreWrite write = store.newWrite();
                                         return write.createWriter(
                                                 partition, bucket, compactExecutor);
                                     } else {
@@ -119,21 +115,20 @@ public class FileStoreTestHelper {
             }
         }
         writers.clear();
-        FileStoreCommitImpl commit = store.newCommit();
+        FileStoreCommit commit = store.newCommit();
         commit.commit(committable, Collections.emptyMap());
     }
 
-    public Tuple2<RecordReader<KeyValue>, Long> read(BinaryRowData partition, int bucket)
+    public Tuple2<RecordReader<RowData>, Long> read(BinaryRowData partition, int bucket)
             throws Exception {
-        FileStoreScanImpl scan = store.newScan();
-        scan.withPartitionFilter(Collections.singletonList(partition)).withBucket(bucket);
-        List<ManifestEntry> files = scan.plan().files();
-        FileStoreReadImpl read = store.newRead();
-        RecordReader<KeyValue> wrapped =
-                read.createReader(
-                        partition,
-                        bucket,
-                        files.stream().map(ManifestEntry::file).collect(Collectors.toList()));
-        return Tuple2.of(wrapped, files.stream().mapToLong(e -> e.file().fileSize()).sum());
+        for (Split split : table.newScan(false).plan().splits) {
+            if (split.partition().equals(partition) && split.bucket() == bucket) {
+                return Tuple2.of(
+                        table.newRead(false).createReader(partition, bucket, split.files()),
+                        split.files().stream().mapToLong(DataFileMeta::fileSize).sum());
+            }
+        }
+        throw new IllegalArgumentException(
+                "Input split not found for partition " + partition + " and bucket " + bucket);
     }
 }
