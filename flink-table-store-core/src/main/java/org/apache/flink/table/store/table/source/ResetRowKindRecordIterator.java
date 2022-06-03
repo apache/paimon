@@ -20,30 +20,38 @@ package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.types.RowKind;
 
 import java.io.IOException;
 
-/** A {@link RecordReader.RecordIterator} mapping a {@link KeyValue} to its value. */
-public class ValueContentRowDataRecordIterator extends ResetRowKindRecordIterator {
+/**
+ * A {@link RecordReader.RecordIterator} which resets {@link RowKind#INSERT} to previous key value.
+ */
+public abstract class ResetRowKindRecordIterator implements RecordReader.RecordIterator<RowData> {
 
-    public ValueContentRowDataRecordIterator(RecordReader.RecordIterator<KeyValue> kvIterator) {
-        super(kvIterator);
+    private final RecordReader.RecordIterator<KeyValue> kvIterator;
+
+    private KeyValue keyValue;
+
+    public ResetRowKindRecordIterator(RecordReader.RecordIterator<KeyValue> kvIterator) {
+        this.kvIterator = kvIterator;
+    }
+
+    public final KeyValue nextKeyValue() throws IOException {
+        // The RowData is reused in kvIterator, we should set back to insert kind
+        // Failure to do so will result in uncontrollable exceptions
+        if (keyValue != null) {
+            keyValue.key().setRowKind(RowKind.INSERT);
+            keyValue.value().setRowKind(RowKind.INSERT);
+        }
+
+        keyValue = kvIterator.next();
+        return keyValue;
     }
 
     @Override
-    public RowData next() throws IOException {
-        KeyValue kv = nextKeyValue();
-        if (kv == null) {
-            return null;
-        }
-
-        RowData rowData = kv.value();
-        if (kv.valueKind() == ValueKind.DELETE) {
-            rowData.setRowKind(RowKind.DELETE);
-        }
-        return rowData;
+    public final void releaseBatch() {
+        kvIterator.releaseBatch();
     }
 }
