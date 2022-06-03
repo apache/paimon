@@ -28,8 +28,6 @@ import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.FileStoreTestHelper;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -90,13 +88,6 @@ public class TableStoreHiveStorageHandlerITCase {
         FileStoreTestHelper helper =
                 new FileStoreTestHelper(
                         conf,
-                        RowType.of(),
-                        RowType.of(
-                                new LogicalType[] {
-                                    DataTypes.INT().getLogicalType(),
-                                    DataTypes.BIGINT().getLogicalType()
-                                },
-                                new String[] {"_KEY_a", "_KEY_b"}),
                         RowType.of(
                                 new LogicalType[] {
                                     DataTypes.INT().getLogicalType(),
@@ -104,7 +95,8 @@ public class TableStoreHiveStorageHandlerITCase {
                                     DataTypes.STRING().getLogicalType()
                                 },
                                 new String[] {"a", "b", "c"}),
-                        new DeduplicateMergeFunction(),
+                        Collections.emptyList(),
+                        Arrays.asList("a", "b"),
                         (k, v) -> BinaryRowDataUtil.EMPTY_ROW,
                         k -> k.getInt(0) % 2);
 
@@ -166,7 +158,6 @@ public class TableStoreHiveStorageHandlerITCase {
         FileStoreTestHelper helper =
                 new FileStoreTestHelper(
                         conf,
-                        RowType.of(),
                         RowType.of(
                                 new LogicalType[] {
                                     DataTypes.INT().getLogicalType(),
@@ -174,10 +165,8 @@ public class TableStoreHiveStorageHandlerITCase {
                                     DataTypes.STRING().getLogicalType()
                                 },
                                 new String[] {"a", "b", "c"}),
-                        RowType.of(
-                                new LogicalType[] {DataTypes.BIGINT().getLogicalType()},
-                                new String[] {"_VALUE_COUNT"}),
-                        new ValueCountMergeFunction(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
                         (k, v) -> BinaryRowDataUtil.EMPTY_ROW,
                         k -> k.getInt(0) % 2);
 
@@ -238,10 +227,6 @@ public class TableStoreHiveStorageHandlerITCase {
         FileStoreTestHelper helper =
                 new FileStoreTestHelper(
                         conf,
-                        RowType.of(),
-                        RowType.of(
-                                new LogicalType[] {DataTypes.INT().getLogicalType()},
-                                new String[] {"_KEY_f_int"}),
                         RowType.of(
                                 RandomGenericRowDataGenerator.TYPE_INFOS.stream()
                                         .map(
@@ -250,7 +235,8 @@ public class TableStoreHiveStorageHandlerITCase {
                                                                 .getLogicalType())
                                         .toArray(LogicalType[]::new),
                                 RandomGenericRowDataGenerator.FIELD_NAMES.toArray(new String[0])),
-                        new DeduplicateMergeFunction(),
+                        Collections.emptyList(),
+                        Collections.singletonList("f_int"),
                         (k, v) -> BinaryRowDataUtil.EMPTY_ROW,
                         k -> 0);
 
@@ -382,14 +368,11 @@ public class TableStoreHiveStorageHandlerITCase {
         FileStoreTestHelper helper =
                 new FileStoreTestHelper(
                         conf,
-                        RowType.of(),
                         RowType.of(
                                 new LogicalType[] {DataTypes.INT().getLogicalType()},
                                 new String[] {"a"}),
-                        RowType.of(
-                                new LogicalType[] {DataTypes.BIGINT().getLogicalType()},
-                                new String[] {"_VALUE_COUNT"}),
-                        new ValueCountMergeFunction(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
                         (k, v) -> BinaryRowDataUtil.EMPTY_ROW,
                         k -> 0);
 
@@ -474,17 +457,14 @@ public class TableStoreHiveStorageHandlerITCase {
         FileStoreTestHelper helper =
                 new FileStoreTestHelper(
                         conf,
-                        RowType.of(),
                         RowType.of(
                                 new LogicalType[] {
                                     DataTypes.DATE().getLogicalType(),
                                     DataTypes.TIMESTAMP(3).getLogicalType()
                                 },
                                 new String[] {"dt", "ts"}),
-                        RowType.of(
-                                new LogicalType[] {DataTypes.BIGINT().getLogicalType()},
-                                new String[] {"_VALUE_COUNT"}),
-                        new ValueCountMergeFunction(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
                         (k, v) -> BinaryRowDataUtil.EMPTY_ROW,
                         k -> 0);
 

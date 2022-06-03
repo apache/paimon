@@ -84,6 +84,10 @@ public class Schema {
         return fields;
     }
 
+    public List<String> fieldNames() {
+        return fields.stream().map(DataField::name).collect(Collectors.toList());
+    }
+
     public int highestFieldId() {
         return highestFieldId;
     }
@@ -130,6 +134,24 @@ public class Schema {
 
     public RowType logicalRowType() {
         return (RowType) new RowDataType(fields).logicalType;
+    }
+
+    public RowType logicalPartitionType() {
+        return projectedLogicalRowType(partitionKeys);
+    }
+
+    public RowType logicalPrimaryKeysType() {
+        return projectedLogicalRowType(primaryKeys);
+    }
+
+    private RowType projectedLogicalRowType(List<String> projectedFieldNames) {
+        List<String> fieldNames = fieldNames();
+        return (RowType)
+                new RowDataType(
+                                projectedFieldNames.stream()
+                                        .map(k -> fields.get(fieldNames.indexOf(k)))
+                                        .collect(Collectors.toList()))
+                        .logicalType;
     }
 
     @Override

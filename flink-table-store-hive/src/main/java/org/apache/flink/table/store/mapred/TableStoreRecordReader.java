@@ -21,14 +21,11 @@ package org.apache.flink.table.store.mapred;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.RowDataContainer;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.utils.PrimaryKeyRowDataSupplier;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
-import org.apache.flink.table.store.file.utils.ValueCountRowDataSupplier;
 
 import org.apache.hadoop.mapred.RecordReader;
 
 import java.io.IOException;
-import java.util.function.Supplier;
 
 /**
  * Base {@link RecordReader} for table store. Reads {@link KeyValue}s from data files and picks out
@@ -36,28 +33,22 @@ import java.util.function.Supplier;
  */
 public class TableStoreRecordReader implements RecordReader<Void, RowDataContainer> {
 
-    private final RecordReaderIterator<KeyValue> iterator;
-    private final Supplier<RowData> rowDataSupplier;
+    private final RecordReaderIterator<RowData> iterator;
     private final long splitLength;
 
     private float progress;
 
     public TableStoreRecordReader(
-            org.apache.flink.table.store.file.utils.RecordReader<KeyValue> wrapped,
-            boolean valueCountMode,
+            org.apache.flink.table.store.file.utils.RecordReader<RowData> wrapped,
             long splitLength) {
         this.iterator = new RecordReaderIterator<>(wrapped);
-        this.rowDataSupplier =
-                valueCountMode
-                        ? new ValueCountRowDataSupplier(iterator::next)
-                        : new PrimaryKeyRowDataSupplier(iterator::next);
         this.splitLength = splitLength;
         this.progress = 0;
     }
 
     @Override
     public boolean next(Void key, RowDataContainer value) throws IOException {
-        RowData rowData = rowDataSupplier.get();
+        RowData rowData = iterator.next();
         if (rowData == null) {
             progress = 1;
             return false;

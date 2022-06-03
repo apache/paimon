@@ -146,7 +146,6 @@ public class FileStoreSourceTest {
         MergeFunction mergeFunction =
                 hasPk ? new DeduplicateMergeFunction() : new ValueCountMergeFunction();
         return new FileStoreImpl(
-                "/fake/path",
                 0,
                 new FileStoreOptions(new Configuration()),
                 WriteMode.CHANGE_LOG,

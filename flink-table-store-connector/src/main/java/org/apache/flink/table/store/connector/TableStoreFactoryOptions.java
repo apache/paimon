@@ -21,14 +21,10 @@ package org.apache.flink.table.store.connector;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
-import org.apache.flink.configuration.description.Description;
 import org.apache.flink.table.factories.FactoryUtil;
-import org.apache.flink.table.store.file.WriteMode;
 
 import java.util.HashSet;
 import java.util.Set;
-
-import static org.apache.flink.table.store.utils.OptionsUtils.formatEnumOption;
 
 /** Options for {@link TableStoreManagedFactory}. */
 public class TableStoreFactoryOptions {
@@ -66,18 +62,6 @@ public class TableStoreFactoryOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("The log system used to keep changes of the table.");
-
-    public static final ConfigOption<WriteMode> WRITE_MODE =
-            ConfigOptions.key("write-mode")
-                    .enumType(WriteMode.class)
-                    .defaultValue(WriteMode.CHANGE_LOG)
-                    .withDescription(
-                            Description.builder()
-                                    .text("Specify the write mode for table.")
-                                    .linebreak()
-                                    .list(formatEnumOption(WriteMode.APPEND_ONLY))
-                                    .list(formatEnumOption(WriteMode.CHANGE_LOG))
-                                    .build());
 
     public static final ConfigOption<Integer> SINK_PARALLELISM = FactoryUtil.SINK_PARALLELISM;
 

@@ -136,6 +136,7 @@ public class TableStoreJobConf {
     }
 
     public void updateFileStoreOptions(Configuration fileStoreOptions) {
+        fileStoreOptions.set(FileStoreOptions.PATH, getLocation());
         for (Map.Entry<String, String> entry :
                 jobConf.getPropsWithPrefix(INTERNAL_TBLPROPERTIES_PREFIX).entrySet()) {
             fileStoreOptions.setString(entry.getKey(), entry.getValue());
