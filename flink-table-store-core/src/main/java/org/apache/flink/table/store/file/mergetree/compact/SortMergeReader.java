@@ -21,15 +21,17 @@ package org.apache.flink.table.store.file.mergetree.compact;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
-import java.util.PriorityQueue;
+import java.util.Map;
+import java.util.TreeSet;
 
 /**
  * This reader is to read a list of {@link RecordReader}, which is already sorted by key and
@@ -40,12 +42,16 @@ import java.util.PriorityQueue;
  */
 public class SortMergeReader<T> implements RecordReader<T> {
 
-    private final List<RecordReader<KeyValue>> nextBatchReaders;
     private final Comparator<RowData> userKeyComparator;
     private final MergeFunctionWrapper<T> mergeFunctionWrapper;
-
-    private final PriorityQueue<Element> minHeap;
-    private final List<Element> polled;
+    private final List<RecordReader<KeyValue>> nextBatchReaders;
+    private final RecordIterator<KeyValue>[] nextIterators;
+    private final KeyValue[] leaves;
+    private final List<Integer> nodeIndexes;
+    private final Map<RowData, TreeSet<Element>> sameKeyMap;
+    private final int size;
+    private int remainReaderCount;
+    private final int[] nodes;
 
     public SortMergeReader(
             List<RecordReader<KeyValue>> readers,
@@ -55,57 +61,121 @@ public class SortMergeReader<T> implements RecordReader<T> {
         this.userKeyComparator = userKeyComparator;
         this.mergeFunctionWrapper = mergeFunctionWrapper;
 
-        this.minHeap =
-                new PriorityQueue<>(
-                        (e1, e2) -> {
-                            int result = userKeyComparator.compare(e1.kv.key(), e2.kv.key());
-                            if (result != 0) {
-                                return result;
-                            }
-                            return Long.compare(e1.kv.sequenceNumber(), e2.kv.sequenceNumber());
-                        });
-        this.polled = new ArrayList<>();
+        this.size = readers.size();
+        this.nextIterators = new RecordIterator[size];
+        this.nodeIndexes = new ArrayList<>(size);
+        this.sameKeyMap = new HashMap<>(size);
+        this.leaves = new KeyValue[size];
+        this.nodes = new int[size];
+        this.remainReaderCount = size;
     }
 
     @Nullable
     @Override
     public RecordIterator<T> readBatch() throws IOException {
-        for (RecordReader<KeyValue> reader : nextBatchReaders) {
-            while (true) {
-                RecordIterator<KeyValue> iterator = reader.readBatch();
-                if (iterator == null) {
-                    // no more batches, permanently remove this reader
-                    reader.close();
-                    break;
-                }
-                KeyValue kv = iterator.next();
-                if (kv == null) {
-                    // empty iterator, clean up and try next batch
-                    iterator.releaseBatch();
-                } else {
-                    // found next kv
-                    minHeap.offer(new Element(kv, iterator, reader));
-                    break;
+
+        if (remainReaderCount > 0) {
+            int winner = 0;
+            for (int i = 0; i < size; i++) {
+                leaves[i] = getIterator(i);
+                if (compareLeavesByIndex(i, winner, null)) {
+                    winner = i;
                 }
             }
-        }
-        nextBatchReaders.clear();
 
-        return minHeap.isEmpty() ? null : new SortMergeIterator();
+            Arrays.fill(nodes, winner);
+
+            for (int i = size - 1; i >= 0; i--) {
+                adjust(i, null);
+            }
+        }
+
+        return remainReaderCount > 0 ? new SortMergeIterator() : null;
+    }
+
+    public void setLeavesValueFromIterator(int index) throws IOException {
+
+        if (nextIterators[index] != null) {
+            KeyValue next = nextIterators[index].next();
+            if (next == null) {
+                nextIterators[index].releaseBatch();
+                KeyValue keyValue = getIterator(index);
+                leaves[index] = keyValue;
+            } else {
+                leaves[index] = next;
+            }
+        }
+    }
+
+    private KeyValue getIterator(int index) throws IOException {
+        while (true) {
+            RecordIterator<KeyValue> iterator = nextBatchReaders.get(index).readBatch();
+            if (iterator == null) {
+                // no more batches, permanently remove this reader
+                nextBatchReaders.get(index).close();
+                nextIterators[index] = null;
+                remainReaderCount--;
+                return null;
+            }
+            KeyValue kv = iterator.next();
+            if (kv == null) {
+                // empty iterator, clean up and try next batch
+                iterator.releaseBatch();
+            } else {
+                // found next kv
+                nextIterators[index] = iterator;
+                return kv;
+            }
+        }
+    }
+
+    public boolean compareLeavesByIndex(int index1, int index2, KeyValue keyValue) {
+        KeyValue value1 = leaves[index1];
+        KeyValue value2 = leaves[index2];
+
+        if (value1 == null) {
+            return false;
+        }
+        if (value2 == null) {
+            return true;
+        }
+
+        int compare = userKeyComparator.compare(value1.key(), value2.key());
+
+        if (compare == 0) {
+            // Avoid previous value to add to same keyMap.
+            if (keyValue == null || userKeyComparator.compare(value1.key(), keyValue.key()) != 0) {
+                TreeSet<Element> aDefault =
+                        sameKeyMap.getOrDefault(
+                                value1.key(),
+                                new TreeSet<>(Comparator.comparingLong(o -> o.sequenceNumber)));
+                aDefault.add(new Element(value1.sequenceNumber(), index1));
+                aDefault.add(new Element(value2.sequenceNumber(), index2));
+                sameKeyMap.put(value1.key(), aDefault);
+            }
+            return value1.sequenceNumber() < value2.sequenceNumber();
+        }
+
+        return compare < 0;
+    }
+
+    public void adjust(int index, KeyValue keyValue) {
+        int parent = (index + size) / 2;
+        while (parent > 0) {
+            if (compareLeavesByIndex(nodes[parent], index, keyValue)) {
+                int temp = nodes[parent];
+                nodes[parent] = index;
+                index = temp;
+            }
+            parent = parent / 2;
+        }
+        nodes[0] = index;
     }
 
     @Override
     public void close() throws IOException {
         for (RecordReader<KeyValue> reader : nextBatchReaders) {
             reader.close();
-        }
-        for (Element element : minHeap) {
-            element.iterator.releaseBatch();
-            element.reader.close();
-        }
-        for (Element element : polled) {
-            element.iterator.releaseBatch();
-            element.reader.close();
         }
     }
 
@@ -117,8 +187,8 @@ public class SortMergeReader<T> implements RecordReader<T> {
         @Override
         public T next() throws IOException {
             while (true) {
-                boolean hasMore = nextImpl();
-                if (!hasMore) {
+                KeyValue value = nextImpl();
+                if (value == null) {
                     return null;
                 }
                 T result = mergeFunctionWrapper.getResult();
@@ -128,50 +198,37 @@ public class SortMergeReader<T> implements RecordReader<T> {
             }
         }
 
-        private boolean nextImpl() throws IOException {
-            Preconditions.checkState(
-                    !released, "SortMergeIterator#advanceNext is called after release");
-            Preconditions.checkState(
-                    nextBatchReaders.isEmpty(),
-                    "SortMergeIterator#advanceNext is called even if the last call returns null. "
-                            + "This is a bug.");
+        private KeyValue nextImpl() throws IOException {
 
-            // add previously polled elements back to priority queue
-            for (Element element : polled) {
-                if (element.update()) {
-                    // still kvs left, add back to priority queue
-                    minHeap.offer(element);
-                } else {
-                    // reach end of batch, clean up
-                    element.iterator.releaseBatch();
-                    nextBatchReaders.add(element.reader);
+            if (nodeIndexes.size() > 0) {
+                KeyValue keyValue = leaves[nodeIndexes.get(nodeIndexes.size() - 1)];
+                for (int i = 0; i < nodeIndexes.size(); i++) {
+                    Integer index = nodeIndexes.get(i);
+                    setLeavesValueFromIterator(index);
+                    // Last value will change, so we do not have to avoid previous value to add to
+                    // same keyMap.
+                    adjust(index, nodeIndexes.size() - 1 == i ? null : keyValue);
                 }
-            }
-            polled.clear();
-
-            // there are readers reaching end of batch, so we end current batch
-            if (!nextBatchReaders.isEmpty()) {
-                return false;
+                nodeIndexes.clear();
             }
 
             mergeFunctionWrapper.reset();
-            RowData key =
-                    Preconditions.checkNotNull(minHeap.peek(), "Min heap is empty. This is a bug.")
-                            .kv
-                            .key();
-
-            // fetch all elements with the same key
-            // note that the same iterator should not produce the same keys, so this code is correct
-            while (!minHeap.isEmpty()) {
-                Element element = minHeap.peek();
-                if (userKeyComparator.compare(key, element.kv.key()) != 0) {
-                    break;
+            KeyValue keyValue = leaves[nodes[0]];
+            if (keyValue != null) {
+                TreeSet<Element> elements = sameKeyMap.remove(keyValue.key());
+                if (elements == null) {
+                    nodeIndexes.add(nodes[0]);
+                    mergeFunctionWrapper.add(keyValue);
+                } else {
+                    elements.forEach(
+                            element -> {
+                                mergeFunctionWrapper.add(leaves[element.nodeIndex]);
+                                nodeIndexes.add(element.nodeIndex);
+                            });
+                    keyValue = leaves[elements.last().nodeIndex];
                 }
-                minHeap.poll();
-                mergeFunctionWrapper.add(element.kv);
-                polled.add(element);
             }
-            return true;
+            return keyValue;
         }
 
         @Override
@@ -181,25 +238,13 @@ public class SortMergeReader<T> implements RecordReader<T> {
     }
 
     private static class Element {
-        private KeyValue kv;
-        private final RecordIterator<KeyValue> iterator;
-        private final RecordReader<KeyValue> reader;
 
-        private Element(
-                KeyValue kv, RecordIterator<KeyValue> iterator, RecordReader<KeyValue> reader) {
-            this.kv = kv;
-            this.iterator = iterator;
-            this.reader = reader;
-        }
+        private final long sequenceNumber;
+        private final int nodeIndex;
 
-        // IMPORTANT: Must not call this for elements still in priority queue!
-        private boolean update() throws IOException {
-            KeyValue nextKv = iterator.next();
-            if (nextKv == null) {
-                return false;
-            }
-            kv = nextKv;
-            return true;
+        public Element(long sequenceNumber, int nodeIndex) {
+            this.sequenceNumber = sequenceNumber;
+            this.nodeIndex = nodeIndex;
         }
     }
 }
