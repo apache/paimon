@@ -19,8 +19,10 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 
 /** Write operation which provides {@link RecordWriter} creation. */
@@ -32,4 +34,8 @@ public interface FileStoreWrite {
     /** Create an empty {@link RecordWriter} from partition and bucket. */
     RecordWriter createEmptyWriter(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor);
+
+    /** Create a compact {@link RecordWriter} from partition, bucket and compact units. */
+    RecordWriter createCompactWriter(
+            BinaryRowData partition, int bucket, List<DataFileMeta> restoredFiles);
 }

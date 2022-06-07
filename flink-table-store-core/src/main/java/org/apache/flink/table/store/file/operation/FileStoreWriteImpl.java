@@ -20,7 +20,6 @@ package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
@@ -35,11 +34,13 @@ import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
 import org.apache.flink.table.store.file.mergetree.SortBufferMemTable;
 import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
+import org.apache.flink.table.store.file.mergetree.compact.CompactUnit;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.writer.AppendOnlyWriter;
+import org.apache.flink.table.store.file.writer.CompactWriter;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -136,6 +137,18 @@ public class FileStoreWriteImpl implements FileStoreWrite {
         return createMergeTreeWriter(partition, bucket, Collections.emptyList(), compactExecutor);
     }
 
+    @Override
+    public RecordWriter createCompactWriter(
+            BinaryRowData partition, int bucket, List<DataFileMeta> restoredFiles) {
+        Comparator<RowData> keyComparator = keyComparatorSupplier.get();
+        return new CompactWriter(
+                CompactUnit.fromFiles(options.numLevels - 1, restoredFiles),
+                keyComparator,
+                options.targetFileSize,
+                createRewriter(partition, bucket, keyComparator),
+                dataFileWriterFactory.create(partition, bucket));
+    }
+
     private RecordWriter createMergeTreeWriter(
             BinaryRowData partition,
             int bucket,
@@ -171,20 +184,27 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                         options.maxSizeAmplificationPercent,
                         options.sizeRatio,
                         options.numSortedRunCompactionTrigger);
-        DataFileWriter dataFileWriter = dataFileWriterFactory.create(partition, bucket);
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
-        CompactManager.Rewriter rewriter =
-                (outputLevel, dropDelete, sections) ->
-                        dataFileWriter.write(
-                                new RecordReaderIterator<KeyValue>(
-                                        new MergeTreeReader(
-                                                sections,
-                                                dropDelete,
-                                                dataFileReaderFactory.create(partition, bucket),
-                                                keyComparator,
-                                                mergeFunction.copy())),
-                                outputLevel);
         return new CompactManager(
-                compactExecutor, compactStrategy, keyComparator, options.targetFileSize, rewriter);
+                compactExecutor,
+                compactStrategy,
+                keyComparator,
+                options.targetFileSize,
+                createRewriter(partition, bucket, keyComparator));
+    }
+
+    private CompactManager.Rewriter createRewriter(
+            BinaryRowData partition, int bucket, Comparator<RowData> keyComparator) {
+        DataFileWriter dataFileWriter = dataFileWriterFactory.create(partition, bucket);
+        return (outputLevel, dropDelete, sections) ->
+                dataFileWriter.write(
+                        new RecordReaderIterator<>(
+                                new MergeTreeReader(
+                                        sections,
+                                        dropDelete,
+                                        dataFileReaderFactory.create(partition, bucket),
+                                        keyComparator,
+                                        mergeFunction.copy())),
+                        outputLevel);
     }
 }

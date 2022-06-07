@@ -211,7 +211,7 @@ public class StoreSinkTest {
     }
 
     private List<Committable> write(StoreSink<?, ?> sink, RowData... rows) throws Exception {
-        StoreSinkWriter<?> writer = sink.createWriter(null);
+        StoreSinkWriterBase<?> writer = sink.createWriter(null);
         for (RowData row : rows) {
             writer.write(row, null);
         }

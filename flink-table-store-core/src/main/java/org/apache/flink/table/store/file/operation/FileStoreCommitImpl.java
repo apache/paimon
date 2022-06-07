@@ -170,12 +170,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         List<ManifestEntry> appendChanges = collectChanges(committable.newFiles(), ValueKind.ADD);
-        tryCommit(
-                appendChanges,
-                committable.identifier(),
-                committable.logOffsets(),
-                Snapshot.CommitKind.APPEND,
-                false);
+        if (!appendChanges.isEmpty()) {
+            tryCommit(
+                    appendChanges,
+                    committable.identifier(),
+                    committable.logOffsets(),
+                    Snapshot.CommitKind.APPEND,
+                    false);
+        }
 
         List<ManifestEntry> compactChanges = new ArrayList<>();
         compactChanges.addAll(collectChanges(committable.compactBefore(), ValueKind.DELETE));

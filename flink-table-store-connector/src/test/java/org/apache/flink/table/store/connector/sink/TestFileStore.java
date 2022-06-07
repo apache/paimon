@@ -32,6 +32,7 @@ import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
+import org.apache.flink.table.store.file.writer.CompactWriter;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -88,6 +89,12 @@ public class TestFileStore implements FileStore {
             public RecordWriter createEmptyWriter(
                     BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
                 return new TestRecordWriter(hasPk);
+            }
+
+            @Override
+            public CompactWriter createCompactWriter(
+                    BinaryRowData partition, int bucket, List<DataFileMeta> restoreFiles) {
+                throw new UnsupportedOperationException();
             }
         };
     }
@@ -208,6 +215,9 @@ public class TestFileStore implements FileStore {
         public void sync() {
             synced = true;
         }
+
+        @Override
+        public void flush() throws Exception {}
 
         @Override
         public List<DataFileMeta> close() {

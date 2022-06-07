@@ -44,6 +44,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
@@ -115,15 +116,20 @@ public class StoreSink<WriterStateT, LogCommT>
     }
 
     @Override
-    public StoreSinkWriter<WriterStateT> createWriter(InitContext initContext) throws IOException {
+    public StoreSinkWriterBase<WriterStateT> createWriter(InitContext initContext)
+            throws IOException {
         return restoreWriter(initContext, null);
     }
 
     @Override
-    public StoreSinkWriter<WriterStateT> restoreWriter(
+    public StoreSinkWriterBase<WriterStateT> restoreWriter(
             InitContext initContext, Collection<WriterStateT> states) throws IOException {
         if (nonRescaleCompact) {
-            // TODO: create compact writer
+            return new StoreSinkCompactor<>(
+                    initContext.getSubtaskId(),
+                    initContext.getNumberOfParallelSubtasks(),
+                    fileStore,
+                    compactPartitionSpec == null ? Collections.emptyMap() : compactPartitionSpec);
         }
         SinkWriter<SinkRecord> logWriter = null;
         LogWriteCallback logCallback = null;

@@ -108,31 +108,40 @@ public class CompactManager {
                                                                                 file.level(),
                                                                                 file.fileSize()))
                                                         .collect(Collectors.joining(", ")));
-                                LOG.debug(
-                                        "Pick these files (name, level, size) for compaction: "
-                                                + unit.files().stream()
-                                                        .map(
-                                                                file ->
-                                                                        String.format(
-                                                                                "(%s, %d, %d)",
-                                                                                file.fileName(),
-                                                                                file.level(),
-                                                                                file.fileSize()))
-                                                        .collect(Collectors.joining(", ")));
                             }
-
-                            CompactTask task = new CompactTask(unit, dropDelete);
-                            taskFuture = executor.submit(task);
+                            submitCompaction(unit, dropDelete);
                         });
+    }
+
+    public void submitCompaction(CompactUnit unit, boolean dropDelete) {
+        CompactTask task = new CompactTask(unit, dropDelete);
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Pick these files (name, level, size) for compaction: {}",
+                    unit.files().stream()
+                            .map(
+                                    file ->
+                                            String.format(
+                                                    "(%s, %d, %d)",
+                                                    file.fileName(), file.level(), file.fileSize()))
+                            .collect(Collectors.joining(", ")));
+        }
+        taskFuture = executor.submit(task);
     }
 
     /** Finish current task, and update result files to {@link Levels}. */
     public Optional<CompactResult> finishCompaction(Levels levels, boolean blocking)
             throws ExecutionException, InterruptedException {
+        Optional<CompactResult> result = finishCompaction(blocking);
+        result.ifPresent(r -> levels.update(r.before(), r.after()));
+        return result;
+    }
+
+    public Optional<CompactResult> finishCompaction(boolean blocking)
+            throws ExecutionException, InterruptedException {
         if (taskFuture != null) {
             if (blocking || taskFuture.isDone()) {
                 CompactResult result = taskFuture.get();
-                levels.update(result.before(), result.after());
                 taskFuture = null;
                 return Optional.of(result);
             }

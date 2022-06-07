@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.connector.sink;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.api.connector.sink2.StatefulSink.StatefulSinkWriter;
 import org.apache.flink.api.connector.sink2.TwoPhaseCommittingSink.PrecommittingSinkWriter;
@@ -41,21 +40,14 @@ import org.apache.flink.util.concurrent.ExecutorThreadFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /** A {@link SinkWriter} for dynamic store. */
-public class StoreSinkWriter<WriterStateT>
-        implements StatefulSinkWriter<RowData, WriterStateT>,
-                PrecommittingSinkWriter<RowData, Committable> {
+public class StoreSinkWriter<WriterStateT> extends StoreSinkWriterBase<WriterStateT> {
 
     private static final BinaryRowData DUMMY_KEY = BinaryRowDataUtil.EMPTY_ROW;
 
@@ -71,8 +63,6 @@ public class StoreSinkWriter<WriterStateT>
     @Nullable private final LogWriteCallback logCallback;
 
     private final ExecutorService compactExecutor;
-
-    private final Map<BinaryRowData, Map<Integer, RecordWriter>> writers;
 
     public StoreSinkWriter(
             FileStoreWrite fileStoreWrite,
@@ -90,23 +80,13 @@ public class StoreSinkWriter<WriterStateT>
         this.compactExecutor =
                 Executors.newSingleThreadScheduledExecutor(
                         new ExecutorThreadFactory("compaction-thread"));
-        this.writers = new HashMap<>();
     }
 
-    private RecordWriter getWriter(BinaryRowData partition, int bucket) {
-        Map<Integer, RecordWriter> buckets = writers.get(partition);
-        if (buckets == null) {
-            buckets = new HashMap<>();
-            writers.put(partition.copy(), buckets);
-        }
-        return buckets.computeIfAbsent(
-                bucket,
-                k ->
-                        overwrite
-                                ? fileStoreWrite.createEmptyWriter(
-                                        partition.copy(), bucket, compactExecutor)
-                                : fileStoreWrite.createWriter(
-                                        partition.copy(), bucket, compactExecutor));
+    @Override
+    protected RecordWriter createWriter(BinaryRowData partition, int bucket) {
+        return overwrite
+                ? fileStoreWrite.createEmptyWriter(partition.copy(), bucket, compactExecutor)
+                : fileStoreWrite.createWriter(partition.copy(), bucket, compactExecutor);
     }
 
     @Override
@@ -168,45 +148,12 @@ public class StoreSinkWriter<WriterStateT>
         if (logWriter != null && logWriter instanceof StatefulSinkWriter) {
             return ((StatefulSinkWriter<?, WriterStateT>) logWriter).snapshotState(checkpointId);
         }
-        return Collections.emptyList();
+        return super.snapshotState(checkpointId);
     }
 
     @Override
     public List<Committable> prepareCommit() throws IOException, InterruptedException {
-        List<Committable> committables = new ArrayList<>();
-        Iterator<Map.Entry<BinaryRowData, Map<Integer, RecordWriter>>> partIter =
-                writers.entrySet().iterator();
-        while (partIter.hasNext()) {
-            Map.Entry<BinaryRowData, Map<Integer, RecordWriter>> partEntry = partIter.next();
-            BinaryRowData partition = partEntry.getKey();
-            Iterator<Map.Entry<Integer, RecordWriter>> bucketIter =
-                    partEntry.getValue().entrySet().iterator();
-            while (bucketIter.hasNext()) {
-                Map.Entry<Integer, RecordWriter> entry = bucketIter.next();
-                int bucket = entry.getKey();
-                RecordWriter writer = entry.getValue();
-                FileCommittable committable;
-                try {
-                    committable = new FileCommittable(partition, bucket, writer.prepareCommit());
-                } catch (Exception e) {
-                    throw new IOException(e);
-                }
-                committables.add(new Committable(Committable.Kind.FILE, committable));
-
-                // clear if no update
-                // we need a mechanism to clear writers, otherwise there will be more and more
-                // such as yesterday's partition that no longer needs to be written.
-                if (committable.increment().newFiles().isEmpty()) {
-                    closeWriter(writer);
-                    bucketIter.remove();
-                }
-            }
-
-            if (partEntry.getValue().isEmpty()) {
-                partIter.remove();
-            }
-        }
-
+        List<Committable> committables = super.prepareCommit();
         if (logWriter != null) {
             if (logWriter instanceof PrecommittingSinkWriter) {
                 Collection<?> logCommittables =
@@ -229,32 +176,12 @@ public class StoreSinkWriter<WriterStateT>
         return committables;
     }
 
-    private void closeWriter(RecordWriter writer) throws IOException {
-        try {
-            writer.sync();
-            writer.close();
-        } catch (Exception e) {
-            throw new IOException(e);
-        }
-    }
-
     @Override
     public void close() throws Exception {
         this.compactExecutor.shutdownNow();
-        for (Map<Integer, RecordWriter> bucketWriters : writers.values()) {
-            for (RecordWriter writer : bucketWriters.values()) {
-                closeWriter(writer);
-            }
-        }
-        writers.clear();
-
         if (logWriter != null) {
             logWriter.close();
         }
-    }
-
-    @VisibleForTesting
-    Map<BinaryRowData, Map<Integer, RecordWriter>> writers() {
-        return writers;
+        super.close();
     }
 }
