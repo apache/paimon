@@ -351,19 +351,22 @@ public class FileStoreITCase extends AbstractTestBase {
         ObjectIdentifier identifier = ObjectIdentifier.of("catalog", "db", "t");
         Configuration options = buildConfiguration(noFail, temporaryFolder.newFolder());
         Path tablePath = new FileStoreOptions(options).path();
-        new SchemaManager(tablePath)
-                .commitNewVersion(
-                        new UpdateSchema(
-                                TABLE_TYPE,
-                                Arrays.stream(partitions)
-                                        .mapToObj(i -> TABLE_TYPE.getFieldNames().get(i))
-                                        .collect(Collectors.toList()),
-                                Arrays.stream(primaryKey)
-                                        .mapToObj(i -> TABLE_TYPE.getFieldNames().get(i))
-                                        .collect(Collectors.toList()),
-                                options.toMap(),
-                                ""));
-        return retryArtificialException(() -> new TableStore(identifier, options));
+        UpdateSchema updateSchema =
+                new UpdateSchema(
+                        TABLE_TYPE,
+                        Arrays.stream(partitions)
+                                .mapToObj(i -> TABLE_TYPE.getFieldNames().get(i))
+                                .collect(Collectors.toList()),
+                        Arrays.stream(primaryKey)
+                                .mapToObj(i -> TABLE_TYPE.getFieldNames().get(i))
+                                .collect(Collectors.toList()),
+                        options.toMap(),
+                        "");
+        return retryArtificialException(
+                () -> {
+                    new SchemaManager(tablePath).commitNewVersion(updateSchema);
+                    return new TableStore(identifier, options);
+                });
     }
 
     public static Configuration buildConfiguration(boolean noFail, File folder) {
