@@ -18,29 +18,29 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.table.store.file.FileStore;
-import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.table.source.TableScan;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.types.logical.RowType;
 
-import java.io.Serializable;
+/** Abstract {@link FileStoreTable}. */
+public abstract class AbstractFileStoreTable implements FileStoreTable {
 
-/**
- * An abstraction layer above {@link org.apache.flink.table.store.file.FileStore} to provide reading
- * and writing of {@link org.apache.flink.table.data.RowData}.
- */
-public interface FileStoreTable extends Serializable {
+    private static final long serialVersionUID = 1L;
 
-    String name();
+    private final String name;
+    protected final Schema schema;
 
-    RowType rowType();
+    public AbstractFileStoreTable(String name, Schema schema) {
+        this.name = name;
+        this.schema = schema;
+    }
 
-    TableScan newScan(boolean incremental);
+    @Override
+    public String name() {
+        return name;
+    }
 
-    TableRead newRead(boolean incremental);
-
-    // TODO remove this once TableWrite is introduced
-    @VisibleForTesting
-    FileStore fileStore();
+    @Override
+    public RowType rowType() {
+        return schema.logicalRowType();
+    }
 }

@@ -43,13 +43,14 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode with primary keys. */
-public class ChangelogWithKeyFileStoreTable implements FileStoreTable {
+public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
-    private final Schema schema;
+    private static final long serialVersionUID = 1L;
+
     private final FileStoreImpl store;
 
-    ChangelogWithKeyFileStoreTable(Schema schema, Configuration conf, String user) {
-        this.schema = schema;
+    ChangelogWithKeyFileStoreTable(String name, Schema schema, String user) {
+        super(name, schema);
         RowType rowType = schema.logicalRowType();
 
         // add _KEY_ prefix to avoid conflict with value
@@ -63,6 +64,8 @@ public class ChangelogWithKeyFileStoreTable implements FileStoreTable {
                                                         f.getType(),
                                                         f.getDescription().orElse(null)))
                                 .collect(Collectors.toList()));
+
+        Configuration conf = Configuration.fromMap(schema.options());
 
         FileStoreOptions.MergeEngine mergeEngine = conf.get(FileStoreOptions.MERGE_ENGINE);
         MergeFunction mergeFunction;

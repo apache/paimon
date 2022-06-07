@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreImpl;
@@ -40,13 +39,14 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
 /** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode without primary keys. */
-public class ChangelogValueCountFileStoreTable implements FileStoreTable {
+public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
 
-    private final Schema schema;
+    private static final long serialVersionUID = 1L;
+
     private final FileStoreImpl store;
 
-    ChangelogValueCountFileStoreTable(Schema schema, Configuration conf, String user) {
-        this.schema = schema;
+    ChangelogValueCountFileStoreTable(String name, Schema schema, String user) {
+        super(name, schema);
         RowType countType =
                 RowType.of(
                         new LogicalType[] {new BigIntType(false)}, new String[] {"_VALUE_COUNT"});
@@ -54,7 +54,7 @@ public class ChangelogValueCountFileStoreTable implements FileStoreTable {
         this.store =
                 new FileStoreImpl(
                         schema.id(),
-                        new FileStoreOptions(conf),
+                        new FileStoreOptions(schema.options()),
                         WriteMode.CHANGE_LOG,
                         user,
                         schema.logicalPartitionType(),

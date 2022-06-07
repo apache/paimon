@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreImpl;
@@ -35,17 +34,20 @@ import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterat
 import org.apache.flink.table.types.logical.RowType;
 
 /** {@link FileStoreTable} for {@link WriteMode#APPEND_ONLY} write mode. */
-public class AppendOnlyFileStoreTable implements FileStoreTable {
+public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
+
+    private static final long serialVersionUID = 1L;
 
     private final Schema schema;
     private final FileStoreImpl store;
 
-    AppendOnlyFileStoreTable(Schema schema, Configuration conf, String user) {
+    AppendOnlyFileStoreTable(String name, Schema schema, String user) {
+        super(name, schema);
         this.schema = schema;
         this.store =
                 new FileStoreImpl(
                         schema.id(),
-                        new FileStoreOptions(conf),
+                        new FileStoreOptions(schema.options()),
                         WriteMode.APPEND_ONLY,
                         user,
                         schema.logicalPartitionType(),
