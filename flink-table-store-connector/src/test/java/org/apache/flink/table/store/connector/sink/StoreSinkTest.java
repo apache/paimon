@@ -126,6 +126,10 @@ public class StoreSinkTest {
                         primaryKeys,
                         primaryKeys,
                         2,
+                        false,
+                        0,
+                        0,
+                        null,
                         () -> lock,
                         new HashMap<>(),
                         null);
@@ -258,6 +262,10 @@ public class StoreSinkTest {
                 primaryKeys,
                 primaryKeys,
                 2,
+                false,
+                0,
+                0,
+                null,
                 () -> lock,
                 overwritePartition,
                 null);

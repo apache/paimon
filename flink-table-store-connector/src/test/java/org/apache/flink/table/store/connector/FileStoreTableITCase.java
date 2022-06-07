@@ -44,14 +44,13 @@ public abstract class FileStoreTableITCase extends AbstractTestBase {
 
     protected TableEnvironment bEnv;
     protected TableEnvironment sEnv;
-    protected String path;
 
     @Before
     public void before() throws IOException {
         bEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
         sEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inStreamingMode().build());
         sEnv.getConfig().getConfiguration().set(CHECKPOINTING_INTERVAL, Duration.ofMillis(100));
-        path = TEMPORARY_FOLDER.newFolder().toURI().toString();
+        String path = TEMPORARY_FOLDER.newFolder().toURI().toString();
         prepareEnv(bEnv, path);
         prepareEnv(sEnv, path);
     }

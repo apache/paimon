@@ -112,8 +112,7 @@ public class TestDataReadWrite {
                         avro,
                         pathFactory,
                         null, // not used, we only create an empty writer
-                        options,
-                        null)
+                        options)
                 .createEmptyWriter(partition, bucket, service);
     }
 }

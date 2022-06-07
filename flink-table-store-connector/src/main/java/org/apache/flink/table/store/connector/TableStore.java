@@ -49,9 +49,11 @@ import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.FileStoreOptions.MergeEngine;
 import org.apache.flink.table.store.file.WriteMode;
+import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.file.utils.PartitionedManifestMeta;
 import org.apache.flink.table.store.log.LogOptions.LogStartupMode;
 import org.apache.flink.table.store.log.LogSinkProvider;
@@ -70,6 +72,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_MANUAL_TRIGGERED;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_PARTITION_SPEC;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_RESCALE_BUCKET;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_SCANNED_MANIFEST;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
@@ -124,7 +129,17 @@ public class TableStore {
     }
 
     public boolean isCompactionTask() {
-        return options.get(COMPACTION_SCANNED_MANIFEST) != null;
+        return options.get(COMPACTION_RESCALE_BUCKET) || options.get(COMPACTION_MANUAL_TRIGGERED);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Nullable
+    public Map<String, String> getCompactPartSpec() {
+        String json = options.get(COMPACTION_PARTITION_SPEC);
+        if (json == null) {
+            return null;
+        }
+        return JsonSerdeUtil.fromJson(json, Map.class);
     }
 
     public boolean valueCountMode() {
@@ -214,18 +229,10 @@ public class TableStore {
         RowType partitionType = TypeUtils.project(type, partitionKeysIndex());
         FileStoreOptions fileStoreOptions = new FileStoreOptions(options);
         int[] trimmedPrimaryKeys = trimmedPrimaryKeysIndex();
-        PartitionedManifestMeta manifestMeta = getCompactionMeta();
 
         if (trimmedPrimaryKeys.length == 0) {
             return FileStoreImpl.createWithValueCount(
                     schema.id(), fileStoreOptions, user, partitionType, type);
-                    fileStoreOptions.path().toString(),
-                    schema.id(),
-                    fileStoreOptions,
-                    user,
-                    partitionType,
-                    type,
-                    manifestMeta);
         } else {
             return FileStoreImpl.createWithPrimaryKey(
                     schema.id(),
@@ -234,8 +241,7 @@ public class TableStore {
                     partitionType,
                     TypeUtils.project(type, trimmedPrimaryKeys),
                     type,
-                    mergeEngine(),
-                    manifestMeta);
+                    mergeEngine());
         }
     }
 
@@ -329,7 +335,10 @@ public class TableStore {
         }
 
         private FileStoreSource buildFileSource(
-                boolean isContinuous, WriteMode writeMode, boolean continuousScanLatest) {
+                boolean isContinuous,
+                WriteMode writeMode,
+                boolean continuousScanLatest,
+                boolean nonRescaleCompact) {
 
             return new FileStoreSource(
                     buildFileStore(),
@@ -338,6 +347,7 @@ public class TableStore {
                     isContinuous,
                     discoveryIntervalMills(),
                     continuousScanLatest,
+                    nonRescaleCompact,
                     projectedFields,
                     partitionPredicate,
                     fieldPredicate,
@@ -354,20 +364,22 @@ public class TableStore {
 
                 LogStartupMode startupMode = logOptions().get(SCAN);
                 if (logSourceProvider == null) {
-                    return buildFileSource(true, writeMode, startupMode == LogStartupMode.LATEST);
+                    return buildFileSource(
+                            true, writeMode, startupMode == LogStartupMode.LATEST, false);
                 } else {
                     if (startupMode != LogStartupMode.FULL) {
                         return logSourceProvider.createSource(null);
                     }
                     return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
-                                    buildFileSource(false, writeMode, false))
+                                    buildFileSource(false, writeMode, false, false))
                             .addSource(
                                     new LogHybridSourceFactory(logSourceProvider),
                                     Boundedness.CONTINUOUS_UNBOUNDED)
                             .build();
                 }
             } else {
-                return buildFileSource(false, writeMode, false);
+                return buildFileSource(
+                        false, writeMode, false, options.get(COMPACTION_MANUAL_TRIGGERED));
             }
         }
 
@@ -451,6 +463,8 @@ public class TableStore {
                 partitioned.setParallelism(parallelism);
             }
 
+            MergeTreeOptions mergeTreeOptions = new FileStoreOptions(options).mergeTreeOptions();
+
             StoreSink<?, ?> sink =
                     new StoreSink<>(
                             tableIdentifier,
@@ -460,6 +474,10 @@ public class TableStore {
                             trimmedPrimaryKeysIndex(),
                             fullPrimaryKeysIndex(),
                             numBucket,
+                            options.get(COMPACTION_MANUAL_TRIGGERED),
+                            mergeTreeOptions.numLevels,
+                            mergeTreeOptions.targetFileSize,
+                            getCompactPartSpec(),
                             lockFactory,
                             overwritePartition,
                             logSinkProvider);

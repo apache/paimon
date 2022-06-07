@@ -34,7 +34,6 @@ import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.format.FlushingFileFormat;
 import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
-import org.apache.flink.table.store.file.mergetree.compact.CompactUnit;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
@@ -56,19 +55,16 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static java.util.Collections.singletonList;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -90,17 +86,12 @@ public class MergeTreeTest {
     public void beforeEach() throws IOException {
         pathFactory = new FileStorePathFactory(new Path(tempDir.toString()));
         comparator = Comparator.comparingInt(o -> o.getInt(0));
-        recreateMergeTree(1024 * 1024, false);
+        recreateMergeTree(1024 * 1024);
         Path bucketDir = dataFileWriter.pathFactory().toPath("ignore").getParent();
         bucketDir.getFileSystem().mkdirs(bucketDir);
     }
 
-    private void recreateMergeTree(long targetFileSize, boolean compactionTask) {
-        recreateMergeTree(Collections.emptyList(), targetFileSize, compactionTask);
-    }
-
-    private void recreateMergeTree(
-            List<DataFileMeta> restoredFiles, long targetFileSize, boolean compactionTask) {
+    private void recreateMergeTree(long targetFileSize) {
         Configuration configuration = new Configuration();
         configuration.set(MergeTreeOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
         configuration.set(MergeTreeOptions.PAGE_SIZE, new MemorySize(4096));
@@ -120,7 +111,7 @@ public class MergeTreeTest {
                                 pathFactory,
                                 options.targetFileSize)
                         .create(BinaryRowDataUtil.EMPTY_ROW, 0);
-        writer = createMergeTreeWriter(restoredFiles, compactionTask);
+        writer = createMergeTreeWriter(Collections.emptyList());
     }
 
     @BeforeAll
@@ -163,7 +154,7 @@ public class MergeTreeTest {
     public void testRestore() throws Exception {
         List<TestRecord> expected = new ArrayList<>(writeBatch());
         List<DataFileMeta> newFiles = writer.prepareCommit().newFiles();
-        writer = createMergeTreeWriter(newFiles, false);
+        writer = createMergeTreeWriter(newFiles);
         expected.addAll(writeBatch());
         writer.prepareCommit();
         writer.sync();
@@ -180,221 +171,11 @@ public class MergeTreeTest {
         }
     }
 
-    @Test
-    public void testCompactEmpty() throws Exception {
-        int targetFileSize = 6383;
-        int batchSize = 185;
-        recreateMergeTree(targetFileSize, false);
-        List<TestRecord> records = new ArrayList<>();
-        for (int i = 0; i < batchSize; i++) {
-            records.add(new TestRecord(ValueKind.ADD, i, i));
-        }
-        writeAll(records);
-        writer.sync();
-        Increment increment = writer.prepareCommit();
-        assertThat(increment.compactBefore()).isEmpty();
-        assertThat(increment.compactAfter()).isEmpty();
-        assertThat(increment.newFiles()).isNotEmpty();
-        Set<DataFileMeta> scannedFiles = new HashSet<>(increment.newFiles());
-        assertThat(pickManifest(scannedFiles, targetFileSize)).isEmpty();
-
-        recreateMergeTree(pickManifest(scannedFiles, targetFileSize), targetFileSize, true);
-        Increment compactIncrement = writer.prepareCommit();
-        assertThat(compactIncrement.newFiles()).isEmpty();
-        assertThat(compactIncrement.compactBefore()).isEmpty();
-        assertThat(compactIncrement.compactAfter()).isEmpty();
-        assertThat(((MergeTreeWriter) writer).levels().allFiles()).isEmpty();
-    }
-
-    @Test
-    public void testCompactSmall() throws Exception {
-        // the outer list stands for each commit
-        // the inner list stands for the records of each commit
-        // [1, 3], [7, 9], [4, 6]
-        List<List<TestRecord>> transactions =
-                Arrays.asList(
-                        Arrays.asList(
-                                new TestRecord(ValueKind.ADD, 1, 1),
-                                new TestRecord(ValueKind.ADD, 2, 2),
-                                new TestRecord(ValueKind.ADD, 3, 3)),
-                        Arrays.asList(
-                                new TestRecord(ValueKind.ADD, 7, 7),
-                                new TestRecord(ValueKind.ADD, 8, 8),
-                                new TestRecord(ValueKind.ADD, 9, 9)),
-                        Arrays.asList(
-                                new TestRecord(ValueKind.ADD, 4, 4),
-                                new TestRecord(ValueKind.ADD, 5, 5),
-                                new TestRecord(ValueKind.ADD, 6, 6)));
-    }
-
-    @Test
-    public void testCompactOverlap() throws Exception {
-        // [1, 5], [5, 30], [25, 90]
-        List<List<TestRecord>> transactions =
-                Arrays.asList(
-                        Arrays.asList(
-                                new TestRecord(ValueKind.ADD, 1, 1),
-                                new TestRecord(ValueKind.ADD, 2, 2),
-                                new TestRecord(ValueKind.ADD, 3, 3),
-                                new TestRecord(ValueKind.ADD, 4, 4),
-                                new TestRecord(ValueKind.ADD, 5, 5)),
-                        Arrays.asList(
-                                new TestRecord(ValueKind.DELETE, 5, 5),
-                                new TestRecord(ValueKind.ADD, 10, 10),
-                                new TestRecord(ValueKind.ADD, 25, 25),
-                                new TestRecord(ValueKind.ADD, 30, 30)),
-                        Arrays.asList(
-                                new TestRecord(ValueKind.ADD, 60, 60),
-                                new TestRecord(ValueKind.ADD, 70, 70),
-                                new TestRecord(ValueKind.ADD, 80, 80),
-                                new TestRecord(ValueKind.ADD, 90, 90),
-                                new TestRecord(ValueKind.DELETE, 25, 25)));
-        assertCompaction(transactions);
-    }
-
-    @Test
-    public void testCompactMix() throws Exception {
-        // [1, 3], [10, 25], [20, 40], [70, 80], [75, 100]
-        List<List<TestRecord>> transactions =
-                Arrays.asList(
-                        Arrays.asList(
-                                new TestRecord(ValueKind.ADD, 1, 1),
-                                new TestRecord(ValueKind.ADD, 2, 2),
-                                new TestRecord(ValueKind.ADD, 3, 3)),
-                        Arrays.asList(
-                                new TestRecord(ValueKind.ADD, 10, 10),
-                                new TestRecord(ValueKind.ADD, 25, 25)),
-                        Arrays.asList(
-                                new TestRecord(ValueKind.ADD, 20, 20),
-                                new TestRecord(ValueKind.ADD, 30, 30),
-                                new TestRecord(ValueKind.ADD, 40, 40)),
-                        Arrays.asList(
-                                new TestRecord(ValueKind.ADD, 70, 70),
-                                new TestRecord(ValueKind.ADD, 75, 75),
-                                new TestRecord(ValueKind.ADD, 80, 80)),
-                        Arrays.asList(
-                                new TestRecord(ValueKind.ADD, 75, 75),
-                                new TestRecord(ValueKind.ADD, 100, 100)));
-        assertCompaction(transactions);
-    }
-
-    @Test
-    public void testCompactRandom() throws Exception {
-        List<List<TestRecord>> transactions = new ArrayList<>();
-        Random random = new Random();
-        for (int i = 0; i < 10; i++) {
-            boolean writeSmall = random.nextBoolean();
-            List<TestRecord> records = generateRandom(writeSmall ? 20 : 20_000);
-            transactions.add(records);
-        }
-        //        assertCompaction2(transactions, false);
-    }
-
-    private List<DataFileMeta> pickManifest(Set<DataFileMeta> scannedFiles, long targetFileSize) {
-        List<DataFileMeta> smallFiles =
-                scannedFiles.stream()
-                        .filter(file -> file.fileSize() < targetFileSize)
-                        .collect(Collectors.toList());
-
-        List<DataFileMeta> overlappedFiles =
-                new IntervalPartition(new ArrayList<>(scannedFiles), comparator)
-                        .partition().stream()
-                                .filter(section -> section.size() > 1)
-                                .flatMap(Collection::stream)
-                                .map(SortedRun::files)
-                                .flatMap(Collection::stream)
-                                .collect(Collectors.toList());
-
-        return Stream.concat(smallFiles.stream(), overlappedFiles.stream())
-                .distinct()
-                .collect(Collectors.toList());
-    }
-
-    private List<Increment> writeTransaction(List<List<TestRecord>> transactions) throws Exception {
-        // commit transactions
-        List<Increment> increments = new ArrayList<>();
-        Set<DataFileMeta> scannedFiles = new HashSet<>();
-        for (List<TestRecord> records : transactions) {
-            writeAll(records);
-            writer.sync();
-            increments.add(writer.prepareCommit());
-        }
-        return increments;
-    }
-
-    private void assertCompaction2(
-            List<List<TestRecord>> transactions,
-            long targetFileSize,
-            List<DataFileMeta> expectedPicked)
-            throws Exception {
-        // commit transactions
-        List<Increment> increments = new ArrayList<>();
-        Set<DataFileMeta> scannedFiles = new HashSet<>();
-        for (List<TestRecord> records : transactions) {
-            writeAll(records);
-            writer.sync();
-            increments.add(writer.prepareCommit());
-        }
-        // perform scan
-        for (Increment increment : increments) {
-            scannedFiles.addAll(increment.newFiles());
-            increment.compactBefore().forEach(scannedFiles::remove);
-            scannedFiles.addAll(increment.compactAfter());
-        }
-
-        // pick manifest
-        List<DataFileMeta> picked = pickManifest(scannedFiles, targetFileSize);
-        assertThat(picked).containsExactlyInAnyOrderElementsOf(expectedPicked);
-
-        // use picked manifest to restore merge tree
-        recreateMergeTree(picked, targetFileSize, true);
-        writeAll(readAll(picked, true));
-        writer.sync();
-        Increment increment = writer.prepareCommit();
-
-        // check compaction does not generate new files
-        assertThat(increment.newFiles()).isEmpty();
-
-        // check all picked manifest are marked as delete
-        assertThat(increment.compactBefore()).containsExactlyInAnyOrderElementsOf(picked);
-
-        // check compaction rewrite
-        assertRecords(readAll(picked, true), increment.compactAfter(), true);
-
-        // scan again to check full data
-        scannedFiles.addAll(increment.compactAfter());
-        increment.compactBefore().forEach(scannedFiles::remove);
-        assertRecords(
-                transactions.stream().flatMap(Collection::stream).collect(Collectors.toList()),
-                new ArrayList<>(scannedFiles),
-                true);
-    }
-
-    private void assertCompaction(List<List<TestRecord>> transactions) throws Exception {
-        List<DataFileMeta> restoredFiles = new ArrayList<>();
-        for (List<TestRecord> records : transactions) {
-            writeAll(records);
-            writer.sync();
-            Increment increment = writer.prepareCommit();
-            assertThat(increment.compactBefore()).isEmpty();
-            assertThat(increment.compactAfter()).isEmpty();
-            restoredFiles.addAll(increment.newFiles());
-        }
-        recreateMergeTree(restoredFiles, 1024 * 1024, true);
-        Increment increment = writer.prepareCommit();
-        assertThat(increment.newFiles()).isEmpty();
-        assertThat(increment.compactBefore()).containsExactlyInAnyOrderElementsOf(restoredFiles);
-        assertRecords(
-                transactions.stream().flatMap(Collection::stream).collect(Collectors.toList()),
-                increment.compactAfter(),
-                true);
-    }
-
     @ParameterizedTest
     @ValueSource(longs = {1, 1024 * 1024})
     public void testCloseUpgrade(long targetFileSize) throws Exception {
         // To generate a large number of upgrade files
-        recreateMergeTree(targetFileSize, false);
+        recreateMergeTree(targetFileSize);
 
         List<TestRecord> expected = new ArrayList<>();
         Random random = new Random();
@@ -469,8 +250,7 @@ public class MergeTreeTest {
         assertThat(files).isEqualTo(Collections.emptySet());
     }
 
-    private MergeTreeWriter createMergeTreeWriter(
-            List<DataFileMeta> files, boolean compactionTask) {
+    private MergeTreeWriter createMergeTreeWriter(List<DataFileMeta> files) {
         long maxSequenceNumber =
                 files.stream().map(DataFileMeta::maxSequenceNumber).max(Long::compare).orElse(-1L);
         return new MergeTreeWriter(
@@ -479,29 +259,23 @@ public class MergeTreeTest {
                         dataFileWriter.valueType(),
                         options.writeBufferSize,
                         options.pageSize),
-                createCompactManager(compactionTask, dataFileWriter, service),
+                createCompactManager(dataFileWriter, service),
                 new Levels(comparator, files, options.numLevels),
                 maxSequenceNumber,
                 comparator,
                 new DeduplicateMergeFunction(),
                 dataFileWriter,
                 options.commitForceCompact,
-                options.numSortedRunStopTrigger,
-                compactionTask);
+                options.numSortedRunStopTrigger);
     }
 
     private CompactManager createCompactManager(
-            boolean compactionTask,
-            DataFileWriter dataFileWriter,
-            ExecutorService compactExecutor) {
+            DataFileWriter dataFileWriter, ExecutorService compactExecutor) {
         CompactStrategy compactStrategy =
-                compactionTask
-                        ? (numLevels, runs) ->
-                                Optional.of(CompactUnit.fromLevelRuns(numLevels - 1, runs))
-                        : new UniversalCompaction(
-                                options.maxSizeAmplificationPercent,
-                                options.sizeRatio,
-                                options.numSortedRunCompactionTrigger);
+                new UniversalCompaction(
+                        options.maxSizeAmplificationPercent,
+                        options.sizeRatio,
+                        options.numSortedRunCompactionTrigger);
         CompactManager.Rewriter rewriter =
                 (outputLevel, dropDelete, sections) ->
                         dataFileWriter.write(
@@ -609,20 +383,6 @@ public class MergeTreeTest {
                     new TestRecord(
                             random.nextBoolean() ? ValueKind.ADD : ValueKind.DELETE,
                             random.nextInt(perBatch / 2),
-                            random.nextInt()));
-        }
-        return records;
-    }
-
-    private List<TestRecord> generateNoOverlap(int perBatch, int previousMax) {
-        Random random = new Random();
-        List<TestRecord> records = new ArrayList<>(perBatch);
-        for (int i = 0; i < perBatch; i++) {
-            previousMax += random.nextInt(perBatch / 2);
-            records.add(
-                    new TestRecord(
-                            random.nextBoolean() ? ValueKind.ADD : ValueKind.DELETE,
-                            previousMax,
                             random.nextInt()));
         }
         return records;

@@ -27,22 +27,19 @@ import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
-import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
-import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.PredicateConverter;
+import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.file.utils.PartitionedManifestMeta;
 import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.table.types.logical.RowType;
@@ -55,31 +52,27 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import javax.annotation.Nullable;
-
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.Set;
 import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import static java.util.Collections.emptyList;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_MANUAL_TRIGGERED;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_PARTITION_SPEC;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_RESCALE_BUCKET;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_SCANNED_MANIFEST;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
@@ -95,8 +88,6 @@ import static org.apache.flink.table.store.file.TestKeyValueGenerator.DEFAULT_RO
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.SINGLE_PARTITIONED;
-import static org.apache.flink.table.store.file.TestKeyValueGenerator.KEY_COMPARATOR;
-import static org.apache.flink.table.store.file.TestKeyValueGenerator.KEY_SERIALIZER;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.KEY_TYPE;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.NON_PARTITIONED_ROW_TYPE;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.SINGLE_PARTITIONED_PART_TYPE;
@@ -120,7 +111,6 @@ public class TableStoreManagedFactoryTest {
     private static final ObjectIdentifier TABLE_IDENTIFIER =
             ObjectIdentifier.of(CATALOG, DATABASE, TABLE);
     private static final int NUM_OF_BUCKETS = 2;
-    private static final int NUM_OF_LEVELS = 5;
 
     private final TableStoreManagedFactory tableStoreManagedFactory =
             new TableStoreManagedFactory();
@@ -301,7 +291,7 @@ public class TableStoreManagedFactoryTest {
                                 mockTableStoreManagedFactory.onCompactTable(
                                         context, new CatalogPartitionSpec(emptyMap())))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("The specified table to compact does not exist any snapshot");
+                .hasMessageContaining("The specified table to rescale does not exist any snapshot");
     }
 
     @ParameterizedTest
@@ -342,33 +332,10 @@ public class TableStoreManagedFactoryTest {
                 rescaleBucket);
     }
 
-    @MethodSource("provideManifest")
-    @ParameterizedTest
-    public void testPickManifest(
-            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> origin,
-            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> expected) {
-        Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> actual =
-                tableStoreManagedFactory.pickManifest(
-                        origin,
-                        new MergeTreeOptions(Configuration.fromMap(Collections.emptyMap())),
-                        KEY_COMPARATOR);
-
-        assertThat(actual).containsOnlyKeys(expected.keySet());
-        actual.forEach(
-                (partKey, bucketEntry) -> {
-                    assertThat(bucketEntry).containsOnlyKeys(expected.get(partKey).keySet());
-                    bucketEntry.forEach(
-                            (bucket, entry) ->
-                                    assertThat(entry)
-                                            .containsExactlyInAnyOrderElementsOf(
-                                                    expected.get(partKey).get(bucket)));
-                });
-    }
-
     // ~ Tools ------------------------------------------------------------------
 
     private void runTest(
-            MockTableStoreManagedFactory mockTableStoreManagedFactory,
+            MockTableStoreManagedFactory mockFactory,
             String tableName,
             RowType partitionType,
             RowType rowType,
@@ -376,7 +343,6 @@ public class TableStoreManagedFactoryTest {
             boolean rescaleBucket)
             throws Exception {
         String path = prepare(tableName, partitionType, rowType, mode, rescaleBucket);
-
         TestFileStore fileStore =
                 TestFileStore.create(
                         "avro",
@@ -387,14 +353,15 @@ public class TableStoreManagedFactoryTest {
                         rowType,
                         new DeduplicateMergeFunction());
 
+        Random random = new Random();
         TestKeyValueGenerator generator = new TestKeyValueGenerator(mode);
         int commitCount =
                 MergeTreeOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER.defaultValue()
-                        + new Random().nextInt(5);
+                        + random.nextInt(5);
         List<KeyValue> committedData = new ArrayList<>();
         Snapshot snapshot = null;
         for (int i = 0; i < commitCount; i++) {
-            List<KeyValue> data = generateData(generator, new Random().nextInt(1000));
+            List<KeyValue> data = generateData(generator, random.nextInt(1000));
             snapshot = commitData(fileStore, generator, data);
             committedData.addAll(data);
         }
@@ -417,7 +384,7 @@ public class TableStoreManagedFactoryTest {
             partSpec = emptyMap();
         }
         assertManifestTobeCompacted(
-                mockTableStoreManagedFactory,
+                mockFactory,
                 rescaleBucket,
                 fileStore,
                 snapshot.id(),
@@ -440,7 +407,7 @@ public class TableStoreManagedFactoryTest {
         Map<String, String> options =
                 of(
                         BUCKET.key(),
-                        NUM_OF_BUCKETS + "",
+                        String.valueOf(NUM_OF_BUCKETS),
                         PATH.key(),
                         path,
                         NUM_SORTED_RUNS_COMPACTION_TRIGGER.key(),
@@ -448,7 +415,7 @@ public class TableStoreManagedFactoryTest {
                         NUM_SORTED_RUNS_STOP_TRIGGER.key(),
                         String.valueOf(compactionTrigger));
         if (rescaleBucket) {
-            options.put(COMPACTION_RESCALE_BUCKET.key(), "true");
+            options.put(COMPACTION_RESCALE_BUCKET.key(), String.valueOf(true));
         }
         ResolvedCatalogTable catalogTable =
                 createResolvedTable(
@@ -479,47 +446,56 @@ public class TableStoreManagedFactoryTest {
     }
 
     private void assertManifestTobeCompacted(
-            MockTableStoreManagedFactory mockTableStoreManagedFactory,
+            MockTableStoreManagedFactory mockFactory,
             boolean rescaleBucket,
             FileStore fileStore,
             long snapshotId,
             CatalogPartitionSpec partitionSpec)
             throws IOException {
-        Map<String, String> actual =
-                mockTableStoreManagedFactory.onCompactTable(context, partitionSpec);
-        org.apache.flink.table.store.file.predicate.Predicate partFilter;
-        if (partitionSpec.getPartitionSpec().isEmpty()) {
-            partFilter = null;
-        } else {
-            partFilter =
-                    PredicateConverter.CONVERTER.fromMap(
-                            partitionSpec.getPartitionSpec(), fileStore.partitionType());
-        }
-        FileStoreScan.Plan expectedPlan =
-                fileStore.newScan().withSnapshot(snapshotId).withPartitionFilter(partFilter).plan();
-        assertThat(actual)
-                .containsEntry(
-                        COMPACTION_SCANNED_MANIFEST.key(),
-                        Base64.getEncoder()
-                                .encodeToString(
-                                        InstantiationUtil.serializeObject(
-                                                new PartitionedManifestMeta(
-                                                        expectedPlan.snapshotId(),
-                                                        rescaleBucket
-                                                                ? expectedPlan.groupByPartFiles()
-                                                                : emptyMap()))));
+        Map<String, String> actual = mockFactory.onCompactTable(context, partitionSpec);
         if (rescaleBucket) {
-            assertThat(actual).containsEntry(COMPACTION_RESCALE_BUCKET.key(), "true");
+            org.apache.flink.table.store.file.predicate.Predicate partFilter;
+            if (partitionSpec.getPartitionSpec().isEmpty()) {
+                partFilter = null;
+            } else {
+                partFilter =
+                        PredicateConverter.CONVERTER.fromMap(
+                                partitionSpec.getPartitionSpec(), fileStore.partitionType());
+            }
+            FileStoreScan.Plan expectedPlan =
+                    fileStore
+                            .newScan()
+                            .withSnapshot(snapshotId)
+                            .withPartitionFilter(partFilter)
+                            .plan();
+            assertThat(actual)
+                    .containsEntry(
+                            COMPACTION_SCANNED_MANIFEST.key(),
+                            Base64.getEncoder()
+                                    .encodeToString(
+                                            InstantiationUtil.serializeObject(
+                                                    new PartitionedManifestMeta(
+                                                            expectedPlan.snapshotId(),
+                                                            expectedPlan.groupByPartFiles()))));
+            assertThat(actual).containsEntry(COMPACTION_RESCALE_BUCKET.key(), String.valueOf(true));
+        } else {
+            assertThat(actual)
+                    .containsEntry(COMPACTION_MANUAL_TRIGGERED.key(), String.valueOf(true));
+            assertThat(actual)
+                    .containsEntry(
+                            COMPACTION_PARTITION_SPEC.key(),
+                            JsonSerdeUtil.toJson(partitionSpec.getPartitionSpec()));
         }
     }
 
     private static Map<String, String> pickPartition(List<Map<String, String>> partitions) {
         // pick a resolved partition spec
+        Random random = new Random();
         Map<String, String> partition =
-                new HashMap<>(partitions.get(new Random().nextInt(partitions.size())));
+                new HashMap<>(partitions.get(random.nextInt(partitions.size())));
         // remove some partition keys to test partition resolution
         List<String> keys = new ArrayList<>(partition.keySet());
-        int count = new Random().nextInt(keys.size());
+        int count = random.nextInt(keys.size());
         for (int i = 0; i < count; i++) {
             partition.remove(pickKey(keys));
         }
@@ -687,147 +663,6 @@ public class TableStoreManagedFactoryTest {
                                                 + " this will result in only one record in a partition"));
 
         return Stream.of(arg0, arg1, arg2);
-    }
-
-    public static Stream<Arguments> provideManifest() {
-        RowDataSerializer partSerializer = new RowDataSerializer(SINGLE_PARTITIONED_PART_TYPE);
-        int repeatedNum = 20;
-        return Stream.of(
-                IntStream.range(0, repeatedNum)
-                        .boxed()
-                        .map(i -> genArguments(partSerializer))
-                        .toArray(Arguments[]::new));
-    }
-
-    private static Arguments genArguments(RowDataSerializer partSerializer) {
-        List<BinaryRowData> partitions =
-                genPartitionValues().stream()
-                        .map(value -> partSerializer.toBinaryRow(GenericRowData.of(value)).copy())
-                        .collect(Collectors.toList());
-        Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> origin = new HashMap<>();
-        Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> expected = new HashMap<>();
-        Random random = new Random();
-        for (BinaryRowData partition : partitions) {
-            Map<Integer, List<DataFileMeta>> bucketEntry = new HashMap<>();
-            Map<Integer, List<DataFileMeta>> expectedBucketEntry = new HashMap<>();
-            for (int bucket = 0; bucket < NUM_OF_BUCKETS; bucket++) {
-                boolean genBySize = random.nextBoolean();
-                boolean triggerCompaction = random.nextBoolean();
-                int fileSize = random.nextInt(10);
-                List<DataFileMeta> fileMetas = new ArrayList<>();
-                BinaryRowData previousMin = null;
-                BinaryRowData previousMax = null;
-                for (int i = 0; i < fileSize; i++) {
-                    int level = random.nextInt(NUM_OF_LEVELS);
-                    fileMetas.add(
-                            genBySize
-                                    ? genFileBySize(level, triggerCompaction, previousMax)
-                                    : genFileByKeyRange(
-                                            level, triggerCompaction, previousMin, previousMax));
-                    previousMin = fileMetas.get(i).minKey();
-                    previousMax = fileMetas.get(i).maxKey();
-                }
-                bucketEntry.put(bucket, fileMetas);
-                if (triggerCompaction) {
-                    if (genBySize && fileMetas.size() > 0 || (!genBySize && fileMetas.size() > 1)) {
-                        expectedBucketEntry.put(bucket, fileMetas);
-                    }
-                }
-            }
-            origin.put(partition, bucketEntry);
-            if (!expectedBucketEntry.isEmpty()) {
-                expected.put(partition, expectedBucketEntry);
-            }
-        }
-        return Arguments.of(origin, expected);
-    }
-
-    private static Set<StringData> genPartitionValues() {
-        Random random = new Random();
-        int size = random.nextInt(10);
-        Set<StringData> values = new HashSet<>();
-        for (int i = 0; i < size; i++) {
-            values.add(StringData.fromString(String.valueOf(random.nextInt(100) + 20211110)));
-        }
-        return values;
-    }
-
-    private static DataFileMeta genFileBySize(
-            int level, boolean smallFile, @Nullable BinaryRowData previousMax) {
-        BinaryRowData minKey = genMinKey(false, null, previousMax);
-        BinaryRowData maxKey = genMaxKey(minKey);
-        Random random = new Random();
-        return new DataFileMeta(
-                "data-file-level" + level + "-" + UUID.randomUUID(),
-                smallFile
-                        ? (long) random.nextInt(100)
-                        : MergeTreeOptions.TARGET_FILE_SIZE.defaultValue().getBytes()
-                                + random.nextInt(100),
-                random.nextInt(100),
-                minKey,
-                maxKey,
-                null,
-                null,
-                1L,
-                100L,
-                level);
-    }
-
-    private static DataFileMeta genFileByKeyRange(
-            int level,
-            boolean overlap,
-            @Nullable BinaryRowData previousMin,
-            @Nullable BinaryRowData previousMax) {
-        BinaryRowData minKey = genMinKey(overlap, previousMin, previousMax);
-        BinaryRowData maxKey = genMaxKey(minKey);
-        Random random = new Random();
-        return new DataFileMeta(
-                "data-file-level" + level + "-" + UUID.randomUUID(),
-                MergeTreeOptions.TARGET_FILE_SIZE.defaultValue().getBytes() + random.nextInt(100),
-                random.nextInt(100),
-                minKey,
-                maxKey,
-                null,
-                null,
-                1L,
-                100L,
-                level);
-    }
-
-    private static BinaryRowData genMinKey(
-            boolean overlap,
-            @Nullable BinaryRowData previousMin,
-            @Nullable BinaryRowData previousMax) {
-        Random random = new Random();
-        BinaryRowData minKey;
-        if (previousMax == null) {
-            return genKey(random.nextInt(100), (long) random.nextInt(100));
-        }
-        int prevMax1 = previousMax.getInt(0);
-        long prevMax2 = previousMax.getLong(1);
-        if (overlap) {
-            assert previousMin != null;
-            double percent = random.nextDouble();
-            int prevMin1 = previousMin.getInt(0);
-            long prevMin2 = previousMin.getLong(1);
-            minKey =
-                    genKey(
-                            (int) (prevMin1 + (prevMax1 - prevMin1) * percent),
-                            (long) (prevMin2 + (prevMax2 - prevMin2) * percent));
-        } else {
-            int offset = random.nextInt(100);
-            minKey = genKey(prevMax1 + 1 + offset, prevMax2 + 1 + offset);
-        }
-        return minKey;
-    }
-
-    private static BinaryRowData genMaxKey(BinaryRowData minKey) {
-        int offset = new Random().nextInt(100);
-        return genKey(minKey.getInt(0) + 1 + offset, minKey.getLong(1) + 1 + offset);
-    }
-
-    private static BinaryRowData genKey(Object... keys) {
-        return KEY_SERIALIZER.toBinaryRow(GenericRowData.of(keys)).copy();
     }
 
     private static Map<String, String> addPrefix(

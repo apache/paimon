@@ -118,8 +118,7 @@ public class TestFileStore extends FileStoreImpl {
                 partitionType,
                 keyType,
                 valueType,
-                mergeFunction,
-                null);
+                mergeFunction);
         this.root = root;
         this.keySerializer = new RowDataSerializer(keyType);
         this.valueSerializer = new RowDataSerializer(valueType);

@@ -19,16 +19,7 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.types.logical.RowType;
-
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
 
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.DEFAULT_PART_TYPE;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.DEFAULT_ROW_TYPE;
@@ -58,13 +49,5 @@ public class MockTableStoreManagedFactory extends TableStoreManagedFactory {
                 partitionType,
                 KEY_TYPE,
                 rowType);
-    }
-
-    @Override
-    Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> pickManifest(
-            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupBy,
-            MergeTreeOptions options,
-            Comparator<RowData> keyComparator) {
-        return Collections.emptyMap();
     }
 }

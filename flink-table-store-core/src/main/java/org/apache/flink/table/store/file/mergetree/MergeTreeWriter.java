@@ -64,8 +64,6 @@ public class MergeTreeWriter implements RecordWriter {
 
     private final LinkedHashSet<DataFileMeta> compactAfter;
 
-    private final boolean compactionTask;
-
     private long newSequenceNumber;
 
     public MergeTreeWriter(
@@ -77,8 +75,7 @@ public class MergeTreeWriter implements RecordWriter {
             MergeFunction mergeFunction,
             DataFileWriter dataFileWriter,
             boolean commitForceCompact,
-            int numSortedRunStopTrigger,
-            boolean compactionTask) {
+            int numSortedRunStopTrigger) {
         this.memTable = memTable;
         this.compactManager = compactManager;
         this.levels = levels;
@@ -91,7 +88,6 @@ public class MergeTreeWriter implements RecordWriter {
         this.newFiles = new LinkedHashSet<>();
         this.compactBefore = new LinkedHashMap<>();
         this.compactAfter = new LinkedHashSet<>();
-        this.compactionTask = compactionTask;
     }
 
     private long newSequenceNumber() {
@@ -105,15 +101,13 @@ public class MergeTreeWriter implements RecordWriter {
 
     @Override
     public void write(ValueKind valueKind, RowData key, RowData value) throws Exception {
-        if (!compactionTask) {
-            long sequenceNumber = newSequenceNumber();
-            boolean success = memTable.put(sequenceNumber, valueKind, key, value);
+        long sequenceNumber = newSequenceNumber();
+        boolean success = memTable.put(sequenceNumber, valueKind, key, value);
+        if (!success) {
+            flush();
+            success = memTable.put(sequenceNumber, valueKind, key, value);
             if (!success) {
-                flush();
-                success = memTable.put(sequenceNumber, valueKind, key, value);
-                if (!success) {
-                    throw new RuntimeException("Mem table is too small to hold a single element.");
-                }
+                throw new RuntimeException("Mem table is too small to hold a single element.");
             }
         }
     }
@@ -136,11 +130,8 @@ public class MergeTreeWriter implements RecordWriter {
 
     @Override
     public Increment prepareCommit() throws Exception {
-        if (compactionTask) {
-            submitCompaction();
-        }
         flush();
-        if (commitForceCompact || compactionTask) {
+        if (commitForceCompact) {
             finishCompaction(true);
         }
         return drainIncrement();

@@ -69,6 +69,14 @@ public class StoreSink<WriterStateT, LogCommT>
 
     private final int numBucket;
 
+    private final boolean nonRescaleCompact;
+
+    private final int numLevels;
+
+    private final long targetFileSize;
+
+    @Nullable private final Map<String, String> compactPartitionSpec;
+
     @Nullable private final CatalogLock.Factory lockFactory;
 
     @Nullable private final Map<String, String> overwritePartition;
@@ -83,6 +91,10 @@ public class StoreSink<WriterStateT, LogCommT>
             int[] primaryKeys,
             int[] logPrimaryKeys,
             int numBucket,
+            boolean nonRescaleCompact,
+            int numLevels,
+            long targetFileSize,
+            @Nullable Map<String, String> compactPartitionSpec,
             @Nullable CatalogLock.Factory lockFactory,
             @Nullable Map<String, String> overwritePartition,
             @Nullable LogSinkProvider logSinkProvider) {
@@ -93,6 +105,10 @@ public class StoreSink<WriterStateT, LogCommT>
         this.primaryKeys = primaryKeys;
         this.logPrimaryKeys = logPrimaryKeys;
         this.numBucket = numBucket;
+        this.nonRescaleCompact = nonRescaleCompact;
+        this.numLevels = numLevels;
+        this.targetFileSize = targetFileSize;
+        this.compactPartitionSpec = compactPartitionSpec;
         this.lockFactory = lockFactory;
         this.overwritePartition = overwritePartition;
         this.logSinkProvider = logSinkProvider;
@@ -106,6 +122,9 @@ public class StoreSink<WriterStateT, LogCommT>
     @Override
     public StoreSinkWriter<WriterStateT> restoreWriter(
             InitContext initContext, Collection<WriterStateT> states) throws IOException {
+        if (nonRescaleCompact) {
+            // TODO: create compact writer
+        }
         SinkWriter<SinkRecord> logWriter = null;
         LogWriteCallback logCallback = null;
         if (logSinkProvider != null) {

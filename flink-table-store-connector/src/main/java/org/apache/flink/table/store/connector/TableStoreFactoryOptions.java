@@ -56,6 +56,22 @@ public class TableStoreFactoryOptions {
                                     + "planning phase and injected back into enriched options. The format contains "
                                     + "snapshot id and each partition's data file meta list tagged with bucket id.");
 
+    @Internal
+    public static final ConfigOption<Boolean> COMPACTION_MANUAL_TRIGGERED =
+            ConfigOptions.key("compaction.manual-triggered")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "An internal flag to indicate a manual triggered non-rescale bucket compaction.");
+
+    @Internal
+    public static final ConfigOption<String> COMPACTION_PARTITION_SPEC =
+            ConfigOptions.key("compaction.partition-spec")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "A json string to record the user-specified partition spec for the manual triggered non-rescale bucket compaction.");
+
     public static final ConfigOption<String> LOG_SYSTEM =
             ConfigOptions.key("log.system")
                     .stringType()
