@@ -49,6 +49,13 @@ public abstract class TableScan {
         return this;
     }
 
+    public TableScan withFilter(List<Predicate> predicates) {
+        if (predicates == null || predicates.isEmpty()) {
+            return this;
+        }
+        return withFilter(PredicateBuilder.and(predicates));
+    }
+
     public TableScan withFilter(Predicate predicate) {
         List<String> partitionKeys = schema.partitionKeys();
         int[] fieldIdxToPartitionIdx =

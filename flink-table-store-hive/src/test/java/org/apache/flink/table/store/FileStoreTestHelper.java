@@ -51,6 +51,8 @@ import java.util.concurrent.Executors;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
+import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
+
 /** Helper class to write and read {@link RowData} with {@link FileStoreImpl}. */
 public class FileStoreTestHelper {
 
@@ -72,7 +74,12 @@ public class FileStoreTestHelper {
         Path tablePath = FileStoreOptions.path(conf);
         new SchemaManager(tablePath)
                 .commitNewVersion(
-                        new UpdateSchema(rowType, partitionKeys, primaryKeys, new HashMap<>(), ""));
+                        new UpdateSchema(rowType, partitionKeys, primaryKeys, conf.toMap(), ""));
+
+        // only path, other config should be read from file store.
+        conf = new Configuration();
+        conf.set(PATH, tablePath.toString());
+
         this.table = FileStoreTableFactory.create(conf, "user");
         this.store = table.fileStore();
         this.partitionCalculator = partitionCalculator;

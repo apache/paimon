@@ -25,11 +25,20 @@ import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+
 /** Factory to create {@link FileStoreTable}. */
 public class FileStoreTableFactory {
 
+    public static FileStoreTable create(Configuration conf) {
+        return create(conf, UUID.randomUUID().toString());
+    }
+
     public static FileStoreTable create(Configuration conf, String user) {
         Path tablePath = FileStoreOptions.path(conf);
+        String name = tablePath.getName();
         Schema schema =
                 new SchemaManager(tablePath)
                         .latest()
@@ -40,13 +49,18 @@ public class FileStoreTableFactory {
                                                         + tablePath
                                                         + ". Please create table first."));
 
+        // merge dynamic options into schema.options
+        Map<String, String> newOptions = new HashMap<>(schema.options());
+        newOptions.putAll(conf.toMap());
+        schema = schema.copy(newOptions);
+
         if (conf.get(FileStoreOptions.WRITE_MODE) == WriteMode.APPEND_ONLY) {
-            return new AppendOnlyFileStoreTable(schema, conf, user);
+            return new AppendOnlyFileStoreTable(name, schema, user);
         } else {
             if (schema.primaryKeys().isEmpty()) {
-                return new ChangelogValueCountFileStoreTable(schema, conf, user);
+                return new ChangelogValueCountFileStoreTable(name, schema, user);
             } else {
-                return new ChangelogWithKeyFileStoreTable(schema, conf, user);
+                return new ChangelogWithKeyFileStoreTable(name, schema, user);
             }
         }
     }

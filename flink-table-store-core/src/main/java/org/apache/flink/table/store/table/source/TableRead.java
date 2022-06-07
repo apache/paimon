@@ -28,6 +28,7 @@ import org.apache.flink.table.store.file.utils.RecordReader;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 
 /** An abstraction layer above {@link FileStoreRead} to provide reading of {@link RowData}. */
@@ -37,6 +38,14 @@ public abstract class TableRead {
 
     protected TableRead(FileStoreRead read) {
         this.read = read;
+    }
+
+    // TODO support filter push down
+
+    public TableRead withProjection(int[] projection) {
+        int[][] nestedProjection =
+                Arrays.stream(projection).mapToObj(i -> new int[] {i}).toArray(int[][]::new);
+        return withProjection(nestedProjection);
     }
 
     public abstract TableRead withProjection(int[][] projection);
