@@ -18,13 +18,9 @@
 
 package org.apache.flink.table.store;
 
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.store.file.predicate.Literal;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.util.Preconditions;
 
@@ -35,12 +31,6 @@ import org.apache.hadoop.hive.serde2.io.HiveDecimalWritable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.sql.Date;
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.ZoneOffset;
-import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -134,58 +124,9 @@ public class SearchArgumentToPredicateConverter {
     }
 
     private Literal toLiteral(LogicalType literalType, Object o) {
-        if (o == null) {
-            throw new UnsupportedOperationException("Null literals are currently unsupported");
+        if (o instanceof HiveDecimalWritable) {
+            o = ((HiveDecimalWritable) o).getHiveDecimal().bigDecimalValue();
         }
-        switch (literalType.getTypeRoot()) {
-            case BOOLEAN:
-            case BIGINT:
-            case DOUBLE:
-                return new Literal(literalType, o);
-            case TINYINT:
-                return new Literal(literalType, ((Long) o).byteValue());
-            case SMALLINT:
-                return new Literal(literalType, ((Long) o).shortValue());
-            case INTEGER:
-                return new Literal(literalType, ((Long) o).intValue());
-            case FLOAT:
-                return new Literal(literalType, ((Double) o).floatValue());
-            case VARCHAR:
-                return new Literal(literalType, StringData.fromString(o.toString()));
-            case DATE:
-                // Hive uses `java.sql.Date.valueOf(lit.toString());` to convert a literal to Date
-                // Which uses `java.util.Date()` internally to create the object and that uses the
-                // TimeZone.getDefaultRef()
-                // To get back the expected date we have to use the LocalDate which gets rid of the
-                // TimeZone misery as it uses the year/month/day to generate the object
-                LocalDate localDate;
-                if (o instanceof Timestamp) {
-                    localDate = ((Timestamp) o).toLocalDateTime().toLocalDate();
-                } else if (o instanceof Date) {
-                    localDate = ((Date) o).toLocalDate();
-                } else {
-                    throw new UnsupportedOperationException(
-                            "Unexpected date literal of class " + o.getClass().getName());
-                }
-                LocalDate epochDay =
-                        Instant.ofEpochSecond(0).atOffset(ZoneOffset.UTC).toLocalDate();
-                int numberOfDays = (int) ChronoUnit.DAYS.between(epochDay, localDate);
-                return new Literal(literalType, numberOfDays);
-            case DECIMAL:
-                DecimalType decimalType = (DecimalType) literalType;
-                int precision = decimalType.getPrecision();
-                int scale = decimalType.getScale();
-                return new Literal(
-                        literalType,
-                        DecimalData.fromBigDecimal(
-                                ((HiveDecimalWritable) o).getHiveDecimal().bigDecimalValue(),
-                                precision,
-                                scale));
-            case TIMESTAMP_WITHOUT_TIME_ZONE:
-                return new Literal(literalType, TimestampData.fromTimestamp((Timestamp) o));
-            default:
-                throw new UnsupportedOperationException(
-                        "Unsupported predicate leaf type " + literalType.getTypeRoot().name());
-        }
+        return Literal.fromJavaObject(literalType, o);
     }
 }
