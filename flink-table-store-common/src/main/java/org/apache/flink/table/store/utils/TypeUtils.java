@@ -21,6 +21,7 @@ package org.apache.flink.table.store.utils;
 import org.apache.flink.table.data.binary.BinaryStringData;
 import org.apache.flink.table.data.binary.BinaryStringDataUtil;
 import org.apache.flink.table.types.logical.DecimalType;
+import org.apache.flink.table.types.logical.LocalZonedTimestampType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.TimestampType;
@@ -75,7 +76,17 @@ public class TypeUtils {
                 TimestampType timestampType = (TimestampType) type;
                 return BinaryStringDataUtil.toTimestamp(str, timestampType.getPrecision());
             default:
-                throw new UnsupportedOperationException("Unsupported type " + type.toString());
+                throw new UnsupportedOperationException("Unsupported type " + type);
         }
+    }
+
+    public static int timestampPrecision(LogicalType type) {
+        if (type instanceof TimestampType) {
+            return ((TimestampType) type).getPrecision();
+        } else if (type instanceof LocalZonedTimestampType) {
+            return ((LocalZonedTimestampType) type).getPrecision();
+        }
+
+        throw new UnsupportedOperationException("Unsupported type: " + type);
     }
 }
