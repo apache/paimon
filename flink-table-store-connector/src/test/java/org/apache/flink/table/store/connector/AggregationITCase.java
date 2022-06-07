@@ -30,6 +30,7 @@ import java.util.concurrent.ExecutionException;
 import static org.apache.flink.util.CollectionUtil.iteratorToList;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.offset;
 
 /** ITCase for partial update. */
 public class AggregationITCase extends FileStoreTableITCase {
@@ -151,18 +152,18 @@ public class AggregationITCase extends FileStoreTableITCase {
                                 + "('pk1',1,4,100001,3.2,2.44, cast('12.5678' as decimal(6,4)),cast(4 as tinyint),cast(0 as smallint))")
                 .await();
         result = iteratorToList(bEnv.from("T4").execute().collect());
-        assertThat(result)
-                .containsExactlyInAnyOrder(
-                        Row.of(
-                                "pk1",
-                                1,
-                                7,
-                                100_001L,
-                                Float.valueOf("6.4"),
-                                Double.valueOf("2.46"),
-                                new BigDecimal("12.5678"),
-                                Byte.valueOf("2"),
-                                Short.valueOf("1")));
+        Row row =
+                Row.of(
+                        "pk1",
+                        1,
+                        7,
+                        100_001L,
+                        Float.valueOf("6.4"),
+                        Double.valueOf("2.46"),
+                        new BigDecimal("12.5678"),
+                        Byte.valueOf("2"),
+                        Short.valueOf("1"));
+        assertRowEqualsListIncludeDouble(row, result.get(0));
     }
 
     @Test
@@ -186,18 +187,18 @@ public class AggregationITCase extends FileStoreTableITCase {
                         "INSERT INTO T4 VALUES ('pk1',1,12,100000,3.6,2.44,cast('12.1234' as decimal(6,4)),cast(0 as tinyint),cast(10 as smallint))")
                 .await();
         result = iteratorToList(bEnv.from("T4").execute().collect());
-        assertThat(result)
-                .containsExactlyInAnyOrder(
-                        Row.of(
-                                "pk1",
-                                1,
-                                21,
-                                112322L,
-                                Float.valueOf("10.2"),
-                                Double.valueOf("2.46"),
-                                new BigDecimal("12.5678"),
-                                Byte.valueOf("0"),
-                                Short.valueOf("13")));
+        Row row =
+                Row.of(
+                        "pk1",
+                        1,
+                        21,
+                        112322L,
+                        Float.valueOf("10.2"),
+                        Double.valueOf("2.46"),
+                        new BigDecimal("12.5678"),
+                        Byte.valueOf("0"),
+                        Short.valueOf("13"));
+        assertRowEqualsListIncludeDouble(row, result.get(0));
     }
 
     @Test
@@ -252,48 +253,54 @@ public class AggregationITCase extends FileStoreTableITCase {
                 .await();
 
         result = iteratorToList(bEnv.from("T4").execute().collect());
-        assertThat(result)
-                .containsExactlyInAnyOrder(
-                        Row.of(
-                                "pk1",
-                                1,
-                                33,
-                                200_000L,
-                                Float.valueOf("4.4"),
-                                Double.valueOf(" 1.86"),
-                                new BigDecimal("45.3456"),
-                                Byte.valueOf("0"),
-                                Short.valueOf("5")),
-                        Row.of(
-                                "pk1",
-                                2,
-                                33,
-                                200_000L,
-                                Float.valueOf("4.4"),
-                                Double.valueOf(" 1.86"),
-                                new BigDecimal("45.3456"),
-                                Byte.valueOf("0"),
-                                Short.valueOf("5")),
-                        Row.of(
-                                "pk2",
-                                2,
-                                33,
-                                200_000L,
-                                Float.valueOf("4.4"),
-                                Double.valueOf("1.86"),
-                                new BigDecimal("45.3456"),
-                                Byte.valueOf("0"),
-                                Short.valueOf("5")),
-                        Row.of(
-                                "pk2",
-                                4,
-                                3,
-                                100_000L,
-                                Float.valueOf("3.2"),
-                                Double.valueOf("2.48"),
-                                new BigDecimal("12.3456"),
-                                Byte.valueOf("2"),
-                                Short.valueOf("1")));
+        Row[] rows = new Row[4];
+        rows[0] =
+                Row.of(
+                        "pk1",
+                        1,
+                        33,
+                        200_000L,
+                        Float.valueOf("4.4"),
+                        Double.valueOf(" 1.86"),
+                        new BigDecimal("45.3456"),
+                        Byte.valueOf("0"),
+                        Short.valueOf("5"));
+        rows[1] =
+                Row.of(
+                        "pk1",
+                        2,
+                        33,
+                        200_000L,
+                        Float.valueOf("4.4"),
+                        Double.valueOf(" 1.86"),
+                        new BigDecimal("45.3456"),
+                        Byte.valueOf("0"),
+                        Short.valueOf("5"));
+        rows[2] =
+                Row.of(
+                        "pk2",
+                        2,
+                        33,
+                        200_000L,
+                        Float.valueOf("4.4"),
+                        Double.valueOf("1.86"),
+                        new BigDecimal("45.3456"),
+                        Byte.valueOf("0"),
+                        Short.valueOf("5"));
+        rows[3] =
+                Row.of(
+                        "pk2",
+                        4,
+                        3,
+                        100_000L,
+                        Float.valueOf("3.2"),
+                        Double.valueOf("2.48"),
+                        new BigDecimal("12.3456"),
+                        Byte.valueOf("2"),
+                        Short.valueOf("1"));
+        for (int i = 0; i < rows.length; i++) {
+            assertRowEqualsListIncludeDouble(rows[i], result.get(i));
+        }
     }
 
     @Test
@@ -301,5 +308,19 @@ public class AggregationITCase extends FileStoreTableITCase {
         assertThatThrownBy(
                 () -> sEnv.from("T3").execute().print(),
                 "Aggregation update continuous reading is not supported");
+    }
+
+    private void assertRowEqualsListIncludeDouble(Row row, Row result) {
+        for (int i = 0; i < row.getArity(); i++) {
+            if (row.getField(i).getClass() == Double.class) {
+                assertThat((Double) row.getField(i))
+                        .isEqualTo((Double) result.getField(i), offset(0.001));
+            } else if (row.getField(i).getClass() == Float.class) {
+                assertThat((Float) row.getField(i))
+                        .isEqualTo((Float) result.getField(i), offset(0.001f));
+            } else {
+                assertThat(row.getField(i)).isEqualTo(result.getField(i));
+            }
+        }
     }
 }
