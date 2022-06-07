@@ -28,6 +28,7 @@ import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.utils.TypeConversions;
 import org.apache.flink.util.Preconditions;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -39,7 +40,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /** Schema of table store. */
-public class Schema {
+public class Schema implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private final long id;
 
@@ -152,6 +155,11 @@ public class Schema {
                                         .map(k -> fields.get(fieldNames.indexOf(k)))
                                         .collect(Collectors.toList()))
                         .logicalType;
+    }
+
+    public Schema copy(Map<String, String> newOptions) {
+        return new Schema(
+                id, fields, highestFieldId, partitionKeys, primaryKeys, newOptions, comment);
     }
 
     @Override
