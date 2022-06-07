@@ -21,9 +21,12 @@ package org.apache.flink.table.store.connector.source;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
+import org.apache.flink.table.store.file.utils.BinPacking;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -56,6 +59,48 @@ public class FileStoreSourceSplitGenerator {
                                                                 be.getKey(),
                                                                 be.getValue())))
                 .collect(Collectors.toList());
+    }
+
+    public List<FileStoreSourceSplit> createBinPackingSplits(
+            FileStoreScan.Plan plan, long targetSplitSize) {
+        Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupByPart = plan.groupByPartFiles();
+
+        List<FileStoreSourceSplit> splits = new ArrayList<>();
+        for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> part :
+                groupByPart.entrySet()) {
+            BinaryRowData partKey = part.getKey();
+
+            Map<Integer, List<DataFileMeta>> buckets = part.getValue();
+            for (Map.Entry<Integer, List<DataFileMeta>> bucket : buckets.entrySet()) {
+                Integer bucketId = bucket.getKey();
+                List<DataFileMeta> bucketFiles = bucket.getValue();
+
+                for (List<DataFileMeta> binPackFiles :
+                        binPackSplits(bucketFiles, targetSplitSize)) {
+                    FileStoreSourceSplit split =
+                            new FileStoreSourceSplit(getNextId(), partKey, bucketId, binPackFiles);
+                    splits.add(split);
+                }
+            }
+        }
+
+        return splits;
+    }
+
+    private static List<List<DataFileMeta>> binPackSplits(
+            List<DataFileMeta> bucketFiles, long targetSplitSize) {
+        long openFileCost = 1024 * 1024L;
+        int lookback = 0;
+        Function<DataFileMeta, Long> weightFunc = file -> Math.max(file.fileSize(), openFileCost);
+
+        List<List<DataFileMeta>> packList = new ArrayList<>();
+        for (List<DataFileMeta> part :
+                new BinPacking.PackingIterable<>(
+                        bucketFiles, targetSplitSize, lookback, weightFunc, true)) {
+            packList.add(part);
+        }
+
+        return packList;
     }
 
     protected final String getNextId() {

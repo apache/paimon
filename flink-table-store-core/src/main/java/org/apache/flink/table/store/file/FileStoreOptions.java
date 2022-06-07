@@ -84,6 +84,13 @@ public class FileStoreOptions implements Serializable {
                             "To avoid frequent manifest merges, this parameter specifies the minimum number "
                                     + "of ManifestFileMeta to merge.");
 
+    public static final ConfigOption<MemorySize> TARGET_TASK_SPLIT_SIZE =
+            ConfigOptions.key("target-task-split-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(256))
+                    .withDescription(
+                            "Target size of a split task when scanning a bucket in the append-only table.");
+
     public static final ConfigOption<String> PARTITION_DEFAULT_NAME =
             key("partition.default-name")
                     .stringType()

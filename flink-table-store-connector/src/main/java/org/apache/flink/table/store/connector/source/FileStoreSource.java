@@ -52,6 +52,8 @@ public class FileStoreSource
 
     private final WriteMode writeMode;
 
+    private final long targetSplitSize;
+
     private final boolean valueCountMode;
 
     private final boolean isContinuous;
@@ -75,6 +77,7 @@ public class FileStoreSource
     public FileStoreSource(
             FileStore fileStore,
             WriteMode writeMode,
+            long targetSplitSize,
             boolean valueCountMode,
             boolean isContinuous,
             long discoveryInterval,
@@ -85,6 +88,7 @@ public class FileStoreSource
             @Nullable PartitionedManifestMeta specifiedPartManifests) {
         this.fileStore = fileStore;
         this.writeMode = writeMode;
+        this.targetSplitSize = targetSplitSize;
         this.valueCountMode = valueCountMode;
         this.isContinuous = isContinuous;
         this.discoveryInterval = discoveryInterval;
@@ -170,7 +174,12 @@ public class FileStoreSource
             } else {
                 FileStoreScan.Plan plan = scan.plan();
                 snapshotId = plan.snapshotId();
-                splits = new FileStoreSourceSplitGenerator().createSplits(plan);
+
+                FileStoreSourceSplitGenerator generator = new FileStoreSourceSplitGenerator();
+                splits =
+                        writeMode == WriteMode.CHANGE_LOG
+                                ? generator.createSplits(plan)
+                                : generator.createBinPackingSplits(plan, targetSplitSize);
             }
         } else {
             // restore from checkpoint
