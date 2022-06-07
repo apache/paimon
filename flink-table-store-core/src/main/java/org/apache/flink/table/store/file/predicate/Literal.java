@@ -21,13 +21,25 @@ package org.apache.flink.table.store.file.predicate;
 import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArrayComparator;
 import org.apache.flink.core.memory.DataInputViewStreamWrapper;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
+import org.apache.flink.table.data.DecimalData;
+import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.runtime.typeutils.InternalSerializers;
+import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.LogicalType;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
+import java.math.BigDecimal;
+import java.sql.Date;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 
 /** A serializable literal class. */
@@ -90,5 +102,72 @@ public class Literal implements Serializable {
     @Override
     public int hashCode() {
         return Objects.hash(type, value);
+    }
+
+    public static Literal fromJavaObject(LogicalType literalType, Object o) {
+        if (o == null) {
+            throw new UnsupportedOperationException("Null literals are currently unsupported");
+        }
+        switch (literalType.getTypeRoot()) {
+            case BOOLEAN:
+                return new Literal(literalType, o);
+            case BIGINT:
+                return new Literal(literalType, ((Number) o).longValue());
+            case DOUBLE:
+                return new Literal(literalType, ((Number) o).doubleValue());
+            case TINYINT:
+                return new Literal(literalType, ((Number) o).byteValue());
+            case SMALLINT:
+                return new Literal(literalType, ((Number) o).shortValue());
+            case INTEGER:
+                return new Literal(literalType, ((Number) o).intValue());
+            case FLOAT:
+                return new Literal(literalType, ((Number) o).floatValue());
+            case VARCHAR:
+                return new Literal(literalType, StringData.fromString(o.toString()));
+            case DATE:
+                // Hive uses `java.sql.Date.valueOf(lit.toString());` to convert a literal to Date
+                // Which uses `java.util.Date()` internally to create the object and that uses the
+                // TimeZone.getDefaultRef()
+                // To get back the expected date we have to use the LocalDate which gets rid of the
+                // TimeZone misery as it uses the year/month/day to generate the object
+                LocalDate localDate;
+                if (o instanceof Timestamp) {
+                    localDate = ((Timestamp) o).toLocalDateTime().toLocalDate();
+                } else if (o instanceof Date) {
+                    localDate = ((Date) o).toLocalDate();
+                } else if (o instanceof LocalDate) {
+                    localDate = (LocalDate) o;
+                } else {
+                    throw new UnsupportedOperationException(
+                            "Unexpected date literal of class " + o.getClass().getName());
+                }
+                LocalDate epochDay =
+                        Instant.ofEpochSecond(0).atOffset(ZoneOffset.UTC).toLocalDate();
+                int numberOfDays = (int) ChronoUnit.DAYS.between(epochDay, localDate);
+                return new Literal(literalType, numberOfDays);
+            case DECIMAL:
+                DecimalType decimalType = (DecimalType) literalType;
+                int precision = decimalType.getPrecision();
+                int scale = decimalType.getScale();
+                return new Literal(
+                        literalType, DecimalData.fromBigDecimal((BigDecimal) o, precision, scale));
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                TimestampData timestampData;
+                if (o instanceof Timestamp) {
+                    timestampData = TimestampData.fromTimestamp((Timestamp) o);
+                } else if (o instanceof Instant) {
+                    timestampData = TimestampData.fromInstant((Instant) o);
+                } else if (o instanceof LocalDateTime) {
+                    timestampData = TimestampData.fromLocalDateTime((LocalDateTime) o);
+                } else {
+                    throw new UnsupportedOperationException("Unsupported object: " + o);
+                }
+                return new Literal(literalType, timestampData);
+            default:
+                throw new UnsupportedOperationException(
+                        "Unsupported predicate leaf type " + literalType.getTypeRoot().name());
+        }
     }
 }
