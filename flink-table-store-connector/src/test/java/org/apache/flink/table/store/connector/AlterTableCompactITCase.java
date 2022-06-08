@@ -20,12 +20,12 @@ package org.apache.flink.table.store.connector;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectIdentifier;
+import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.utils.SnapshotFinder;
 import org.apache.flink.types.Row;
 
 import org.junit.Test;
 
-import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.util.Arrays;
@@ -55,14 +55,12 @@ public class AlterTableCompactITCase extends FileStoreTableITCase {
         batchSql("INSERT INTO T0 VALUES (5, 'Northanger Abby', 8.6)");
         batchSql(
                 "INSERT INTO T0 VALUES (6, 'Jane Eyre', 9.9), (1, 'Pride and Prejudice', 9.0), (2, 'Emma', 8.5)");
-
-        Long snapshot = findLatestSnapshotId("T0");
+        assertSnapshot("T0", 4, Snapshot.CommitKind.APPEND);
         List<Row> expected = batchSql("SELECT * FROM T0", 6);
 
         batchSql("ALTER TABLE T0 COMPACT");
-
         assertThat(batchSql("SELECT * FROM T0", 6)).containsExactlyInAnyOrderElementsOf(expected);
-        assertThat(findLatestSnapshotId("T0")).isEqualTo(snapshot + 1);
+        assertSnapshot("T0", 5, Snapshot.CommitKind.COMPACT);
     }
 
     @Test
@@ -100,7 +98,7 @@ public class AlterTableCompactITCase extends FileStoreTableITCase {
                 "INSERT INTO T1 VALUES (66666, 'Summer', 'Summer Vibe'),"
                         + " (7, 'Summer', 'Summertime Sadness')");
 
-        Long snapshot = findLatestSnapshotId("T1");
+        assertSnapshot("T1", 11, Snapshot.CommitKind.APPEND);
         List<Row> expectedSummer = batchSql("SELECT * FROM T1 WHERE f1 = 'Summer'", 8);
         List<Row> expectedFourSeasons = batchSql("SELECT * FROM T1", 21);
 
@@ -108,16 +106,16 @@ public class AlterTableCompactITCase extends FileStoreTableITCase {
         batchSql("ALTER TABLE T1 PARTITION (f1 = 'Summer') COMPACT");
         assertThat(batchSql("SELECT * FROM T1 WHERE f1 = 'Summer'", 8))
                 .containsExactlyElementsOf(expectedSummer);
-        assertThat(findLatestSnapshotId("T1")).isEqualTo(snapshot + 1);
+        assertSnapshot("T1", 12, Snapshot.CommitKind.COMPACT);
 
         // compact whole table
         batchSql("ALTER TABLE T1 COMPACT");
         assertThat(batchSql("SELECT * FROM T1", 21))
                 .containsExactlyInAnyOrderElementsOf(expectedFourSeasons);
-        assertThat(findLatestSnapshotId("T1")).isEqualTo(snapshot + 2);
+        assertSnapshot("T1", 13, Snapshot.CommitKind.COMPACT);
 
         batchSql("ALTER TABLE T1 COMPACT");
-        assertThat(findLatestSnapshotId("T1")).isEqualTo(snapshot + 2);
+        assertSnapshot("T1", 13, Snapshot.CommitKind.COMPACT);
     }
 
     @Test
@@ -142,26 +140,36 @@ public class AlterTableCompactITCase extends FileStoreTableITCase {
                         + " (2, '2022-05-19', 'Ciao'),"
                         + " (3, '2022-05-19', 'Bark')");
 
-        Long snapshot = findLatestSnapshotId("T2");
+        assertSnapshot("T2", 3, Snapshot.CommitKind.APPEND);
         List<Row> theSecond = batchSql("SELECT * FROM T2 WHERE f0 = 2", 3);
 
         batchSql("ALTER TABLE T2 PARTITION (f0 = 2) COMPACT");
         assertThat(batchSql("SELECT * FROM T2 WHERE f0 = 2", 3))
                 .containsExactlyInAnyOrderElementsOf(theSecond);
-        assertThat(findLatestSnapshotId("T2")).isEqualTo(snapshot + 1);
+        assertSnapshot("T2", 4, Snapshot.CommitKind.COMPACT);
     }
 
-    private Long findLatestSnapshotId(String tableName) throws IOException {
-        return SnapshotFinder.findLatest(
-                Path.fromLocalFile(
-                        new File(
+    private void assertSnapshot(
+            String tableName, long expectedSnapshotId, Snapshot.CommitKind expectedKind)
+            throws IOException {
+        String snapshotDir =
+                path
+                        + relativeTablePath(
+                                ObjectIdentifier.of(
+                                        bEnv.getCurrentCatalog(),
+                                        bEnv.getCurrentDatabase(),
+                                        tableName))
+                        + "/snapshot";
+        assertThat(SnapshotFinder.findLatest(new Path(URI.create(snapshotDir))))
+                .isEqualTo(expectedSnapshotId);
+
+        Snapshot snapshot =
+                Snapshot.fromPath(
+                        new Path(
                                 URI.create(
-                                        path
-                                                + relativeTablePath(
-                                                        ObjectIdentifier.of(
-                                                                bEnv.getCurrentCatalog(),
-                                                                bEnv.getCurrentDatabase(),
-                                                                tableName))
-                                                + "/snapshot"))));
+                                        snapshotDir
+                                                + String.format(
+                                                        "/snapshot-%d", expectedSnapshotId))));
+        assertThat(snapshot.commitKind()).isEqualTo(expectedKind);
     }
 }

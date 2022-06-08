@@ -18,6 +18,11 @@
 
 package org.apache.flink.table.store.connector.sink;
 
+import org.apache.flink.api.common.operators.MailboxExecutor;
+import org.apache.flink.api.common.operators.ProcessingTimeService;
+import org.apache.flink.api.common.serialization.SerializationSchema;
+import org.apache.flink.api.connector.sink2.Sink;
+import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
 import org.apache.flink.table.catalog.CatalogLock;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.GenericRowData;
@@ -31,6 +36,7 @@ import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
+import org.apache.flink.util.UserCodeClassLoader;
 
 import org.junit.Assume;
 import org.junit.Before;
@@ -38,11 +44,14 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 import java.util.concurrent.Callable;
 
 import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
@@ -189,6 +198,26 @@ public class StoreSinkTest {
                 .isEqualTo(Collections.singletonList("ADD-key-8-value-0/8/9"));
     }
 
+    @Test
+    public void testCreateCompactor() throws Exception {
+        StoreSink<?, ?> sink =
+                new StoreSink<>(
+                        identifier,
+                        fileStore,
+                        WriteMode.CHANGE_LOG,
+                        partitions,
+                        primaryKeys,
+                        primaryKeys,
+                        2,
+                        true,
+                        null,
+                        () -> lock,
+                        null,
+                        null);
+        StoreSinkWriterBase<?> writer = sink.createWriter(initContext());
+        assertThat(writer).isInstanceOf(StoreSinkCompactor.class);
+    }
+
     private void writeAndAssert(StoreSink<?, ?> sink) throws Exception {
         writeAndCommit(
                 sink,
@@ -251,7 +280,7 @@ public class StoreSinkTest {
         assertThat(lock.closed).isTrue();
     }
 
-    private StoreSink<?, ?> newSink(Map<String, String> overwritePartition) {
+    private StoreSink<?, ?> newSink(@Nullable Map<String, String> overwritePartition) {
         return new StoreSink<>(
                 identifier,
                 fileStore,
@@ -286,5 +315,50 @@ public class StoreSinkTest {
         public void close() {
             closed = true;
         }
+    }
+
+    private Sink.InitContext initContext() {
+        return new Sink.InitContext() {
+            @Override
+            public UserCodeClassLoader getUserCodeClassLoader() {
+                return null;
+            }
+
+            @Override
+            public MailboxExecutor getMailboxExecutor() {
+                return null;
+            }
+
+            @Override
+            public ProcessingTimeService getProcessingTimeService() {
+                return null;
+            }
+
+            @Override
+            public int getSubtaskId() {
+                return 0;
+            }
+
+            @Override
+            public int getNumberOfParallelSubtasks() {
+                return 1;
+            }
+
+            @Override
+            public SinkWriterMetricGroup metricGroup() {
+                return null;
+            }
+
+            @Override
+            public OptionalLong getRestoredCheckpointId() {
+                return OptionalLong.empty();
+            }
+
+            @Override
+            public SerializationSchema.InitializationContext
+                    asSerializationSchemaInitializationContext() {
+                return null;
+            }
+        };
     }
 }

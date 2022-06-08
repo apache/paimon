@@ -69,6 +69,7 @@ public class FileStorePathFactory {
         this.uuid = UUID.randomUUID().toString();
 
         this.partitionComputer = getPartitionComputer(partitionType, defaultPartValue);
+        this.formatIdentifier = formatIdentifier;
 
         this.manifestFileCount = new AtomicInteger(0);
         this.manifestListCount = new AtomicInteger(0);
