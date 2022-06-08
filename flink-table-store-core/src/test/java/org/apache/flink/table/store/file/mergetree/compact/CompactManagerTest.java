@@ -203,7 +203,7 @@ public class CompactManagerTest {
         assertThat(outputs).isEqualTo(expected);
     }
 
-    public static DataFileMeta newFile(int level, int minKey, int maxKey, long maxSequence) {
+    private static DataFileMeta newFile(int level, int minKey, int maxKey, long maxSequence) {
         return new DataFileMeta(
                 "",
                 maxKey - minKey + 1,

@@ -47,16 +47,6 @@ public class TableStoreFactoryOptions {
                                     + "of a partition/table.");
 
     @Internal
-    public static final ConfigOption<String> COMPACTION_SCANNED_MANIFEST =
-            ConfigOptions.key("compaction.scanned-manifest")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "The base64 string of manifest entries which are scanned during manual compaction "
-                                    + "planning phase and injected back into enriched options. The format contains "
-                                    + "snapshot id and each partition's data file meta list tagged with bucket id.");
-
-    @Internal
     public static final ConfigOption<Boolean> COMPACTION_MANUAL_TRIGGERED =
             ConfigOptions.key("compaction.manual-triggered")
                     .booleanType()
@@ -92,7 +82,6 @@ public class TableStoreFactoryOptions {
     public static Set<ConfigOption<?>> allOptions() {
         Set<ConfigOption<?>> allOptions = new HashSet<>();
         allOptions.add(COMPACTION_RESCALE_BUCKET);
-        allOptions.add(COMPACTION_SCANNED_MANIFEST);
         allOptions.add(LOG_SYSTEM);
         allOptions.add(SINK_PARALLELISM);
         allOptions.add(SCAN_PARALLELISM);

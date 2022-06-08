@@ -53,19 +53,15 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
-import org.apache.flink.table.store.file.utils.PartitionedManifestMeta;
 import org.apache.flink.table.store.log.LogOptions.LogStartupMode;
 import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.util.InstantiationUtil;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -73,8 +69,6 @@ import java.util.UUID;
 
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_MANUAL_TRIGGERED;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_PARTITION_SPEC;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_RESCALE_BUCKET;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_SCANNED_MANIFEST;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.flink.table.store.file.FileStoreOptions.MERGE_ENGINE;
@@ -128,7 +122,7 @@ public class TableStore {
     }
 
     public boolean isCompactionTask() {
-        return options.get(COMPACTION_RESCALE_BUCKET) || options.get(COMPACTION_MANUAL_TRIGGERED);
+        return options.get(COMPACTION_MANUAL_TRIGGERED);
     }
 
     @SuppressWarnings("unchecked")
@@ -197,20 +191,6 @@ public class TableStore {
 
     private MergeEngine mergeEngine() {
         return options.get(MERGE_ENGINE);
-    }
-
-    @Nullable
-    private PartitionedManifestMeta getCompactionMeta() {
-        String json = options.get(COMPACTION_SCANNED_MANIFEST);
-        try {
-            return json == null
-                    ? null
-                    : InstantiationUtil.deserializeObject(
-                            Base64.getDecoder().decode(json),
-                            Thread.currentThread().getContextClassLoader());
-        } catch (IOException | ClassNotFoundException e) {
-            throw new RuntimeException(e);
-        }
     }
 
     private FileStore buildAppendOnlyStore() {
@@ -337,7 +317,7 @@ public class TableStore {
                 boolean isContinuous,
                 WriteMode writeMode,
                 boolean continuousScanLatest,
-                boolean nonRescaleCompact) {
+                boolean compactionTask) {
 
             return new FileStoreSource(
                     buildFileStore(),
@@ -346,11 +326,10 @@ public class TableStore {
                     isContinuous,
                     discoveryIntervalMills(),
                     continuousScanLatest,
-                    nonRescaleCompact,
+                    compactionTask,
                     projectedFields,
                     partitionPredicate,
-                    fieldPredicate,
-                    getCompactionMeta());
+                    fieldPredicate);
         }
 
         private Source<RowData, ?, ?> buildSource() {
@@ -377,8 +356,7 @@ public class TableStore {
                             .build();
                 }
             } else {
-                return buildFileSource(
-                        false, writeMode, false, options.get(COMPACTION_MANUAL_TRIGGERED));
+                return buildFileSource(false, writeMode, false, isCompactionTask());
             }
         }
 
@@ -471,7 +449,7 @@ public class TableStore {
                             trimmedPrimaryKeysIndex(),
                             fullPrimaryKeysIndex(),
                             numBucket,
-                            options.get(COMPACTION_MANUAL_TRIGGERED),
+                            isCompactionTask(),
                             getCompactPartSpec(),
                             lockFactory,
                             overwritePartition,

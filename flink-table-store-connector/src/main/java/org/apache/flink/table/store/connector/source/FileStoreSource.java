@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.connector.source;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.api.connector.source.SourceReader;
@@ -32,7 +31,6 @@ import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.utils.PartitionedManifestMeta;
 
 import javax.annotation.Nullable;
 
@@ -61,19 +59,13 @@ public class FileStoreSource
 
     private final boolean latestContinuous;
 
-    private final boolean nonRescaleCompact;
+    private final boolean compactionTask;
 
     @Nullable private final int[][] projectedFields;
 
     @Nullable private final Predicate partitionPredicate;
 
     @Nullable private final Predicate fieldPredicate;
-
-    /**
-     * The partitioned manifest meta collected at planning phase when rescale-bucket compaction is
-     * triggered.
-     */
-    @Nullable private final PartitionedManifestMeta specifiedPartManifests;
 
     public FileStoreSource(
             FileStore fileStore,
@@ -82,22 +74,24 @@ public class FileStoreSource
             boolean isContinuous,
             long discoveryInterval,
             boolean latestContinuous,
-            boolean nonRescaleCompact,
+            boolean compactionTask,
             @Nullable int[][] projectedFields,
             @Nullable Predicate partitionPredicate,
-            @Nullable Predicate fieldPredicate,
-            @Nullable PartitionedManifestMeta specifiedPartManifests) {
+            @Nullable Predicate fieldPredicate) {
         this.fileStore = fileStore;
         this.writeMode = writeMode;
         this.valueCountMode = valueCountMode;
         this.isContinuous = isContinuous;
         this.discoveryInterval = discoveryInterval;
         this.latestContinuous = latestContinuous;
-        this.nonRescaleCompact = nonRescaleCompact;
+        this.compactionTask = compactionTask;
         this.projectedFields = projectedFields;
         this.partitionPredicate = partitionPredicate;
         this.fieldPredicate = fieldPredicate;
-        this.specifiedPartManifests = specifiedPartManifests;
+        /**
+         * The partitioned manifest meta collected at planning phase when rescale-bucket compaction
+         * is triggered.
+         */
     }
 
     @Override
@@ -142,19 +136,11 @@ public class FileStoreSource
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
         // no need to assign splits for non-rescale compaction
-        if (nonRescaleCompact) {
+        if (compactionTask) {
             return new StaticFileStoreSplitEnumerator(context, null, Collections.emptyList());
         }
 
         FileStoreScan scan = fileStore.newScan();
-        // let rescale compaction read pre-planned manifests
-        if (specifiedPartManifests != null) {
-            return new StaticFileStoreSplitEnumerator(
-                    context,
-                    scan.snapshot(specifiedPartManifests.getSnapshotId()),
-                    new FileStoreSourceSplitGenerator()
-                            .createSplits(specifiedPartManifests.getManifestEntries()));
-        }
 
         if (partitionPredicate != null) {
             scan.withPartitionFilter(partitionPredicate);
@@ -214,11 +200,5 @@ public class FileStoreSource
     @Override
     public PendingSplitsCheckpointSerializer getEnumeratorCheckpointSerializer() {
         return new PendingSplitsCheckpointSerializer(getSplitSerializer());
-    }
-
-    @VisibleForTesting
-    @Nullable
-    PartitionedManifestMeta getSpecifiedPartManifests() {
-        return specifiedPartManifests;
     }
 }
