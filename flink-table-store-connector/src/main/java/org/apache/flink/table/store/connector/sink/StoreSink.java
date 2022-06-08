@@ -72,10 +72,6 @@ public class StoreSink<WriterStateT, LogCommT>
 
     private final boolean nonRescaleCompact;
 
-    private final int numLevels;
-
-    private final long targetFileSize;
-
     @Nullable private final Map<String, String> compactPartitionSpec;
 
     @Nullable private final CatalogLock.Factory lockFactory;
@@ -93,8 +89,6 @@ public class StoreSink<WriterStateT, LogCommT>
             int[] logPrimaryKeys,
             int numBucket,
             boolean nonRescaleCompact,
-            int numLevels,
-            long targetFileSize,
             @Nullable Map<String, String> compactPartitionSpec,
             @Nullable CatalogLock.Factory lockFactory,
             @Nullable Map<String, String> overwritePartition,
@@ -107,8 +101,6 @@ public class StoreSink<WriterStateT, LogCommT>
         this.logPrimaryKeys = logPrimaryKeys;
         this.numBucket = numBucket;
         this.nonRescaleCompact = nonRescaleCompact;
-        this.numLevels = numLevels;
-        this.targetFileSize = targetFileSize;
         this.compactPartitionSpec = compactPartitionSpec;
         this.lockFactory = lockFactory;
         this.overwritePartition = overwritePartition;

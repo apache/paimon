@@ -49,7 +49,6 @@ import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.FileStoreOptions.MergeEngine;
 import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -463,8 +462,6 @@ public class TableStore {
                 partitioned.setParallelism(parallelism);
             }
 
-            MergeTreeOptions mergeTreeOptions = new FileStoreOptions(options).mergeTreeOptions();
-
             StoreSink<?, ?> sink =
                     new StoreSink<>(
                             tableIdentifier,
@@ -475,8 +472,6 @@ public class TableStore {
                             fullPrimaryKeysIndex(),
                             numBucket,
                             options.get(COMPACTION_MANUAL_TRIGGERED),
-                            mergeTreeOptions.numLevels,
-                            mergeTreeOptions.targetFileSize,
                             getCompactPartSpec(),
                             lockFactory,
                             overwritePartition,
