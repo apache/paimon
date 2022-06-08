@@ -33,6 +33,7 @@ public class FlushingFileFormat extends FileFormat {
     private final FileFormat format;
 
     public FlushingFileFormat(String identifier) {
+        super(identifier);
         this.format =
                 FileFormat.fromIdentifier(
                         FlushingFileFormat.class.getClassLoader(), identifier, new Configuration());

@@ -23,6 +23,7 @@ import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
+import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.format.FileFormat;
@@ -144,7 +145,11 @@ public class ManifestFileMetaTest {
         return new ManifestFile.Factory(
                         PARTITION_TYPE,
                         avro,
-                        new FileStorePathFactory(new Path(path), PARTITION_TYPE, "default"),
+                        new FileStorePathFactory(
+                                new Path(path),
+                                PARTITION_TYPE,
+                                "default",
+                                FileStoreOptions.FILE_FORMAT.defaultValue()),
                         Long.MAX_VALUE)
                 .create();
     }
