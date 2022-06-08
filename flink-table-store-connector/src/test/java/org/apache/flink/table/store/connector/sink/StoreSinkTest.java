@@ -28,6 +28,7 @@ import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.connector.StatefulPrecommittingSinkWriter;
 import org.apache.flink.table.store.connector.sink.TestFileStore.TestRecordWriter;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
@@ -214,7 +215,7 @@ public class StoreSinkTest {
                         () -> lock,
                         null,
                         null);
-        StoreSinkWriterBase<?> writer = sink.createWriter(initContext());
+        StatefulPrecommittingSinkWriter<?> writer = sink.createWriter(initContext());
         assertThat(writer).isInstanceOf(StoreSinkCompactor.class);
     }
 
@@ -238,13 +239,14 @@ public class StoreSinkTest {
     }
 
     private List<Committable> write(StoreSink<?, ?> sink, RowData... rows) throws Exception {
-        StoreSinkWriterBase<?> writer = sink.createWriter(null);
+        StatefulPrecommittingSinkWriter<?> writer = sink.createWriter(null);
         for (RowData row : rows) {
             writer.write(row, null);
         }
 
-        List<Committable> committables = writer.prepareCommit();
-        Map<BinaryRowData, Map<Integer, RecordWriter>> writers = new HashMap<>(writer.writers());
+        List<Committable> committables = ((StoreSinkWriter) writer).prepareCommit();
+        Map<BinaryRowData, Map<Integer, RecordWriter>> writers =
+                new HashMap<>(((StoreSinkWriter) writer).writers());
         assertThat(writers.size()).isGreaterThan(0);
 
         writer.close();
@@ -254,7 +256,6 @@ public class StoreSinkTest {
                                 (bucket, recordWriter) -> {
                                     TestRecordWriter testWriter = (TestRecordWriter) recordWriter;
                                     assertThat(testWriter.synced).isTrue();
-                                    assertThat(testWriter.endOfInput).isTrue();
                                     assertThat(testWriter.closed).isTrue();
                                 }));
         return committables;

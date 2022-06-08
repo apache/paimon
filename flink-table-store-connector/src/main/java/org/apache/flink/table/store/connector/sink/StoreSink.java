@@ -27,6 +27,7 @@ import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.table.catalog.CatalogLock;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.connector.StatefulPrecommittingSinkWriter;
 import org.apache.flink.table.store.connector.sink.global.GlobalCommittingSink;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.WriteMode;
@@ -108,20 +109,24 @@ public class StoreSink<WriterStateT, LogCommT>
     }
 
     @Override
-    public StoreSinkWriterBase<WriterStateT> createWriter(InitContext initContext)
+    public StatefulPrecommittingSinkWriter<WriterStateT> createWriter(InitContext initContext)
             throws IOException {
         return restoreWriter(initContext, null);
     }
 
+    @SuppressWarnings("unchecked")
     @Override
-    public StoreSinkWriterBase<WriterStateT> restoreWriter(
+    public StatefulPrecommittingSinkWriter<WriterStateT> restoreWriter(
             InitContext initContext, Collection<WriterStateT> states) throws IOException {
         if (compactionTask) {
-            return new StoreSinkCompactor<>(
-                    initContext.getSubtaskId(),
-                    initContext.getNumberOfParallelSubtasks(),
-                    fileStore,
-                    compactPartitionSpec == null ? Collections.emptyMap() : compactPartitionSpec);
+            return (StatefulPrecommittingSinkWriter<WriterStateT>)
+                    new StoreSinkCompactor(
+                            initContext.getSubtaskId(),
+                            initContext.getNumberOfParallelSubtasks(),
+                            fileStore,
+                            compactPartitionSpec == null
+                                    ? Collections.emptyMap()
+                                    : compactPartitionSpec);
         }
         SinkWriter<SinkRecord> logWriter = null;
         LogWriteCallback logCallback = null;

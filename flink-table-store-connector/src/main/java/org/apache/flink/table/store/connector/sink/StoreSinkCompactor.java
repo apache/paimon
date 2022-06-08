@@ -23,6 +23,7 @@ import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.connector.file.table.FileSystemConnectorOptions;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.connector.StatefulPrecommittingSinkWriter;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
@@ -34,13 +35,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 /** A dedicated {@link SinkWriter} for manual triggered compaction. */
-public class StoreSinkCompactor<WriterStateT> extends StoreSinkWriterBase<WriterStateT> {
+public class StoreSinkCompactor implements StatefulPrecommittingSinkWriter<Void> {
 
     private static final Logger LOG = LoggerFactory.getLogger(StoreSinkCompactor.class);
 
@@ -49,6 +53,7 @@ public class StoreSinkCompactor<WriterStateT> extends StoreSinkWriterBase<Writer
 
     private final FileStore fileStore;
     private final Map<String, String> partitionSpec;
+    private final Map<BinaryRowData, Map<Integer, RecordWriter>> writers;
 
     public StoreSinkCompactor(
             int subTaskId,
@@ -59,6 +64,7 @@ public class StoreSinkCompactor<WriterStateT> extends StoreSinkWriterBase<Writer
         this.numOfParallelInstances = numOfParallelInstances;
         this.fileStore = fileStore;
         this.partitionSpec = partitionSpec;
+        this.writers = new HashMap<>();
     }
 
     @Override
@@ -109,7 +115,12 @@ public class StoreSinkCompactor<WriterStateT> extends StoreSinkWriterBase<Writer
 
     @Override
     public void close() throws Exception {
-        super.close();
+        for (Map<Integer, RecordWriter> bucketWriters : writers.values()) {
+            for (RecordWriter writer : bucketWriters.values()) {
+                writer.close();
+            }
+        }
+        writers.clear();
     }
 
     private RecordWriter getWriter(BinaryRowData partition, int bucket, List<DataFileMeta> files) {
@@ -126,5 +137,31 @@ public class StoreSinkCompactor<WriterStateT> extends StoreSinkWriterBase<Writer
     @VisibleForTesting
     boolean select(BinaryRowData partition, int bucket) {
         return subTaskId == Math.abs(Objects.hash(partition, bucket) % numOfParallelInstances);
+    }
+
+    @Override
+    public List<Void> snapshotState(long checkpointId) {
+        return Collections.emptyList();
+    }
+
+    @Override
+    public Collection<Committable> prepareCommit() throws IOException {
+        List<Committable> committables = new ArrayList<>();
+        for (Map.Entry<BinaryRowData, Map<Integer, RecordWriter>> partEntry : writers.entrySet()) {
+            BinaryRowData partition = partEntry.getKey();
+            for (Map.Entry<Integer, RecordWriter> bucketEntry : partEntry.getValue().entrySet()) {
+                RecordWriter writer = bucketEntry.getValue();
+                FileCommittable committable;
+                try {
+                    committable =
+                            new FileCommittable(
+                                    partition, bucketEntry.getKey(), writer.prepareCommit());
+                } catch (Exception e) {
+                    throw new IOException(e);
+                }
+                committables.add(new Committable(Committable.Kind.FILE, committable));
+            }
+        }
+        return committables;
     }
 }

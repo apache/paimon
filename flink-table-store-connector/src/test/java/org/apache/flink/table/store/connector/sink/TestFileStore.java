@@ -153,8 +153,6 @@ public class TestFileStore implements FileStore {
 
         boolean closed = false;
 
-        boolean endOfInput = false;
-
         TestRecordWriter(boolean hasPk) {
             this.hasPk = hasPk;
         }
@@ -219,9 +217,7 @@ public class TestFileStore implements FileStore {
         }
 
         @Override
-        public void endInput() {
-            endOfInput = true;
-        }
+        public void endInput() {}
 
         @Override
         public List<DataFileMeta> close() {
