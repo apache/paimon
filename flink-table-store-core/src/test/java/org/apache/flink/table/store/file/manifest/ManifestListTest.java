@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.manifest;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
@@ -92,7 +93,10 @@ public class ManifestListTest {
     private ManifestList createManifestList(String path) {
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
-                        new Path(path), TestKeyValueGenerator.PARTITION_TYPE, "default");
+                        new Path(path),
+                        TestKeyValueGenerator.PARTITION_TYPE,
+                        "default",
+                        FileStoreOptions.FILE_FORMAT.defaultValue());
         return new ManifestList.Factory(TestKeyValueGenerator.PARTITION_TYPE, avro, pathFactory)
                 .create();
     }

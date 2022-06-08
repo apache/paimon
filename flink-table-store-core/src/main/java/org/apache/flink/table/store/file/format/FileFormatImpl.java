@@ -36,6 +36,7 @@ public class FileFormatImpl extends FileFormat {
 
     public FileFormatImpl(
             ClassLoader classLoader, String formatIdentifier, ReadableConfig formatOptions) {
+        super(formatIdentifier);
         this.readerFactory =
                 FactoryUtil.discoverFactory(
                         classLoader, BulkReaderFormatFactory.class, formatIdentifier);

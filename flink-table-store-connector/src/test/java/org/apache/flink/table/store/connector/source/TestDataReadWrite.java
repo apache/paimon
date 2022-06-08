@@ -24,6 +24,7 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.data.DataFileMeta;
@@ -68,7 +69,11 @@ public class TestDataReadWrite {
                         "avro",
                         new Configuration());
         this.pathFactory =
-                new FileStorePathFactory(new Path(root), RowType.of(new IntType()), "default");
+                new FileStorePathFactory(
+                        new Path(root),
+                        RowType.of(new IntType()),
+                        "default",
+                        FileStoreOptions.FILE_FORMAT.defaultValue());
         this.service = service;
     }
 
