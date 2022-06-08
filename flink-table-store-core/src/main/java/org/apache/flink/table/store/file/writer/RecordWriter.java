@@ -48,8 +48,8 @@ public interface RecordWriter {
      */
     void sync() throws Exception;
 
-    /** Called when mem table is full or end of input to flush all pending data to disk. */
-    void flush() throws Exception;
+    /** Called when end of input to flush all pending data to disk. */
+    void endInput() throws Exception;
 
     /**
      * Close this writer, the call will delete newly generated but not committed files.

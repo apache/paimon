@@ -113,7 +113,9 @@ public class MergeTreeWriter implements RecordWriter {
     }
 
     @Override
-    public void flush() throws Exception {
+    public void endInput() throws Exception {}
+
+    private void flush() throws Exception {
         if (memTable.size() > 0) {
             if (levels.numberOfSortedRuns() > numSortedRunStopTrigger) {
                 // stop writing, wait for compaction finished

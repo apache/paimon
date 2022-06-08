@@ -92,7 +92,7 @@ public class StoreSinkCompactor<WriterStateT> extends StoreSinkWriterBase<Writer
                         }
                         RecordWriter writer = getWriter(partition, bucket, bucketEntry.getValue());
                         try {
-                            writer.flush();
+                            writer.endInput();
                         } catch (Exception e) {
                             throw new RuntimeException(e);
                         }

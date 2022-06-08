@@ -254,6 +254,7 @@ public class StoreSinkTest {
                                 (bucket, recordWriter) -> {
                                     TestRecordWriter testWriter = (TestRecordWriter) recordWriter;
                                     assertThat(testWriter.synced).isTrue();
+                                    assertThat(testWriter.endOfInput).isTrue();
                                     assertThat(testWriter.closed).isTrue();
                                 }));
         return committables;

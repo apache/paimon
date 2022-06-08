@@ -104,6 +104,7 @@ public abstract class StoreSinkWriterBase<WriterStateT>
     private void closeWriter(RecordWriter writer) throws IOException {
         try {
             writer.sync();
+            writer.endInput();
             writer.close();
         } catch (Exception e) {
             throw new IOException(e);

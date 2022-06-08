@@ -106,7 +106,7 @@ public class AppendOnlyWriter implements RecordWriter {
     }
 
     @Override
-    public void flush() throws Exception {}
+    public void endInput() throws Exception {}
 
     @Override
     public List<DataFileMeta> close() throws Exception {

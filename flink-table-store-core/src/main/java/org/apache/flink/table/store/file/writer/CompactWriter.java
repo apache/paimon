@@ -69,7 +69,7 @@ public class CompactWriter implements RecordWriter {
     }
 
     @Override
-    public void flush() {
+    public void endInput() {
         compactor.submitCompaction(unit, true);
     }
 
