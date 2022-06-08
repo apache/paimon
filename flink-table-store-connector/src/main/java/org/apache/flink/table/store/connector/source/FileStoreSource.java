@@ -36,7 +36,6 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 
 import static org.apache.flink.table.store.connector.source.PendingSplitsCheckpoint.INVALID_SNAPSHOT;
 import static org.apache.flink.util.Preconditions.checkArgument;
@@ -59,8 +58,6 @@ public class FileStoreSource
 
     private final boolean latestContinuous;
 
-    private final boolean compactionTask;
-
     @Nullable private final int[][] projectedFields;
 
     @Nullable private final Predicate partitionPredicate;
@@ -74,7 +71,6 @@ public class FileStoreSource
             boolean isContinuous,
             long discoveryInterval,
             boolean latestContinuous,
-            boolean compactionTask,
             @Nullable int[][] projectedFields,
             @Nullable Predicate partitionPredicate,
             @Nullable Predicate fieldPredicate) {
@@ -84,14 +80,9 @@ public class FileStoreSource
         this.isContinuous = isContinuous;
         this.discoveryInterval = discoveryInterval;
         this.latestContinuous = latestContinuous;
-        this.compactionTask = compactionTask;
         this.projectedFields = projectedFields;
         this.partitionPredicate = partitionPredicate;
         this.fieldPredicate = fieldPredicate;
-        /**
-         * The partitioned manifest meta collected at planning phase when rescale-bucket compaction
-         * is triggered.
-         */
     }
 
     @Override
@@ -135,11 +126,6 @@ public class FileStoreSource
     public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> restoreEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
-        // no need to assign splits for non-rescale compaction
-        if (compactionTask) {
-            return new StaticFileStoreSplitEnumerator(context, null, Collections.emptyList());
-        }
-
         FileStoreScan scan = fileStore.newScan();
 
         if (partitionPredicate != null) {

@@ -34,7 +34,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,7 +48,6 @@ public class StoreSinkCompactor<WriterStateT> extends StoreSinkWriterBase<Writer
     private final int numOfParallelInstances;
 
     private final FileStore fileStore;
-    private final Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> partitionedMeta;
     private final Map<String, String> partitionSpec;
 
     public StoreSinkCompactor(
@@ -61,7 +59,6 @@ public class StoreSinkCompactor<WriterStateT> extends StoreSinkWriterBase<Writer
         this.numOfParallelInstances = numOfParallelInstances;
         this.fileStore = fileStore;
         this.partitionSpec = partitionSpec;
-        this.partitionedMeta = new HashMap<>();
     }
 
     @Override
@@ -93,11 +90,7 @@ public class StoreSinkCompactor<WriterStateT> extends StoreSinkWriterBase<Writer
                                     bucket,
                                     subTaskId);
                         }
-                        partitionedMeta
-                                .computeIfAbsent(partition, k -> new HashMap<>())
-                                .computeIfAbsent(bucket, k -> new ArrayList<>())
-                                .addAll(bucketEntry.getValue());
-                        RecordWriter writer = getWriter(partition, bucket);
+                        RecordWriter writer = getWriter(partition, bucket, bucketEntry.getValue());
                         try {
                             writer.flush();
                         } catch (Exception e) {
@@ -110,22 +103,24 @@ public class StoreSinkCompactor<WriterStateT> extends StoreSinkWriterBase<Writer
     }
 
     @Override
-    protected RecordWriter createWriter(BinaryRowData partition, int bucket) {
-        BinaryRowData copied = partition.copy();
-        return fileStore
-                .newWrite()
-                .createCompactWriter(copied, bucket, partitionedMeta.get(copied).get(bucket));
-    }
-
-    @Override
     public void write(RowData element, Context context) throws IOException, InterruptedException {
         // nothing to write
     }
 
     @Override
     public void close() throws Exception {
-        partitionedMeta.clear();
         super.close();
+    }
+
+    private RecordWriter getWriter(BinaryRowData partition, int bucket, List<DataFileMeta> files) {
+        Map<Integer, RecordWriter> buckets = writers.get(partition);
+        if (buckets == null) {
+            buckets = new HashMap<>();
+            writers.put(partition.copy(), buckets);
+        }
+        return buckets.computeIfAbsent(
+                bucket,
+                k -> fileStore.newWrite().createCompactWriter(partition.copy(), bucket, files));
     }
 
     @VisibleForTesting

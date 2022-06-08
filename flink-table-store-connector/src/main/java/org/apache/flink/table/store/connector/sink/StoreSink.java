@@ -70,7 +70,7 @@ public class StoreSink<WriterStateT, LogCommT>
 
     private final int numBucket;
 
-    private final boolean nonRescaleCompact;
+    private final boolean compactionTask;
 
     @Nullable private final Map<String, String> compactPartitionSpec;
 
@@ -88,7 +88,7 @@ public class StoreSink<WriterStateT, LogCommT>
             int[] primaryKeys,
             int[] logPrimaryKeys,
             int numBucket,
-            boolean nonRescaleCompact,
+            boolean compactionTask,
             @Nullable Map<String, String> compactPartitionSpec,
             @Nullable CatalogLock.Factory lockFactory,
             @Nullable Map<String, String> overwritePartition,
@@ -100,7 +100,7 @@ public class StoreSink<WriterStateT, LogCommT>
         this.primaryKeys = primaryKeys;
         this.logPrimaryKeys = logPrimaryKeys;
         this.numBucket = numBucket;
-        this.nonRescaleCompact = nonRescaleCompact;
+        this.compactionTask = compactionTask;
         this.compactPartitionSpec = compactPartitionSpec;
         this.lockFactory = lockFactory;
         this.overwritePartition = overwritePartition;
@@ -116,7 +116,7 @@ public class StoreSink<WriterStateT, LogCommT>
     @Override
     public StoreSinkWriterBase<WriterStateT> restoreWriter(
             InitContext initContext, Collection<WriterStateT> states) throws IOException {
-        if (nonRescaleCompact) {
+        if (compactionTask) {
             return new StoreSinkCompactor<>(
                     initContext.getSubtaskId(),
                     initContext.getNumberOfParallelSubtasks(),

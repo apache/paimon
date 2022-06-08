@@ -41,6 +41,7 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.connector.sink.BucketStreamPartitioner;
 import org.apache.flink.table.store.connector.sink.StoreSink;
 import org.apache.flink.table.store.connector.sink.global.GlobalCommittingSinkTranslator;
+import org.apache.flink.table.store.connector.source.FileStoreEmptySource;
 import org.apache.flink.table.store.connector.source.FileStoreSource;
 import org.apache.flink.table.store.connector.source.LogHybridSourceFactory;
 import org.apache.flink.table.store.connector.source.StaticFileStoreSplitEnumerator;
@@ -224,7 +225,7 @@ public class TableStore {
         }
     }
 
-    FileStore buildFileStore() {
+    private FileStore buildFileStore() {
         WriteMode writeMode = options.get(FileStoreOptions.WRITE_MODE);
 
         switch (writeMode) {
@@ -314,10 +315,7 @@ public class TableStore {
         }
 
         private FileStoreSource buildFileSource(
-                boolean isContinuous,
-                WriteMode writeMode,
-                boolean continuousScanLatest,
-                boolean compactionTask) {
+                boolean isContinuous, WriteMode writeMode, boolean continuousScanLatest) {
 
             return new FileStoreSource(
                     buildFileStore(),
@@ -326,7 +324,6 @@ public class TableStore {
                     isContinuous,
                     discoveryIntervalMills(),
                     continuousScanLatest,
-                    compactionTask,
                     projectedFields,
                     partitionPredicate,
                     fieldPredicate);
@@ -342,21 +339,20 @@ public class TableStore {
 
                 LogStartupMode startupMode = logOptions().get(SCAN);
                 if (logSourceProvider == null) {
-                    return buildFileSource(
-                            true, writeMode, startupMode == LogStartupMode.LATEST, false);
+                    return buildFileSource(true, writeMode, startupMode == LogStartupMode.LATEST);
                 } else {
                     if (startupMode != LogStartupMode.FULL) {
                         return logSourceProvider.createSource(null);
                     }
                     return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
-                                    buildFileSource(false, writeMode, false, false))
+                                    buildFileSource(false, writeMode, false))
                             .addSource(
                                     new LogHybridSourceFactory(logSourceProvider),
                                     Boundedness.CONTINUOUS_UNBOUNDED)
                             .build();
                 }
             } else {
-                return buildFileSource(false, writeMode, false, isCompactionTask());
+                return buildFileSource(false, writeMode, false);
             }
         }
 
@@ -373,7 +369,7 @@ public class TableStore {
                             .orElse(type);
             DataStreamSource<RowData> dataStream =
                     env.fromSource(
-                            buildSource(),
+                            isCompactionTask() ? new FileStoreEmptySource() : buildSource(),
                             WatermarkStrategy.noWatermarks(),
                             tableIdentifier.asSummaryString(),
                             InternalTypeInfo.of(produceType));

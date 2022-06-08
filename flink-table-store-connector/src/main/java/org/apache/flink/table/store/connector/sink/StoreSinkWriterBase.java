@@ -101,17 +101,6 @@ public abstract class StoreSinkWriterBase<WriterStateT>
         writers.clear();
     }
 
-    protected RecordWriter getWriter(BinaryRowData partition, int bucket) {
-        Map<Integer, RecordWriter> buckets = writers.get(partition);
-        if (buckets == null) {
-            buckets = new HashMap<>();
-            writers.put(partition.copy(), buckets);
-        }
-        return buckets.computeIfAbsent(bucket, k -> createWriter(partition, bucket));
-    }
-
-    protected abstract RecordWriter createWriter(BinaryRowData partition, int bucket);
-
     private void closeWriter(RecordWriter writer) throws IOException {
         try {
             writer.sync();

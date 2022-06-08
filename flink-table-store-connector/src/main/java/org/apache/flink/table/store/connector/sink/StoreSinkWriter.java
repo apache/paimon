@@ -41,7 +41,9 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -82,11 +84,20 @@ public class StoreSinkWriter<WriterStateT> extends StoreSinkWriterBase<WriterSta
                         new ExecutorThreadFactory("compaction-thread"));
     }
 
-    @Override
-    protected RecordWriter createWriter(BinaryRowData partition, int bucket) {
-        return overwrite
-                ? fileStoreWrite.createEmptyWriter(partition.copy(), bucket, compactExecutor)
-                : fileStoreWrite.createWriter(partition.copy(), bucket, compactExecutor);
+    private RecordWriter getWriter(BinaryRowData partition, int bucket) {
+        Map<Integer, RecordWriter> buckets = writers.get(partition);
+        if (buckets == null) {
+            buckets = new HashMap<>();
+            writers.put(partition.copy(), buckets);
+        }
+        return buckets.computeIfAbsent(
+                bucket,
+                k ->
+                        overwrite
+                                ? fileStoreWrite.createEmptyWriter(
+                                        partition.copy(), bucket, compactExecutor)
+                                : fileStoreWrite.createWriter(
+                                        partition.copy(), bucket, compactExecutor));
     }
 
     @Override
