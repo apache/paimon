@@ -52,7 +52,7 @@ public class TableStoreFactoryOptions {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "An internal flag to indicate a manual triggered non-rescale bucket compaction.");
+                            "An internal flag to indicate a manual triggered compaction job.");
 
     @Internal
     public static final ConfigOption<String> COMPACTION_PARTITION_SPEC =
@@ -60,7 +60,7 @@ public class TableStoreFactoryOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "A json string to record the user-specified partition spec for the manual triggered non-rescale bucket compaction.");
+                            "An internal json string to record the user-specified partition spec for the manual triggered compaction.");
 
     public static final ConfigOption<String> LOG_SYSTEM =
             ConfigOptions.key("log.system")

@@ -35,7 +35,7 @@ public interface FileStoreWrite {
     RecordWriter createEmptyWriter(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor);
 
-    /** Create a compact {@link RecordWriter} from partition, bucket and compact units. */
+    /** Create a compact {@link RecordWriter} from partition, bucket and restore files. */
     RecordWriter createCompactWriter(
             BinaryRowData partition, int bucket, List<DataFileMeta> restoredFiles);
 }

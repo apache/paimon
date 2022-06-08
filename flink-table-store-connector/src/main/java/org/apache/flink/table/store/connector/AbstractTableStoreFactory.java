@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
@@ -156,8 +155,7 @@ public abstract class AbstractTableStoreFactory
                                 Map.Entry::getValue));
     }
 
-    @VisibleForTesting
-    TableStore buildTableStore(DynamicTableFactory.Context context) {
+    static TableStore buildTableStore(DynamicTableFactory.Context context) {
         TableStore store =
                 new TableStore(
                         context.getObjectIdentifier(),

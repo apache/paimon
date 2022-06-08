@@ -225,7 +225,7 @@ public class TableStoreManagedFactoryTest {
         context = createEnrichedContext(TABLE_IDENTIFIER, catalogTable);
         if (expectedResult.success) {
             tableStoreManagedFactory.onCreateTable(context, false);
-            TableStore tableStore = tableStoreManagedFactory.buildTableStore(context);
+            TableStore tableStore = AbstractTableStoreFactory.buildTableStore(context);
             assertThat(tableStore.partitioned()).isEqualTo(catalogTable.isPartitioned());
             assertThat(tableStore.valueCountMode())
                     .isEqualTo(catalogTable.getResolvedSchema().getPrimaryKeyIndexes().length == 0);
