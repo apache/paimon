@@ -112,9 +112,6 @@ public class MergeTreeWriter implements RecordWriter {
         }
     }
 
-    @Override
-    public void endInput() throws Exception {}
-
     private void flush() throws Exception {
         if (memTable.size() > 0) {
             if (levels.numberOfSortedRuns() > numSortedRunStopTrigger) {

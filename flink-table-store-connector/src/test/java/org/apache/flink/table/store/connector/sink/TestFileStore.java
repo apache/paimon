@@ -217,9 +217,6 @@ public class TestFileStore implements FileStore {
         }
 
         @Override
-        public void endInput() {}
-
-        @Override
         public List<DataFileMeta> close() {
             closed = true;
             return Collections.emptyList();

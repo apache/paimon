@@ -69,14 +69,12 @@ public class CompactWriter implements RecordWriter {
     }
 
     @Override
-    public void endInput() {
-        compactor.submitCompaction(unit, true);
-    }
-
-    @Override
     public Increment prepareCommit() throws IOException, InterruptedException {
         List<DataFileMeta> compactBefore = new ArrayList<>();
         List<DataFileMeta> compactAfter = new ArrayList<>();
+        if (compactor.isCompactionFinished()) {
+            compactor.submitCompaction(unit, true);
+        }
         while (!compactor.isCompactionFinished()) {
             try {
                 compactor

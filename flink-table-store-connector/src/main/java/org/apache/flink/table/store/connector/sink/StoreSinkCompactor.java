@@ -68,45 +68,7 @@ public class StoreSinkCompactor implements StatefulPrecommittingSinkWriter<Void>
     }
 
     @Override
-    public void flush(boolean endOfInput) {
-        if (endOfInput) {
-            FileStoreScan.Plan plan =
-                    fileStore
-                            .newScan()
-                            .withPartitionFilter(
-                                    PredicateConverter.CONVERTER.fromMap(
-                                            partitionSpec, fileStore.partitionType()))
-                            .plan();
-            for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> partEntry :
-                    plan.groupByPartFiles().entrySet()) {
-                BinaryRowData partition = partEntry.getKey();
-                for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry :
-                        partEntry.getValue().entrySet()) {
-                    int bucket = bucketEntry.getKey();
-                    if (select(partition, bucket)) {
-                        if (LOG.isDebugEnabled()) {
-                            LOG.debug(
-                                    "Assign partition {}, bucket {} to subtask {}",
-                                    FileStorePathFactory.getPartitionComputer(
-                                                    fileStore.partitionType(),
-                                                    FileSystemConnectorOptions
-                                                            .PARTITION_DEFAULT_NAME
-                                                            .defaultValue())
-                                            .generatePartValues(partition),
-                                    bucket,
-                                    subTaskId);
-                        }
-                        RecordWriter writer = getWriter(partition, bucket, bucketEntry.getValue());
-                        try {
-                            writer.endInput();
-                        } catch (Exception e) {
-                            throw new RuntimeException(e);
-                        }
-                    }
-                }
-            }
-        }
-    }
+    public void flush(boolean endOfInput) {}
 
     @Override
     public void write(RowData element, Context context) throws IOException, InterruptedException {
@@ -147,19 +109,43 @@ public class StoreSinkCompactor implements StatefulPrecommittingSinkWriter<Void>
     @Override
     public Collection<Committable> prepareCommit() throws IOException {
         List<Committable> committables = new ArrayList<>();
-        for (Map.Entry<BinaryRowData, Map<Integer, RecordWriter>> partEntry : writers.entrySet()) {
+
+        FileStoreScan.Plan plan =
+                fileStore
+                        .newScan()
+                        .withPartitionFilter(
+                                PredicateConverter.CONVERTER.fromMap(
+                                        partitionSpec, fileStore.partitionType()))
+                        .plan();
+        for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> partEntry :
+                plan.groupByPartFiles().entrySet()) {
             BinaryRowData partition = partEntry.getKey();
-            for (Map.Entry<Integer, RecordWriter> bucketEntry : partEntry.getValue().entrySet()) {
-                RecordWriter writer = bucketEntry.getValue();
-                FileCommittable committable;
-                try {
-                    committable =
-                            new FileCommittable(
-                                    partition, bucketEntry.getKey(), writer.prepareCommit());
-                } catch (Exception e) {
-                    throw new IOException(e);
+            for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry :
+                    partEntry.getValue().entrySet()) {
+                int bucket = bucketEntry.getKey();
+                if (select(partition, bucket)) {
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug(
+                                "Assign partition {}, bucket {} to subtask {}",
+                                FileStorePathFactory.getPartitionComputer(
+                                                fileStore.partitionType(),
+                                                FileSystemConnectorOptions.PARTITION_DEFAULT_NAME
+                                                        .defaultValue())
+                                        .generatePartValues(partition),
+                                bucket,
+                                subTaskId);
+                    }
+                    RecordWriter writer = getWriter(partition, bucket, bucketEntry.getValue());
+                    FileCommittable committable;
+                    try {
+                        committable =
+                                new FileCommittable(
+                                        partition, bucketEntry.getKey(), writer.prepareCommit());
+                    } catch (Exception e) {
+                        throw new IOException(e);
+                    }
+                    committables.add(new Committable(Committable.Kind.FILE, committable));
                 }
-                committables.add(new Committable(Committable.Kind.FILE, committable));
             }
         }
         return committables;
