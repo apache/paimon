@@ -75,14 +75,34 @@ public class TestKeyValueGenerator {
                         "dt", "hr", "shopId", "orderId", "itemId", "priceAmount", "comment"
                     });
     public static final RowType DEFAULT_PART_TYPE =
+            new RowType(DEFAULT_ROW_TYPE.getFields().subList(0, 2));
+
+    public static final RowType SINGLE_PARTITIONED_ROW_TYPE =
             RowType.of(
-                    new LogicalType[] {new VarCharType(false, 8), new IntType(false)},
-                    new String[] {"dt", "hr"});
-    public static final RowType SINGLE_PARTITIONED_ROW_TYPE = singlePartType(DEFAULT_ROW_TYPE);
-    public static final RowType SINGLE_PARTITIONED_PART_TYPE = singlePartType(DEFAULT_PART_TYPE);
+                    new LogicalType[] {
+                        new VarCharType(false, 8),
+                        new IntType(false),
+                        new BigIntType(false),
+                        new BigIntType(),
+                        new ArrayType(new IntType()),
+                        new VarCharType(Integer.MAX_VALUE)
+                    },
+                    new String[] {"dt", "shopId", "orderId", "itemId", "priceAmount", "comment"});
+    public static final RowType SINGLE_PARTITIONED_PART_TYPE =
+            RowType.of(SINGLE_PARTITIONED_ROW_TYPE.getTypeAt(0));
+
     public static final RowType NON_PARTITIONED_ROW_TYPE =
-            nonPartType(DEFAULT_PART_TYPE.getFieldCount());
+            RowType.of(
+                    new LogicalType[] {
+                        new IntType(false),
+                        new BigIntType(false),
+                        new BigIntType(),
+                        new ArrayType(new IntType()),
+                        new VarCharType(Integer.MAX_VALUE)
+                    },
+                    new String[] {"shopId", "orderId", "itemId", "priceAmount", "comment"});
     public static final RowType NON_PARTITIONED_PART_TYPE = RowType.of();
+
     public static final RowType KEY_TYPE =
             RowType.of(
                     new LogicalType[] {new IntType(false), new BigIntType(false)},
@@ -259,17 +279,6 @@ public class TestKeyValueGenerator {
         list.set(idx, list.get(list.size() - 1));
         list.remove(list.size() - 1);
         return tmp;
-    }
-
-    private static RowType nonPartType(int to) {
-        List<RowType.RowField> fields = TestKeyValueGenerator.DEFAULT_PART_TYPE.getFields();
-        return new RowType(fields.subList(2, to));
-    }
-
-    private static RowType singlePartType(RowType type) {
-        List<RowType.RowField> fields = new ArrayList<>(type.getFields());
-        fields.remove(1);
-        return new RowType(fields);
     }
 
     private class Order {

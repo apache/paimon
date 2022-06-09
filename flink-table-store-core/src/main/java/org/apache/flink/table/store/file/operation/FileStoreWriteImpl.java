@@ -49,6 +49,7 @@ import org.apache.flink.shaded.guava30.com.google.common.collect.Lists;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
@@ -139,14 +140,18 @@ public class FileStoreWriteImpl implements FileStoreWrite {
 
     @Override
     public RecordWriter createCompactWriter(
-            BinaryRowData partition, int bucket, List<DataFileMeta> restoredFiles) {
-        Comparator<RowData> keyComparator = keyComparatorSupplier.get();
+            BinaryRowData partition,
+            int bucket,
+            ExecutorService compactExecutor,
+            List<DataFileMeta> restoredFiles) {
         return new CompactWriter(
                 CompactUnit.fromFiles(options.numLevels - 1, restoredFiles),
-                keyComparator,
-                options.targetFileSize,
-                createRewriter(partition, bucket, keyComparator),
-                dataFileWriterFactory.create(partition, bucket));
+                createCompactManager(
+                        partition,
+                        bucket,
+                        (numLevels, runs) ->
+                                Optional.of(CompactUnit.fromLevelRuns(numLevels - 1, runs)),
+                        compactExecutor));
     }
 
     private RecordWriter createMergeTreeWriter(
@@ -167,7 +172,14 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                         dataFileWriter.valueType(),
                         options.writeBufferSize,
                         options.pageSize),
-                createCompactManager(partition, bucket, compactExecutor),
+                createCompactManager(
+                        partition,
+                        bucket,
+                        new UniversalCompaction(
+                                options.maxSizeAmplificationPercent,
+                                options.sizeRatio,
+                                options.numSortedRunCompactionTrigger),
+                        compactExecutor),
                 new Levels(keyComparator, restoreFiles, options.numLevels),
                 maxSequenceNumber,
                 keyComparator,
@@ -178,33 +190,24 @@ public class FileStoreWriteImpl implements FileStoreWrite {
     }
 
     private CompactManager createCompactManager(
-            BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
-        CompactStrategy compactStrategy =
-                new UniversalCompaction(
-                        options.maxSizeAmplificationPercent,
-                        options.sizeRatio,
-                        options.numSortedRunCompactionTrigger);
-        Comparator<RowData> keyComparator = keyComparatorSupplier.get();
-        return new CompactManager(
-                compactExecutor,
-                compactStrategy,
-                keyComparator,
-                options.targetFileSize,
-                createRewriter(partition, bucket, keyComparator));
-    }
-
-    private CompactManager.Rewriter createRewriter(
-            BinaryRowData partition, int bucket, Comparator<RowData> keyComparator) {
+            BinaryRowData partition,
+            int bucket,
+            CompactStrategy compactStrategy,
+            ExecutorService compactExecutor) {
         DataFileWriter dataFileWriter = dataFileWriterFactory.create(partition, bucket);
-        return (outputLevel, dropDelete, sections) ->
-                dataFileWriter.write(
-                        new RecordReaderIterator<>(
-                                new MergeTreeReader(
-                                        sections,
-                                        dropDelete,
-                                        dataFileReaderFactory.create(partition, bucket),
-                                        keyComparator,
-                                        mergeFunction.copy())),
-                        outputLevel);
+        Comparator<RowData> keyComparator = keyComparatorSupplier.get();
+        CompactManager.Rewriter rewriter =
+                (outputLevel, dropDelete, sections) ->
+                        dataFileWriter.write(
+                                new RecordReaderIterator<>(
+                                        new MergeTreeReader(
+                                                sections,
+                                                dropDelete,
+                                                dataFileReaderFactory.create(partition, bucket),
+                                                keyComparator,
+                                                mergeFunction.copy())),
+                                outputLevel);
+        return new CompactManager(
+                compactExecutor, compactStrategy, keyComparator, options.targetFileSize, rewriter);
     }
 }

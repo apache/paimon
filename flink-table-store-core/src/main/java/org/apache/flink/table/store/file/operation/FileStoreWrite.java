@@ -37,5 +37,8 @@ public interface FileStoreWrite {
 
     /** Create a compact {@link RecordWriter} from partition, bucket and restore files. */
     RecordWriter createCompactWriter(
-            BinaryRowData partition, int bucket, List<DataFileMeta> restoredFiles);
+            BinaryRowData partition,
+            int bucket,
+            ExecutorService compactExecutor,
+            List<DataFileMeta> restoredFiles);
 }

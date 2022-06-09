@@ -20,156 +20,273 @@ package org.apache.flink.table.store.connector;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectIdentifier;
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.file.TestKeyValueGenerator;
+import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.utils.SnapshotFinder;
 import org.apache.flink.types.Row;
+import org.apache.flink.types.RowKind;
 
 import org.junit.Test;
 
 import java.io.IOException;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.stream.Collectors;
 
+import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.flink.table.store.file.FileStoreOptions.relativeTablePath;
+import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED;
+import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED;
+import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.SINGLE_PARTITIONED;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for 'ALTER TABLE ... COMPACT'. */
 public class AlterTableCompactITCase extends FileStoreTableITCase {
 
+    private TestKeyValueGenerator generator;
+
     @Override
     protected List<String> ddl() {
         return Arrays.asList(
-                "CREATE TABLE IF NOT EXISTS T0 (f0 INT, f1 STRING, f2 DOUBLE)",
-                "CREATE TABLE IF NOT EXISTS T1 ("
-                        + "f0 INT, f1 STRING, f2 STRING) PARTITIONED BY (f1)",
-                "CREATE TABLE IF NOT EXISTS T2 ("
-                        + "f0 INT, f1 STRING, f2 STRING) PARTITIONED BY (f1, f0)");
+                "CREATE TABLE IF NOT EXISTS T0 (\n"
+                        + "shopId INT\n, "
+                        + "orderId BIGINT NOT NULL\n, "
+                        + "itemId BIGINT)",
+                "CREATE TABLE IF NOT EXISTS T1 (\n"
+                        + "dt STRING\n, "
+                        + "shopId INT\n, "
+                        + "orderId BIGINT NOT NULL\n, "
+                        + "itemId BIGINT)\n "
+                        + "PARTITIONED BY (dt)",
+                "CREATE TABLE IF NOT EXISTS T2 (\n"
+                        + "dt STRING\n, "
+                        + "hr INT\n, "
+                        + "shopId INT\n, "
+                        + "orderId BIGINT NOT NULL\n, "
+                        + "itemId BIGINT)"
+                        + "PARTITIONED BY (dt, hr)");
     }
 
     @Test
-    public void testNonPartitioned() throws Exception {
-        batchSql("INSERT INTO T0 VALUES (1, 'Pride and Prejudice', 9.0), (2, 'Emma', 8.5)");
-        batchSql(
-                "INSERT INTO T0 VALUES (3, 'The Mansfield Park', 7.0), (4, 'Sense and Sensibility', 9.0)");
-        batchSql("INSERT INTO T0 VALUES (5, 'Northanger Abby', 8.6)");
-        batchSql(
-                "INSERT INTO T0 VALUES (6, 'Jane Eyre', 9.9), (1, 'Pride and Prejudice', 9.0), (2, 'Emma', 8.5)");
-        assertSnapshot("T0", 4, Snapshot.CommitKind.APPEND);
-        List<Row> expected = batchSql("SELECT * FROM T0", 6);
-
-        batchSql("ALTER TABLE T0 COMPACT");
-        assertThat(batchSql("SELECT * FROM T0", 6)).containsExactlyInAnyOrderElementsOf(expected);
-        assertSnapshot("T0", 5, Snapshot.CommitKind.COMPACT);
+    public void testNonPartitioned() throws IOException {
+        generator = new TestKeyValueGenerator(NON_PARTITIONED);
+        Random random = new Random();
+        innerTest("T0", random.nextInt(10) + 1, NON_PARTITIONED);
     }
 
     @Test
-    public void testSinglePartitioned() throws Exception {
-        // increase trigger to avoid compaction
-        batchSql("ALTER TABLE T1 SET ('num-sorted-run.compaction-trigger' = '20')");
-        batchSql("ALTER TABLE T1 SET ('num-sorted-run.stop-trigger' = '20')");
-        batchSql(
-                "INSERT INTO T1 VALUES (1, 'Winter', 'Winter is Coming'),"
-                        + " (2, 'Winter', 'The First Snowflake'),"
-                        + " (2, 'Spring', 'The First Rose in Spring'),"
-                        + " (7, 'Summer', 'Summertime Sadness')");
-        batchSql("INSERT INTO T1 VALUES (12, 'Winter', 'Last Christmas')");
-        batchSql("INSERT INTO T1 VALUES (11, 'Winter', 'Winter is Coming')");
-        batchSql("INSERT INTO T1 VALUES (10, 'Autumn', 'Refrain')");
-        batchSql(
-                "INSERT INTO T1 VALUES (6, 'Summer', 'Watermelon Sugar'),"
-                        + " (4, 'Spring', 'Spring Water')");
-        batchSql(
-                "INSERT INTO T1 VALUES (66, 'Summer', 'Summer Vibe'),"
-                        + " (9, 'Autumn', 'Wake Me Up When September Ends')");
-        batchSql(
-                "INSERT INTO T1 VALUES (666, 'Summer', 'Summer Vibe'),"
-                        + " (9, 'Autumn', 'Wake Me Up When September Ends')");
-        batchSql(
-                "INSERT INTO T1 VALUES (6666, 'Summer', 'Summer Vibe'),"
-                        + " (9, 'Autumn', 'Wake Me Up When September Ends')");
-        batchSql(
-                "INSERT INTO T1 VALUES (66666, 'Summer', 'Summer Vibe'),"
-                        + " (7, 'Summer', 'Summertime Sadness')");
-        batchSql(
-                "INSERT INTO T1 VALUES (66666, 'Summer', 'Summer Vibe'),"
-                        + " (9, 'Autumn', 'Wake Me Up When September Ends')");
-        batchSql(
-                "INSERT INTO T1 VALUES (66666, 'Summer', 'Summer Vibe'),"
-                        + " (7, 'Summer', 'Summertime Sadness')");
-
-        assertSnapshot("T1", 11, Snapshot.CommitKind.APPEND);
-        List<Row> expectedSummer = batchSql("SELECT * FROM T1 WHERE f1 = 'Summer'", 8);
-        List<Row> expectedFourSeasons = batchSql("SELECT * FROM T1", 21);
-
-        // compact a single partition
-        batchSql("ALTER TABLE T1 PARTITION (f1 = 'Summer') COMPACT");
-        assertThat(batchSql("SELECT * FROM T1 WHERE f1 = 'Summer'", 8))
-                .containsExactlyElementsOf(expectedSummer);
-        assertSnapshot("T1", 12, Snapshot.CommitKind.COMPACT);
-
-        // compact whole table
-        batchSql("ALTER TABLE T1 COMPACT");
-        assertThat(batchSql("SELECT * FROM T1", 21))
-                .containsExactlyInAnyOrderElementsOf(expectedFourSeasons);
-        assertSnapshot("T1", 13, Snapshot.CommitKind.COMPACT);
-
-        batchSql("ALTER TABLE T1 COMPACT");
-        assertSnapshot("T1", 13, Snapshot.CommitKind.COMPACT);
+    public void testSinglePartitioned() throws IOException {
+        generator = new TestKeyValueGenerator(SINGLE_PARTITIONED);
+        Random random = new Random();
+        innerTest("T1", random.nextInt(10) + 1, SINGLE_PARTITIONED);
     }
 
     @Test
-    public void testMultiPartitioned() throws Exception {
-        // increase trigger to avoid compaction
-        batchSql("ALTER TABLE T2 SET ('num-sorted-run.compaction-trigger' = '20')");
-        batchSql("ALTER TABLE T2 SET ('num-sorted-run.stop-trigger' = '20')");
-
-        batchSql(
-                "INSERT INTO T2 VALUES (1, '2022-05-19', 'Hello'),"
-                        + " (2, '2022-05-19', 'Bye'),"
-                        + " (3, '2022-05-19', 'Meow')");
-
-        batchSql(
-                "INSERT INTO T2 VALUES (1, '2022-05-19', 'Bonjour'),"
-                        + " (2, '2022-05-19', 'Ciao'),"
-                        + " (3, '2022-05-19', 'Bark')");
-
-        batchSql(
-                "INSERT INTO T2 VALUES (1, '2022-05-20', 'Hasta la vista'),"
-                        + " (1, '2022-05-19', 'Bonjour'),"
-                        + " (2, '2022-05-19', 'Ciao'),"
-                        + " (3, '2022-05-19', 'Bark')");
-
-        assertSnapshot("T2", 3, Snapshot.CommitKind.APPEND);
-        List<Row> theSecond = batchSql("SELECT * FROM T2 WHERE f0 = 2", 3);
-
-        batchSql("ALTER TABLE T2 PARTITION (f0 = 2) COMPACT");
-        assertThat(batchSql("SELECT * FROM T2 WHERE f0 = 2", 3))
-                .containsExactlyInAnyOrderElementsOf(theSecond);
-        assertSnapshot("T2", 4, Snapshot.CommitKind.COMPACT);
+    public void testMultiPartitioned() throws IOException {
+        generator = new TestKeyValueGenerator(MULTI_PARTITIONED);
+        Random random = new Random();
+        innerTest("T2", random.nextInt(10) + 1, MULTI_PARTITIONED);
     }
 
-    private void assertSnapshot(
-            String tableName, long expectedSnapshotId, Snapshot.CommitKind expectedKind)
+    private void innerTest(String tableName, int batchNum, TestKeyValueGenerator.GeneratorMode mode)
             throws IOException {
-        String snapshotDir =
-                path
-                        + relativeTablePath(
-                                ObjectIdentifier.of(
-                                        bEnv.getCurrentCatalog(),
-                                        bEnv.getCurrentDatabase(),
-                                        tableName))
-                        + "/snapshot";
-        assertThat(SnapshotFinder.findLatest(new Path(URI.create(snapshotDir))))
-                .isEqualTo(expectedSnapshotId);
+        // increase trigger to avoid auto-compaction
+        batchSql(
+                String.format(
+                        "ALTER TABLE %s SET ('num-sorted-run.compaction-trigger' = '50')",
+                        tableName));
+        batchSql(
+                String.format(
+                        "ALTER TABLE %s SET ('num-sorted-run.stop-trigger' = '50')", tableName));
 
-        Snapshot snapshot =
-                Snapshot.fromPath(
-                        new Path(
-                                URI.create(
-                                        snapshotDir
-                                                + String.format(
-                                                        "/snapshot-%d", expectedSnapshotId))));
-        assertThat(snapshot.commitKind()).isEqualTo(expectedKind);
+        Random random = new Random();
+        List<KeyValue> dataset = new ArrayList<>();
+        long latestSnapshot = 0L;
+        for (int i = 0; i < batchNum; i++) {
+            List<KeyValue> data = generateData(random.nextInt(200) + 1);
+            String insertQuery =
+                    String.format(
+                            "INSERT INTO %s VALUES \n%s",
+                            tableName,
+                            data.stream()
+                                    .map(kv -> kvAsString(kv, mode))
+                                    .collect(Collectors.joining(",\n")));
+            batchSql(insertQuery);
+            Snapshot snapshot = findLatestSnapshot(tableName);
+            assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+            latestSnapshot = snapshot.id();
+            dataset.addAll(data);
+        }
+        if (mode == NON_PARTITIONED) {
+            String compactQuery = String.format("ALTER TABLE %s COMPACT", tableName);
+            String selectQuery = String.format("SELECT * FROM %s", tableName);
+            compactAndCheck(
+                    tableName,
+                    compactQuery,
+                    selectQuery,
+                    latestSnapshot,
+                    dataset.stream()
+                            .map(kv -> convertToRow(kv, mode))
+                            .collect(Collectors.toList()));
+        } else {
+            List<BinaryRowData> partitions =
+                    dataset.stream()
+                            .map(kv -> generator.getPartition(kv))
+                            .distinct()
+                            .collect(Collectors.toList());
+            while (!partitions.isEmpty()) {
+                BinaryRowData part = pickPartition(partitions);
+                Map<String, String> partSpec = TestKeyValueGenerator.toPartitionMap(part, mode);
+                String compactQuery =
+                        String.format(
+                                "ALTER TABLE %s PARTITION (%s) COMPACT",
+                                tableName, partAsString(partSpec, false));
+                String selectQuery =
+                        String.format(
+                                "SELECT * FROM %s WHERE %s",
+                                tableName, partAsString(partSpec, true));
+                compactAndCheck(
+                        tableName,
+                        compactQuery,
+                        selectQuery,
+                        latestSnapshot,
+                        dataset.stream()
+                                .filter(kv -> partFilter(kv, part, mode))
+                                .map(kv -> convertToRow(kv, mode))
+                                .collect(Collectors.toList()));
+                latestSnapshot = findLatestSnapshot(tableName).id();
+            }
+        }
+    }
+
+    private void compactAndCheck(
+            String tableName,
+            String compactQuery,
+            String selectQuery,
+            long latestSnapshot,
+            List<Row> expectedData)
+            throws IOException {
+        batchSql(compactQuery);
+        Snapshot snapshot = findLatestSnapshot(tableName);
+        assertThat(snapshot.id()).isEqualTo(latestSnapshot + 1);
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+        // check idempotence
+        batchSql(compactQuery);
+        assertThat(findLatestSnapshot(tableName).id()).isEqualTo(snapshot.id());
+
+        // read data
+        List<Row> readData = batchSql(selectQuery);
+        assertThat(readData).containsExactlyInAnyOrderElementsOf(expectedData);
+    }
+
+    private boolean partFilter(
+            KeyValue kv, BinaryRowData partition, TestKeyValueGenerator.GeneratorMode mode) {
+        RowData record = kv.value();
+        if (mode == SINGLE_PARTITIONED) {
+            return record.getString(0).equals(partition.getString(0));
+        } else if (mode == MULTI_PARTITIONED) {
+            return record.getString(0).equals(partition.getString(0))
+                    && record.getInt(1) == partition.getInt(1);
+        }
+        return true;
+    }
+
+    private String partAsString(Map<String, String> partSpec, boolean predicate) {
+        String dt = String.format("dt = '%s'", partSpec.get("dt"));
+        String hr = partSpec.get("hr");
+        if (hr == null) {
+            return dt;
+        }
+        hr = String.format("hr = %s", hr);
+        return predicate ? String.join(" AND ", dt, hr) : String.join(", ", dt, hr);
+    }
+
+    private BinaryRowData pickPartition(List<BinaryRowData> partitions) {
+        Random random = new Random();
+        int idx = random.nextInt(partitions.size());
+        return partitions.remove(idx);
+    }
+
+    private List<KeyValue> generateData(int numRecords) {
+        List<KeyValue> data = new ArrayList<>();
+        for (int i = 0; i < numRecords; i++) {
+            KeyValue kv = generator.next();
+            if (kv.valueKind() == ValueKind.ADD) {
+                data.add(kv);
+            }
+        }
+        return data;
+    }
+
+    private Row convertToRow(KeyValue keyValue, TestKeyValueGenerator.GeneratorMode mode) {
+        byte kind = keyValue.valueKind().toByteValue();
+        RowData record = keyValue.value();
+        String rowKind = RowKind.fromByteValue(kind == 0 ? kind : 3).shortString();
+        if (mode == NON_PARTITIONED) {
+            return changelogRow(rowKind, record.getInt(0), record.getLong(1), record.getLong(2));
+        } else if (mode == SINGLE_PARTITIONED) {
+            return changelogRow(
+                    rowKind,
+                    record.getString(0).toString(),
+                    record.getInt(1),
+                    record.getLong(2),
+                    record.getLong(3));
+        }
+        return changelogRow(
+                rowKind,
+                record.getString(0).toString(),
+                record.getInt(1),
+                record.getInt(2),
+                record.getLong(3),
+                record.getLong(4));
+    }
+
+    private String kvAsString(KeyValue keyValue, TestKeyValueGenerator.GeneratorMode mode) {
+        RowData record = keyValue.value();
+        switch (mode) {
+            case NON_PARTITIONED:
+                return String.format(
+                        "(%d, %d, %d)", record.getInt(0), record.getLong(1), record.getLong(2));
+            case SINGLE_PARTITIONED:
+                return String.format(
+                        "('%s', %d, %d, %d)",
+                        record.getString(0),
+                        record.getInt(1),
+                        record.getLong(2),
+                        record.getLong(3));
+            case MULTI_PARTITIONED:
+                return String.format(
+                        "('%s', %d, %d, %d, %d)",
+                        record.getString(0),
+                        record.getInt(1),
+                        record.getInt(2),
+                        record.getLong(3),
+                        record.getLong(4));
+            default:
+                throw new UnsupportedOperationException("unsupported mode");
+        }
+    }
+
+    private String getSnapshotDir(String tableName) {
+        return path
+                + relativeTablePath(
+                        ObjectIdentifier.of(
+                                bEnv.getCurrentCatalog(), bEnv.getCurrentDatabase(), tableName))
+                + "/snapshot";
+    }
+
+    private Snapshot findLatestSnapshot(String tableName) throws IOException {
+        String snapshotDir = getSnapshotDir(tableName);
+        Long latest = SnapshotFinder.findLatest(new Path(URI.create(snapshotDir)));
+        return Snapshot.fromPath(
+                new Path(URI.create(snapshotDir + String.format("/snapshot-%d", latest))));
     }
 }

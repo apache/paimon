@@ -93,7 +93,10 @@ public class TestFileStore implements FileStore {
 
             @Override
             public CompactWriter createCompactWriter(
-                    BinaryRowData partition, int bucket, List<DataFileMeta> restoreFiles) {
+                    BinaryRowData partition,
+                    int bucket,
+                    ExecutorService compactExecutor,
+                    List<DataFileMeta> restoreFiles) {
                 throw new UnsupportedOperationException();
             }
         };
