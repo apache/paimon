@@ -20,11 +20,16 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.FileStore;
+import org.apache.flink.table.store.table.sink.TableCommit;
+import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.types.logical.RowType;
 
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
+import java.util.Map;
 
 /**
  * An abstraction layer above {@link org.apache.flink.table.store.file.FileStore} to provide reading
@@ -39,6 +44,10 @@ public interface FileStoreTable extends Serializable {
     TableScan newScan(boolean incremental);
 
     TableRead newRead(boolean incremental);
+
+    TableWrite newWrite(boolean overwrite);
+
+    TableCommit newCommit(@Nullable Map<String, String> overwritePartition);
 
     // TODO remove this once TableWrite is introduced
     @VisibleForTesting

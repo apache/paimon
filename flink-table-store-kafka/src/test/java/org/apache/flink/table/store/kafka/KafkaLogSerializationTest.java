@@ -22,7 +22,7 @@ import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDe
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.store.log.LogOptions.LogChangelogMode;
-import org.apache.flink.table.store.sink.SinkRecord;
+import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Collector;
 

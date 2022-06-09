@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.store.file.operation.FileStoreScan;
-import org.apache.flink.table.store.file.predicate.And;
 import org.apache.flink.table.store.file.predicate.CompoundPredicate;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -64,7 +63,7 @@ public abstract class TableScan {
         List<Predicate> partitionFilters = new ArrayList<>();
         List<Predicate> nonPartitionFilters = new ArrayList<>();
         for (Predicate p : PredicateBuilder.splitAnd(predicate)) {
-            Optional<Predicate> mapped = mapToPartitionFilter(p, fieldIdxToPartitionIdx);
+            Optional<Predicate> mapped = mapFilterFields(p, fieldIdxToPartitionIdx);
             if (mapped.isPresent()) {
                 partitionFilters.add(mapped.get());
             } else {
@@ -72,8 +71,12 @@ public abstract class TableScan {
             }
         }
 
-        scan.withPartitionFilter(new CompoundPredicate(And.INSTANCE, partitionFilters));
-        withNonPartitionFilter(new CompoundPredicate(And.INSTANCE, nonPartitionFilters));
+        if (partitionFilters.size() > 0) {
+            scan.withPartitionFilter(PredicateBuilder.and(partitionFilters));
+        }
+        if (nonPartitionFilters.size() > 0) {
+            withNonPartitionFilter(PredicateBuilder.and(nonPartitionFilters));
+        }
         return this;
     }
 
@@ -86,13 +89,12 @@ public abstract class TableScan {
 
     protected abstract void withNonPartitionFilter(Predicate predicate);
 
-    private Optional<Predicate> mapToPartitionFilter(
-            Predicate predicate, int[] fieldIdxToPartitionIdx) {
+    protected Optional<Predicate> mapFilterFields(Predicate predicate, int[] fieldIdxMapping) {
         if (predicate instanceof CompoundPredicate) {
             CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
             List<Predicate> children = new ArrayList<>();
             for (Predicate child : compoundPredicate.children()) {
-                Optional<Predicate> mapped = mapToPartitionFilter(child, fieldIdxToPartitionIdx);
+                Optional<Predicate> mapped = mapFilterFields(child, fieldIdxMapping);
                 if (mapped.isPresent()) {
                     children.add(mapped.get());
                 } else {
@@ -102,7 +104,7 @@ public abstract class TableScan {
             return Optional.of(new CompoundPredicate(compoundPredicate.function(), children));
         } else {
             LeafPredicate leafPredicate = (LeafPredicate) predicate;
-            int mapped = fieldIdxToPartitionIdx[leafPredicate.index()];
+            int mapped = fieldIdxMapping[leafPredicate.index()];
             if (mapped >= 0) {
                 return Optional.of(
                         new LeafPredicate(

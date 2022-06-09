@@ -24,14 +24,19 @@ import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.binary.BinaryRowDataUtil;
-import org.apache.flink.table.store.FileStoreTestHelper;
+import org.apache.flink.table.store.FileStoreTestUtils;
 import org.apache.flink.table.store.RowDataContainer;
 import org.apache.flink.table.store.file.FileStoreOptions;
-import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.types.RowKind;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -54,8 +59,8 @@ public class TableStoreRecordReaderTest {
         Configuration conf = new Configuration();
         conf.setString(FileStoreOptions.PATH, tempDir.toString());
         conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
-        FileStoreTestHelper helper =
-                new FileStoreTestHelper(
+        FileStoreTable table =
+                FileStoreTestUtils.createFileStoreTable(
                         conf,
                         RowType.of(
                                 new LogicalType[] {
@@ -64,33 +69,17 @@ public class TableStoreRecordReaderTest {
                                 },
                                 new String[] {"a", "b"}),
                         Collections.emptyList(),
-                        Collections.singletonList("a"),
-                        (k, v) -> BinaryRowDataUtil.EMPTY_ROW,
-                        k -> 0);
+                        Collections.singletonList("a"));
 
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(1L),
-                GenericRowData.of(1L, StringData.fromString("Hi")));
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(2L),
-                GenericRowData.of(2L, StringData.fromString("Hello")));
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(3L),
-                GenericRowData.of(3L, StringData.fromString("World")));
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(1L),
-                GenericRowData.of(1L, StringData.fromString("Hi again")));
-        helper.write(
-                ValueKind.DELETE,
-                GenericRowData.of(2L),
-                GenericRowData.of(2L, StringData.fromString("Hello")));
-        helper.commit();
+        TableWrite write = table.newWrite(false);
+        write.write(GenericRowData.of(1L, StringData.fromString("Hi")));
+        write.write(GenericRowData.of(2L, StringData.fromString("Hello")));
+        write.write(GenericRowData.of(3L, StringData.fromString("World")));
+        write.write(GenericRowData.of(1L, StringData.fromString("Hi again")));
+        write.write(GenericRowData.ofKind(RowKind.DELETE, 2L, StringData.fromString("Hello")));
+        table.newCommit(null).commit("0", write.prepareCommit());
 
-        Tuple2<RecordReader<RowData>, Long> tuple = helper.read(BinaryRowDataUtil.EMPTY_ROW, 0);
+        Tuple2<RecordReader<RowData>, Long> tuple = read(table, BinaryRowDataUtil.EMPTY_ROW, 0);
         TableStoreRecordReader reader = new TableStoreRecordReader(tuple.f0, tuple.f1);
         RowDataContainer container = reader.createValue();
         Set<String> actual = new HashSet<>();
@@ -111,8 +100,8 @@ public class TableStoreRecordReaderTest {
         Configuration conf = new Configuration();
         conf.setString(FileStoreOptions.PATH, tempDir.toString());
         conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
-        FileStoreTestHelper helper =
-                new FileStoreTestHelper(
+        FileStoreTable table =
+                FileStoreTestUtils.createFileStoreTable(
                         conf,
                         RowType.of(
                                 new LogicalType[] {
@@ -121,37 +110,18 @@ public class TableStoreRecordReaderTest {
                                 },
                                 new String[] {"a", "b"}),
                         Collections.emptyList(),
-                        Collections.emptyList(),
-                        (k, v) -> BinaryRowDataUtil.EMPTY_ROW,
-                        k -> 0);
+                        Collections.emptyList());
 
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(1, StringData.fromString("Hi")),
-                GenericRowData.of(1L));
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(2, StringData.fromString("Hello")),
-                GenericRowData.of(1L));
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(3, StringData.fromString("World")),
-                GenericRowData.of(1L));
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(1, StringData.fromString("Hi")),
-                GenericRowData.of(1L));
-        helper.write(
-                ValueKind.DELETE,
-                GenericRowData.of(2, StringData.fromString("Hello")),
-                GenericRowData.of(1L));
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(1, StringData.fromString("Hi")),
-                GenericRowData.of(1L));
-        helper.commit();
+        TableWrite write = table.newWrite(false);
+        write.write(GenericRowData.of(1, StringData.fromString("Hi")));
+        write.write(GenericRowData.of(2, StringData.fromString("Hello")));
+        write.write(GenericRowData.of(3, StringData.fromString("World")));
+        write.write(GenericRowData.of(1, StringData.fromString("Hi")));
+        write.write(GenericRowData.ofKind(RowKind.DELETE, 2, StringData.fromString("Hello")));
+        write.write(GenericRowData.of(1, StringData.fromString("Hi")));
+        table.newCommit(null).commit("0", write.prepareCommit());
 
-        Tuple2<RecordReader<RowData>, Long> tuple = helper.read(BinaryRowDataUtil.EMPTY_ROW, 0);
+        Tuple2<RecordReader<RowData>, Long> tuple = read(table, BinaryRowDataUtil.EMPTY_ROW, 0);
         TableStoreRecordReader reader = new TableStoreRecordReader(tuple.f0, tuple.f1);
         RowDataContainer container = reader.createValue();
         Map<String, Integer> actual = new HashMap<>();
@@ -165,5 +135,18 @@ public class TableStoreRecordReaderTest {
         expected.put("1|Hi", 3);
         expected.put("3|World", 1);
         assertThat(actual).isEqualTo(expected);
+    }
+
+    private Tuple2<RecordReader<RowData>, Long> read(
+            FileStoreTable table, BinaryRowData partition, int bucket) throws Exception {
+        for (Split split : table.newScan(false).plan().splits) {
+            if (split.partition().equals(partition) && split.bucket() == bucket) {
+                return Tuple2.of(
+                        table.newRead(false).createReader(partition, bucket, split.files()),
+                        split.files().stream().mapToLong(DataFileMeta::fileSize).sum());
+            }
+        }
+        throw new IllegalArgumentException(
+                "Input split not found for partition " + partition + " and bucket " + bucket);
     }
 }

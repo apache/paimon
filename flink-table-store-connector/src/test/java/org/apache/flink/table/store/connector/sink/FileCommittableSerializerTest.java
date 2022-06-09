@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.table.store.file.mergetree.Increment;
+import org.apache.flink.table.store.table.sink.FileCommittable;
 
 import org.junit.jupiter.api.Test;
 

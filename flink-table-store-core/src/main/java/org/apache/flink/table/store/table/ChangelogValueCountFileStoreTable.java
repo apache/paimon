@@ -18,11 +18,13 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
@@ -31,12 +33,21 @@ import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.table.sink.SinkRecord;
+import org.apache.flink.table.store.table.sink.SinkRecordConverter;
+import org.apache.flink.table.store.table.sink.TableCommit;
+import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.store.table.source.ValueCountRowDataRecordIterator;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+
+import javax.annotation.Nullable;
+
+import java.util.Map;
 
 /** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode without primary keys. */
 public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
@@ -96,6 +107,35 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                 return new ValueCountRowDataRecordIterator(kvRecordIterator, projection);
             }
         };
+    }
+
+    @Override
+    public TableWrite newWrite(boolean overwrite) {
+        SinkRecordConverter recordConverter =
+                new SinkRecordConverter(store.options().bucket(), schema);
+        return new TableWrite(store.newWrite(), recordConverter, overwrite) {
+            @Override
+            protected void writeImpl(SinkRecord record, RecordWriter writer) throws Exception {
+                switch (record.row().getRowKind()) {
+                    case INSERT:
+                    case UPDATE_AFTER:
+                        writer.write(ValueKind.ADD, record.row(), GenericRowData.of(1L));
+                        break;
+                    case UPDATE_BEFORE:
+                    case DELETE:
+                        writer.write(ValueKind.ADD, record.row(), GenericRowData.of(-1L));
+                        break;
+                    default:
+                        throw new UnsupportedOperationException(
+                                "Unknown row kind " + record.row().getRowKind());
+                }
+            }
+        };
+    }
+
+    @Override
+    public TableCommit newCommit(@Nullable Map<String, String> overwritePartition) {
+        return new TableCommit(store.newCommit(), store.newExpire(), overwritePartition);
     }
 
     @Override

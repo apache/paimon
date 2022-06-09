@@ -36,8 +36,8 @@ import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.log.LogInitContext;
 import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.log.LogWriteCallback;
-import org.apache.flink.table.store.sink.SinkRecord;
-import org.apache.flink.table.store.sink.SinkRecordConverter;
+import org.apache.flink.table.store.table.sink.SinkRecord;
+import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 
 import javax.annotation.Nullable;
 

@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.core.io.SimpleVersionedSerializer;
+import org.apache.flink.table.store.table.sink.FileCommittable;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

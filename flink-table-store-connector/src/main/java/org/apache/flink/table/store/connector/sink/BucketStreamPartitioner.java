@@ -23,7 +23,7 @@ import org.apache.flink.runtime.plugable.SerializationDelegate;
 import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.sink.SinkRecordConverter;
+import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.types.logical.RowType;
 
 /** A {@link StreamPartitioner} to partition records by bucket. */

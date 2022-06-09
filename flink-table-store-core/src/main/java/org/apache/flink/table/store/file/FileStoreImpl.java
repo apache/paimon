@@ -88,6 +88,10 @@ public class FileStoreImpl implements FileStore {
                 options.fileFormat().getFormatIdentifier());
     }
 
+    public FileStoreOptions options() {
+        return options;
+    }
+
     @VisibleForTesting
     public ManifestFile.Factory manifestFileFactory() {
         return new ManifestFile.Factory(

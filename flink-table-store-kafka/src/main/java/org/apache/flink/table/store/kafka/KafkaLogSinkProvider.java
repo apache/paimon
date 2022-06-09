@@ -27,7 +27,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.log.LogOptions.LogChangelogMode;
 import org.apache.flink.table.store.log.LogOptions.LogConsistency;
 import org.apache.flink.table.store.log.LogSinkProvider;
-import org.apache.flink.table.store.sink.SinkRecord;
+import org.apache.flink.table.store.table.sink.SinkRecord;
 
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.RecordMetadata;

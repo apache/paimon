@@ -24,12 +24,13 @@ import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.data.binary.BinaryRowDataUtil;
-import org.apache.flink.table.store.FileStoreTestHelper;
+import org.apache.flink.table.store.FileStoreTestUtils;
 import org.apache.flink.table.store.file.FileStoreOptions;
-import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.types.RowKind;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
@@ -85,8 +86,8 @@ public class TableStoreHiveStorageHandlerITCase {
         conf.setString(FileStoreOptions.PATH, path);
         conf.setInteger(FileStoreOptions.BUCKET, 2);
         conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
-        FileStoreTestHelper helper =
-                new FileStoreTestHelper(
+        FileStoreTable table =
+                FileStoreTestUtils.createFileStoreTable(
                         conf,
                         RowType.of(
                                 new LogicalType[] {
@@ -96,35 +97,17 @@ public class TableStoreHiveStorageHandlerITCase {
                                 },
                                 new String[] {"a", "b", "c"}),
                         Collections.emptyList(),
-                        Arrays.asList("a", "b"),
-                        (k, v) -> BinaryRowDataUtil.EMPTY_ROW,
-                        k -> k.getInt(0) % 2);
+                        Arrays.asList("a", "b"));
 
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(1, 10L),
-                GenericRowData.of(1, 10L, StringData.fromString("Hi")));
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(1, 20L),
-                GenericRowData.of(1, 20L, StringData.fromString("Hello")));
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(2, 30L),
-                GenericRowData.of(2, 30L, StringData.fromString("World")));
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(1, 10L),
-                GenericRowData.of(1, 10L, StringData.fromString("Hi Again")));
-        helper.write(
-                ValueKind.DELETE,
-                GenericRowData.of(2, 30L),
-                GenericRowData.of(2, 30L, StringData.fromString("World")));
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(2, 40L),
-                GenericRowData.of(2, 40L, StringData.fromString("Test")));
-        helper.commit();
+        TableWrite write = table.newWrite(false);
+        write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi")));
+        write.write(GenericRowData.of(1, 20L, StringData.fromString("Hello")));
+        write.write(GenericRowData.of(2, 30L, StringData.fromString("World")));
+        write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi Again")));
+        write.write(GenericRowData.ofKind(RowKind.DELETE, 2, 30L, StringData.fromString("World")));
+        write.write(GenericRowData.of(2, 40L, StringData.fromString("Test")));
+        table.newCommit(null).commit("0", write.prepareCommit());
+        write.close();
 
         hiveShell.execute(
                 String.join(
@@ -136,13 +119,7 @@ public class TableStoreHiveStorageHandlerITCase {
                                 "  c STRING",
                                 ")",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
-                                "LOCATION '" + path + "'",
-                                "TBLPROPERTIES (",
-                                "  'table-store.catalog' = 'test_catalog',",
-                                "  'table-store.primary-keys' = 'a,b',",
-                                "  'table-store.bucket' = '2',",
-                                "  'table-store.file.format' = 'avro'",
-                                ")")));
+                                "LOCATION '" + path + "'")));
         List<String> actual = hiveShell.executeQuery("SELECT b, a, c FROM test_table ORDER BY b");
         List<String> expected = Arrays.asList("10\t1\tHi Again", "20\t1\tHello", "40\t2\tTest");
         Assert.assertEquals(expected, actual);
@@ -155,8 +132,8 @@ public class TableStoreHiveStorageHandlerITCase {
         conf.setString(FileStoreOptions.PATH, path);
         conf.setInteger(FileStoreOptions.BUCKET, 2);
         conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
-        FileStoreTestHelper helper =
-                new FileStoreTestHelper(
+        FileStoreTable table =
+                FileStoreTestUtils.createFileStoreTable(
                         conf,
                         RowType.of(
                                 new LogicalType[] {
@@ -166,35 +143,17 @@ public class TableStoreHiveStorageHandlerITCase {
                                 },
                                 new String[] {"a", "b", "c"}),
                         Collections.emptyList(),
-                        Collections.emptyList(),
-                        (k, v) -> BinaryRowDataUtil.EMPTY_ROW,
-                        k -> k.getInt(0) % 2);
+                        Collections.emptyList());
 
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(1, 10L, StringData.fromString("Hi")),
-                GenericRowData.of(1L));
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(1, 20L, StringData.fromString("Hello")),
-                GenericRowData.of(1L));
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(2, 30L, StringData.fromString("World")),
-                GenericRowData.of(1L));
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(1, 10L, StringData.fromString("Hi")),
-                GenericRowData.of(1L));
-        helper.write(
-                ValueKind.DELETE,
-                GenericRowData.of(2, 30L, StringData.fromString("World")),
-                GenericRowData.of(1L));
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(2, 40L, StringData.fromString("Test")),
-                GenericRowData.of(1L));
-        helper.commit();
+        TableWrite write = table.newWrite(false);
+        write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi")));
+        write.write(GenericRowData.of(1, 20L, StringData.fromString("Hello")));
+        write.write(GenericRowData.of(2, 30L, StringData.fromString("World")));
+        write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi")));
+        write.write(GenericRowData.ofKind(RowKind.DELETE, 2, 30L, StringData.fromString("World")));
+        write.write(GenericRowData.of(2, 40L, StringData.fromString("Test")));
+        table.newCommit(null).commit("0", write.prepareCommit());
+        write.close();
 
         hiveShell.execute(
                 String.join(
@@ -206,12 +165,7 @@ public class TableStoreHiveStorageHandlerITCase {
                                 "  c STRING",
                                 ")",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
-                                "LOCATION '" + path + "'",
-                                "TBLPROPERTIES (",
-                                "  'table-store.catalog' = 'test_catalog',",
-                                "  'table-store.bucket' = '2',",
-                                "  'table-store.file.format' = 'avro'",
-                                ")")));
+                                "LOCATION '" + path + "'")));
         List<String> actual = hiveShell.executeQuery("SELECT b, a, c FROM test_table ORDER BY b");
         List<String> expected =
                 Arrays.asList("10\t1\tHi", "10\t1\tHi", "20\t1\tHello", "40\t2\tTest");
@@ -224,8 +178,8 @@ public class TableStoreHiveStorageHandlerITCase {
         Configuration conf = new Configuration();
         conf.setString(FileStoreOptions.PATH, root);
         conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
-        FileStoreTestHelper helper =
-                new FileStoreTestHelper(
+        FileStoreTable table =
+                FileStoreTestUtils.createFileStoreTable(
                         conf,
                         RowType.of(
                                 RandomGenericRowDataGenerator.TYPE_INFOS.stream()
@@ -236,9 +190,7 @@ public class TableStoreHiveStorageHandlerITCase {
                                         .toArray(LogicalType[]::new),
                                 RandomGenericRowDataGenerator.FIELD_NAMES.toArray(new String[0])),
                         Collections.emptyList(),
-                        Collections.singletonList("f_int"),
-                        (k, v) -> BinaryRowDataUtil.EMPTY_ROW,
-                        k -> 0);
+                        Collections.singletonList("f_int"));
 
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<GenericRowData> input = new ArrayList<>();
@@ -252,10 +204,13 @@ public class TableStoreHiveStorageHandlerITCase {
                 }
             }
         }
+
+        TableWrite write = table.newWrite(false);
         for (GenericRowData rowData : input) {
-            helper.write(ValueKind.ADD, GenericRowData.of(rowData.getInt(3)), rowData);
+            write.write(rowData);
         }
-        helper.commit();
+        table.newCommit(null).commit("0", write.prepareCommit());
+        write.close();
 
         StringBuilder ddl = new StringBuilder();
         for (int i = 0; i < RandomGenericRowDataGenerator.FIELD_NAMES.size(); i++) {
@@ -365,31 +320,31 @@ public class TableStoreHiveStorageHandlerITCase {
         Configuration conf = new Configuration();
         conf.setString(FileStoreOptions.PATH, path);
         conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
-        FileStoreTestHelper helper =
-                new FileStoreTestHelper(
+        FileStoreTable table =
+                FileStoreTestUtils.createFileStoreTable(
                         conf,
                         RowType.of(
                                 new LogicalType[] {DataTypes.INT().getLogicalType()},
                                 new String[] {"a"}),
                         Collections.emptyList(),
-                        Collections.emptyList(),
-                        (k, v) -> BinaryRowDataUtil.EMPTY_ROW,
-                        k -> 0);
+                        Collections.emptyList());
 
         // TODO add NaN related tests after FLINK-27627 and FLINK-27628 are fixed
 
-        helper.write(ValueKind.ADD, GenericRowData.of(1), GenericRowData.of(1L));
-        helper.commit();
-        helper.write(ValueKind.ADD, GenericRowData.of((Object) null), GenericRowData.of(1L));
-        helper.commit();
-        helper.write(ValueKind.ADD, GenericRowData.of(2), GenericRowData.of(1L));
-        helper.write(ValueKind.ADD, GenericRowData.of(3), GenericRowData.of(1L));
-        helper.write(ValueKind.ADD, GenericRowData.of((Object) null), GenericRowData.of(1L));
-        helper.commit();
-        helper.write(ValueKind.ADD, GenericRowData.of(4), GenericRowData.of(1L));
-        helper.write(ValueKind.ADD, GenericRowData.of(5), GenericRowData.of(1L));
-        helper.write(ValueKind.ADD, GenericRowData.of(6), GenericRowData.of(1L));
-        helper.commit();
+        TableWrite write = table.newWrite(false);
+        write.write(GenericRowData.of(1));
+        table.newCommit(null).commit("0", write.prepareCommit());
+        write.write(GenericRowData.of((Object) null));
+        table.newCommit(null).commit("1", write.prepareCommit());
+        write.write(GenericRowData.of(2));
+        write.write(GenericRowData.of(3));
+        write.write(GenericRowData.of((Object) null));
+        table.newCommit(null).commit("2", write.prepareCommit());
+        write.write(GenericRowData.of(4));
+        write.write(GenericRowData.of(5));
+        write.write(GenericRowData.of(6));
+        table.newCommit(null).commit("3", write.prepareCommit());
+        write.close();
 
         hiveShell.execute(
                 String.join(
@@ -454,8 +409,8 @@ public class TableStoreHiveStorageHandlerITCase {
         Configuration conf = new Configuration();
         conf.setString(FileStoreOptions.PATH, path);
         conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
-        FileStoreTestHelper helper =
-                new FileStoreTestHelper(
+        FileStoreTable table =
+                FileStoreTestUtils.createFileStoreTable(
                         conf,
                         RowType.of(
                                 new LogicalType[] {
@@ -464,30 +419,24 @@ public class TableStoreHiveStorageHandlerITCase {
                                 },
                                 new String[] {"dt", "ts"}),
                         Collections.emptyList(),
-                        Collections.emptyList(),
-                        (k, v) -> BinaryRowDataUtil.EMPTY_ROW,
-                        k -> 0);
+                        Collections.emptyList());
 
-        helper.write(
-                ValueKind.ADD,
+        TableWrite write = table.newWrite(false);
+        write.write(
                 GenericRowData.of(
                         375, /* 1971-01-11 */
-                        TimestampData.fromLocalDateTime(LocalDateTime.of(2022, 5, 17, 17, 29, 20))),
-                GenericRowData.of(1L));
-        helper.commit();
-        helper.write(ValueKind.ADD, GenericRowData.of(null, null), GenericRowData.of(1L));
-        helper.commit();
-        helper.write(
-                ValueKind.ADD,
-                GenericRowData.of(376 /* 1971-01-12 */, null),
-                GenericRowData.of(1L));
-        helper.write(
-                ValueKind.ADD,
+                        TimestampData.fromLocalDateTime(
+                                LocalDateTime.of(2022, 5, 17, 17, 29, 20))));
+        table.newCommit(null).commit("0", write.prepareCommit());
+        write.write(GenericRowData.of(null, null));
+        table.newCommit(null).commit("1", write.prepareCommit());
+        write.write(GenericRowData.of(376 /* 1971-01-12 */, null));
+        write.write(
                 GenericRowData.of(
                         null,
-                        TimestampData.fromLocalDateTime(LocalDateTime.of(2022, 6, 18, 8, 30, 0))),
-                GenericRowData.of(1L));
-        helper.commit();
+                        TimestampData.fromLocalDateTime(LocalDateTime.of(2022, 6, 18, 8, 30, 0))));
+        table.newCommit(null).commit("2", write.prepareCommit());
+        write.close();
 
         hiveShell.execute(
                 String.join(

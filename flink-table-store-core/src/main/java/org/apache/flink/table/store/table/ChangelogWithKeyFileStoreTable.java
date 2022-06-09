@@ -24,6 +24,7 @@ import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
@@ -31,15 +32,26 @@ import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFun
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.table.sink.SinkRecord;
+import org.apache.flink.table.store.table.sink.SinkRecordConverter;
+import org.apache.flink.table.store.table.sink.TableCommit;
+import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
+import javax.annotation.Nullable;
+
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode with primary keys. */
@@ -56,7 +68,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         // add _KEY_ prefix to avoid conflict with value
         RowType keyType =
                 new RowType(
-                        schema.logicalPrimaryKeysType().getFields().stream()
+                        schema.logicalTrimmedPrimaryKeysType().getFields().stream()
                                 .map(
                                         f ->
                                                 new RowType.RowField(
@@ -103,7 +115,27 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         return new TableScan(scan, schema, store.pathFactory()) {
             @Override
             protected void withNonPartitionFilter(Predicate predicate) {
-                scan.withValueFilter(predicate);
+                // currently we can only perform filter push down on keys
+                // consider this case:
+                //   data file 1: insert key = a, value = 1
+                //   data file 2: update key = a, value = 2
+                //   filter: value = 1
+                // if we perform filter push down on values, data file 1 will be chosen, but data
+                // file 2 will be ignored, and the final result will be key = a, value = 1 while the
+                // correct result is an empty set
+                List<String> trimmedPrimaryKeys = schema.trimmedPrimaryKeys();
+                int[] fieldIdxToKeyIdx =
+                        schema.fields().stream()
+                                .mapToInt(f -> trimmedPrimaryKeys.indexOf(f.name()))
+                                .toArray();
+                List<Predicate> keyFilters = new ArrayList<>();
+                for (Predicate p : PredicateBuilder.splitAnd(predicate)) {
+                    Optional<Predicate> mapped = mapFilterFields(p, fieldIdxToKeyIdx);
+                    mapped.ifPresent(keyFilters::add);
+                }
+                if (keyFilters.size() > 0) {
+                    scan.withKeyFilter(PredicateBuilder.and(keyFilters));
+                }
             }
         };
     }
@@ -124,6 +156,35 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                 return new ValueContentRowDataRecordIterator(kvRecordIterator);
             }
         };
+    }
+
+    @Override
+    public TableWrite newWrite(boolean overwrite) {
+        SinkRecordConverter recordConverter =
+                new SinkRecordConverter(store.options().bucket(), schema);
+        return new TableWrite(store.newWrite(), recordConverter, overwrite) {
+            @Override
+            protected void writeImpl(SinkRecord record, RecordWriter writer) throws Exception {
+                switch (record.row().getRowKind()) {
+                    case INSERT:
+                    case UPDATE_AFTER:
+                        writer.write(ValueKind.ADD, record.primaryKey(), record.row());
+                        break;
+                    case UPDATE_BEFORE:
+                    case DELETE:
+                        writer.write(ValueKind.DELETE, record.primaryKey(), record.row());
+                        break;
+                    default:
+                        throw new UnsupportedOperationException(
+                                "Unknown row kind " + record.row().getRowKind());
+                }
+            }
+        };
+    }
+
+    @Override
+    public TableCommit newCommit(@Nullable Map<String, String> overwritePartition) {
+        return new TableCommit(store.newCommit(), store.newExpire(), overwritePartition);
     }
 
     @Override

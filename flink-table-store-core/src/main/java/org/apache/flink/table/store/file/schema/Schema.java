@@ -143,8 +143,13 @@ public class Schema implements Serializable {
         return projectedLogicalRowType(partitionKeys);
     }
 
-    public RowType logicalPrimaryKeysType() {
-        return projectedLogicalRowType(primaryKeys);
+    public RowType logicalTrimmedPrimaryKeysType() {
+        return projectedLogicalRowType(trimmedPrimaryKeys());
+    }
+
+    public int[] projection(List<String> projectedFieldNames) {
+        List<String> fieldNames = fieldNames();
+        return projectedFieldNames.stream().mapToInt(fieldNames::indexOf).toArray();
     }
 
     private RowType projectedLogicalRowType(List<String> projectedFieldNames) {
