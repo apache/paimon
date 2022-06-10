@@ -23,6 +23,7 @@ import org.apache.flink.table.store.connector.sink.global.GlobalCommitter;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.FileStoreExpire;
+import org.apache.flink.table.store.table.sink.FileCommittable;
 
 import javax.annotation.Nullable;
 

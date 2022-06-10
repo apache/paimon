@@ -19,31 +19,36 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.table.sink.SinkRecord;
+import org.apache.flink.table.store.table.sink.SinkRecordConverter;
+import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.types.RowKind;
+import org.apache.flink.util.Preconditions;
 
 /** {@link FileStoreTable} for {@link WriteMode#APPEND_ONLY} write mode. */
 public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
-    private final Schema schema;
     private final FileStoreImpl store;
 
     AppendOnlyFileStoreTable(String name, Schema schema, String user) {
         super(name, schema);
-        this.schema = schema;
         this.store =
                 new FileStoreImpl(
                         schema.id(),
@@ -57,9 +62,8 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableScan newScan(boolean incremental) {
-        FileStoreScan scan = store.newScan().withIncremental(incremental);
-        return new TableScan(scan, schema, store.pathFactory()) {
+    public TableScan newScan() {
+        return new TableScan(store.newScan(), schema, store.pathFactory()) {
             @Override
             protected void withNonPartitionFilter(Predicate predicate) {
                 scan.withValueFilter(predicate);
@@ -68,11 +72,16 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableRead newRead(boolean incremental) {
+    public TableRead newRead() {
         return new TableRead(store.newRead()) {
             @Override
             public TableRead withProjection(int[][] projection) {
                 read.withValueProjection(projection);
+                return this;
+            }
+
+            @Override
+            public TableRead withIncremental(boolean isIncremental) {
                 return this;
             }
 
@@ -85,7 +94,24 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public FileStore fileStore() {
+    public TableWrite newWrite() {
+        SinkRecordConverter recordConverter =
+                new SinkRecordConverter(store.options().bucket(), schema);
+        return new TableWrite(store.newWrite(), recordConverter) {
+            @Override
+            protected void writeSinkRecord(SinkRecord record, RecordWriter writer)
+                    throws Exception {
+                Preconditions.checkState(
+                        record.row().getRowKind() == RowKind.INSERT,
+                        "Append only writer can not accept row with RowKind %s",
+                        record.row().getRowKind());
+                writer.write(ValueKind.ADD, BinaryRowDataUtil.EMPTY_ROW, record.row());
+            }
+        };
+    }
+
+    @Override
+    public FileStore store() {
         return store;
     }
 }

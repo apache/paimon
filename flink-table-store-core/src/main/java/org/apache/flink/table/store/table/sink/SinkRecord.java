@@ -16,26 +16,32 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.connector.sink;
+package org.apache.flink.table.store.table.sink;
 
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.mergetree.Increment;
+import org.apache.flink.types.RowKind;
 
-import java.util.Objects;
+import static org.apache.flink.util.Preconditions.checkArgument;
 
-/** File committable for sink. */
-public class FileCommittable {
+/** A sink record contains key, row and partition, bucket information. */
+public class SinkRecord {
 
     private final BinaryRowData partition;
 
     private final int bucket;
 
-    private final Increment increment;
+    private final BinaryRowData primaryKey;
 
-    public FileCommittable(BinaryRowData partition, int bucket, Increment increment) {
+    private final RowData row;
+
+    public SinkRecord(BinaryRowData partition, int bucket, BinaryRowData primaryKey, RowData row) {
+        checkArgument(partition.getRowKind() == RowKind.INSERT);
+        checkArgument(primaryKey.getRowKind() == RowKind.INSERT);
         this.partition = partition;
         this.bucket = bucket;
-        this.increment = increment;
+        this.primaryKey = primaryKey;
+        this.row = row;
     }
 
     public BinaryRowData partition() {
@@ -46,26 +52,11 @@ public class FileCommittable {
         return bucket;
     }
 
-    public Increment increment() {
-        return increment;
+    public BinaryRowData primaryKey() {
+        return primaryKey;
     }
 
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        FileCommittable that = (FileCommittable) o;
-        return bucket == that.bucket
-                && Objects.equals(partition, that.partition)
-                && Objects.equals(increment, that.increment);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(partition, bucket, increment);
+    public RowData row() {
+        return row;
     }
 }

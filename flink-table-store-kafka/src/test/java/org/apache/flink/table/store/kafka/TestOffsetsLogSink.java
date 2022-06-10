@@ -27,7 +27,7 @@ import org.apache.flink.api.connector.sink2.TwoPhaseCommittingSink.Precommitting
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.table.store.log.LogInitContext;
 import org.apache.flink.table.store.log.LogSinkProvider;
-import org.apache.flink.table.store.sink.SinkRecord;
+import org.apache.flink.table.store.table.sink.SinkRecord;
 
 import java.io.IOException;
 import java.util.Collection;

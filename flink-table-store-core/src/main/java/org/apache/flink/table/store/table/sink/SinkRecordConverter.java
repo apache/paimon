@@ -16,12 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.sink;
+package org.apache.flink.table.store.table.sink;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.generated.Projection;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 
@@ -42,6 +43,15 @@ public class SinkRecordConverter {
     private final Projection<RowData, BinaryRowData> pkProjection;
 
     @Nullable private final Projection<RowData, BinaryRowData> logPkProjection;
+
+    public SinkRecordConverter(int numBucket, Schema schema) {
+        this(
+                numBucket,
+                schema.logicalRowType(),
+                schema.projection(schema.partitionKeys()),
+                schema.projection(schema.trimmedPrimaryKeys()),
+                schema.projection(schema.primaryKeys()));
+    }
 
     public SinkRecordConverter(
             int numBucket,

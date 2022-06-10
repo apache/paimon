@@ -50,6 +50,8 @@ public abstract class TableRead {
 
     public abstract TableRead withProjection(int[][] projection);
 
+    public abstract TableRead withIncremental(boolean isIncremental);
+
     public RecordReader<RowData> createReader(
             BinaryRowData partition, int bucket, List<DataFileMeta> files) throws IOException {
         return new RowDataRecordReader(read.createReader(partition, bucket, files));

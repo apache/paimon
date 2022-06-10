@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.table.store.file.FileStore;
+import org.apache.flink.table.store.table.sink.TableCommit;
+import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.types.logical.RowType;
@@ -36,11 +36,11 @@ public interface FileStoreTable extends Serializable {
 
     RowType rowType();
 
-    TableScan newScan(boolean incremental);
+    TableScan newScan();
 
-    TableRead newRead(boolean incremental);
+    TableRead newRead();
 
-    // TODO remove this once TableWrite is introduced
-    @VisibleForTesting
-    FileStore fileStore();
+    TableWrite newWrite();
+
+    TableCommit newCommit();
 }
