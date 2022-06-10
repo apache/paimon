@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.log;
 
 import org.apache.flink.api.connector.sink2.Sink;
-import org.apache.flink.table.store.sink.SinkRecord;
+import org.apache.flink.table.store.table.sink.SinkRecord;
 
 import java.io.Serializable;
 import java.util.function.Consumer;

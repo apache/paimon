@@ -18,7 +18,9 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.types.logical.RowType;
 
 /** Abstract {@link FileStoreTable}. */
@@ -43,4 +45,11 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     public RowType rowType() {
         return schema.logicalRowType();
     }
+
+    @Override
+    public TableCommit newCommit() {
+        return new TableCommit(store().newCommit(), store().newExpire());
+    }
+
+    protected abstract FileStore store();
 }

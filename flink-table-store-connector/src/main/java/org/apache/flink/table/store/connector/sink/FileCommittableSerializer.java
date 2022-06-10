@@ -23,6 +23,7 @@ import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.table.store.file.data.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.mergetree.Increment;
+import org.apache.flink.table.store.table.sink.FileCommittable;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;

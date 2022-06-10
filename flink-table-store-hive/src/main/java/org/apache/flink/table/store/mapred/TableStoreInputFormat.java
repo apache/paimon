@@ -50,7 +50,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
     @Override
     public InputSplit[] getSplits(JobConf jobConf, int numSplits) throws IOException {
         FileStoreTable table = createFileStoreTable(jobConf);
-        TableScan scan = table.newScan(false);
+        TableScan scan = table.newScan();
         createPredicate(jobConf).ifPresent(scan::withFilter);
         return scan.plan().splits.stream()
                 .map(TableStoreInputSplit::create)
@@ -64,7 +64,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
         TableStoreInputSplit split = (TableStoreInputSplit) inputSplit;
         long splitLength = split.getLength();
         return new TableStoreRecordReader(
-                table.newRead(false).createReader(split.partition(), split.bucket(), split.files()),
+                table.newRead().createReader(split.partition(), split.bucket(), split.files()),
                 splitLength);
     }
 
