@@ -55,6 +55,7 @@ public class StoreSinkCompactor implements StatefulPrecommittingSinkWriter<Void>
 
     private final FileStore fileStore;
     private final Map<String, String> partitionSpec;
+    private final ExecutorService compactExecutor;
 
     public StoreSinkCompactor(
             int subTaskId,
@@ -65,6 +66,10 @@ public class StoreSinkCompactor implements StatefulPrecommittingSinkWriter<Void>
         this.numOfParallelInstances = numOfParallelInstances;
         this.fileStore = fileStore;
         this.partitionSpec = partitionSpec;
+        this.compactExecutor =
+                Executors.newSingleThreadScheduledExecutor(
+                        new ExecutorThreadFactory(
+                                String.format("compaction-subtask-%d", subTaskId)));
     }
 
     @Override
@@ -76,7 +81,9 @@ public class StoreSinkCompactor implements StatefulPrecommittingSinkWriter<Void>
     }
 
     @Override
-    public void close() throws Exception {}
+    public void close() throws Exception {
+        compactExecutor.shutdownNow();
+    }
 
     @Override
     public List<Void> snapshotState(long checkpointId) {
@@ -113,10 +120,6 @@ public class StoreSinkCompactor implements StatefulPrecommittingSinkWriter<Void>
                                 bucket,
                                 subTaskId);
                     }
-                    ExecutorService compactExecutor =
-                            Executors.newSingleThreadScheduledExecutor(
-                                    new ExecutorThreadFactory(
-                                            String.format("compaction-subtask-%d", subTaskId)));
                     RecordWriter writer =
                             fileStore
                                     .newWrite()
@@ -133,8 +136,6 @@ public class StoreSinkCompactor implements StatefulPrecommittingSinkWriter<Void>
                         committables.add(new Committable(Committable.Kind.FILE, committable));
                     } catch (Exception e) {
                         throw new IOException(e);
-                    } finally {
-                        compactExecutor.shutdownNow();
                     }
                 }
             }

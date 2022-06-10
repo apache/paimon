@@ -59,11 +59,12 @@ public class CompactWriter implements RecordWriter {
                                     compactBefore.addAll(result.before());
                                     compactAfter.addAll(result.after());
                                 });
+                return Increment.forCompact(compactBefore, compactAfter);
             } catch (ExecutionException e) {
                 throw new IOException(e.getCause());
             }
         }
-        return Increment.forCompact(compactBefore, compactAfter);
+        throw new IllegalStateException("Compact manager should have finished previous task.");
     }
 
     @Override
