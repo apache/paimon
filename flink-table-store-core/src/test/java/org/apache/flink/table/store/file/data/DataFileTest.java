@@ -81,7 +81,7 @@ public class DataFileTest {
 
         checkRollingFiles(
                 TestKeyValueGenerator.KEY_TYPE,
-                TestKeyValueGenerator.ROW_TYPE,
+                TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                 data.meta,
                 actualMetas,
                 writer.suggestedFileSize());
@@ -91,7 +91,7 @@ public class DataFileTest {
                 data,
                 actualMetas,
                 TestKeyValueGenerator.KEY_SERIALIZER,
-                TestKeyValueGenerator.ROW_SERIALIZER,
+                TestKeyValueGenerator.DEFAULT_ROW_SERIALIZER,
                 serializer,
                 reader,
                 kv -> kv);
@@ -137,7 +137,7 @@ public class DataFileTest {
                 data,
                 actualMetas,
                 projectedKeySerializer,
-                TestKeyValueGenerator.ROW_SERIALIZER,
+                TestKeyValueGenerator.DEFAULT_ROW_SERIALIZER,
                 serializer,
                 fileReader,
                 kv ->
@@ -208,7 +208,7 @@ public class DataFileTest {
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         return new DataFileWriter.Factory(
                         TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.ROW_TYPE,
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                         // normal format will buffer changes in memory and we can't determine
                         // if the written file size is really larger than suggested, so we use a
                         // special format which flushes for every added element
@@ -224,7 +224,7 @@ public class DataFileTest {
         DataFileReader.Factory factory =
                 new DataFileReader.Factory(
                         TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.ROW_TYPE,
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                         new FlushingFileFormat(format),
                         pathFactory);
         if (keyProjection != null) {

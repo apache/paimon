@@ -27,6 +27,7 @@ import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.table.catalog.CatalogLock;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.connector.StatefulPrecommittingSinkWriter;
 import org.apache.flink.table.store.connector.sink.global.GlobalCommittingSink;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.WriteMode;
@@ -44,6 +45,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
@@ -69,6 +71,10 @@ public class StoreSink<WriterStateT, LogCommT>
 
     private final int numBucket;
 
+    private final boolean compactionTask;
+
+    @Nullable private final Map<String, String> compactPartitionSpec;
+
     @Nullable private final CatalogLock.Factory lockFactory;
 
     @Nullable private final Map<String, String> overwritePartition;
@@ -83,6 +89,8 @@ public class StoreSink<WriterStateT, LogCommT>
             int[] primaryKeys,
             int[] logPrimaryKeys,
             int numBucket,
+            boolean compactionTask,
+            @Nullable Map<String, String> compactPartitionSpec,
             @Nullable CatalogLock.Factory lockFactory,
             @Nullable Map<String, String> overwritePartition,
             @Nullable LogSinkProvider logSinkProvider) {
@@ -93,19 +101,33 @@ public class StoreSink<WriterStateT, LogCommT>
         this.primaryKeys = primaryKeys;
         this.logPrimaryKeys = logPrimaryKeys;
         this.numBucket = numBucket;
+        this.compactionTask = compactionTask;
+        this.compactPartitionSpec = compactPartitionSpec;
         this.lockFactory = lockFactory;
         this.overwritePartition = overwritePartition;
         this.logSinkProvider = logSinkProvider;
     }
 
     @Override
-    public StoreSinkWriter<WriterStateT> createWriter(InitContext initContext) throws IOException {
+    public StatefulPrecommittingSinkWriter<WriterStateT> createWriter(InitContext initContext)
+            throws IOException {
         return restoreWriter(initContext, null);
     }
 
+    @SuppressWarnings("unchecked")
     @Override
-    public StoreSinkWriter<WriterStateT> restoreWriter(
+    public StatefulPrecommittingSinkWriter<WriterStateT> restoreWriter(
             InitContext initContext, Collection<WriterStateT> states) throws IOException {
+        if (compactionTask) {
+            return (StatefulPrecommittingSinkWriter<WriterStateT>)
+                    new StoreSinkCompactor(
+                            initContext.getSubtaskId(),
+                            initContext.getNumberOfParallelSubtasks(),
+                            fileStore,
+                            compactPartitionSpec == null
+                                    ? Collections.emptyMap()
+                                    : compactPartitionSpec);
+        }
         SinkWriter<SinkRecord> logWriter = null;
         LogWriteCallback logCallback = null;
         if (logSinkProvider != null) {

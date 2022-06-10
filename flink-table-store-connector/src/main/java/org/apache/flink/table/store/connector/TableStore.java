@@ -41,6 +41,7 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.connector.sink.BucketStreamPartitioner;
 import org.apache.flink.table.store.connector.sink.StoreSink;
 import org.apache.flink.table.store.connector.sink.global.GlobalCommittingSinkTranslator;
+import org.apache.flink.table.store.connector.source.FileStoreEmptySource;
 import org.apache.flink.table.store.connector.source.FileStoreSource;
 import org.apache.flink.table.store.connector.source.LogHybridSourceFactory;
 import org.apache.flink.table.store.connector.source.StaticFileStoreSplitEnumerator;
@@ -52,6 +53,7 @@ import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.log.LogOptions.LogStartupMode;
 import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.log.LogSourceProvider;
@@ -66,6 +68,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_MANUAL_TRIGGERED;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_PARTITION_SPEC;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.flink.table.store.file.FileStoreOptions.MERGE_ENGINE;
@@ -116,6 +120,20 @@ public class TableStore {
 
     public boolean partitioned() {
         return schema.partitionKeys().size() > 0;
+    }
+
+    public boolean isCompactionTask() {
+        return options.get(COMPACTION_MANUAL_TRIGGERED);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Nullable
+    public Map<String, String> getCompactPartSpec() {
+        String json = options.get(COMPACTION_PARTITION_SPEC);
+        if (json == null) {
+            return null;
+        }
+        return JsonSerdeUtil.fromJson(json, Map.class);
     }
 
     public boolean valueCountMode() {
@@ -308,8 +326,7 @@ public class TableStore {
                     continuousScanLatest,
                     projectedFields,
                     partitionPredicate,
-                    fieldPredicate,
-                    null);
+                    fieldPredicate);
         }
 
         private Source<RowData, ?, ?> buildSource() {
@@ -352,7 +369,7 @@ public class TableStore {
                             .orElse(type);
             DataStreamSource<RowData> dataStream =
                     env.fromSource(
-                            buildSource(),
+                            isCompactionTask() ? new FileStoreEmptySource() : buildSource(),
                             WatermarkStrategy.noWatermarks(),
                             tableIdentifier.asSummaryString(),
                             InternalTypeInfo.of(produceType));
@@ -428,6 +445,8 @@ public class TableStore {
                             trimmedPrimaryKeysIndex(),
                             fullPrimaryKeysIndex(),
                             numBucket,
+                            isCompactionTask(),
+                            getCompactPartSpec(),
                             lockFactory,
                             overwritePartition,
                             logSinkProvider);

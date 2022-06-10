@@ -47,15 +47,20 @@ public class TableStoreFactoryOptions {
                                     + "of a partition/table.");
 
     @Internal
-    public static final ConfigOption<String> COMPACTION_SCANNED_MANIFEST =
-            ConfigOptions.key("compaction.scanned-manifest")
+    public static final ConfigOption<Boolean> COMPACTION_MANUAL_TRIGGERED =
+            ConfigOptions.key("compaction.manual-triggered")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "An internal flag to indicate a manual triggered compaction job.");
+
+    @Internal
+    public static final ConfigOption<String> COMPACTION_PARTITION_SPEC =
+            ConfigOptions.key("compaction.partition-spec")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "The serialized json string of manifest entries which are scanned during manual compaction "
-                                    + "planning phase and injected back into enriched options. The json format contains "
-                                    + "snapshot id and each partition's data file meta list (among which "
-                                    + "each data file meta is encoded by Base64 format) tagged with bucket id.");
+                            "An internal json string to record the user-specified partition spec for the manual triggered compaction.");
 
     public static final ConfigOption<String> LOG_SYSTEM =
             ConfigOptions.key("log.system")
@@ -77,7 +82,6 @@ public class TableStoreFactoryOptions {
     public static Set<ConfigOption<?>> allOptions() {
         Set<ConfigOption<?>> allOptions = new HashSet<>();
         allOptions.add(COMPACTION_RESCALE_BUCKET);
-        allOptions.add(COMPACTION_SCANNED_MANIFEST);
         allOptions.add(LOG_SYSTEM);
         allOptions.add(SINK_PARALLELISM);
         allOptions.add(SCAN_PARALLELISM);

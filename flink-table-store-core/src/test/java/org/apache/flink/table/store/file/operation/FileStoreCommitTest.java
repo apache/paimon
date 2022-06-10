@@ -263,6 +263,24 @@ public class FileStoreCommitTest {
         assertThat(snapshot.getLogOffsets()).isEqualTo(expected);
     }
 
+    @Test
+    public void testCommitEmpty() throws Exception {
+        TestFileStore store = createStore(false, 2);
+        Snapshot snapshot =
+                store.commitData(
+                                generateDataList(10),
+                                gen::getPartition,
+                                kv -> 0,
+                                Collections.emptyMap())
+                        .get(0);
+
+        store.commitData(
+                Collections.emptyList(), gen::getPartition, kv -> 0, Collections.emptyMap());
+        Path snapshotDir = store.pathFactory().snapshotDirectory();
+
+        assertThat(SnapshotFinder.findLatest(snapshotDir)).isEqualTo(snapshot.id());
+    }
+
     private TestFileStore createStore(boolean failing) {
         return createStore(failing, 1);
     }
@@ -276,9 +294,9 @@ public class FileStoreCommitTest {
                 "avro",
                 root,
                 numBucket,
-                TestKeyValueGenerator.PARTITION_TYPE,
+                TestKeyValueGenerator.DEFAULT_PART_TYPE,
                 TestKeyValueGenerator.KEY_TYPE,
-                TestKeyValueGenerator.ROW_TYPE,
+                TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                 new DeduplicateMergeFunction());
     }
 
@@ -310,7 +328,10 @@ public class FileStoreCommitTest {
 
         LOG.debug("========== Beginning of " + name + " ==========");
         for (KeyValue kv : supplier.get()) {
-            LOG.debug(kv.toString(TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.ROW_TYPE));
+            LOG.debug(
+                    kv.toString(
+                            TestKeyValueGenerator.KEY_TYPE,
+                            TestKeyValueGenerator.DEFAULT_ROW_TYPE));
         }
         LOG.debug("========== End of " + name + " ==========");
     }
