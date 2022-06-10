@@ -21,13 +21,14 @@ package org.apache.flink.table.store.connector;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.api.TableException;
+import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
-import org.apache.flink.table.store.file.TestKeyValueGenerator;
+import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -36,11 +37,11 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -49,14 +50,22 @@ import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
+import static java.util.Collections.emptyList;
 import static java.util.Collections.emptyMap;
+import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_MANUAL_TRIGGERED;
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_PARTITION_SPEC;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
 import static org.apache.flink.table.store.connector.TableStoreTestBase.createResolvedTable;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
-import static org.apache.flink.table.store.file.FileStoreOptions.relativeTablePath;
+import static org.apache.flink.table.store.file.FileStoreOptions.path;
+import static org.apache.flink.table.store.file.TestKeyValueGenerator.DEFAULT_PART_TYPE;
+import static org.apache.flink.table.store.file.TestKeyValueGenerator.DEFAULT_ROW_TYPE;
+import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED;
+import static org.apache.flink.table.store.file.TestKeyValueGenerator.getPrimaryKeys;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.flink.table.store.log.LogOptions.CONSISTENCY;
 import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
@@ -66,8 +75,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Test cases for {@link TableStoreManagedFactory}. */
 public class TableStoreManagedFactoryTest {
 
+    private static final String CATALOG = "catalog";
+    private static final String DATABASE = "database";
+    private static final String TABLE = "table";
     private static final ObjectIdentifier TABLE_IDENTIFIER =
-            ObjectIdentifier.of("catalog", "database", "table");
+            ObjectIdentifier.of(CATALOG, DATABASE, TABLE);
 
     private final TableStoreManagedFactory tableStoreManagedFactory =
             new TableStoreManagedFactory();
@@ -76,12 +88,12 @@ public class TableStoreManagedFactoryTest {
     private DynamicTableFactory.Context context;
 
     @ParameterizedTest
-    @MethodSource("providingOptions")
+    @MethodSource("provideOptionsToEnrich")
     public void testEnrichOptions(
             Map<String, String> sessionOptions,
             Map<String, String> tableOptions,
             Map<String, String> expectedEnrichedOptions) {
-        context = createTableContext(sessionOptions, tableOptions);
+        context = createNonEnrichedContext(sessionOptions, tableOptions);
         Map<String, String> actualEnrichedOptions = tableStoreManagedFactory.enrichOptions(context);
         assertThat(actualEnrichedOptions)
                 .containsExactlyInAnyOrderEntriesOf(expectedEnrichedOptions);
@@ -92,12 +104,12 @@ public class TableStoreManagedFactoryTest {
         Map<String, String> sessionMap = new HashMap<>();
         sessionMap.put("table-store.root-path", "my_path");
         sessionMap.put("table-store.path", "another_path");
-        context = createTableContext(sessionMap, emptyMap());
+        context = createNonEnrichedContext(sessionMap, emptyMap());
         assertThatThrownBy(() -> tableStoreManagedFactory.enrichOptions(context))
                 .hasMessage(
                         "Managed table can not contain table path. You need to remove path in table options or session config.");
 
-        context = createTableContext(emptyMap(), emptyMap());
+        context = createNonEnrichedContext(emptyMap(), emptyMap());
         assertThatThrownBy(() -> tableStoreManagedFactory.enrichOptions(context))
                 .hasMessage(
                         "Please specify a root path by setting session level configuration as `SET 'table-store.root-path' = '...'`.");
@@ -109,13 +121,13 @@ public class TableStoreManagedFactoryTest {
         sessionMap.put("table-store.root-path", "my_path");
         sessionMap.put("table-store.log.system", "kafka");
         sessionMap.put("table-store.log.topic", "my_topic");
-        context = createTableContext(sessionMap, emptyMap());
+        context = createNonEnrichedContext(sessionMap, emptyMap());
         assertThatThrownBy(() -> tableStoreManagedFactory.enrichOptions(context))
                 .hasMessage(
                         "Managed table can not contain custom topic. You need to remove topic in table options or session config.");
 
         sessionMap.remove("table-store.log.topic");
-        context = createTableContext(sessionMap, emptyMap());
+        context = createNonEnrichedContext(sessionMap, emptyMap());
         Map<String, String> enriched = tableStoreManagedFactory.enrichOptions(context);
 
         Map<String, String> expected = new HashMap<>();
@@ -126,13 +138,10 @@ public class TableStoreManagedFactoryTest {
     }
 
     @ParameterizedTest
-    @MethodSource("providingEnrichedOptionsForCreation")
+    @MethodSource("provideOptionsToCreate")
     public void testOnCreateTable(Map<String, String> enrichedOptions, boolean ignoreIfExists) {
-        context = enrichContext(createTableContext(emptyMap(), enrichedOptions));
-        Path expectedPath =
-                Paths.get(
-                        sharedTempDir.toAbsolutePath().toString(),
-                        relativeTablePath(TABLE_IDENTIFIER));
+        context = createEnrichedContext(enrichedOptions);
+        Path expectedPath = Paths.get(path(enrichedOptions).getPath());
         boolean exist = expectedPath.toFile().exists();
         if (ignoreIfExists || !exist) {
             tableStoreManagedFactory.onCreateTable(context, ignoreIfExists);
@@ -156,26 +165,11 @@ public class TableStoreManagedFactoryTest {
         }
     }
 
-    private DynamicTableFactory.Context enrichContext(DynamicTableFactory.Context context) {
-        Map<String, String> newOptions = tableStoreManagedFactory.enrichOptions(context);
-        ResolvedCatalogTable table = context.getCatalogTable().copy(newOptions);
-        return new FactoryUtil.DefaultDynamicTableContext(
-                context.getObjectIdentifier(),
-                table,
-                emptyMap(),
-                context.getConfiguration(),
-                context.getClassLoader(),
-                context.isTemporary());
-    }
-
     @ParameterizedTest
-    @MethodSource("providingEnrichedOptionsForDrop")
+    @MethodSource("provideOptionsToDrop")
     public void testOnDropTable(Map<String, String> enrichedOptions, boolean ignoreIfNotExists) {
-        context = enrichContext(createTableContext(emptyMap(), enrichedOptions));
-        Path expectedPath =
-                Paths.get(
-                        sharedTempDir.toAbsolutePath().toString(),
-                        relativeTablePath(TABLE_IDENTIFIER));
+        context = createEnrichedContext(enrichedOptions);
+        Path expectedPath = Paths.get(path(enrichedOptions).getPath());
         boolean exist = expectedPath.toFile().exists();
         if (exist || ignoreIfNotExists) {
             tableStoreManagedFactory.onDropTable(context, ignoreIfNotExists);
@@ -214,7 +208,7 @@ public class TableStoreManagedFactoryTest {
     }
 
     @ParameterizedTest
-    @MethodSource("providingResolvedTable")
+    @MethodSource("provideResolvedTable")
     public void testCreateAndCheckTableStore(
             RowType rowType,
             List<String> partitions,
@@ -223,18 +217,12 @@ public class TableStoreManagedFactoryTest {
         ResolvedCatalogTable catalogTable =
                 createResolvedTable(
                         singletonMap(
-                                "path", sharedTempDir.toAbsolutePath() + "/" + UUID.randomUUID()),
+                                PATH.key(),
+                                sharedTempDir.toAbsolutePath() + "/" + UUID.randomUUID()),
                         rowType,
                         partitions,
                         primaryKeys);
-        context =
-                new FactoryUtil.DefaultDynamicTableContext(
-                        TABLE_IDENTIFIER,
-                        catalogTable,
-                        emptyMap(),
-                        Configuration.fromMap(emptyMap()),
-                        Thread.currentThread().getContextClassLoader(),
-                        false);
+        context = createEnrichedContext(TABLE_IDENTIFIER, catalogTable);
         if (expectedResult.success) {
             tableStoreManagedFactory.onCreateTable(context, false);
             TableStore tableStore = AbstractTableStoreFactory.buildTableStore(context);
@@ -256,9 +244,59 @@ public class TableStoreManagedFactoryTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 2})
+    public void testOnCompactTable(int partitionNum) {
+        context = createEnrichedContext(Collections.emptyMap());
+
+        Map<String, String> partSpec =
+                partitionNum == 0
+                        ? Collections.emptyMap()
+                        : partitionNum == 1 ? of("foo", "bar") : of("foo", "bar", "meow", "burr");
+        CatalogPartitionSpec catalogPartSpec = new CatalogPartitionSpec(partSpec);
+        Map<String, String> newOptions =
+                tableStoreManagedFactory.onCompactTable(context, catalogPartSpec);
+        assertThat(newOptions)
+                .containsEntry(COMPACTION_MANUAL_TRIGGERED.key(), String.valueOf(true));
+        assertThat(newOptions)
+                .containsEntry(COMPACTION_PARTITION_SPEC.key(), JsonSerdeUtil.toJson(partSpec));
+    }
+
     // ~ Tools ------------------------------------------------------------------
 
-    private static Stream<Arguments> providingOptions() {
+    private static ResolvedCatalogTable getDummyTable(Map<String, String> tableOptions) {
+        return new ResolvedCatalogTable(
+                CatalogTable.of(Schema.derived(), "a comment", emptyList(), tableOptions),
+                ResolvedSchema.of(emptyList()));
+    }
+
+    private static DynamicTableFactory.Context createNonEnrichedContext(
+            Map<String, String> sessionOptions, Map<String, String> tableOptions) {
+        return new FactoryUtil.DefaultDynamicTableContext(
+                TABLE_IDENTIFIER,
+                getDummyTable(tableOptions),
+                emptyMap(),
+                Configuration.fromMap(sessionOptions),
+                Thread.currentThread().getContextClassLoader(),
+                false);
+    }
+
+    private static DynamicTableFactory.Context createEnrichedContext(Map<String, String> options) {
+        return createEnrichedContext(TABLE_IDENTIFIER, getDummyTable(options));
+    }
+
+    private static DynamicTableFactory.Context createEnrichedContext(
+            ObjectIdentifier tableIdentifier, ResolvedCatalogTable catalogTable) {
+        return new FactoryUtil.DefaultDynamicTableContext(
+                tableIdentifier,
+                catalogTable,
+                emptyMap(),
+                Configuration.fromMap(emptyMap()),
+                Thread.currentThread().getContextClassLoader(),
+                false);
+    }
+
+    private static Stream<Arguments> provideOptionsToEnrich() {
         Map<String, String> enrichedOptions =
                 of(
                         BUCKET.key(),
@@ -315,16 +353,17 @@ public class TableStoreManagedFactoryTest {
         return expected;
     }
 
-    private static Stream<Arguments> providingEnrichedOptionsForCreation() {
-        Map<String, String> enrichedOptions = new HashMap<>();
-        enrichedOptions.put(ROOT_PATH.key(), sharedTempDir.toAbsolutePath().toString());
+    private static Stream<Arguments> provideOptionsToCreate() {
+        Map<String, String> enrichedOptions =
+                of(ROOT_PATH.key(), sharedTempDir.toAbsolutePath().toString());
+        enrichedOptions = generateTablePath(enrichedOptions);
         return Stream.of(
                 Arguments.of(enrichedOptions, false),
                 Arguments.of(enrichedOptions, true),
                 Arguments.of(enrichedOptions, false));
     }
 
-    private static Stream<Arguments> providingEnrichedOptionsForDrop() {
+    private static Stream<Arguments> provideOptionsToDrop() {
         File tablePath =
                 Paths.get(
                                 sharedTempDir.toAbsolutePath().toString(),
@@ -333,30 +372,31 @@ public class TableStoreManagedFactoryTest {
         if (!tablePath.exists()) {
             tablePath.mkdirs();
         }
-        Map<String, String> enrichedOptions = new HashMap<>();
-        enrichedOptions.put(ROOT_PATH.key(), sharedTempDir.toAbsolutePath().toString());
+        Map<String, String> enrichedOptions =
+                of(ROOT_PATH.key(), sharedTempDir.toAbsolutePath().toString());
+        enrichedOptions = generateTablePath(enrichedOptions);
         return Stream.of(
                 Arguments.of(enrichedOptions, false),
                 Arguments.of(enrichedOptions, true),
                 Arguments.of(enrichedOptions, false));
     }
 
-    private static Stream<Arguments> providingResolvedTable() {
-        RowType rowType = TestKeyValueGenerator.ROW_TYPE;
+    private static Stream<Arguments> provideResolvedTable() {
+        RowType rowType = DEFAULT_ROW_TYPE;
         // success case
         Arguments arg0 =
                 Arguments.of(
                         rowType,
-                        Arrays.asList("dt", "hr"),
-                        Arrays.asList("dt", "hr", "shopId"), // pk is [dt, hr, shopId]
+                        DEFAULT_PART_TYPE.getFieldNames(), // partition is [dt, hr]
+                        getPrimaryKeys(MULTI_PARTITIONED), // pk is [dt, hr, shopId]
                         new TableStoreTestBase.ExpectedResult().success(true));
 
         // failed case: pk doesn't contain partition key
         Arguments arg1 =
                 Arguments.of(
                         rowType,
-                        Arrays.asList("dt", "hr"),
-                        Collections.singletonList("shopId"), // pk is [shopId]
+                        DEFAULT_PART_TYPE.getFieldNames(), // partition is [dt, hr]
+                        singletonList("shopId"), // pk is [shopId]
                         new TableStoreTestBase.ExpectedResult()
                                 .success(false)
                                 .expectedType(IllegalStateException.class)
@@ -367,13 +407,13 @@ public class TableStoreManagedFactoryTest {
         Arguments arg2 =
                 Arguments.of(
                         rowType,
-                        Arrays.asList("dt", "hr", "shopId"),
-                        Arrays.asList("dt", "hr", "shopId"), // pk is [dt, hr, shopId]
+                        DEFAULT_PART_TYPE.getFieldNames(), // partition is [dt, hr]
+                        DEFAULT_PART_TYPE.getFieldNames(), // pk is [dt, hr]
                         new TableStoreTestBase.ExpectedResult()
                                 .success(false)
                                 .expectedType(IllegalStateException.class)
                                 .expectedMessage(
-                                        "Primary key constraint [dt, hr, shopId] should not be same with partition fields [dt, hr, shopId],"
+                                        "Primary key constraint [dt, hr] should not be same with partition fields [dt, hr],"
                                                 + " this will result in only one record in a partition"));
 
         return Stream.of(arg0, arg1, arg2);
@@ -389,25 +429,6 @@ public class TableStoreManagedFactoryTest {
                     }
                 });
         return newOptions;
-    }
-
-    private static DynamicTableFactory.Context createTableContext(
-            Map<String, String> sessionOptions, Map<String, String> tableOptions) {
-        ResolvedCatalogTable resolvedCatalogTable =
-                new ResolvedCatalogTable(
-                        CatalogTable.of(
-                                Schema.derived(),
-                                "a comment",
-                                Collections.emptyList(),
-                                tableOptions),
-                        ResolvedSchema.of(Collections.emptyList()));
-        return new FactoryUtil.DefaultDynamicTableContext(
-                TABLE_IDENTIFIER,
-                resolvedCatalogTable,
-                emptyMap(),
-                Configuration.fromMap(sessionOptions),
-                Thread.currentThread().getContextClassLoader(),
-                false);
     }
 
     private static Map<String, String> of(String... kvs) {

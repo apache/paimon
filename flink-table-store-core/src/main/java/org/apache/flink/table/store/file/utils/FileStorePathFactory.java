@@ -68,19 +68,24 @@ public class FileStorePathFactory {
         this.root = root;
         this.uuid = UUID.randomUUID().toString();
 
-        String[] partitionColumns = partitionType.getFieldNames().toArray(new String[0]);
-        this.partitionComputer =
-                new RowDataPartitionComputer(
-                        defaultPartValue,
-                        partitionColumns,
-                        partitionType.getFields().stream()
-                                .map(f -> LogicalTypeDataTypeConverter.toDataType(f.getType()))
-                                .toArray(DataType[]::new),
-                        partitionColumns);
+        this.partitionComputer = getPartitionComputer(partitionType, defaultPartValue);
         this.formatIdentifier = formatIdentifier;
 
         this.manifestFileCount = new AtomicInteger(0);
         this.manifestListCount = new AtomicInteger(0);
+    }
+
+    @VisibleForTesting
+    public static RowDataPartitionComputer getPartitionComputer(
+            RowType partitionType, String defaultPartValue) {
+        String[] partitionColumns = partitionType.getFieldNames().toArray(new String[0]);
+        return new RowDataPartitionComputer(
+                defaultPartValue,
+                partitionColumns,
+                partitionType.getFields().stream()
+                        .map(f -> LogicalTypeDataTypeConverter.toDataType(f.getType()))
+                        .toArray(DataType[]::new),
+                partitionColumns);
     }
 
     public Path newManifestFile() {

@@ -127,7 +127,8 @@ public class TableStoreSink
                             });
         }
         // Do not sink to log store when overwrite mode
-        final LogSinkProvider finalLogSinkProvider = overwrite ? null : logSinkProvider;
+        final LogSinkProvider finalLogSinkProvider =
+                overwrite || tableStore.isCompactionTask() ? null : logSinkProvider;
         return (DataStreamSinkProvider)
                 (providerContext, dataStream) ->
                         tableStore

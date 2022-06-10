@@ -26,6 +26,7 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.binary.BinaryRowDataUtil;
+import org.apache.flink.table.store.connector.StatefulPrecommittingSinkWriter;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
@@ -54,8 +55,7 @@ import java.util.concurrent.Executors;
 
 /** A {@link SinkWriter} for dynamic store. */
 public class StoreSinkWriter<WriterStateT>
-        implements StatefulSinkWriter<RowData, WriterStateT>,
-                PrecommittingSinkWriter<RowData, Committable> {
+        implements StatefulPrecommittingSinkWriter<WriterStateT> {
 
     private static final BinaryRowData DUMMY_KEY = BinaryRowDataUtil.EMPTY_ROW;
 

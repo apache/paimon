@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file;
 
 import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.generated.RecordComparator;
@@ -34,10 +35,16 @@ import org.apache.flink.table.types.logical.VarCharType;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.stream.Collectors;
+
+import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED;
+import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED;
+import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.SINGLE_PARTITIONED;
 
 /** Random {@link KeyValue} generator. */
 public class TestKeyValueGenerator {
@@ -53,7 +60,7 @@ public class TestKeyValueGenerator {
     // * itemId: long, any value
     // * price & amount: int[], [1 ~ 100, 1 ~ 10]
     // * comment: string, length from 10 to 1000
-    public static final RowType ROW_TYPE =
+    public static final RowType DEFAULT_ROW_TYPE =
             RowType.of(
                     new LogicalType[] {
                         new VarCharType(false, 8),
@@ -67,18 +74,42 @@ public class TestKeyValueGenerator {
                     new String[] {
                         "dt", "hr", "shopId", "orderId", "itemId", "priceAmount", "comment"
                     });
-    public static final RowType PARTITION_TYPE =
+    public static final RowType DEFAULT_PART_TYPE =
+            new RowType(DEFAULT_ROW_TYPE.getFields().subList(0, 2));
+
+    public static final RowType SINGLE_PARTITIONED_ROW_TYPE =
             RowType.of(
-                    new LogicalType[] {new VarCharType(false, 8), new IntType(false)},
-                    new String[] {"dt", "hr"});
+                    new LogicalType[] {
+                        new VarCharType(false, 8),
+                        new IntType(false),
+                        new BigIntType(false),
+                        new BigIntType(),
+                        new ArrayType(new IntType()),
+                        new VarCharType(Integer.MAX_VALUE)
+                    },
+                    new String[] {"dt", "shopId", "orderId", "itemId", "priceAmount", "comment"});
+    public static final RowType SINGLE_PARTITIONED_PART_TYPE =
+            RowType.of(SINGLE_PARTITIONED_ROW_TYPE.getTypeAt(0));
+
+    public static final RowType NON_PARTITIONED_ROW_TYPE =
+            RowType.of(
+                    new LogicalType[] {
+                        new IntType(false),
+                        new BigIntType(false),
+                        new BigIntType(),
+                        new ArrayType(new IntType()),
+                        new VarCharType(Integer.MAX_VALUE)
+                    },
+                    new String[] {"shopId", "orderId", "itemId", "priceAmount", "comment"});
+    public static final RowType NON_PARTITIONED_PART_TYPE = RowType.of();
+
     public static final RowType KEY_TYPE =
             RowType.of(
                     new LogicalType[] {new IntType(false), new BigIntType(false)},
                     new String[] {"key_shopId", "key_orderId"});
 
-    public static final RowDataSerializer ROW_SERIALIZER = new RowDataSerializer(ROW_TYPE);
-    private static final RowDataSerializer PARTITION_SERIALIZER =
-            new RowDataSerializer(PARTITION_TYPE);
+    public static final RowDataSerializer DEFAULT_ROW_SERIALIZER =
+            new RowDataSerializer(DEFAULT_ROW_TYPE);
     public static final RowDataSerializer KEY_SERIALIZER = new RowDataSerializer(KEY_TYPE);
     public static final RecordComparator KEY_COMPARATOR =
             (a, b) -> {
@@ -89,6 +120,7 @@ public class TestKeyValueGenerator {
                 return Long.compare(a.getLong(1), b.getLong(1));
             };
 
+    private final GeneratorMode mode;
     private final Random random;
 
     private final List<Order> addedOrders;
@@ -96,13 +128,42 @@ public class TestKeyValueGenerator {
 
     private long sequenceNumber;
 
+    private final RowDataSerializer rowSerializer;
+    private final RowDataSerializer partitionSerializer;
+
     public TestKeyValueGenerator() {
+        this(MULTI_PARTITIONED);
+    }
+
+    public TestKeyValueGenerator(GeneratorMode mode) {
+        this.mode = mode;
         this.random = new Random();
 
         this.addedOrders = new ArrayList<>();
         this.deletedOrders = new ArrayList<>();
 
         this.sequenceNumber = 0;
+
+        RowType rowType;
+        RowType partitionType;
+        switch (mode) {
+            case NON_PARTITIONED:
+                rowType = NON_PARTITIONED_ROW_TYPE;
+                partitionType = NON_PARTITIONED_PART_TYPE;
+                break;
+            case SINGLE_PARTITIONED:
+                rowType = SINGLE_PARTITIONED_ROW_TYPE;
+                partitionType = SINGLE_PARTITIONED_PART_TYPE;
+                break;
+            case MULTI_PARTITIONED:
+                rowType = DEFAULT_ROW_TYPE;
+                partitionType = DEFAULT_PART_TYPE;
+                break;
+            default:
+                throw new UnsupportedOperationException("Unsupported generator mode: " + mode);
+        }
+        rowSerializer = new RowDataSerializer(rowType);
+        partitionSerializer = new RowDataSerializer(partitionType);
     }
 
     public KeyValue next() {
@@ -140,31 +201,65 @@ public class TestKeyValueGenerator {
                                 .copy(),
                         sequenceNumber++,
                         kind,
-                        ROW_SERIALIZER
-                                .toBinaryRow(
-                                        GenericRowData.of(
-                                                StringData.fromString(order.dt),
-                                                order.hr,
-                                                order.shopId,
-                                                order.orderId,
-                                                order.itemId,
-                                                order.priceAmount == null
-                                                        ? null
-                                                        : new GenericArrayData(order.priceAmount),
-                                                StringData.fromString(order.comment)))
-                                .copy());
+                        rowSerializer.toBinaryRow(convertToRow(order)).copy());
+    }
+
+    private RowData convertToRow(Order order) {
+        List<Object> values =
+                new ArrayList<>(
+                        Arrays.asList(
+                                order.shopId,
+                                order.orderId,
+                                order.itemId,
+                                order.priceAmount == null
+                                        ? null
+                                        : new GenericArrayData(order.priceAmount),
+                                StringData.fromString(order.comment)));
+
+        if (mode == MULTI_PARTITIONED) {
+            values.add(0, StringData.fromString(order.dt));
+            values.add(1, order.hr);
+        } else if (mode == SINGLE_PARTITIONED) {
+            values.add(0, StringData.fromString(order.dt));
+        }
+        return GenericRowData.of(values.toArray(new Object[0]));
     }
 
     public BinaryRowData getPartition(KeyValue kv) {
-        return PARTITION_SERIALIZER
-                .toBinaryRow(GenericRowData.of(kv.value().getString(0), kv.value().getInt(1)))
-                .copy();
+        Object[] values;
+        if (mode == MULTI_PARTITIONED) {
+            values = new Object[] {kv.value().getString(0), kv.value().getInt(1)};
+        } else if (mode == SINGLE_PARTITIONED) {
+            values = new Object[] {kv.value().getString(0)};
+        } else {
+            values = new Object[0];
+        }
+        return partitionSerializer.toBinaryRow(GenericRowData.of(values)).copy();
     }
 
-    public static Map<String, String> toPartitionMap(BinaryRowData partition) {
+    public static List<String> getPrimaryKeys(GeneratorMode mode) {
+        List<String> trimmedPk =
+                KEY_TYPE.getFieldNames().stream()
+                        .map(f -> f.replaceFirst("key_", ""))
+                        .collect(Collectors.toList());
+        if (mode != NON_PARTITIONED) {
+            trimmedPk = new ArrayList<>(trimmedPk);
+            trimmedPk.addAll(
+                    mode == MULTI_PARTITIONED
+                            ? DEFAULT_PART_TYPE.getFieldNames()
+                            : SINGLE_PARTITIONED_PART_TYPE.getFieldNames());
+        }
+        return trimmedPk;
+    }
+
+    public static Map<String, String> toPartitionMap(BinaryRowData partition, GeneratorMode mode) {
         Map<String, String> map = new HashMap<>();
-        map.put("dt", partition.getString(0).toString());
-        map.put("hr", String.valueOf(partition.getInt(1)));
+        if (mode == MULTI_PARTITIONED) {
+            map.put("dt", partition.getString(0).toString());
+            map.put("hr", String.valueOf(partition.getInt(1)));
+        } else if (mode == SINGLE_PARTITIONED) {
+            map.put("dt", partition.getString(0).toString());
+        }
         return map;
     }
 
@@ -219,5 +314,12 @@ public class TestKeyValueGenerator {
                             : new int[] {random.nextInt(100) + 1, random.nextInt(100) + 1};
             comment = random.nextInt(10) == 0 ? null : randomString(random.nextInt(1001 - 10) + 10);
         }
+    }
+
+    /** Generator mode for {@link TestKeyValueGenerator}. */
+    public enum GeneratorMode {
+        NON_PARTITIONED,
+        SINGLE_PARTITIONED,
+        MULTI_PARTITIONED
     }
 }
