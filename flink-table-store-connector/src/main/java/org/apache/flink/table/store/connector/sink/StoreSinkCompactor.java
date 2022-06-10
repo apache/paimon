@@ -38,7 +38,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -55,7 +54,6 @@ public class StoreSinkCompactor implements StatefulPrecommittingSinkWriter<Void>
 
     private final FileStore fileStore;
     private final Map<String, String> partitionSpec;
-    private final Map<Integer, ExecutorService> compactExecutors;
 
     public StoreSinkCompactor(
             int subTaskId,
@@ -66,7 +64,6 @@ public class StoreSinkCompactor implements StatefulPrecommittingSinkWriter<Void>
         this.numOfParallelInstances = numOfParallelInstances;
         this.fileStore = fileStore;
         this.partitionSpec = partitionSpec;
-        this.compactExecutors = new HashMap<>();
     }
 
     @Override
@@ -78,12 +75,7 @@ public class StoreSinkCompactor implements StatefulPrecommittingSinkWriter<Void>
     }
 
     @Override
-    public void close() throws Exception {
-        for (Map.Entry<Integer, ExecutorService> entry : compactExecutors.entrySet()) {
-            entry.getValue().shutdownNow();
-        }
-        compactExecutors.clear();
-    }
+    public void close() throws Exception {}
 
     @Override
     public List<Void> snapshotState(long checkpointId) {
@@ -120,7 +112,10 @@ public class StoreSinkCompactor implements StatefulPrecommittingSinkWriter<Void>
                                 bucket,
                                 subTaskId);
                     }
-                    ExecutorService compactExecutor = getCompactExecutor(subTaskId);
+                    ExecutorService compactExecutor =
+                            Executors.newSingleThreadScheduledExecutor(
+                                    new ExecutorThreadFactory(
+                                            String.format("compaction-subtask-%d", subTaskId)));
                     RecordWriter writer =
                             fileStore
                                     .newWrite()
@@ -134,10 +129,12 @@ public class StoreSinkCompactor implements StatefulPrecommittingSinkWriter<Void>
                         committable =
                                 new FileCommittable(
                                         partition, bucketEntry.getKey(), writer.prepareCommit());
+                        committables.add(new Committable(Committable.Kind.FILE, committable));
                     } catch (Exception e) {
                         throw new IOException(e);
+                    } finally {
+                        compactExecutor.shutdownNow();
                     }
-                    committables.add(new Committable(Committable.Kind.FILE, committable));
                 }
             }
         }
@@ -146,14 +143,5 @@ public class StoreSinkCompactor implements StatefulPrecommittingSinkWriter<Void>
 
     private boolean select(BinaryRowData partition, int bucket) {
         return subTaskId == Math.abs(Objects.hash(partition, bucket) % numOfParallelInstances);
-    }
-
-    private ExecutorService getCompactExecutor(int subTaskId) {
-        return compactExecutors.computeIfAbsent(
-                subTaskId,
-                k ->
-                        Executors.newSingleThreadScheduledExecutor(
-                                new ExecutorThreadFactory(
-                                        String.format("compaction-subtask-%d", subTaskId))));
     }
 }

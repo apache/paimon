@@ -58,6 +58,7 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
 
     @Nullable
     public Predicate fromMap(Map<String, String> map, RowType rowType) {
+        // TODO: It is somewhat misleading that an empty map creates a null predicate filter
         List<String> fieldNames = rowType.getFieldNames();
         Predicate predicate = null;
         for (Map.Entry<String, String> entry : map.entrySet()) {
