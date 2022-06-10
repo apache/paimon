@@ -71,13 +71,13 @@ public class TableStoreRecordReaderTest {
                         Collections.emptyList(),
                         Collections.singletonList("a"));
 
-        TableWrite write = table.newWrite(false);
+        TableWrite write = table.newWrite();
         write.write(GenericRowData.of(1L, StringData.fromString("Hi")));
         write.write(GenericRowData.of(2L, StringData.fromString("Hello")));
         write.write(GenericRowData.of(3L, StringData.fromString("World")));
         write.write(GenericRowData.of(1L, StringData.fromString("Hi again")));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 2L, StringData.fromString("Hello")));
-        table.newCommit(null).commit("0", write.prepareCommit());
+        table.newCommit().commit("0", write.prepareCommit());
 
         Tuple2<RecordReader<RowData>, Long> tuple = read(table, BinaryRowDataUtil.EMPTY_ROW, 0);
         TableStoreRecordReader reader = new TableStoreRecordReader(tuple.f0, tuple.f1);
@@ -112,14 +112,14 @@ public class TableStoreRecordReaderTest {
                         Collections.emptyList(),
                         Collections.emptyList());
 
-        TableWrite write = table.newWrite(false);
+        TableWrite write = table.newWrite();
         write.write(GenericRowData.of(1, StringData.fromString("Hi")));
         write.write(GenericRowData.of(2, StringData.fromString("Hello")));
         write.write(GenericRowData.of(3, StringData.fromString("World")));
         write.write(GenericRowData.of(1, StringData.fromString("Hi")));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 2, StringData.fromString("Hello")));
         write.write(GenericRowData.of(1, StringData.fromString("Hi")));
-        table.newCommit(null).commit("0", write.prepareCommit());
+        table.newCommit().commit("0", write.prepareCommit());
 
         Tuple2<RecordReader<RowData>, Long> tuple = read(table, BinaryRowDataUtil.EMPTY_ROW, 0);
         TableStoreRecordReader reader = new TableStoreRecordReader(tuple.f0, tuple.f1);
@@ -139,10 +139,10 @@ public class TableStoreRecordReaderTest {
 
     private Tuple2<RecordReader<RowData>, Long> read(
             FileStoreTable table, BinaryRowData partition, int bucket) throws Exception {
-        for (Split split : table.newScan(false).plan().splits) {
+        for (Split split : table.newScan().plan().splits) {
             if (split.partition().equals(partition) && split.bucket() == bucket) {
                 return Tuple2.of(
-                        table.newRead(false).createReader(partition, bucket, split.files()),
+                        table.newRead().createReader(partition, bucket, split.files()),
                         split.files().stream().mapToLong(DataFileMeta::fileSize).sum());
             }
         }

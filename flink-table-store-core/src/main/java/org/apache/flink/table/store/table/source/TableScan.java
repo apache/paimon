@@ -80,6 +80,11 @@ public abstract class TableScan {
         return this;
     }
 
+    public TableScan withIncremental(boolean isIncremental) {
+        scan.withIncremental(isIncremental);
+        return this;
+    }
+
     public Plan plan() {
         FileStoreScan.Plan plan = scan.plan();
         return new Plan(

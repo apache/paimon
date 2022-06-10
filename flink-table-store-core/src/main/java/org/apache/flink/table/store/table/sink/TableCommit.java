@@ -37,15 +37,17 @@ public class TableCommit {
 
     private final FileStoreCommit commit;
     private final FileStoreExpire expire;
-    @Nullable private final Map<String, String> overwritePartition;
 
-    public TableCommit(
-            FileStoreCommit commit,
-            FileStoreExpire expire,
-            @Nullable Map<String, String> overwritePartition) {
+    @Nullable private Map<String, String> overwritePartition = null;
+
+    public TableCommit(FileStoreCommit commit, FileStoreExpire expire) {
         this.commit = commit;
         this.expire = expire;
+    }
+
+    public TableCommit withOverwritePartition(@Nullable Map<String, String> overwritePartition) {
         this.overwritePartition = overwritePartition;
+        return this;
     }
 
     public List<ManifestCommittable> filterRecoveredCommittables(

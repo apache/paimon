@@ -56,8 +56,8 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan(false).plan().splits;
-        TableRead read = table.newRead(false);
+        List<Split> splits = table.newScan().plan().splits;
+        TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .isEqualTo(
                         Arrays.asList("1|10|100", "1|11|101", "1|12|102", "1|11|101", "1|12|102"));
@@ -70,8 +70,8 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan(false).plan().splits;
-        TableRead read = table.newRead(false).withProjection(PROJECTION);
+        List<Split> splits = table.newScan().plan().splits;
+        TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("100|10", "101|11", "102|12", "101|11", "102|12"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_PROJECTED_ROW_TO_STRING))
@@ -86,8 +86,8 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         Predicate predicate =
                 PredicateBuilder.equal(
                         2, Literal.fromJavaObject(DataTypes.BIGINT().getLogicalType(), 201L));
-        List<Split> splits = table.newScan(false).withFilter(predicate).plan().splits;
-        TableRead read = table.newRead(false);
+        List<Split> splits = table.newScan().withFilter(predicate).plan().splits;
+        TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
                 .isEqualTo(
@@ -103,8 +103,8 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan(true).plan().splits;
-        TableRead read = table.newRead(true);
+        List<Split> splits = table.newScan().withIncremental(true).plan().splits;
+        TableRead read = table.newRead().withIncremental(true);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("+1|11|101", "+1|12|102"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
@@ -116,8 +116,8 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan(true).plan().splits;
-        TableRead read = table.newRead(true).withProjection(PROJECTION);
+        List<Split> splits = table.newScan().withIncremental(true).plan().splits;
+        TableRead read = table.newRead().withIncremental(true).withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
                 .hasSameElementsAs(Arrays.asList("+101|11", "+102|12"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_PROJECTED_ROW_TO_STRING))
@@ -132,8 +132,9 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         Predicate predicate =
                 PredicateBuilder.equal(
                         2, Literal.fromJavaObject(DataTypes.BIGINT().getLogicalType(), 101L));
-        List<Split> splits = table.newScan(true).withFilter(predicate).plan().splits;
-        TableRead read = table.newRead(true);
+        List<Split> splits =
+                table.newScan().withIncremental(true).withFilter(predicate).plan().splits;
+        TableRead read = table.newRead().withIncremental(true);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
                         Arrays.asList(
@@ -145,22 +146,22 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
 
     private void writeData() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        TableWrite write = table.newWrite(false);
+        TableWrite write = table.newWrite();
 
         write.write(GenericRowData.of(1, 10, 100L));
         write.write(GenericRowData.of(2, 20, 200L));
         write.write(GenericRowData.of(1, 11, 101L));
-        table.newCommit(null).commit("0", write.prepareCommit());
+        table.newCommit().commit("0", write.prepareCommit());
 
         write.write(GenericRowData.of(1, 12, 102L));
         write.write(GenericRowData.of(2, 21, 201L));
         write.write(GenericRowData.of(2, 22, 202L));
-        table.newCommit(null).commit("1", write.prepareCommit());
+        table.newCommit().commit("1", write.prepareCommit());
 
         write.write(GenericRowData.of(1, 11, 101L));
         write.write(GenericRowData.of(2, 21, 201L));
         write.write(GenericRowData.of(1, 12, 102L));
-        table.newCommit(null).commit("2", write.prepareCommit());
+        table.newCommit().commit("2", write.prepareCommit());
 
         write.close();
     }

@@ -29,8 +29,6 @@ import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFunction;
-import org.apache.flink.table.store.file.operation.FileStoreRead;
-import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.Schema;
@@ -38,7 +36,6 @@ import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
-import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
@@ -46,11 +43,8 @@ import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterat
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
-import javax.annotation.Nullable;
-
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -110,9 +104,8 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableScan newScan(boolean incremental) {
-        FileStoreScan scan = store.newScan().withIncremental(incremental);
-        return new TableScan(scan, schema, store.pathFactory()) {
+    public TableScan newScan() {
+        return new TableScan(store.newScan(), schema, store.pathFactory()) {
             @Override
             protected void withNonPartitionFilter(Predicate predicate) {
                 // currently we can only perform filter push down on keys
@@ -123,6 +116,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                 // if we perform filter push down on values, data file 1 will be chosen, but data
                 // file 2 will be ignored, and the final result will be key = a, value = 1 while the
                 // correct result is an empty set
+                // TODO support value filter
                 List<String> trimmedPrimaryKeys = schema.trimmedPrimaryKeys();
                 int[] fieldIdxToKeyIdx =
                         schema.fields().stream()
@@ -141,12 +135,17 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableRead newRead(boolean incremental) {
-        FileStoreRead read = store.newRead().withDropDelete(!incremental);
-        return new TableRead(read) {
+    public TableRead newRead() {
+        return new TableRead(store.newRead()) {
             @Override
             public TableRead withProjection(int[][] projection) {
                 read.withValueProjection(projection);
+                return this;
+            }
+
+            @Override
+            public TableRead withIncremental(boolean isIncremental) {
+                read.withDropDelete(!isIncremental);
                 return this;
             }
 
@@ -159,12 +158,13 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableWrite newWrite(boolean overwrite) {
+    public TableWrite newWrite() {
         SinkRecordConverter recordConverter =
                 new SinkRecordConverter(store.options().bucket(), schema);
-        return new TableWrite(store.newWrite(), recordConverter, overwrite) {
+        return new TableWrite(store.newWrite(), recordConverter) {
             @Override
-            protected void writeImpl(SinkRecord record, RecordWriter writer) throws Exception {
+            protected void writeSinkRecord(SinkRecord record, RecordWriter writer)
+                    throws Exception {
                 switch (record.row().getRowKind()) {
                     case INSERT:
                     case UPDATE_AFTER:
@@ -183,12 +183,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableCommit newCommit(@Nullable Map<String, String> overwritePartition) {
-        return new TableCommit(store.newCommit(), store.newExpire(), overwritePartition);
-    }
-
-    @Override
-    public FileStore fileStore() {
+    public FileStore store() {
         return store;
     }
 }

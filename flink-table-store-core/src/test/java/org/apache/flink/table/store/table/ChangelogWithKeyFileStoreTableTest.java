@@ -54,8 +54,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan(false).plan().splits;
-        TableRead read = table.newRead(false);
+        List<Split> splits = table.newScan().plan().splits;
+        TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(Collections.singletonList("1|10|1000"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
@@ -67,8 +67,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan(false).plan().splits;
-        TableRead read = table.newRead(false).withProjection(PROJECTION);
+        List<Split> splits = table.newScan().plan().splits;
+        TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_PROJECTED_ROW_TO_STRING))
                 .hasSameElementsAs(Collections.singletonList("1000|10"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_PROJECTED_ROW_TO_STRING))
@@ -87,8 +87,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 Literal.fromJavaObject(DataTypes.BIGINT().getLogicalType(), 201L)),
                         PredicateBuilder.equal(
                                 1, Literal.fromJavaObject(DataTypes.INT().getLogicalType(), 21)));
-        List<Split> splits = table.newScan(false).withFilter(predicate).plan().splits;
-        TableRead read = table.newRead(false);
+        List<Split> splits = table.newScan().withFilter(predicate).plan().splits;
+        TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
@@ -103,8 +103,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan(true).plan().splits;
-        TableRead read = table.newRead(true);
+        List<Split> splits = table.newScan().withIncremental(true).plan().splits;
+        TableRead read = table.newRead().withIncremental(true);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .hasSameElementsAs(Collections.singletonList("-1|11|1001"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
@@ -116,8 +116,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan(true).plan().splits;
-        TableRead read = table.newRead(true).withProjection(PROJECTION);
+        List<Split> splits = table.newScan().withIncremental(true).plan().splits;
+        TableRead read = table.newRead().withIncremental(true).withProjection(PROJECTION);
 
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
                 .hasSameElementsAs(Collections.singletonList("-1001|11"));
@@ -137,8 +137,9 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 Literal.fromJavaObject(DataTypes.BIGINT().getLogicalType(), 201L)),
                         PredicateBuilder.equal(
                                 1, Literal.fromJavaObject(DataTypes.INT().getLogicalType(), 21)));
-        List<Split> splits = table.newScan(true).withFilter(predicate).plan().splits;
-        TableRead read = table.newRead(true);
+        List<Split> splits =
+                table.newScan().withIncremental(true).withFilter(predicate).plan().splits;
+        TableRead read = table.newRead().withIncremental(true);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
                 .hasSameElementsAs(
@@ -150,24 +151,24 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     private void writeData() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        TableWrite write = table.newWrite(false);
+        TableWrite write = table.newWrite();
 
         write.write(GenericRowData.of(1, 10, 100L));
         write.write(GenericRowData.of(2, 20, 200L));
         write.write(GenericRowData.of(1, 11, 101L));
-        table.newCommit(null).commit("0", write.prepareCommit());
+        table.newCommit().commit("0", write.prepareCommit());
 
         write.write(GenericRowData.of(1, 10, 1000L));
         write.write(GenericRowData.of(2, 21, 201L));
         write.write(GenericRowData.of(2, 21, 2001L));
-        table.newCommit(null).commit("1", write.prepareCommit());
+        table.newCommit().commit("1", write.prepareCommit());
 
         write.write(GenericRowData.of(1, 11, 1001L));
         write.write(GenericRowData.of(2, 21, 20001L));
         write.write(GenericRowData.of(2, 22, 202L));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 1, 11, 1001L));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 2, 20, 200L));
-        table.newCommit(null).commit("2", write.prepareCommit());
+        table.newCommit().commit("2", write.prepareCommit());
 
         write.close();
     }

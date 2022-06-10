@@ -37,16 +37,15 @@ public abstract class TableWrite {
 
     private final FileStoreWrite write;
     private final SinkRecordConverter recordConverter;
-    private final boolean overwrite;
 
     private final Map<BinaryRowData, Map<Integer, RecordWriter>> writers;
     private final ExecutorService compactExecutor;
 
-    protected TableWrite(
-            FileStoreWrite write, SinkRecordConverter recordConverter, boolean overwrite) {
+    private boolean overwrite = false;
+
+    protected TableWrite(FileStoreWrite write, SinkRecordConverter recordConverter) {
         this.write = write;
         this.recordConverter = recordConverter;
-        this.overwrite = overwrite;
 
         this.writers = new HashMap<>();
         this.compactExecutor =
@@ -54,10 +53,15 @@ public abstract class TableWrite {
                         new ExecutorThreadFactory("compaction-thread"));
     }
 
+    public TableWrite withOverwrite(boolean overwrite) {
+        this.overwrite = overwrite;
+        return this;
+    }
+
     public void write(RowData rowData) throws Exception {
         SinkRecord record = recordConverter.convert(rowData);
         RecordWriter writer = getWriter(record.partition(), record.bucket());
-        writeImpl(record, writer);
+        writeSinkRecord(record, writer);
     }
 
     public List<FileCommittable> prepareCommit() throws Exception {
@@ -110,7 +114,8 @@ public abstract class TableWrite {
         writers.clear();
     }
 
-    protected abstract void writeImpl(SinkRecord record, RecordWriter writer) throws Exception;
+    protected abstract void writeSinkRecord(SinkRecord record, RecordWriter writer)
+            throws Exception;
 
     private RecordWriter getWriter(BinaryRowData partition, int bucket) {
         Map<Integer, RecordWriter> buckets = writers.get(partition);

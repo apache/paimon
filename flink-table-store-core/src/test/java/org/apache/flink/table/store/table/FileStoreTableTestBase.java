@@ -73,21 +73,23 @@ public abstract class FileStoreTableTestBase {
     public void testOverwrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
-        TableWrite write = table.newWrite(false);
+        TableWrite write = table.newWrite();
         write.write(GenericRowData.of(1, 10, 100L));
         write.write(GenericRowData.of(2, 20, 200L));
-        table.newCommit(null).commit("0", write.prepareCommit());
+        table.newCommit().commit("0", write.prepareCommit());
         write.close();
 
-        write = table.newWrite(true);
+        write = table.newWrite().withOverwrite(true);
         write.write(GenericRowData.of(2, 21, 201L));
         Map<String, String> overwritePartition = new HashMap<>();
         overwritePartition.put("pt", "2");
-        table.newCommit(overwritePartition).commit("1", write.prepareCommit());
+        table.newCommit()
+                .withOverwritePartition(overwritePartition)
+                .commit("1", write.prepareCommit());
         write.close();
 
-        List<Split> splits = table.newScan(false).plan().splits;
-        TableRead read = table.newRead(false);
+        List<Split> splits = table.newScan().plan().splits;
+        TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(Collections.singletonList("1|10|100"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
