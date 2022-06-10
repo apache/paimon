@@ -84,7 +84,7 @@ public class SparkScan implements Scan, SupportsReportStatistics {
 
     protected List<Split> splits() {
         if (splits == null) {
-            this.splits = table.newScan(false).withFilter(predicates).plan().splits;
+            this.splits = table.newScan().withFilter(predicates).plan().splits;
         }
         return splits;
     }

@@ -56,7 +56,7 @@ public class SparkReaderFactory implements PartitionReaderFactory {
         RecordReader<RowData> reader;
         try {
             reader =
-                    table.newRead(false)
+                    table.newRead()
                             .withProjection(projectedFields)
                             .createReader(split.partition(), split.bucket(), split.files());
         } catch (IOException e) {

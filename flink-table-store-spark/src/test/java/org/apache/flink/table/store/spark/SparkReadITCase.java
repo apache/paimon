@@ -21,11 +21,11 @@ package org.apache.flink.table.store.spark;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.types.RowKind;
 
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
@@ -77,10 +77,10 @@ public class SparkReadITCase {
 
     @Test
     public void testNormal() throws Exception {
-        testHelper.write(ValueKind.ADD, GenericRowData.of(1, 2L, StringData.fromString("1")));
-        testHelper.write(ValueKind.ADD, GenericRowData.of(3, 4L, StringData.fromString("2")));
-        testHelper.write(ValueKind.ADD, GenericRowData.of(5, 6L, StringData.fromString("3")));
-        testHelper.write(ValueKind.DELETE, GenericRowData.of(3, 4L, StringData.fromString("2")));
+        testHelper.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
+        testHelper.write(GenericRowData.of(3, 4L, StringData.fromString("2")));
+        testHelper.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
+        testHelper.write(GenericRowData.ofKind(RowKind.DELETE, 3, 4L, StringData.fromString("2")));
         testHelper.commit();
 
         Dataset<Row> dataset =
@@ -98,12 +98,12 @@ public class SparkReadITCase {
 
     @Test
     public void testFilterPushDown() throws Exception {
-        testHelper.write(ValueKind.ADD, GenericRowData.of(1, 2L, StringData.fromString("1")));
-        testHelper.write(ValueKind.ADD, GenericRowData.of(3, 4L, StringData.fromString("2")));
+        testHelper.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
+        testHelper.write(GenericRowData.of(3, 4L, StringData.fromString("2")));
         testHelper.commit();
 
-        testHelper.write(ValueKind.ADD, GenericRowData.of(5, 6L, StringData.fromString("3")));
-        testHelper.write(ValueKind.ADD, GenericRowData.of(7, 8L, StringData.fromString("4")));
+        testHelper.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
+        testHelper.write(GenericRowData.of(7, 8L, StringData.fromString("4")));
         testHelper.commit();
 
         Dataset<Row> dataset =

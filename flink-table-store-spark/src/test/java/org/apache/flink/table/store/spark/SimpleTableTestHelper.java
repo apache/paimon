@@ -20,34 +20,26 @@ package org.apache.flink.table.store.spark;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.FileStoreOptions;
-import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.manifest.ManifestCommittable;
-import org.apache.flink.table.store.file.mergetree.Increment;
-import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
+import org.apache.flink.table.store.table.sink.TableCommit;
+import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.Executors;
 
-import static org.apache.flink.table.data.binary.BinaryRowDataUtil.EMPTY_ROW;
-
-/** TODO use new sink api in {@link FileStoreTable}. */
+/** A simple table test helper to write and commit. */
 public class SimpleTableTestHelper {
 
-    private final FileStore store;
-    private final RecordWriter writer;
+    private final TableWrite writer;
+    private final TableCommit commit;
 
     public SimpleTableTestHelper(Path path, RowType rowType) throws Exception {
         Map<String, String> options = new HashMap<>();
@@ -64,22 +56,15 @@ public class SimpleTableTestHelper {
         Configuration conf = Configuration.fromMap(options);
         conf.setString("path", path.toString());
         FileStoreTable table = FileStoreTableFactory.create(conf, "user");
-        this.store = table.fileStore();
-        this.writer =
-                store.newWrite().createWriter(EMPTY_ROW, 0, Executors.newSingleThreadExecutor());
+        this.writer = table.newWrite();
+        this.commit = table.newCommit();
     }
 
-    public void write(ValueKind kind, RowData record) throws Exception {
-        long value = kind == ValueKind.ADD ? 1 : -1;
-        writer.write(ValueKind.ADD, record, GenericRowData.of(value));
+    public void write(RowData row) throws Exception {
+        writer.write(row);
     }
 
     public void commit() throws Exception {
-        ManifestCommittable committable = new ManifestCommittable(UUID.randomUUID().toString());
-        writer.sync();
-        Increment increment = writer.prepareCommit();
-        committable.addFileCommittable(EMPTY_ROW, 0, increment);
-        FileStoreCommit commit = store.newCommit();
-        commit.commit(committable, Collections.emptyMap());
+        commit.commit(UUID.randomUUID().toString(), writer.prepareCommit());
     }
 }
