@@ -22,9 +22,9 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /** Default implementation of {@link SplitGenerator}. The whole bucket is marked as one split. */
 public class DefaultSplitGenerator implements SplitGenerator {
@@ -38,23 +38,31 @@ public class DefaultSplitGenerator implements SplitGenerator {
     @Override
     public List<Split> generate(
             Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupedDataFileMetas) {
-        List<Split> splits = new ArrayList<>();
-        for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> entryWithPartition :
-                groupedDataFileMetas.entrySet()) {
-            BinaryRowData partition = entryWithPartition.getKey();
-            for (Map.Entry<Integer, List<DataFileMeta>> entryWithBucket :
-                    entryWithPartition.getValue().entrySet()) {
-                int bucket = entryWithBucket.getKey();
-                splits.add(
-                        new Split(
-                                partition,
-                                bucket,
-                                entryWithBucket.getValue(),
-                                pathFactory
-                                        .createDataFilePathFactory(partition, bucket)
-                                        .bucketPath()));
-            }
-        }
+        List<Split> splits =
+                groupedDataFileMetas
+                        .entrySet()
+                        .parallelStream()
+                        .flatMap(
+                                entry ->
+                                        entry.getValue().entrySet().stream()
+                                                .map(
+                                                        v -> {
+                                                            BinaryRowData partition =
+                                                                    entry.getKey();
+                                                            int bucket = v.getKey();
+                                                            List<DataFileMeta> dataFileMetaList =
+                                                                    v.getValue();
+                                                            return new Split(
+                                                                    partition,
+                                                                    bucket,
+                                                                    dataFileMetaList,
+                                                                    pathFactory
+                                                                            .createDataFilePathFactory(
+                                                                                    partition,
+                                                                                    bucket)
+                                                                            .bucketPath());
+                                                        }))
+                        .collect(Collectors.toList());
         return splits;
     }
 }
