@@ -18,14 +18,21 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.catalog.ResolvedCatalogTable;
-import org.apache.flink.table.catalog.ResolvedSchema;
+import org.apache.flink.table.api.TableSchema;
+import org.apache.flink.table.catalog.CatalogTable;
+import org.apache.flink.table.catalog.CatalogTableImpl;
+import org.apache.flink.table.descriptors.DescriptorProperties;
+import org.apache.flink.table.descriptors.Schema;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+
+import static org.apache.flink.table.descriptors.Schema.SCHEMA;
+import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 
 /** A update schema. */
 public class UpdateSchema {
@@ -39,22 +46,6 @@ public class UpdateSchema {
     private final Map<String, String> options;
 
     private final String comment;
-
-    public static UpdateSchema fromCatalogTable(ResolvedCatalogTable catalogTable) {
-        ResolvedSchema schema = catalogTable.getResolvedSchema();
-        RowType rowType = (RowType) schema.toPhysicalRowDataType().getLogicalType();
-        List<String> primaryKeys = new ArrayList<>();
-        if (schema.getPrimaryKey().isPresent()) {
-            primaryKeys = schema.getPrimaryKey().get().getColumns();
-        }
-
-        return new UpdateSchema(
-                rowType,
-                catalogTable.getPartitionKeys(),
-                primaryKeys,
-                catalogTable.getOptions(),
-                catalogTable.getComment());
-    }
 
     public UpdateSchema(
             RowType rowType,
@@ -103,5 +94,64 @@ public class UpdateSchema {
                 + ", comment="
                 + comment
                 + '}';
+    }
+
+    public CatalogTableImpl toCatalogTable() {
+        TableSchema schema;
+        Map<String, String> newOptions = new HashMap<>(options);
+
+        // try to read schema from options
+        // in the case of virtual columns and watermark
+        DescriptorProperties tableSchemaProps = new DescriptorProperties(true);
+        tableSchemaProps.putProperties(newOptions);
+        Optional<TableSchema> optional = tableSchemaProps.getOptionalTableSchema(Schema.SCHEMA);
+        if (optional.isPresent()) {
+            schema = optional.get();
+
+            // remove schema from options
+            DescriptorProperties removeProperties = new DescriptorProperties(false);
+            removeProperties.putTableSchema(SCHEMA, schema);
+            removeProperties.asMap().keySet().forEach(newOptions::remove);
+        } else {
+            TableSchema.Builder builder = TableSchema.builder();
+            for (RowType.RowField field : rowType.getFields()) {
+                builder.field(field.getName(), fromLogicalToDataType(field.getType()));
+            }
+            if (primaryKeys.size() > 0) {
+                builder.primaryKey(primaryKeys.toArray(new String[0]));
+            }
+
+            schema = builder.build();
+        }
+
+        return new CatalogTableImpl(schema, partitionKeys, newOptions, comment);
+    }
+
+    public static UpdateSchema fromCatalogTable(CatalogTable catalogTable) {
+        TableSchema schema = catalogTable.getSchema();
+        RowType rowType = (RowType) schema.toPhysicalRowDataType().getLogicalType();
+        List<String> primaryKeys = new ArrayList<>();
+        if (schema.getPrimaryKey().isPresent()) {
+            primaryKeys = schema.getPrimaryKey().get().getColumns();
+        }
+
+        Map<String, String> options = new HashMap<>(catalogTable.getOptions());
+
+        // Serialize virtual columns and watermark to the options
+        // This is what Flink SQL needs, the storage itself does not need them
+        if (schema.getTableColumns().stream().anyMatch(c -> !c.isPhysical())
+                || schema.getWatermarkSpecs().size() > 0) {
+            DescriptorProperties tableSchemaProps = new DescriptorProperties(true);
+            tableSchemaProps.putTableSchema(
+                    org.apache.flink.table.descriptors.Schema.SCHEMA, schema);
+            options.putAll(tableSchemaProps.asMap());
+        }
+
+        return new UpdateSchema(
+                rowType,
+                catalogTable.getPartitionKeys(),
+                primaryKeys,
+                options,
+                catalogTable.getComment());
     }
 }
