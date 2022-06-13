@@ -29,6 +29,7 @@ import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.types.logical.RowType;
@@ -53,6 +54,8 @@ public class FileStoreReadImpl implements FileStoreRead {
     private boolean dropDelete = true;
 
     public FileStoreReadImpl(
+            SchemaManager schemaManager,
+            long schemaId,
             WriteMode writeMode,
             RowType keyType,
             RowType valueType,
@@ -61,7 +64,8 @@ public class FileStoreReadImpl implements FileStoreRead {
             FileFormat fileFormat,
             FileStorePathFactory pathFactory) {
         this.dataFileReaderFactory =
-                new DataFileReader.Factory(keyType, valueType, fileFormat, pathFactory);
+                new DataFileReader.Factory(
+                        schemaManager, schemaId, keyType, valueType, fileFormat, pathFactory);
         this.writeMode = writeMode;
         this.keyComparator = keyComparator;
         this.mergeFunction = mergeFunction;

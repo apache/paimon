@@ -176,6 +176,7 @@ public class IntervalPartitionTest {
                 StatsTestUtils.newEmptyTableStats(), // not used
                 0,
                 24,
+                0,
                 0);
     }
 

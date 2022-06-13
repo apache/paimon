@@ -31,6 +31,7 @@ import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFun
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.store.table.sink.SinkRecord;
@@ -54,7 +55,8 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
     private final FileStoreImpl store;
 
-    ChangelogWithKeyFileStoreTable(String name, Schema schema, String user) {
+    ChangelogWithKeyFileStoreTable(
+            String name, SchemaManager schemaManager, Schema schema, String user) {
         super(name, schema);
         RowType rowType = schema.logicalRowType();
 
@@ -92,6 +94,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
         this.store =
                 new FileStoreImpl(
+                        schemaManager,
                         schema.id(),
                         new FileStoreOptions(conf),
                         WriteMode.CHANGE_LOG,

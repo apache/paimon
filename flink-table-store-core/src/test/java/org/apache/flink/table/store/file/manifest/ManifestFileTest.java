@@ -23,6 +23,7 @@ import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.format.FileFormat;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -100,7 +101,13 @@ public class ManifestFileTest {
                         "default",
                         FileStoreOptions.FILE_FORMAT.defaultValue());
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
-        return new ManifestFile.Factory(DEFAULT_PART_TYPE, avro, pathFactory, suggestedFileSize)
+        return new ManifestFile.Factory(
+                        new SchemaManager(new Path(path)),
+                        0,
+                        DEFAULT_PART_TYPE,
+                        avro,
+                        pathFactory,
+                        suggestedFileSize)
                 .create();
     }
 

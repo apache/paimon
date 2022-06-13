@@ -27,6 +27,7 @@ import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.format.FileFormat;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -143,6 +144,8 @@ public class ManifestFileMetaTest {
 
     private ManifestFile createManifestFile(String path) {
         return new ManifestFile.Factory(
+                        new SchemaManager(new Path(path)),
+                        0,
                         PARTITION_TYPE,
                         avro,
                         new FileStorePathFactory(
@@ -222,7 +225,8 @@ public class ManifestFileMetaTest {
                 entries.length * 100, // for testing purpose
                 writtenMeta.numAddedFiles(),
                 writtenMeta.numDeletedFiles(),
-                writtenMeta.partitionStats());
+                writtenMeta.partitionStats(),
+                0);
     }
 
     private ManifestEntry makeEntry(boolean isAdd, String fileName) {
@@ -244,6 +248,7 @@ public class ManifestFileMetaTest {
                         binaryRowData, // not used
                         StatsTestUtils.newEmptyTableStats(), // not used
                         StatsTestUtils.newEmptyTableStats(), // not used
+                        0, // not used
                         0, // not used
                         0, // not used
                         0 // not used

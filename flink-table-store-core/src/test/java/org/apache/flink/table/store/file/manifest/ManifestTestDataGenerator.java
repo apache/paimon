@@ -101,7 +101,8 @@ public class ManifestTestDataGenerator {
                 entries.size() * 100L,
                 numAddedFiles,
                 numDeletedFiles,
-                collector.extract());
+                collector.extract(),
+                0);
     }
 
     private void mergeLevelsIfNeeded(BinaryRowData partition, int bucket) {

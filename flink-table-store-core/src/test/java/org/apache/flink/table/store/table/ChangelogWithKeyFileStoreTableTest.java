@@ -180,15 +180,16 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         conf.set(FileStoreOptions.PATH, tablePath.toString());
         conf.set(FileStoreOptions.FILE_FORMAT, "avro");
         conf.set(FileStoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
+        SchemaManager schemaManager = new SchemaManager(tablePath);
         Schema schema =
-                new SchemaManager(tablePath)
-                        .commitNewVersion(
-                                new UpdateSchema(
-                                        ROW_TYPE,
-                                        Collections.singletonList("pt"),
-                                        Arrays.asList("pt", "a"),
-                                        conf.toMap(),
-                                        ""));
-        return new ChangelogWithKeyFileStoreTable(tablePath.getName(), schema, "user");
+                schemaManager.commitNewVersion(
+                        new UpdateSchema(
+                                ROW_TYPE,
+                                Collections.singletonList("pt"),
+                                Arrays.asList("pt", "a"),
+                                conf.toMap(),
+                                ""));
+        return new ChangelogWithKeyFileStoreTable(
+                tablePath.getName(), schemaManager, schema, "user");
     }
 }

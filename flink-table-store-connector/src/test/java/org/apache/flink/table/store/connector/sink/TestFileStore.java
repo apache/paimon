@@ -215,6 +215,7 @@ public class TestFileStore implements FileStore {
                                                     newEmptyTableStats(3),
                                                     0,
                                                     0,
+                                                    0,
                                                     0))
                             .collect(Collectors.toList());
             return new Increment(newFiles, Collections.emptyList(), Collections.emptyList());

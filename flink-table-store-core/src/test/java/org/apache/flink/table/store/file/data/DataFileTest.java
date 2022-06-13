@@ -29,6 +29,7 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializerTest;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.format.FlushingFileFormat;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
@@ -207,6 +208,7 @@ public class DataFileTest {
                         format);
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         return new DataFileWriter.Factory(
+                        0,
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                         // normal format will buffer changes in memory and we can't determine
@@ -223,6 +225,8 @@ public class DataFileTest {
         FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(path));
         DataFileReader.Factory factory =
                 new DataFileReader.Factory(
+                        new SchemaManager(new Path(path)),
+                        0,
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                         new FlushingFileFormat(format),

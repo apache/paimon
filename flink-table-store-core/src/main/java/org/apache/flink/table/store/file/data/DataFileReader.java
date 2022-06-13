@@ -28,6 +28,7 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.format.FileFormat;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RecordReader;
@@ -45,16 +46,24 @@ import java.io.IOException;
  */
 public class DataFileReader {
 
+    private final SchemaManager schemaManager;
+    private final long schemaId;
     private final RowType keyType;
     private final RowType valueType;
+
+    // TODO introduce Map<SchemaId, readerFactory>
     private final BulkFormat<RowData, FileSourceSplit> readerFactory;
     private final DataFilePathFactory pathFactory;
 
     private DataFileReader(
+            SchemaManager schemaManager,
+            long schemaId,
             RowType keyType,
             RowType valueType,
             BulkFormat<RowData, FileSourceSplit> readerFactory,
             DataFilePathFactory pathFactory) {
+        this.schemaManager = schemaManager;
+        this.schemaId = schemaId;
         this.keyType = keyType;
         this.valueType = valueType;
         this.readerFactory = readerFactory;
@@ -104,6 +113,8 @@ public class DataFileReader {
         @Override
         public KeyValue next() throws IOException {
             RecordAndPosition<RowData> result = iterator.next();
+
+            // TODO schema evolution
             return result == null ? null : serializer.fromRow(result.getRecord());
         }
 
@@ -116,6 +127,8 @@ public class DataFileReader {
     /** Creates {@link DataFileReader}. */
     public static class Factory {
 
+        private final SchemaManager schemaManager;
+        private final long schemaId;
         private final RowType keyType;
         private final RowType valueType;
         private final FileFormat fileFormat;
@@ -127,10 +140,14 @@ public class DataFileReader {
         private RowType projectedValueType;
 
         public Factory(
+                SchemaManager schemaManager,
+                long schemaId,
                 RowType keyType,
                 RowType valueType,
                 FileFormat fileFormat,
                 FileStorePathFactory pathFactory) {
+            this.schemaManager = schemaManager;
+            this.schemaId = schemaId;
             this.keyType = keyType;
             this.valueType = valueType;
             this.fileFormat = fileFormat;
@@ -158,6 +175,8 @@ public class DataFileReader {
             int[][] projection =
                     KeyValue.project(keyProjection, valueProjection, keyType.getFieldCount());
             return new DataFileReader(
+                    schemaManager,
+                    schemaId,
                     projectedKeyType,
                     projectedValueType,
                     fileFormat.createReaderFactory(recordType, projection),
