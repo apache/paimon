@@ -63,6 +63,7 @@ under the License.
         <module>flink-table-store-shade</module>
         <module>flink-table-store-hive</module>
         <module>flink-table-store-kafka</module>
+        <module>flink-table-store-benchmark</module>
         <module>flink-table-store-spark</module>
     </modules>
 
@@ -86,6 +87,7 @@ under the License.
         <flink.forkCount>1C</flink.forkCount>
         <flink.reuseForks>true</flink.reuseForks>
         <testcontainers.version>1.16.2</testcontainers.version>
+        <jmh.version>1.35</jmh.version>
 
         <!-- Can be set to any value to reproduce a specific build. -->
         <test.randomization.seed/>
