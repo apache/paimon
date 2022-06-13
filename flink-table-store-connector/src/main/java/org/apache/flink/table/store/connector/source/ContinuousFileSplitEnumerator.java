@@ -23,6 +23,7 @@ import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,6 +56,8 @@ public class ContinuousFileSplitEnumerator
 
     private final FileStoreScan scan;
 
+    private final SnapshotManager snapshotManager;
+
     private final Map<Integer, Queue<FileStoreSourceSplit>> bucketSplits;
 
     private final long discoveryInterval;
@@ -70,12 +73,14 @@ public class ContinuousFileSplitEnumerator
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             FileStoreScan scan,
+            SnapshotManager snapshotManager,
             Collection<FileStoreSourceSplit> remainSplits,
             long currentSnapshotId,
             long discoveryInterval) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.scan = checkNotNull(scan);
+        this.snapshotManager = snapshotManager;
         this.bucketSplits = new HashMap<>();
         addSplits(remainSplits);
         this.currentSnapshotId = currentSnapshotId;
@@ -191,7 +196,7 @@ public class ContinuousFileSplitEnumerator
         public EnumeratorResult call() {
             // TODO sync with processDiscoveredSplits to avoid too more splits in memory
             while (true) {
-                if (!scan.snapshotExists(nextSnapshotId)) {
+                if (!snapshotManager.snapshotExists(nextSnapshotId)) {
                     // TODO check latest snapshot id, expired?
                     LOG.debug(
                             "Next snapshot id {} not exists, wait for it to be generated.",
@@ -199,7 +204,7 @@ public class ContinuousFileSplitEnumerator
                     return null;
                 }
 
-                Snapshot snapshot = scan.snapshot(nextSnapshotId);
+                Snapshot snapshot = snapshotManager.snapshot(nextSnapshotId);
                 if (snapshot.commitKind() != Snapshot.CommitKind.APPEND) {
                     if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE) {
                         LOG.warn("Ignore overwrite snapshot id {}.", nextSnapshotId);

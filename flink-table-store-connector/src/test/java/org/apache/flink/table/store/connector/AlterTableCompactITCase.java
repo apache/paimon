@@ -26,14 +26,13 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.utils.SnapshotFinder;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 
 import org.junit.Test;
 
 import java.io.IOException;
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -275,18 +274,18 @@ public class AlterTableCompactITCase extends FileStoreTableITCase {
         }
     }
 
-    private String getSnapshotDir(String tableName) {
-        return path
-                + relativeTablePath(
-                        ObjectIdentifier.of(
-                                bEnv.getCurrentCatalog(), bEnv.getCurrentDatabase(), tableName))
-                + "/snapshot";
+    private Path getTableDirectory(String tableName) {
+        return new Path(
+                path
+                        + relativeTablePath(
+                                ObjectIdentifier.of(
+                                        bEnv.getCurrentCatalog(),
+                                        bEnv.getCurrentDatabase(),
+                                        tableName)));
     }
 
     private Snapshot findLatestSnapshot(String tableName) throws IOException {
-        String snapshotDir = getSnapshotDir(tableName);
-        Long latest = SnapshotFinder.findLatest(new Path(URI.create(snapshotDir)));
-        return Snapshot.fromPath(
-                new Path(URI.create(snapshotDir + String.format("/snapshot-%d", latest))));
+        SnapshotManager snapshotManager = new SnapshotManager(getTableDirectory(tableName));
+        return snapshotManager.snapshot(snapshotManager.latestSnapshotId());
     }
 }

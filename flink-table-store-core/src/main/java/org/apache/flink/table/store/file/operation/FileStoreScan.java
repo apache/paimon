@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
@@ -37,12 +36,6 @@ import static org.apache.flink.util.Preconditions.checkArgument;
 
 /** Scan operation which produces a plan. */
 public interface FileStoreScan {
-
-    Long latestSnapshot();
-
-    boolean snapshotExists(long snapshotId);
-
-    Snapshot snapshot(long snapshotId);
 
     FileStoreScan withPartitionFilter(Predicate predicate);
 

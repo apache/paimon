@@ -35,6 +35,7 @@ import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreReadImpl;
 import org.apache.flink.table.store.file.operation.FileStoreWriteImpl;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
@@ -60,6 +61,7 @@ public class TestDataReadWrite {
 
     private final FileFormat avro;
     private final FileStorePathFactory pathFactory;
+    private final SnapshotManager snapshotManager;
     private final ExecutorService service;
 
     public TestDataReadWrite(String root, ExecutorService service) {
@@ -74,6 +76,7 @@ public class TestDataReadWrite {
                         RowType.of(new IntType()),
                         "default",
                         FileStoreOptions.FILE_FORMAT.defaultValue());
+        this.snapshotManager = new SnapshotManager(new Path(root));
         this.service = service;
     }
 
@@ -111,6 +114,7 @@ public class TestDataReadWrite {
                         new DeduplicateMergeFunction(),
                         avro,
                         pathFactory,
+                        snapshotManager,
                         null, // not used, we only create an empty writer
                         options)
                 .createEmptyWriter(partition, bucket, service);

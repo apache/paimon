@@ -31,6 +31,7 @@ import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
@@ -126,6 +127,7 @@ public class FileStoreSource
     public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> restoreEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
+        SnapshotManager snapshotManager = fileStore.snapshotManager();
         FileStoreScan scan = fileStore.newScan();
 
         if (partitionPredicate != null) {
@@ -147,7 +149,7 @@ public class FileStoreSource
                 checkArgument(
                         isContinuous,
                         "The latest continuous can only be true when isContinuous is true.");
-                snapshotId = scan.latestSnapshot();
+                snapshotId = snapshotManager.latestSnapshotId();
                 splits = new ArrayList<>();
             } else {
                 FileStoreScan.Plan plan = scan.plan();
@@ -169,11 +171,12 @@ public class FileStoreSource
             return new ContinuousFileSplitEnumerator(
                     context,
                     scan.withIncremental(true), // the subsequent planning is all incremental
+                    snapshotManager,
                     splits,
                     currentSnapshot,
                     discoveryInterval);
         } else {
-            Snapshot snapshot = snapshotId == null ? null : scan.snapshot(snapshotId);
+            Snapshot snapshot = snapshotId == null ? null : snapshotManager.snapshot(snapshotId);
             return new StaticFileStoreSplitEnumerator(context, snapshot, splits);
         }
     }

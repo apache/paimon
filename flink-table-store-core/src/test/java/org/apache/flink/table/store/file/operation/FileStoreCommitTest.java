@@ -28,9 +28,8 @@ import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
-import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
-import org.apache.flink.table.store.file.utils.SnapshotFinder;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -41,7 +40,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -63,7 +61,7 @@ public class FileStoreCommitTest {
     @TempDir java.nio.file.Path tempDir;
 
     @BeforeEach
-    public void beforeEach() throws IOException {
+    public void beforeEach() {
         gen = new TestKeyValueGenerator();
         // for failure tests
         FailingAtomicRenameFileSystem.get().reset(100, 5000);
@@ -84,17 +82,18 @@ public class FileStoreCommitTest {
     @Test
     public void testLatestHint() throws Exception {
         testRandomConcurrentNoConflict(1, false);
-        Path snapshotDir = createStore(false, 1).pathFactory().snapshotDirectory();
-        Path latest = new Path(snapshotDir, SnapshotFinder.LATEST);
+        SnapshotManager snapshotManager = createStore(false, 1).snapshotManager();
+        Path snapshotDir = snapshotManager.snapshotDirectory();
+        Path latest = new Path(snapshotDir, SnapshotManager.LATEST);
 
         assertThat(latest.getFileSystem().exists(latest)).isTrue();
 
-        Long latestId = SnapshotFinder.findLatest(snapshotDir);
+        Long latestId = snapshotManager.findLatest();
 
         // remove latest hint file
         latest.getFileSystem().delete(latest, false);
 
-        assertThat(SnapshotFinder.findLatest(snapshotDir)).isEqualTo(latestId);
+        assertThat(snapshotManager.findLatest()).isEqualTo(latestId);
     }
 
     @Test
@@ -102,8 +101,8 @@ public class FileStoreCommitTest {
         testRandomConcurrentNoConflict(1, false);
         // remove first snapshot to mimic expiration
         TestFileStore store = createStore(false);
-        FileStorePathFactory pathFactory = store.pathFactory();
-        Path firstSnapshotPath = pathFactory.toSnapshotPath(Snapshot.FIRST_SNAPSHOT_ID);
+        SnapshotManager snapshotManager = store.snapshotManager();
+        Path firstSnapshotPath = snapshotManager.snapshotPath(Snapshot.FIRST_SNAPSHOT_ID);
         FileUtils.deleteOrWarn(firstSnapshotPath);
         // this test succeeds if this call does not fail
         store.newCommit()
@@ -159,7 +158,7 @@ public class FileStoreCommitTest {
                                 .collect(Collectors.toList()));
 
         // read actual data and compare
-        Long snapshotId = store.pathFactory().latestSnapshotId();
+        Long snapshotId = store.snapshotManager().latestSnapshotId();
         assertThat(snapshotId).isNotNull();
         List<KeyValue> actualKvs = store.readKvsFromSnapshot(snapshotId);
         gen.sort(actualKvs);
@@ -231,7 +230,7 @@ public class FileStoreCommitTest {
         Map<BinaryRowData, BinaryRowData> expected = store.toKvMap(expectedKvs);
 
         List<KeyValue> actualKvs =
-                store.readKvsFromSnapshot(store.pathFactory().latestSnapshotId());
+                store.readKvsFromSnapshot(store.snapshotManager().latestSnapshotId());
         gen.sort(actualKvs);
         Map<BinaryRowData, BinaryRowData> actual = store.toKvMap(actualKvs);
 
@@ -276,9 +275,8 @@ public class FileStoreCommitTest {
 
         store.commitData(
                 Collections.emptyList(), gen::getPartition, kv -> 0, Collections.emptyMap());
-        Path snapshotDir = store.pathFactory().snapshotDirectory();
 
-        assertThat(SnapshotFinder.findLatest(snapshotDir)).isEqualTo(snapshot.id());
+        assertThat(store.snapshotManager().findLatest()).isEqualTo(snapshot.id());
     }
 
     private TestFileStore createStore(boolean failing) {

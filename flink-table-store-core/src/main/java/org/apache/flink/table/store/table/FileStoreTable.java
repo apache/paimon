@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -35,6 +36,8 @@ public interface FileStoreTable extends Serializable {
     String name();
 
     RowType rowType();
+
+    SnapshotManager snapshotManager();
 
     TableScan newScan();
 

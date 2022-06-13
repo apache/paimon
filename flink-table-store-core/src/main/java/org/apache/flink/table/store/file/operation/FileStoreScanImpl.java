@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
@@ -29,16 +28,14 @@ import org.apache.flink.table.store.file.predicate.Literal;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
-import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RowDataToObjectArrayConverter;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -55,7 +52,7 @@ public class FileStoreScanImpl implements FileStoreScan {
     private final FieldStatsArraySerializer keyStatsConverter;
     private final FieldStatsArraySerializer valueStatsConverter;
     private final RowDataToObjectArrayConverter partitionConverter;
-    private final FileStorePathFactory pathFactory;
+    private final SnapshotManager snapshotManager;
     private final ManifestFile.Factory manifestFileFactory;
     private final ManifestList manifestList;
     private final int numOfBuckets;
@@ -73,7 +70,7 @@ public class FileStoreScanImpl implements FileStoreScan {
             RowType partitionType,
             RowType keyType,
             RowType valueType,
-            FileStorePathFactory pathFactory,
+            SnapshotManager snapshotManager,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets) {
@@ -81,30 +78,10 @@ public class FileStoreScanImpl implements FileStoreScan {
         this.keyStatsConverter = new FieldStatsArraySerializer(keyType);
         this.valueStatsConverter = new FieldStatsArraySerializer(valueType);
         this.partitionConverter = new RowDataToObjectArrayConverter(partitionType);
-        this.pathFactory = pathFactory;
+        this.snapshotManager = snapshotManager;
         this.manifestFileFactory = manifestFileFactory;
         this.manifestList = manifestListFactory.create();
         this.numOfBuckets = numOfBuckets;
-    }
-
-    @Override
-    public Long latestSnapshot() {
-        return pathFactory.latestSnapshotId();
-    }
-
-    @Override
-    public boolean snapshotExists(long snapshotId) {
-        Path path = pathFactory.toSnapshotPath(snapshotId);
-        try {
-            return path.getFileSystem().exists(path);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    @Override
-    public Snapshot snapshot(long snapshotId) {
-        return Snapshot.fromPath(pathFactory.toSnapshotPath(snapshotId));
     }
 
     @Override
@@ -188,12 +165,12 @@ public class FileStoreScanImpl implements FileStoreScan {
         Long snapshotId = specifiedSnapshotId;
         if (manifests == null) {
             if (snapshotId == null) {
-                snapshotId = pathFactory.latestSnapshotId();
+                snapshotId = snapshotManager.latestSnapshotId();
             }
             if (snapshotId == null) {
                 manifests = Collections.emptyList();
             } else {
-                Snapshot snapshot = snapshot(snapshotId);
+                Snapshot snapshot = snapshotManager.snapshot(snapshotId);
                 manifests =
                         isIncremental
                                 ? manifestList.read(snapshot.deltaManifestList())

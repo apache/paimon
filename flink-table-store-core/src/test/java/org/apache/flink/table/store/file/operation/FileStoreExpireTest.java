@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
@@ -26,8 +25,7 @@ import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.file.utils.SnapshotFinder;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,7 +46,7 @@ public class FileStoreExpireTest {
     private TestKeyValueGenerator gen;
     @TempDir java.nio.file.Path tempDir;
     private TestFileStore store;
-    private FileStorePathFactory pathFactory;
+    private SnapshotManager snapshotManager;
 
     @BeforeEach
     public void beforeEach() throws IOException {
@@ -62,7 +60,7 @@ public class FileStoreExpireTest {
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                         new DeduplicateMergeFunction());
-        pathFactory = store.pathFactory();
+        snapshotManager = store.snapshotManager();
     }
 
     @AfterEach
@@ -75,7 +73,7 @@ public class FileStoreExpireTest {
         FileStoreExpire expire = store.newExpire(1, 3, Long.MAX_VALUE);
         expire.expire();
 
-        assertThat(pathFactory.latestSnapshotId()).isNull();
+        assertThat(snapshotManager.latestSnapshotId()).isNull();
     }
 
     @Test
@@ -83,13 +81,12 @@ public class FileStoreExpireTest {
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(2, allData, snapshotPositions);
-        int latestSnapshotId = pathFactory.latestSnapshotId().intValue();
+        int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
         FileStoreExpire expire = store.newExpire(1, latestSnapshotId + 1, Long.MAX_VALUE);
         expire.expire();
 
-        FileSystem fs = pathFactory.toSnapshotPath(latestSnapshotId).getFileSystem();
         for (int i = 1; i <= latestSnapshotId; i++) {
-            assertThat(fs.exists(pathFactory.toSnapshotPath(i))).isTrue();
+            assertThat(snapshotManager.snapshotExists(i)).isTrue();
             assertSnapshot(i, allData, snapshotPositions);
         }
     }
@@ -99,13 +96,12 @@ public class FileStoreExpireTest {
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(5, allData, snapshotPositions);
-        int latestSnapshotId = pathFactory.latestSnapshotId().intValue();
+        int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
         FileStoreExpire expire = store.newExpire(1, Integer.MAX_VALUE, Long.MAX_VALUE);
         expire.expire();
 
-        FileSystem fs = pathFactory.toSnapshotPath(latestSnapshotId).getFileSystem();
         for (int i = 1; i <= latestSnapshotId; i++) {
-            assertThat(fs.exists(pathFactory.toSnapshotPath(i))).isTrue();
+            assertThat(snapshotManager.snapshotExists(i)).isTrue();
             assertSnapshot(i, allData, snapshotPositions);
         }
     }
@@ -118,17 +114,16 @@ public class FileStoreExpireTest {
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(numRetainedMin + random.nextInt(5), allData, snapshotPositions);
-        int latestSnapshotId = pathFactory.latestSnapshotId().intValue();
+        int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
         Thread.sleep(100);
         FileStoreExpire expire = store.newExpire(numRetainedMin, Integer.MAX_VALUE, 1);
         expire.expire();
 
-        FileSystem fs = pathFactory.toSnapshotPath(latestSnapshotId).getFileSystem();
         for (int i = 1; i <= latestSnapshotId - numRetainedMin; i++) {
-            assertThat(fs.exists(pathFactory.toSnapshotPath(i))).isFalse();
+            assertThat(snapshotManager.snapshotExists(i)).isFalse();
         }
         for (int i = latestSnapshotId - numRetainedMin + 1; i <= latestSnapshotId; i++) {
-            assertThat(fs.exists(pathFactory.toSnapshotPath(i))).isTrue();
+            assertThat(snapshotManager.snapshotExists(i)).isTrue();
             assertSnapshot(i, allData, snapshotPositions);
         }
     }
@@ -143,31 +138,30 @@ public class FileStoreExpireTest {
             commit(ThreadLocalRandom.current().nextInt(5) + 1, allData, snapshotPositions);
             expire.expire();
 
-            int latestSnapshotId = pathFactory.latestSnapshotId().intValue();
-            FileSystem fs = pathFactory.toSnapshotPath(latestSnapshotId).getFileSystem();
+            int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
             for (int j = 1; j <= latestSnapshotId; j++) {
                 if (j > latestSnapshotId - 3) {
-                    assertThat(fs.exists(pathFactory.toSnapshotPath(j))).isTrue();
+                    assertThat(snapshotManager.snapshotExists(j)).isTrue();
                     assertSnapshot(j, allData, snapshotPositions);
                 } else {
-                    assertThat(fs.exists(pathFactory.toSnapshotPath(j))).isFalse();
+                    assertThat(snapshotManager.snapshotExists(j)).isFalse();
                 }
             }
         }
 
         // validate earliest hint file
 
-        Path snapshotDir = pathFactory.snapshotDirectory();
-        Path earliest = new Path(snapshotDir, SnapshotFinder.EARLIEST);
+        Path snapshotDir = snapshotManager.snapshotDirectory();
+        Path earliest = new Path(snapshotDir, SnapshotManager.EARLIEST);
 
         assertThat(earliest.getFileSystem().exists(earliest)).isTrue();
 
-        Long earliestId = SnapshotFinder.findEarliest(snapshotDir);
+        Long earliestId = snapshotManager.findEarliest();
 
         // remove earliest hint file
         earliest.getFileSystem().delete(earliest, false);
 
-        assertThat(SnapshotFinder.findEarliest(snapshotDir)).isEqualTo(earliestId);
+        assertThat(snapshotManager.findEarliest()).isEqualTo(earliestId);
     }
 
     @Test
@@ -184,12 +178,10 @@ public class FileStoreExpireTest {
         expire.expire();
         expire.expire();
 
-        int latestSnapshotId = pathFactory.latestSnapshotId().intValue();
-        FileSystem fs = pathFactory.toSnapshotPath(latestSnapshotId).getFileSystem();
+        int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
         for (int i = 1; i <= latestSnapshotId; i++) {
-            Path snapshotPath = pathFactory.toSnapshotPath(i);
-            if (fs.exists(snapshotPath)) {
-                assertThat(Snapshot.fromPath(snapshotPath).timeMillis())
+            if (snapshotManager.snapshotExists(i)) {
+                assertThat(snapshotManager.snapshot(i).timeMillis())
                         .isBetween(expireMillis - 1000, expireMillis);
                 assertSnapshot(i, allData, snapshotPositions);
             }
