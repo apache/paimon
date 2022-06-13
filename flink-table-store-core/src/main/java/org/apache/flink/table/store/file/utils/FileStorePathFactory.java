@@ -31,18 +31,14 @@ import org.apache.flink.table.types.utils.LogicalTypeDataTypeConverter;
 import org.apache.flink.table.utils.PartitionPathUtils;
 import org.apache.flink.util.Preconditions;
 
-import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
-import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.apache.flink.table.store.file.utils.SnapshotFinder.SNAPSHOT_PREFIX;
-
-/** Factory which produces {@link Path}s for each type of files. */
+/** Factory which produces {@link Path}s for manifest files. */
 @ThreadSafe
 public class FileStorePathFactory {
 
@@ -110,14 +106,6 @@ public class FileStorePathFactory {
         return new Path(root + "/manifest/" + manifestListName);
     }
 
-    public Path toSnapshotPath(long id) {
-        return new Path(root + "/snapshot/" + SNAPSHOT_PREFIX + id);
-    }
-
-    public Path toTmpSnapshotPath(long id) {
-        return new Path(root + "/snapshot/." + SNAPSHOT_PREFIX + id + "-" + UUID.randomUUID());
-    }
-
     public DataFilePathFactory createDataFilePathFactory(BinaryRowData partition, int bucket) {
         return new DataFilePathFactory(
                 root, getPartitionString(partition), bucket, formatIdentifier);
@@ -129,19 +117,6 @@ public class FileStorePathFactory {
                 partitionComputer.generatePartValues(
                         Preconditions.checkNotNull(
                                 partition, "Partition row data is null. This is unexpected.")));
-    }
-
-    public Path snapshotDirectory() {
-        return new Path(root + "/snapshot");
-    }
-
-    @Nullable
-    public Long latestSnapshotId() {
-        try {
-            return SnapshotFinder.findLatest(snapshotDirectory());
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to find latest snapshot id", e);
-        }
     }
 
     @VisibleForTesting

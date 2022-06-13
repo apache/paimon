@@ -38,7 +38,7 @@ import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
-import org.apache.flink.table.store.file.utils.SnapshotFinder;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.function.QuadFunction;
@@ -131,6 +131,7 @@ public class TestFileStore extends FileStoreImpl {
                 numRetainedMax,
                 millisRetained,
                 pathFactory(),
+                snapshotManager(),
                 manifestFileFactory(),
                 manifestListFactory());
     }
@@ -216,13 +217,13 @@ public class TestFileStore extends FileStoreImpl {
             }
         }
 
-        FileStorePathFactory pathFactory = pathFactory();
-        Long snapshotIdBeforeCommit = pathFactory.latestSnapshotId();
+        SnapshotManager snapshotManager = snapshotManager();
+        Long snapshotIdBeforeCommit = snapshotManager.latestSnapshotId();
         if (snapshotIdBeforeCommit == null) {
             snapshotIdBeforeCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
         }
         commitFunction.accept(commit, committable);
-        Long snapshotIdAfterCommit = pathFactory.latestSnapshotId();
+        Long snapshotIdAfterCommit = snapshotManager.latestSnapshotId();
         if (snapshotIdAfterCommit == null) {
             snapshotIdAfterCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
         }
@@ -240,7 +241,7 @@ public class TestFileStore extends FileStoreImpl {
 
         List<Snapshot> snapshots = new ArrayList<>();
         for (long id = snapshotIdBeforeCommit + 1; id <= snapshotIdAfterCommit; id++) {
-            snapshots.add(Snapshot.fromPath(pathFactory.toSnapshotPath(id)));
+            snapshots.add(snapshotManager.snapshot(id));
         }
         return snapshots;
     }
@@ -320,18 +321,19 @@ public class TestFileStore extends FileStoreImpl {
         // possibly not the most accurate, so this check is only.
         // - latest should < true_latest
         // - earliest should < true_earliest
-        Path snapshotDir = pathFactory().snapshotDirectory();
-        Path earliest = new Path(snapshotDir, SnapshotFinder.EARLIEST);
-        Path latest = new Path(snapshotDir, SnapshotFinder.LATEST);
+        SnapshotManager snapshotManager = snapshotManager();
+        Path snapshotDir = snapshotManager.snapshotDirectory();
+        Path earliest = new Path(snapshotDir, SnapshotManager.EARLIEST);
+        Path latest = new Path(snapshotDir, SnapshotManager.LATEST);
         if (actualFiles.remove(earliest)) {
-            long earliestId = SnapshotFinder.readHint(snapshotDir, SnapshotFinder.EARLIEST);
+            long earliestId = snapshotManager.readHint(SnapshotManager.EARLIEST);
             earliest.getFileSystem().delete(earliest, false);
-            assertThat(earliestId <= SnapshotFinder.findEarliest(snapshotDir)).isTrue();
+            assertThat(earliestId <= snapshotManager.findEarliest()).isTrue();
         }
         if (actualFiles.remove(latest)) {
-            long latestId = SnapshotFinder.readHint(snapshotDir, SnapshotFinder.LATEST);
+            long latestId = snapshotManager.readHint(SnapshotManager.LATEST);
             latest.getFileSystem().delete(latest, false);
-            assertThat(latestId <= SnapshotFinder.findLatest(snapshotDir)).isTrue();
+            assertThat(latestId <= snapshotManager.findLatest()).isTrue();
         }
         actualFiles.remove(latest);
 
@@ -345,27 +347,23 @@ public class TestFileStore extends FileStoreImpl {
         FileStorePathFactory.DataFilePathFactoryCache dataFilePathFactoryCache =
                 new FileStorePathFactory.DataFilePathFactoryCache(pathFactory);
 
-        Long latestSnapshotId = pathFactory.latestSnapshotId();
+        SnapshotManager snapshotManager = snapshotManager();
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
         if (latestSnapshotId == null) {
             return Collections.emptySet();
         }
 
         long firstInUseSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
         for (long id = latestSnapshotId - 1; id >= Snapshot.FIRST_SNAPSHOT_ID; id--) {
-            Path snapshotPath = pathFactory.toSnapshotPath(id);
-            try {
-                if (!snapshotPath.getFileSystem().exists(snapshotPath)) {
-                    firstInUseSnapshotId = id + 1;
-                    break;
-                }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
+            if (!snapshotManager.snapshotExists(id)) {
+                firstInUseSnapshotId = id + 1;
+                break;
             }
         }
 
         Set<Path> result = new HashSet<>();
         for (long id = firstInUseSnapshotId; id <= latestSnapshotId; id++) {
-            Path snapshotPath = pathFactory.toSnapshotPath(id);
+            Path snapshotPath = snapshotManager.snapshotPath(id);
             Snapshot snapshot = Snapshot.fromPath(snapshotPath);
 
             // snapshot file

@@ -23,6 +23,7 @@ import org.apache.flink.table.store.file.operation.FileStoreExpire;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.io.Serializable;
@@ -39,6 +40,8 @@ public interface FileStore extends Serializable {
     FileStoreExpire newExpire();
 
     FileStoreScan newScan();
+
+    SnapshotManager snapshotManager();
 
     RowType keyType();
 

@@ -27,7 +27,7 @@ import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
-import org.apache.flink.table.store.file.utils.SnapshotFinder;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,6 +58,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     private final long millisRetained;
 
     private final FileStorePathFactory pathFactory;
+    private final SnapshotManager snapshotManager;
     private final ManifestFile manifestFile;
     private final ManifestList manifestList;
 
@@ -68,12 +69,14 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             int numRetainedMax,
             long millisRetained,
             FileStorePathFactory pathFactory,
+            SnapshotManager snapshotManager,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory) {
         this.numRetainedMin = numRetainedMin;
         this.numRetainedMax = numRetainedMax;
         this.millisRetained = millisRetained;
         this.pathFactory = pathFactory;
+        this.snapshotManager = snapshotManager;
         this.manifestFile = manifestFileFactory.create();
         this.manifestList = manifestListFactory.create();
     }
@@ -86,7 +89,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
     @Override
     public void expire() {
-        Long latestSnapshotId = pathFactory.latestSnapshotId();
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
         if (latestSnapshotId == null) {
             // no snapshot, nothing to expire
             return;
@@ -96,7 +99,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
         Long earliest;
         try {
-            earliest = SnapshotFinder.findEarliest(pathFactory.snapshotDirectory());
+            earliest = snapshotManager.findEarliest();
         } catch (IOException e) {
             throw new RuntimeException("Failed to find earliest snapshot id", e);
         }
@@ -108,19 +111,13 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         for (long id = Math.max(latestSnapshotId - numRetainedMax + 1, earliest);
                 id <= latestSnapshotId - numRetainedMin;
                 id++) {
-            Path snapshotPath = pathFactory.toSnapshotPath(id);
-            try {
-                if (snapshotPath.getFileSystem().exists(snapshotPath)
-                        && currentMillis - Snapshot.fromPath(snapshotPath).timeMillis()
-                                <= millisRetained) {
-                    // within time threshold, can assume that all snapshots after it are also within
-                    // the threshold
-                    expireUntil(earliest, id);
-                    return;
-                }
-            } catch (IOException e) {
-                throw new RuntimeException(
-                        "Failed to determine if snapshot #" + id + " still exists", e);
+            if (snapshotManager.snapshotExists(id)
+                    && currentMillis - snapshotManager.snapshot(id).timeMillis()
+                            <= millisRetained) {
+                // within time threshold, can assume that all snapshots after it are also within
+                // the threshold
+                expireUntil(earliest, id);
+                return;
             }
         }
 
@@ -133,9 +130,8 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             // No expire happens:
             // write the hint file in order to see the earliest snapshot directly next time
             // should avoid duplicate writes when the file exists
-            Path hint = new Path(pathFactory.snapshotDirectory(), SnapshotFinder.EARLIEST);
             try {
-                if (!hint.getFileSystem().exists(hint)) {
+                if (snapshotManager.readHint(SnapshotManager.EARLIEST) == null) {
                     writeEarliestHint(endExclusiveId);
                 }
             } catch (IOException e) {
@@ -149,17 +145,11 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         // find first snapshot to expire
         long beginInclusiveId = earliestId;
         for (long id = endExclusiveId - 1; id >= earliestId; id--) {
-            Path snapshotPath = pathFactory.toSnapshotPath(id);
-            try {
-                if (!snapshotPath.getFileSystem().exists(snapshotPath)) {
-                    // only latest snapshots are retained, as we cannot find this snapshot, we can
-                    // assume that all snapshots preceding it have been removed
-                    beginInclusiveId = id + 1;
-                    break;
-                }
-            } catch (IOException e) {
-                throw new RuntimeException(
-                        "Failed to determine if snapshot #" + id + " still exists", e);
+            if (!snapshotManager.snapshotExists(id)) {
+                // only latest snapshots are retained, as we cannot find this snapshot, we can
+                // assume that all snapshots preceding it have been removed
+                beginInclusiveId = id + 1;
+                break;
             }
         }
         if (LOG.isDebugEnabled()) {
@@ -177,7 +167,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                 LOG.debug("Ready to delete data files in snapshot #" + id);
             }
 
-            Snapshot toExpire = Snapshot.fromPath(pathFactory.toSnapshotPath(id));
+            Snapshot toExpire = snapshotManager.snapshot(id);
             List<ManifestFileMeta> deltaManifests = manifestList.read(toExpire.deltaManifestList());
 
             // we cannot delete a data file directly when we meet a DELETE entry, because that
@@ -208,7 +198,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         }
 
         // delete manifests
-        Snapshot exclusiveSnapshot = Snapshot.fromPath(pathFactory.toSnapshotPath(endExclusiveId));
+        Snapshot exclusiveSnapshot = snapshotManager.snapshot(endExclusiveId);
         Set<ManifestFileMeta> manifestsInUse =
                 new HashSet<>(exclusiveSnapshot.readAllManifests(manifestList));
         // to avoid deleting twice
@@ -218,7 +208,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                 LOG.debug("Ready to delete manifests in snapshot #" + id);
             }
 
-            Snapshot toExpire = Snapshot.fromPath(pathFactory.toSnapshotPath(id));
+            Snapshot toExpire = snapshotManager.snapshot(id);
 
             for (ManifestFileMeta manifest : toExpire.readAllManifests(manifestList)) {
                 if (!manifestsInUse.contains(manifest) && !deletedManifests.contains(manifest)) {
@@ -232,7 +222,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             manifestList.delete(toExpire.deltaManifestList());
 
             // delete snapshot
-            FileUtils.deleteOrWarn(pathFactory.toSnapshotPath(id));
+            FileUtils.deleteOrWarn(snapshotManager.snapshotPath(id));
         }
 
         writeEarliestHint(endExclusiveId);
@@ -243,7 +233,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
         Callable<Void> callable =
                 () -> {
-                    SnapshotFinder.commitEarliestHint(pathFactory.snapshotDirectory(), earliest);
+                    snapshotManager.commitEarliestHint(earliest);
                     return null;
                 };
 

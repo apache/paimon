@@ -18,8 +18,9 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.table.store.file.FileStore;
+import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -47,9 +48,14 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public SnapshotManager snapshotManager() {
+        return store().snapshotManager();
+    }
+
+    @Override
     public TableCommit newCommit() {
         return new TableCommit(store().newCommit(), store().newExpire());
     }
 
-    protected abstract FileStore store();
+    protected abstract FileStoreImpl store();
 }

@@ -28,14 +28,13 @@ import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.predicate.Literal;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.IntType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -55,10 +54,10 @@ public class FileStoreScanTest {
     private TestKeyValueGenerator gen;
     @TempDir java.nio.file.Path tempDir;
     private TestFileStore store;
-    private FileStorePathFactory pathFactory;
+    private SnapshotManager snapshotManager;
 
     @BeforeEach
-    public void beforeEach() throws IOException {
+    public void beforeEach() {
         gen = new TestKeyValueGenerator();
         store =
                 TestFileStore.create(
@@ -69,7 +68,7 @@ public class FileStoreScanTest {
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                         new DeduplicateMergeFunction());
-        pathFactory = store.pathFactory();
+        snapshotManager = store.snapshotManager();
     }
 
     @Test
@@ -203,8 +202,8 @@ public class FileStoreScanTest {
         }
 
         ManifestList manifestList = store.manifestListFactory().create();
-        long wantedSnapshotId = random.nextLong(pathFactory.latestSnapshotId()) + 1;
-        Snapshot wantedSnapshot = Snapshot.fromPath(pathFactory.toSnapshotPath(wantedSnapshotId));
+        long wantedSnapshotId = random.nextLong(snapshotManager.latestSnapshotId()) + 1;
+        Snapshot wantedSnapshot = snapshotManager.snapshot(wantedSnapshotId);
         List<ManifestFileMeta> wantedManifests = wantedSnapshot.readAllManifests(manifestList);
 
         FileStoreScan scan = store.newScan();

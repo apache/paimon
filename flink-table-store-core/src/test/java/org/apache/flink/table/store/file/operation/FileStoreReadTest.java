@@ -186,7 +186,8 @@ public class FileStoreReadTest {
         store.commitData(data, partitionCalculator, kv -> 0);
         FileStoreScan scan = store.newScan();
         Map<BinaryRowData, List<ManifestEntry>> filesGroupedByPartition =
-                scan.withSnapshot(store.pathFactory().latestSnapshotId()).plan().files().stream()
+                scan.withSnapshot(store.snapshotManager().latestSnapshotId()).plan().files()
+                        .stream()
                         .collect(Collectors.groupingBy(ManifestEntry::partition));
         FileStoreRead read = store.newRead();
         if (keyProjection != null) {
