@@ -18,13 +18,18 @@
 
 package org.apache.flink.table.store.connector.source;
 
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
+import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.table.source.DefaultSplitGenerator;
+import org.apache.flink.table.store.table.source.TableScan;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import javax.annotation.Nullable;
 
@@ -40,6 +45,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link FileStoreSourceSplitGenerator}. */
 public class FileStoreSourceSplitGeneratorTest {
 
+    @TempDir java.nio.file.Path tempDir;
+
     @Test
     public void test() {
         FileStoreScan.Plan plan =
@@ -47,7 +54,7 @@ public class FileStoreSourceSplitGeneratorTest {
                     @Nullable
                     @Override
                     public Long snapshotId() {
-                        return null;
+                        return 1L;
                     }
 
                     @Override
@@ -70,7 +77,15 @@ public class FileStoreSourceSplitGeneratorTest {
                                 makeEntry(6, 1, "f14"));
                     }
                 };
-        List<FileStoreSourceSplit> splits = new FileStoreSourceSplitGenerator().createSplits(plan);
+        TableScan.Plan tableScanPlan =
+                new TableScan.Plan(
+                        1,
+                        new DefaultSplitGenerator(
+                                        new FileStorePathFactory(new Path(tempDir.toString())))
+                                .generate(plan.groupByPartFiles()));
+
+        List<FileStoreSourceSplit> splits =
+                new FileStoreSourceSplitGenerator().createSplits(tableScanPlan);
         assertThat(splits.size()).isEqualTo(12);
         splits.sort(
                 Comparator.comparingInt(o -> ((FileStoreSourceSplit) o).partition().getInt(0))

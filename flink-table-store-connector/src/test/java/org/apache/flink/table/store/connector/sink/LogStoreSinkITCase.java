@@ -21,7 +21,7 @@ package org.apache.flink.table.store.connector.sink;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.flink.table.store.connector.TableStore;
+import org.apache.flink.table.store.connector.source.FlinkSourceBuilder;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.kafka.KafkaLogSinkProvider;
 import org.apache.flink.table.store.kafka.KafkaLogSourceProvider;
@@ -29,6 +29,7 @@ import org.apache.flink.table.store.kafka.KafkaLogStoreFactory;
 import org.apache.flink.table.store.kafka.KafkaLogTestUtils;
 import org.apache.flink.table.store.kafka.KafkaTableTestBase;
 import org.apache.flink.table.store.log.LogOptions;
+import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.types.Row;
 
 import org.junit.Ignore;
@@ -38,11 +39,12 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import static org.apache.flink.table.store.connector.FileStoreITCase.CONVERTER;
+import static org.apache.flink.table.store.connector.FileStoreITCase.IDENTIFIER;
 import static org.apache.flink.table.store.connector.FileStoreITCase.SOURCE_DATA;
 import static org.apache.flink.table.store.connector.FileStoreITCase.TABLE_TYPE;
 import static org.apache.flink.table.store.connector.FileStoreITCase.buildBatchEnv;
+import static org.apache.flink.table.store.connector.FileStoreITCase.buildFileStoreTable;
 import static org.apache.flink.table.store.connector.FileStoreITCase.buildStreamEnv;
-import static org.apache.flink.table.store.connector.FileStoreITCase.buildTableStore;
 import static org.apache.flink.table.store.connector.FileStoreITCase.buildTestSource;
 import static org.apache.flink.table.store.connector.FileStoreITCase.executeAndCollect;
 import static org.apache.flink.table.store.kafka.KafkaLogTestUtils.SINK_CONTEXT;
@@ -90,8 +92,8 @@ public class LogStoreSinkITCase extends KafkaTableTestBase {
         StreamExecutionEnvironment env = isBatch ? buildBatchEnv() : buildStreamEnv();
 
         // in eventual mode, failure will result in duplicate data
-        TableStore store =
-                buildTableStore(
+        FileStoreTable table =
+                buildFileStoreTable(
                         isBatch || !transaction,
                         TEMPORARY_FOLDER,
                         partitioned ? new int[] {1} : new int[0],
@@ -118,14 +120,16 @@ public class LogStoreSinkITCase extends KafkaTableTestBase {
 
         try {
             // write
-            store.sinkBuilder()
+            new FlinkSinkBuilder(IDENTIFIER, table)
                     .withInput(buildTestSource(env, isBatch))
                     .withLogSinkProvider(sinkProvider)
                     .build();
             env.execute();
 
             // read
-            List<Row> results = executeAndCollect(store.sourceBuilder().withEnv(env).build());
+            List<Row> results =
+                    executeAndCollect(
+                            new FlinkSourceBuilder(IDENTIFIER, table).withEnv(env).build());
 
             Row[] expected;
             if (hasPk) {
@@ -152,7 +156,7 @@ public class LogStoreSinkITCase extends KafkaTableTestBase {
 
             BlockingIterator<RowData, Row> iterator =
                     BlockingIterator.of(
-                            store.sourceBuilder()
+                            new FlinkSourceBuilder(IDENTIFIER, table)
                                     .withContinuousMode(true)
                                     .withLogSourceProvider(sourceProvider)
                                     .withEnv(buildStreamEnv())

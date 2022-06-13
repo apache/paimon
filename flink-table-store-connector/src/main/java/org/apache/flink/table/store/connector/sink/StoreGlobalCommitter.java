@@ -21,37 +21,24 @@ package org.apache.flink.table.store.connector.sink;
 import org.apache.flink.table.catalog.CatalogLock;
 import org.apache.flink.table.store.connector.sink.global.GlobalCommitter;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
-import org.apache.flink.table.store.file.operation.FileStoreCommit;
-import org.apache.flink.table.store.file.operation.FileStoreExpire;
 import org.apache.flink.table.store.table.sink.FileCommittable;
+import org.apache.flink.table.store.table.sink.TableCommit;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /** {@link GlobalCommitter} for dynamic store. */
 public class StoreGlobalCommitter implements GlobalCommitter<Committable, ManifestCommittable> {
 
-    private final FileStoreCommit fileStoreCommit;
-
-    private final FileStoreExpire fileStoreExpire;
+    private final TableCommit commit;
 
     @Nullable private final CatalogLock lock;
 
-    @Nullable private final Map<String, String> overwritePartition;
-
-    public StoreGlobalCommitter(
-            FileStoreCommit fileStoreCommit,
-            FileStoreExpire fileStoreExpire,
-            @Nullable CatalogLock lock,
-            @Nullable Map<String, String> overwritePartition) {
-        this.fileStoreCommit = fileStoreCommit;
-        this.fileStoreExpire = fileStoreExpire;
+    public StoreGlobalCommitter(TableCommit commit, @Nullable CatalogLock lock) {
+        this.commit = commit;
         this.lock = lock;
-        this.overwritePartition = overwritePartition;
     }
 
     @Override
@@ -64,7 +51,7 @@ public class StoreGlobalCommitter implements GlobalCommitter<Committable, Manife
     @Override
     public List<ManifestCommittable> filterRecoveredCommittables(
             List<ManifestCommittable> globalCommittables) {
-        return fileStoreCommit.filterCommitted(globalCommittables);
+        return commit.filterCommitted(globalCommittables);
     }
 
     @Override
@@ -94,16 +81,6 @@ public class StoreGlobalCommitter implements GlobalCommitter<Committable, Manife
     @Override
     public void commit(List<ManifestCommittable> committables)
             throws IOException, InterruptedException {
-        if (overwritePartition == null) {
-            for (ManifestCommittable committable : committables) {
-                fileStoreCommit.commit(committable, new HashMap<>());
-            }
-        } else {
-            for (ManifestCommittable committable : committables) {
-                fileStoreCommit.overwrite(overwritePartition, committable, new HashMap<>());
-            }
-        }
-
-        fileStoreExpire.expire();
+        commit.commit(committables);
     }
 }

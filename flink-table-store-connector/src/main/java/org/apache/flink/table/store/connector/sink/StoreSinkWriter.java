@@ -22,21 +22,15 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.api.connector.sink2.StatefulSink.StatefulSinkWriter;
 import org.apache.flink.api.connector.sink2.TwoPhaseCommittingSink.PrecommittingSinkWriter;
-import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.connector.StatefulPrecommittingSinkWriter;
-import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.store.log.LogWriteCallback;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
-import org.apache.flink.types.RowKind;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.util.concurrent.ExecutorThreadFactory;
 
 import javax.annotation.Nullable;
@@ -45,8 +39,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -57,14 +49,7 @@ import java.util.concurrent.Executors;
 public class StoreSinkWriter<WriterStateT>
         implements StatefulPrecommittingSinkWriter<WriterStateT> {
 
-    private static final BinaryRowData DUMMY_KEY = BinaryRowDataUtil.EMPTY_ROW;
-
-    private final FileStoreWrite fileStoreWrite;
-
-    private final SinkRecordConverter recordConverter;
-
-    private final WriteMode writeMode;
-    private final boolean overwrite;
+    private final TableWrite write;
 
     @Nullable private final SinkWriter<SinkRecord> logWriter;
 
@@ -72,87 +57,31 @@ public class StoreSinkWriter<WriterStateT>
 
     private final ExecutorService compactExecutor;
 
-    private final Map<BinaryRowData, Map<Integer, RecordWriter>> writers;
-
     public StoreSinkWriter(
-            FileStoreWrite fileStoreWrite,
-            SinkRecordConverter recordConverter,
-            WriteMode writeMode,
-            boolean overwrite,
+            TableWrite write,
             @Nullable SinkWriter<SinkRecord> logWriter,
             @Nullable LogWriteCallback logCallback) {
-        this.fileStoreWrite = fileStoreWrite;
-        this.recordConverter = recordConverter;
-        this.writeMode = writeMode;
-        this.overwrite = overwrite;
+        this.write = write;
         this.logWriter = logWriter;
         this.logCallback = logCallback;
         this.compactExecutor =
                 Executors.newSingleThreadScheduledExecutor(
                         new ExecutorThreadFactory("compaction-thread"));
-        this.writers = new HashMap<>();
-    }
-
-    private RecordWriter getWriter(BinaryRowData partition, int bucket) {
-        Map<Integer, RecordWriter> buckets = writers.get(partition);
-        if (buckets == null) {
-            buckets = new HashMap<>();
-            writers.put(partition.copy(), buckets);
-        }
-        return buckets.computeIfAbsent(
-                bucket,
-                k ->
-                        overwrite
-                                ? fileStoreWrite.createEmptyWriter(
-                                        partition.copy(), bucket, compactExecutor)
-                                : fileStoreWrite.createWriter(
-                                        partition.copy(), bucket, compactExecutor));
     }
 
     @Override
     public void write(RowData rowData, Context context) throws IOException, InterruptedException {
-        SinkRecord record = recordConverter.convert(rowData);
-        RecordWriter writer = getWriter(record.partition(), record.bucket());
+        SinkRecord record;
         try {
-            writeToFileStore(writer, record);
+            record = write.write(rowData);
         } catch (Exception e) {
             throw new IOException(e);
         }
 
         // write to log store, need to preserve original pk (which includes partition fields)
         if (logWriter != null) {
-            record = recordConverter.convertToLogSinkRecord(record);
-            logWriter.write(record, context);
-        }
-    }
-
-    private void writeToFileStore(RecordWriter writer, SinkRecord record) throws Exception {
-        if (writeMode == WriteMode.APPEND_ONLY) {
-            Preconditions.checkState(
-                    record.row().getRowKind() == RowKind.INSERT,
-                    "Append only writer can not accept row with RowKind %s",
-                    record.row().getRowKind());
-            writer.write(ValueKind.ADD, DUMMY_KEY, record.row());
-            return;
-        }
-
-        switch (record.row().getRowKind()) {
-            case INSERT:
-            case UPDATE_AFTER:
-                if (record.primaryKey().getArity() == 0) {
-                    writer.write(ValueKind.ADD, record.row(), GenericRowData.of(1L));
-                } else {
-                    writer.write(ValueKind.ADD, record.primaryKey(), record.row());
-                }
-                break;
-            case UPDATE_BEFORE:
-            case DELETE:
-                if (record.primaryKey().getArity() == 0) {
-                    writer.write(ValueKind.ADD, record.row(), GenericRowData.of(-1L));
-                } else {
-                    writer.write(ValueKind.DELETE, record.primaryKey(), record.row());
-                }
-                break;
+            SinkRecordConverter converter = write.recordConverter();
+            logWriter.write(converter.convertToLogSinkRecord(record), context);
         }
     }
 
@@ -174,37 +103,12 @@ public class StoreSinkWriter<WriterStateT>
     @Override
     public List<Committable> prepareCommit() throws IOException, InterruptedException {
         List<Committable> committables = new ArrayList<>();
-        Iterator<Map.Entry<BinaryRowData, Map<Integer, RecordWriter>>> partIter =
-                writers.entrySet().iterator();
-        while (partIter.hasNext()) {
-            Map.Entry<BinaryRowData, Map<Integer, RecordWriter>> partEntry = partIter.next();
-            BinaryRowData partition = partEntry.getKey();
-            Iterator<Map.Entry<Integer, RecordWriter>> bucketIter =
-                    partEntry.getValue().entrySet().iterator();
-            while (bucketIter.hasNext()) {
-                Map.Entry<Integer, RecordWriter> entry = bucketIter.next();
-                int bucket = entry.getKey();
-                RecordWriter writer = entry.getValue();
-                FileCommittable committable;
-                try {
-                    committable = new FileCommittable(partition, bucket, writer.prepareCommit());
-                } catch (Exception e) {
-                    throw new IOException(e);
-                }
+        try {
+            for (FileCommittable committable : write.prepareCommit()) {
                 committables.add(new Committable(Committable.Kind.FILE, committable));
-
-                // clear if no update
-                // we need a mechanism to clear writers, otherwise there will be more and more
-                // such as yesterday's partition that no longer needs to be written.
-                if (committable.increment().newFiles().isEmpty()) {
-                    closeWriter(writer);
-                    bucketIter.remove();
-                }
             }
-
-            if (partEntry.getValue().isEmpty()) {
-                partIter.remove();
-            }
+        } catch (Exception e) {
+            throw new IOException(e);
         }
 
         if (logWriter != null) {
@@ -229,24 +133,10 @@ public class StoreSinkWriter<WriterStateT>
         return committables;
     }
 
-    private void closeWriter(RecordWriter writer) throws IOException {
-        try {
-            writer.sync();
-            writer.close();
-        } catch (Exception e) {
-            throw new IOException(e);
-        }
-    }
-
     @Override
     public void close() throws Exception {
         this.compactExecutor.shutdownNow();
-        for (Map<Integer, RecordWriter> bucketWriters : writers.values()) {
-            for (RecordWriter writer : bucketWriters.values()) {
-                closeWriter(writer);
-            }
-        }
-        writers.clear();
+        write.close();
 
         if (logWriter != null) {
             logWriter.close();
@@ -255,6 +145,6 @@ public class StoreSinkWriter<WriterStateT>
 
     @VisibleForTesting
     Map<BinaryRowData, Map<Integer, RecordWriter>> writers() {
-        return writers;
+        return write.writers();
     }
 }

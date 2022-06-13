@@ -1440,11 +1440,15 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                         "Bucket number has been changed. Manifest might be corrupted.");
 
         // decrease bucket num from 3 to 1
+        // TODO this test cannot work until alter table callback is implemented for managed table
+        /*
         tEnv.executeSql("ALTER TABLE rates RESET ('bucket')");
         assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM rates").await())
                 .hasRootCauseInstanceOf(IllegalStateException.class)
                 .hasRootCauseMessage(
                         "Bucket number has been changed. Manifest might be corrupted.");
+
+         */
     }
 
     @Test

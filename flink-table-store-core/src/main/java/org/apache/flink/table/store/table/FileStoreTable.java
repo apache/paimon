@@ -18,12 +18,13 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.table.store.file.FileStore;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
-import org.apache.flink.table.types.logical.RowType;
 
 import java.io.Serializable;
 
@@ -35,7 +36,7 @@ public interface FileStoreTable extends Serializable {
 
     String name();
 
-    RowType rowType();
+    Schema schema();
 
     SnapshotManager snapshotManager();
 
@@ -46,4 +47,6 @@ public interface FileStoreTable extends Serializable {
     TableWrite newWrite();
 
     TableCommit newCommit();
+
+    FileStore store();
 }
