@@ -275,9 +275,8 @@ public class FileStoreCommitTest {
 
         store.commitData(
                 Collections.emptyList(), gen::getPartition, kv -> 0, Collections.emptyMap());
-        Path snapshotDir = store.pathFactory().snapshotDirectory();
 
-        assertThat(SnapshotFinder.findLatest(snapshotDir)).isEqualTo(snapshot.id());
+        assertThat(store.snapshotManager().findLatest()).isEqualTo(snapshot.id());
     }
 
     private TestFileStore createStore(boolean failing) {
