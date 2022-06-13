@@ -27,6 +27,8 @@ import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -123,11 +125,12 @@ public abstract class TableScan {
 
     /** Scanning plan containing snapshot ID and input splits. */
     public static class Plan {
-        public final long snapshotId;
+
+        @Nullable public final Long snapshotId;
         public final List<Split> splits;
 
         @VisibleForTesting
-        public Plan(long snapshotId, List<Split> splits) {
+        public Plan(@Nullable Long snapshotId, List<Split> splits) {
             this.snapshotId = snapshotId;
             this.splits = splits;
         }

@@ -79,7 +79,7 @@ public class FileStoreSourceSplitGeneratorTest {
                 };
         TableScan.Plan tableScanPlan =
                 new TableScan.Plan(
-                        1,
+                        1L,
                         new DefaultSplitGenerator(
                                         new FileStorePathFactory(new Path(tempDir.toString())))
                                 .generate(plan.groupByPartFiles()));

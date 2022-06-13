@@ -49,6 +49,11 @@ public class AppendOnlyTableTest extends FileStoreTableITCase {
     }
 
     @Test
+    public void testReadEmpty() {
+        assertThat(batchSql("SELECT * FROM append_table")).isEmpty();
+    }
+
+    @Test
     public void testReadWrite() {
         batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')");
 
