@@ -40,7 +40,7 @@ public class FileSystemCatalogITCase extends KafkaTableTestBase {
         String path = TEMPORARY_FOLDER.newFolder().toURI().toString();
         tEnv.executeSql(
                 String.format(
-                        "CREATE CATALOG fs WITH ('type'='table-store', 'root-path'='%s')", path));
+                        "CREATE CATALOG fs WITH ('type'='table-store', 'warehouse'='%s')", path));
         tEnv.useCatalog("fs");
         env.setParallelism(1);
     }
