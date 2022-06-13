@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.table.source;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.CompoundPredicate;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
@@ -125,7 +126,8 @@ public abstract class TableScan {
         public final long snapshotId;
         public final List<Split> splits;
 
-        private Plan(long snapshotId, List<Split> splits) {
+        @VisibleForTesting
+        public Plan(long snapshotId, List<Split> splits) {
             this.snapshotId = snapshotId;
             this.splits = splits;
         }

@@ -36,6 +36,8 @@ import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
+import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
@@ -60,7 +62,8 @@ public abstract class AbstractTableStoreFactory
     @Override
     public TableStoreSource createDynamicTableSource(Context context) {
         return new TableStoreSource(
-                buildTableStore(context),
+                context.getObjectIdentifier(),
+                buildFileStoreTable(context),
                 context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                         == RuntimeExecutionMode.STREAMING,
                 createLogContext(context),
@@ -70,7 +73,8 @@ public abstract class AbstractTableStoreFactory
     @Override
     public TableStoreSink createDynamicTableSink(Context context) {
         return new TableStoreSink(
-                buildTableStore(context),
+                context.getObjectIdentifier(),
+                buildFileStoreTable(context),
                 createLogContext(context),
                 createOptionalLogStoreFactory(context).orElse(null));
     }
@@ -155,14 +159,12 @@ public abstract class AbstractTableStoreFactory
                                 Map.Entry::getValue));
     }
 
-    static TableStore buildTableStore(DynamicTableFactory.Context context) {
-        TableStore store =
-                new TableStore(
-                        context.getObjectIdentifier(),
+    static FileStoreTable buildFileStoreTable(DynamicTableFactory.Context context) {
+        FileStoreTable table =
+                FileStoreTableFactory.create(
                         Configuration.fromMap(context.getCatalogTable().getOptions()));
 
-        Schema schema = store.schema();
-
+        Schema schema = table.schema();
         UpdateSchema updateSchema = UpdateSchema.fromCatalogTable(context.getCatalogTable());
 
         RowType rowType = updateSchema.rowType();
@@ -191,6 +193,6 @@ public abstract class AbstractTableStoreFactory
                 schema.primaryKeys(),
                 primaryKeys);
 
-        return store;
+        return table;
     }
 }

@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.connector.source;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitReader;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
@@ -29,51 +28,32 @@ import org.apache.flink.connector.file.src.util.MutableRecordAndPosition;
 import org.apache.flink.connector.file.src.util.Pool;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.utils.ProjectedRowData;
-import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.operation.FileStoreRead;
-import org.apache.flink.table.store.file.utils.PrimaryKeyRowDataSupplier;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.ValueCountRowDataSupplier;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.table.source.TableRead;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.LinkedList;
-import java.util.Optional;
 import java.util.Queue;
-import java.util.function.Supplier;
 
 /** The {@link SplitReader} implementation for the file store source. */
 public class FileStoreSourceSplitReader
         implements SplitReader<RecordAndPosition<RowData>, FileStoreSourceSplit> {
 
-    private final FileStoreRead fileStoreRead;
-    private final boolean valueCountMode;
-    @Nullable private final int[][] valueCountModeProjects;
+    private final TableRead tableRead;
 
     private final Queue<FileStoreSourceSplit> splits;
 
     private final Pool<FileStoreRecordIterator> pool;
 
-    @Nullable private RecordReader<KeyValue> currentReader;
+    @Nullable private RecordReader<RowData> currentReader;
     @Nullable private String currentSplitId;
     private long currentNumRead;
-    private RecordReader.RecordIterator<KeyValue> currentFirstBatch;
+    private RecordReader.RecordIterator<RowData> currentFirstBatch;
 
-    @VisibleForTesting
-    public FileStoreSourceSplitReader(FileStoreRead fileStoreRead, boolean valueCountMode) {
-        this(fileStoreRead, valueCountMode, null);
-    }
-
-    public FileStoreSourceSplitReader(
-            FileStoreRead fileStoreRead,
-            boolean valueCountMode,
-            @Nullable int[][] valueCountModeProjects) {
-        this.fileStoreRead = fileStoreRead;
-        this.valueCountMode = valueCountMode;
-        this.valueCountModeProjects = valueCountModeProjects;
+    public FileStoreSourceSplitReader(TableRead tableRead) {
+        this.tableRead = tableRead;
         this.splits = new LinkedList<>();
         this.pool = new Pool<>(1);
         this.pool.add(new FileStoreRecordIterator());
@@ -87,7 +67,7 @@ public class FileStoreSourceSplitReader
         // to be read at the same time
         FileStoreRecordIterator iterator = pool();
 
-        RecordReader.RecordIterator<KeyValue> nextBatch;
+        RecordReader.RecordIterator<RowData> nextBatch;
         if (currentFirstBatch != null) {
             nextBatch = currentFirstBatch;
             currentFirstBatch = null;
@@ -144,7 +124,7 @@ public class FileStoreSourceSplitReader
 
         currentSplitId = nextSplit.splitId();
         currentReader =
-                fileStoreRead.createReader(
+                tableRead.createReader(
                         nextSplit.partition(), nextSplit.bucket(), nextSplit.files());
         currentNumRead = nextSplit.recordsToSkip();
         if (currentNumRead > 0) {
@@ -154,19 +134,14 @@ public class FileStoreSourceSplitReader
 
     private void seek(long toSkip) throws IOException {
         while (true) {
-            RecordReader.RecordIterator<KeyValue> nextBatch = currentReader.readBatch();
+            RecordReader.RecordIterator<RowData> nextBatch = currentReader.readBatch();
             if (nextBatch == null) {
                 throw new RuntimeException(
                         String.format(
                                 "skip(%s) more than the number of remaining elements.", toSkip));
             }
-            KeyValue keyValue;
-            while (toSkip > 0 && (keyValue = nextBatch.next()) != null) {
-                if (valueCountMode) {
-                    toSkip -= Math.abs(keyValue.value().getLong(0));
-                } else {
-                    toSkip--;
-                }
+            while (toSkip > 0 && nextBatch.next() != null) {
+                toSkip--;
             }
             if (toSkip == 0) {
                 currentFirstBatch = nextBatch;
@@ -189,54 +164,30 @@ public class FileStoreSourceSplitReader
 
     private class FileStoreRecordIterator implements BulkFormat.RecordIterator<RowData> {
 
-        private final Supplier<RowData> rowDataSupplier;
-
-        private RecordReader.RecordIterator<KeyValue> iterator;
+        private RecordReader.RecordIterator<RowData> iterator;
 
         private final MutableRecordAndPosition<RowData> recordAndPosition =
                 new MutableRecordAndPosition<>();
 
-        @Nullable
-        private final ProjectedRowData projectedRow =
-                Optional.ofNullable(valueCountModeProjects)
-                        .map(ProjectedRowData::from)
-                        .orElse(null);
-
-        private FileStoreRecordIterator() {
-            this.rowDataSupplier =
-                    valueCountMode
-                            ? new ValueCountRowDataSupplier(this::nextKeyValue)
-                            : new PrimaryKeyRowDataSupplier(this::nextKeyValue);
-        }
-
-        public FileStoreRecordIterator replace(RecordReader.RecordIterator<KeyValue> iterator) {
+        public FileStoreRecordIterator replace(RecordReader.RecordIterator<RowData> iterator) {
             this.iterator = iterator;
             this.recordAndPosition.set(null, RecordAndPosition.NO_OFFSET, currentNumRead);
             return this;
         }
 
-        private KeyValue nextKeyValue() {
-            // The RowData is reused in iterator, we should set back to insert kind
-            if (recordAndPosition.getRecord() != null) {
-                recordAndPosition.getRecord().setRowKind(RowKind.INSERT);
-            }
-
-            try {
-                return iterator.next();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        }
-
         @Nullable
         @Override
         public RecordAndPosition<RowData> next() {
-            RowData row = rowDataSupplier.get();
+            RowData row;
+            try {
+                row = iterator.next();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
             if (row == null) {
                 return null;
             }
 
-            row = projectedRow == null ? row : projectedRow.replaceRow(row);
             recordAndPosition.setNext(row);
             currentNumRead++;
             return recordAndPosition;

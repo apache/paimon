@@ -30,6 +30,7 @@ import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.log.LogOptions;
+import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.junit.jupiter.api.Test;
@@ -225,16 +226,19 @@ public class TableStoreManagedFactoryTest {
         context = createEnrichedContext(TABLE_IDENTIFIER, catalogTable);
         if (expectedResult.success) {
             tableStoreManagedFactory.onCreateTable(context, false);
-            TableStore tableStore = AbstractTableStoreFactory.buildTableStore(context);
-            assertThat(tableStore.partitioned()).isEqualTo(catalogTable.isPartitioned());
-            assertThat(tableStore.valueCountMode())
-                    .isEqualTo(catalogTable.getResolvedSchema().getPrimaryKeyIndexes().length == 0);
+            FileStoreTable table = AbstractTableStoreFactory.buildFileStoreTable(context);
+            assertThat(table.schema().partitionKeys().size() > 0)
+                    .isEqualTo(catalogTable.isPartitioned());
+            assertThat(table.schema().primaryKeys().size())
+                    .isEqualTo(catalogTable.getResolvedSchema().getPrimaryKeyIndexes().length);
 
             // check primary key doesn't contain partition
-            if (tableStore.partitioned() && !tableStore.valueCountMode()) {
+            if (table.schema().partitionKeys().size() > 0
+                    && table.schema().primaryKeys().size() > 0) {
                 assertThat(
-                                tableStore.trimmedPrimaryKeys().stream()
-                                        .noneMatch(pk -> tableStore.partitionKeys().contains(pk)))
+                                table.schema().trimmedPrimaryKeys().stream()
+                                        .noneMatch(
+                                                pk -> table.schema().partitionKeys().contains(pk)))
                         .isTrue();
             }
         } else {

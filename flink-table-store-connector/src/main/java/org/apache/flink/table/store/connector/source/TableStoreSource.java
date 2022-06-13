@@ -20,8 +20,10 @@ package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.DelegatingConfiguration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.ProviderContext;
 import org.apache.flink.table.connector.source.DataStreamScanProvider;
@@ -30,20 +32,19 @@ import org.apache.flink.table.connector.source.ScanTableSource;
 import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.expressions.CallExpression;
-import org.apache.flink.table.expressions.Expression;
-import org.apache.flink.table.expressions.ExpressionVisitor;
-import org.apache.flink.table.expressions.FieldReferenceExpression;
 import org.apache.flink.table.expressions.ResolvedExpression;
-import org.apache.flink.table.expressions.TypeLiteralExpression;
-import org.apache.flink.table.expressions.ValueLiteralExpression;
 import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.flink.table.store.connector.TableStore;
+import org.apache.flink.table.store.connector.TableStoreFactoryOptions;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.predicate.PredicateConverter;
+import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
+import org.apache.flink.table.store.table.AppendOnlyFileStoreTable;
+import org.apache.flink.table.store.table.ChangelogValueCountFileStoreTable;
+import org.apache.flink.table.store.table.ChangelogWithKeyFileStoreTable;
+import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 
@@ -51,14 +52,6 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
-import java.util.stream.Collectors;
-
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.SCAN_PARALLELISM;
-import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
-import static org.apache.flink.table.store.log.LogOptions.CONSISTENCY;
-import static org.apache.flink.table.store.log.LogOptions.LogChangelogMode.ALL;
-import static org.apache.flink.table.store.log.LogOptions.LogConsistency.TRANSACTIONAL;
 
 /**
  * Table source to create {@link FileStoreSource} under batch mode or change-tracking is disabled.
@@ -69,21 +62,23 @@ import static org.apache.flink.table.store.log.LogOptions.LogConsistency.TRANSAC
 public class TableStoreSource
         implements ScanTableSource, SupportsFilterPushDown, SupportsProjectionPushDown {
 
-    private final TableStore tableStore;
+    private final ObjectIdentifier tableIdentifier;
+    private final FileStoreTable table;
     private final boolean streaming;
     private final DynamicTableFactory.Context logStoreContext;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
-    @Nullable private Predicate partitionPredicate;
-    @Nullable private Predicate fieldPredicate;
+    @Nullable private Predicate predicate;
     @Nullable private int[][] projectFields;
 
     public TableStoreSource(
-            TableStore tableStore,
+            ObjectIdentifier tableIdentifier,
+            FileStoreTable table,
             boolean streaming,
             DynamicTableFactory.Context logStoreContext,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
-        this.tableStore = tableStore;
+        this.tableIdentifier = tableIdentifier;
+        this.table = table;
         this.streaming = streaming;
         this.logStoreContext = logStoreContext;
         this.logStoreTableFactory = logStoreTableFactory;
@@ -96,17 +91,25 @@ public class TableStoreSource
             return ChangelogMode.insertOnly();
         }
 
-        if (tableStore.valueCountMode()) {
-            // no primary key, return all
+        if (table instanceof AppendOnlyFileStoreTable) {
+            return ChangelogMode.insertOnly();
+        } else if (table instanceof ChangelogValueCountFileStoreTable) {
             return ChangelogMode.all();
+        } else if (table instanceof ChangelogWithKeyFileStoreTable) {
+            // optimization: transaction consistency and all changelog mode avoid the generation of
+            // normalized nodes. See TableStoreSink.getChangelogMode validation.
+            Configuration logOptions =
+                    new DelegatingConfiguration(
+                            Configuration.fromMap(table.schema().options()), LogOptions.LOG_PREFIX);
+            return logOptions.get(LogOptions.CONSISTENCY) == LogOptions.LogConsistency.TRANSACTIONAL
+                            && logOptions.get(LogOptions.CHANGELOG_MODE)
+                                    == LogOptions.LogChangelogMode.ALL
+                    ? ChangelogMode.all()
+                    : ChangelogMode.upsert();
+        } else {
+            throw new UnsupportedOperationException(
+                    "Unknown FileStoreTable subclass " + table.getClass().getName());
         }
-
-        // optimization: transaction consistency and all changelog mode avoid the generation of
-        // normalized nodes. See TableStoreSink.getChangelogMode validation.
-        Configuration logOptions = tableStore.logOptions();
-        return logOptions.get(CONSISTENCY) == TRANSACTIONAL && logOptions.get(CHANGELOG_MODE) == ALL
-                ? ChangelogMode.all()
-                : ChangelogMode.upsert();
     }
 
     @Override
@@ -139,15 +142,15 @@ public class TableStoreSource
                             projectFields);
         }
 
-        TableStore.SourceBuilder sourceBuilder =
-                tableStore
-                        .sourceBuilder()
+        FlinkSourceBuilder sourceBuilder =
+                new FlinkSourceBuilder(tableIdentifier, table)
                         .withContinuousMode(streaming)
                         .withLogSourceProvider(logSourceProvider)
                         .withProjection(projectFields)
-                        .withPartitionPredicate(partitionPredicate)
-                        .withFieldPredicate(fieldPredicate)
-                        .withParallelism(tableStore.options().get(SCAN_PARALLELISM));
+                        .withPredicate(predicate)
+                        .withParallelism(
+                                Configuration.fromMap(table.schema().options())
+                                        .get(TableStoreFactoryOptions.SCAN_PARALLELISM));
 
         return new DataStreamScanProvider() {
             @Override
@@ -166,9 +169,9 @@ public class TableStoreSource
     @Override
     public DynamicTableSource copy() {
         TableStoreSource copied =
-                new TableStoreSource(tableStore, streaming, logStoreContext, logStoreTableFactory);
-        copied.partitionPredicate = partitionPredicate;
-        copied.fieldPredicate = fieldPredicate;
+                new TableStoreSource(
+                        tableIdentifier, table, streaming, logStoreContext, logStoreTableFactory);
+        copied.predicate = predicate;
         copied.projectFields = projectFields;
         return copied;
     }
@@ -180,30 +183,12 @@ public class TableStoreSource
 
     @Override
     public Result applyFilters(List<ResolvedExpression> filters) {
-        List<Predicate> partitionPredicates = new ArrayList<>();
-        List<Predicate> fieldPredicates = new ArrayList<>();
-        List<ResolvedExpression> notAcceptedFilters = new ArrayList<>();
+        List<Predicate> converted = new ArrayList<>();
         for (ResolvedExpression filter : filters) {
-            Optional<ResolvedExpression> optionalPartPredicate = extractPartitionFilter(filter);
-            if (optionalPartPredicate.isPresent()) {
-                ResolvedExpression partitionFilter = optionalPartPredicate.get();
-                Optional<Predicate> partitionPredicate =
-                        PredicateConverter.convert(partitionFilter);
-                if (partitionPredicate.isPresent()) {
-                    partitionPredicates.add(partitionPredicate.get());
-                } else {
-                    notAcceptedFilters.add(partitionFilter);
-                }
-            } else {
-                notAcceptedFilters.add(filter);
-                PredicateConverter.convert(filter).ifPresent(fieldPredicates::add);
-            }
+            PredicateConverter.convert(filter).ifPresent(converted::add);
         }
-        partitionPredicate =
-                partitionPredicates.isEmpty() ? null : PredicateBuilder.and(partitionPredicates);
-        fieldPredicate = fieldPredicates.isEmpty() ? null : PredicateBuilder.and(fieldPredicates);
-        return Result.of(
-                filters, streaming && logStoreTableFactory != null ? filters : notAcceptedFilters);
+        predicate = converted.isEmpty() ? null : PredicateBuilder.and(converted);
+        return Result.of(filters, filters);
     }
 
     @Override
@@ -215,67 +200,4 @@ public class TableStoreSource
     public void applyProjection(int[][] projectedFields, DataType producedDataType) {
         this.projectFields = projectedFields;
     }
-
-    private Optional<ResolvedExpression> extractPartitionFilter(ResolvedExpression filter) {
-        List<String> fieldNames = tableStore.fieldNames();
-        List<String> partitionKeys = tableStore.partitionKeys();
-        PartitionIndexVisitor visitor =
-                new PartitionIndexVisitor(
-                        fieldNames.stream().mapToInt(partitionKeys::indexOf).toArray());
-        try {
-            return Optional.of(filter.accept(visitor));
-        } catch (FoundFieldReference e) {
-            return Optional.empty();
-        }
-    }
-
-    private static class PartitionIndexVisitor implements ExpressionVisitor<ResolvedExpression> {
-
-        private final int[] mapping;
-
-        PartitionIndexVisitor(int[] mapping) {
-            this.mapping = mapping;
-        }
-
-        @Override
-        public ResolvedExpression visit(CallExpression call) {
-            return CallExpression.anonymous(
-                    call.getFunctionDefinition(),
-                    call.getResolvedChildren().stream()
-                            .map(e -> e.accept(this))
-                            .collect(Collectors.toList()),
-                    call.getOutputDataType());
-        }
-
-        @Override
-        public ResolvedExpression visit(ValueLiteralExpression valueLiteral) {
-            return valueLiteral;
-        }
-
-        @Override
-        public ResolvedExpression visit(FieldReferenceExpression fieldReference) {
-            int adjustIndex = mapping[fieldReference.getFieldIndex()];
-            if (adjustIndex == -1) {
-                // not a partition field
-                throw new FoundFieldReference();
-            }
-            return new FieldReferenceExpression(
-                    fieldReference.getName(),
-                    fieldReference.getOutputDataType(),
-                    fieldReference.getInputIndex(),
-                    adjustIndex);
-        }
-
-        @Override
-        public ResolvedExpression visit(TypeLiteralExpression typeLiteral) {
-            return typeLiteral;
-        }
-
-        @Override
-        public ResolvedExpression visit(Expression other) {
-            return (ResolvedExpression) other;
-        }
-    }
-
-    private static class FoundFieldReference extends RuntimeException {}
 }
