@@ -26,7 +26,6 @@ import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.factories.ManagedTableFactory;
 import org.apache.flink.table.store.connector.utils.TableConfigUtils;
 import org.apache.flink.table.store.file.FileStoreOptions;
-import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
@@ -47,6 +46,7 @@ import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
 import static org.apache.flink.table.store.file.FileStoreOptions.WRITE_MODE;
+import static org.apache.flink.table.store.file.WriteMode.APPEND_ONLY;
 import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 
 /** Default implementation of {@link ManagedTableFactory}. */
@@ -129,7 +129,7 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
         // Cannot define any primary key in an append-only table.
         if (context.getCatalogTable().getResolvedSchema().getPrimaryKey().isPresent()) {
             if (Objects.equals(
-                    WriteMode.APPEND_ONLY.toString(),
+                    APPEND_ONLY.toString(),
                     options.getOrDefault(WRITE_MODE.key(), WRITE_MODE.defaultValue().toString()))) {
                 throw new TableException(
                         "Cannot define any primary key in an append-only table. Set 'write-mode'='change-log' if "
@@ -187,6 +187,11 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
     public Map<String, String> onCompactTable(
             Context context, CatalogPartitionSpec catalogPartitionSpec) {
         Map<String, String> newOptions = new HashMap<>(context.getCatalogTable().getOptions());
+        if (APPEND_ONLY.toString().equals(newOptions.get(FileStoreOptions.WRITE_MODE.key()))) {
+            throw new UnsupportedOperationException(
+                    "ALTER TABLE COMPACT is not yet supported for append only table.");
+        }
+
         newOptions.put(COMPACTION_MANUAL_TRIGGERED.key(), String.valueOf(true));
         newOptions.put(
                 COMPACTION_PARTITION_SPEC.key(),

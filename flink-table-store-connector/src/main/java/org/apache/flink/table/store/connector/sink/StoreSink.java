@@ -119,10 +119,6 @@ public class StoreSink<WriterStateT, LogCommT>
     public StatefulPrecommittingSinkWriter<WriterStateT> restoreWriter(
             InitContext initContext, Collection<WriterStateT> states) throws IOException {
         if (compactionTask) {
-            if (writeMode == WriteMode.APPEND_ONLY) {
-                throw new UnsupportedOperationException(
-                        "ALTER TABLE COMPACT is not yet supported for append only table.");
-            }
             return (StatefulPrecommittingSinkWriter<WriterStateT>)
                     new StoreSinkCompactor(
                             initContext.getSubtaskId(),

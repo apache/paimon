@@ -28,6 +28,7 @@ import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
+import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.table.types.logical.RowType;
@@ -66,6 +67,7 @@ import static org.apache.flink.table.store.file.TestKeyValueGenerator.DEFAULT_PA
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.DEFAULT_ROW_TYPE;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.getPrimaryKeys;
+import static org.apache.flink.table.store.file.WriteMode.APPEND_ONLY;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.flink.table.store.log.LogOptions.CONSISTENCY;
 import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
@@ -260,6 +262,20 @@ public class TableStoreManagedFactoryTest {
                 .containsEntry(COMPACTION_MANUAL_TRIGGERED.key(), String.valueOf(true));
         assertThat(newOptions)
                 .containsEntry(COMPACTION_PARTITION_SPEC.key(), JsonSerdeUtil.toJson(partSpec));
+    }
+
+    @Test
+    public void testOnCompactAppendOnlyTable() {
+        context =
+                createEnrichedContext(
+                        Collections.singletonMap(
+                                FileStoreOptions.WRITE_MODE.key(), APPEND_ONLY.toString()));
+        assertThatThrownBy(
+                        () ->
+                                tableStoreManagedFactory.onCompactTable(
+                                        context, new CatalogPartitionSpec(Collections.emptyMap())))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("ALTER TABLE COMPACT is not yet supported for append only table.");
     }
 
     // ~ Tools ------------------------------------------------------------------
