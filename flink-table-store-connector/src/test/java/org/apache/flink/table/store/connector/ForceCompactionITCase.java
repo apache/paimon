@@ -81,34 +81,31 @@ public class ForceCompactionITCase extends FileStoreTableITCase {
     }
 
     @Test
-    public void testNoDefaultNumOfLevels() throws Exception {
-        bEnv.executeSql("ALTER TABLE T1 SET ('commit.force-compact' = 'true')");
-        bEnv.executeSql(
-                        "INSERT INTO T1 VALUES(1, 'Winter', 'Winter is Coming'),"
-                                + "(2, 'Winter', 'The First Snowflake'), "
-                                + "(2, 'Spring', 'The First Rose in Spring'), "
-                                + "(7, 'Summer', 'Summertime Sadness')")
-                .await();
-        bEnv.executeSql("INSERT INTO T1 VALUES(12, 'Winter', 'Last Christmas')").await();
-        bEnv.executeSql("INSERT INTO T1 VALUES(11, 'Winter', 'Winter is Coming')").await();
-        bEnv.executeSql("INSERT INTO T1 VALUES(10, 'Autumn', 'Refrain')").await();
-        bEnv.executeSql(
-                        "INSERT INTO T1 VALUES(6, 'Summer', 'Watermelon Sugar'), "
-                                + "(4, 'Spring', 'Spring Water')")
-                .await();
-        bEnv.executeSql(
-                        "INSERT INTO T1 VALUES(66, 'Summer', 'Summer Vibe'), "
-                                + "(9, 'Autumn', 'Wake Me Up When September Ends')")
-                .await();
-        bEnv.executeSql(
-                        "INSERT INTO T1 VALUES(666, 'Summer', 'Summer Vibe'), "
-                                + "(9, 'Autumn', 'Wake Me Up When September Ends')")
-                .await();
-        bEnv.executeSql("ALTER TABLE T1 SET ('num-sorted-run.compaction-trigger' = '2')");
-        bEnv.executeSql(
-                        "INSERT INTO T1 VALUES(666, 'Summer', 'Summer Vibe'), "
-                                + "(9, 'Autumn', 'Wake Me Up When September Ends')")
-                .await();
+    public void testNoDefaultNumOfLevels() {
+        batchSql("ALTER TABLE T1 SET ('commit.force-compact' = 'true')");
+        batchSql(
+                "INSERT INTO T1 VALUES(1, 'Winter', 'Winter is Coming'),"
+                        + "(2, 'Winter', 'The First Snowflake'), "
+                        + "(2, 'Spring', 'The First Rose in Spring'), "
+                        + "(7, 'Summer', 'Summertime Sadness')");
+        batchSql("INSERT INTO T1 VALUES(12, 'Winter', 'Last Christmas')");
+        batchSql("INSERT INTO T1 VALUES(11, 'Winter', 'Winter is Coming')");
+        batchSql("INSERT INTO T1 VALUES(10, 'Autumn', 'Refrain')");
+        batchSql(
+                "INSERT INTO T1 VALUES(6, 'Summer', 'Watermelon Sugar'), "
+                        + "(4, 'Spring', 'Spring Water')");
+        batchSql(
+                "INSERT INTO T1 VALUES(66, 'Summer', 'Summer Vibe'), "
+                        + "(9, 'Autumn', 'Wake Me Up When September Ends')");
+
+        batchSql(
+                "INSERT INTO T1 VALUES(666, 'Summer', 'Summer Vibe'), "
+                        + "(9, 'Autumn', 'Wake Me Up When September Ends')");
+
+        batchSql("ALTER TABLE T1 SET ('num-sorted-run.compaction-trigger' = '2')");
+        batchSql(
+                "INSERT INTO T1 VALUES(666, 'Summer', 'Summer Vibe'), "
+                        + "(9, 'Autumn', 'Wake Me Up When September Ends')");
 
         assertThat(batchSql("SELECT * FROM T1")).hasSize(15);
     }

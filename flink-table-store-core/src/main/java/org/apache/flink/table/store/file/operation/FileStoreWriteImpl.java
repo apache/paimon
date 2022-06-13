@@ -148,8 +148,9 @@ public class FileStoreWriteImpl implements FileStoreWrite {
             int bucket,
             ExecutorService compactExecutor,
             List<DataFileMeta> restoredFiles) {
+        Levels levels = new Levels(keyComparatorSupplier.get(), restoredFiles, options.numLevels);
         return new CompactWriter(
-                CompactUnit.fromFiles(options.numLevels - 1, restoredFiles),
+                CompactUnit.fromLevelRuns(levels.numberOfLevels() - 1, levels.levelSortedRuns()),
                 createCompactManager(
                         partition,
                         bucket,
