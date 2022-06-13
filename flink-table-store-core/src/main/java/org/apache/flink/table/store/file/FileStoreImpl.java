@@ -31,6 +31,7 @@ import org.apache.flink.table.store.file.operation.FileStoreExpireImpl;
 import org.apache.flink.table.store.file.operation.FileStoreReadImpl;
 import org.apache.flink.table.store.file.operation.FileStoreScanImpl;
 import org.apache.flink.table.store.file.operation.FileStoreWriteImpl;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.KeyComparatorSupplier;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -48,6 +49,7 @@ import java.util.stream.Collectors;
 /** File store implementation. */
 public class FileStoreImpl implements FileStore {
 
+    private final SchemaManager schemaManager;
     private final long schemaId;
     private final WriteMode writeMode;
     private final FileStoreOptions options;
@@ -59,6 +61,7 @@ public class FileStoreImpl implements FileStore {
     @Nullable private final MergeFunction mergeFunction;
 
     public FileStoreImpl(
+            SchemaManager schemaManager,
             long schemaId,
             FileStoreOptions options,
             WriteMode writeMode,
@@ -67,6 +70,7 @@ public class FileStoreImpl implements FileStore {
             RowType keyType,
             RowType valueType,
             @Nullable MergeFunction mergeFunction) {
+        this.schemaManager = schemaManager;
         this.schemaId = schemaId;
         this.options = options;
         this.writeMode = writeMode;
@@ -93,6 +97,8 @@ public class FileStoreImpl implements FileStore {
     @VisibleForTesting
     public ManifestFile.Factory manifestFileFactory() {
         return new ManifestFile.Factory(
+                schemaManager,
+                schemaId,
                 partitionType,
                 options.manifestFormat(),
                 pathFactory(),
@@ -108,6 +114,8 @@ public class FileStoreImpl implements FileStore {
     public FileStoreWriteImpl newWrite() {
         return new FileStoreWriteImpl(
                 writeMode,
+                schemaManager,
+                schemaId,
                 keyType,
                 valueType,
                 keyComparatorSupplier,
@@ -122,6 +130,8 @@ public class FileStoreImpl implements FileStore {
     @Override
     public FileStoreReadImpl newRead() {
         return new FileStoreReadImpl(
+                schemaManager,
+                schemaId,
                 writeMode,
                 keyType,
                 valueType,
@@ -192,12 +202,14 @@ public class FileStoreImpl implements FileStore {
     }
 
     public static FileStoreImpl createWithAppendOnly(
+            SchemaManager schemaManager,
             long schemaId,
             FileStoreOptions options,
             String user,
             RowType partitionType,
             RowType rowType) {
         return new FileStoreImpl(
+                schemaManager,
                 schemaId,
                 options,
                 WriteMode.APPEND_ONLY,
@@ -209,6 +221,7 @@ public class FileStoreImpl implements FileStore {
     }
 
     public static FileStoreImpl createWithPrimaryKey(
+            SchemaManager schemaManager,
             long schemaId,
             FileStoreOptions options,
             String user,
@@ -246,6 +259,7 @@ public class FileStoreImpl implements FileStore {
         }
 
         return new FileStoreImpl(
+                schemaManager,
                 schemaId,
                 options,
                 WriteMode.CHANGE_LOG,
@@ -257,6 +271,7 @@ public class FileStoreImpl implements FileStore {
     }
 
     public static FileStoreImpl createWithValueCount(
+            SchemaManager schemaManager,
             long schemaId,
             FileStoreOptions options,
             String user,
@@ -267,6 +282,7 @@ public class FileStoreImpl implements FileStore {
                         new LogicalType[] {new BigIntType(false)}, new String[] {"_VALUE_COUNT"});
         MergeFunction mergeFunction = new ValueCountMergeFunction();
         return new FileStoreImpl(
+                schemaManager,
                 schemaId,
                 options,
                 WriteMode.CHANGE_LOG,

@@ -170,15 +170,16 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         conf.set(FileStoreOptions.PATH, tablePath.toString());
         conf.set(FileStoreOptions.FILE_FORMAT, "avro");
         conf.set(FileStoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
+        SchemaManager schemaManager = new SchemaManager(tablePath);
         Schema schema =
-                new SchemaManager(tablePath)
-                        .commitNewVersion(
-                                new UpdateSchema(
-                                        ROW_TYPE,
-                                        Collections.singletonList("pt"),
-                                        Collections.emptyList(),
-                                        conf.toMap(),
-                                        ""));
-        return new ChangelogValueCountFileStoreTable(tablePath.getName(), schema, "user");
+                schemaManager.commitNewVersion(
+                        new UpdateSchema(
+                                ROW_TYPE,
+                                Collections.singletonList("pt"),
+                                Collections.emptyList(),
+                                conf.toMap(),
+                                ""));
+        return new ChangelogValueCountFileStoreTable(
+                tablePath.getName(), schemaManager, schema, "user");
     }
 }

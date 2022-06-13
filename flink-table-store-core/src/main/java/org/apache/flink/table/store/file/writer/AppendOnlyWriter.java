@@ -43,6 +43,7 @@ import java.util.function.Supplier;
  * operations and don't have any unique keys or sort keys.
  */
 public class AppendOnlyWriter implements RecordWriter {
+    private final long schemaId;
     private final long targetFileSize;
     private final DataFilePathFactory pathFactory;
     private final FieldStatsArraySerializer statsArraySerializer;
@@ -53,12 +54,13 @@ public class AppendOnlyWriter implements RecordWriter {
     private RowRollingWriter writer;
 
     public AppendOnlyWriter(
+            long schemaId,
             FileFormat fileFormat,
             long targetFileSize,
             RowType writeSchema,
             long maxWroteSeqNumber,
             DataFilePathFactory pathFactory) {
-
+        this.schemaId = schemaId;
         this.targetFileSize = targetFileSize;
         this.pathFactory = pathFactory;
         this.statsArraySerializer = new FieldStatsArraySerializer(writeSchema);
@@ -158,7 +160,8 @@ public class AppendOnlyWriter implements RecordWriter {
                     recordCount(),
                     stats,
                     minSeqNum,
-                    Math.max(minSeqNum, nextSeqNum - 1));
+                    Math.max(minSeqNum, nextSeqNum - 1),
+                    schemaId);
         }
     }
 }

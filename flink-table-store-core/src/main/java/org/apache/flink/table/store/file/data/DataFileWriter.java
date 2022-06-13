@@ -57,6 +57,7 @@ public class DataFileWriter {
 
     private static final Logger LOG = LoggerFactory.getLogger(DataFileWriter.class);
 
+    private final long schemaId;
     private final RowType keyType;
     private final RowType valueType;
     private final BulkWriter.Factory<RowData> writerFactory;
@@ -67,12 +68,14 @@ public class DataFileWriter {
     private final long suggestedFileSize;
 
     private DataFileWriter(
+            long schemaId,
             RowType keyType,
             RowType valueType,
             BulkWriter.Factory<RowData> writerFactory,
             @Nullable FileStatsExtractor fileStatsExtractor,
             DataFilePathFactory pathFactory,
             long suggestedFileSize) {
+        this.schemaId = schemaId;
         this.keyType = keyType;
         this.valueType = valueType;
         this.writerFactory = writerFactory;
@@ -199,6 +202,7 @@ public class DataFileWriter {
                     valueStats,
                     minSeqNumber,
                     maxSeqNumber,
+                    schemaId,
                     level);
         }
     }
@@ -235,6 +239,7 @@ public class DataFileWriter {
     /** Creates {@link DataFileWriter}. */
     public static class Factory {
 
+        private final long schemaId;
         private final RowType keyType;
         private final RowType valueType;
         private final FileFormat fileFormat;
@@ -242,11 +247,13 @@ public class DataFileWriter {
         private final long suggestedFileSize;
 
         public Factory(
+                long schemaId,
                 RowType keyType,
                 RowType valueType,
                 FileFormat fileFormat,
                 FileStorePathFactory pathFactory,
                 long suggestedFileSize) {
+            this.schemaId = schemaId;
             this.keyType = keyType;
             this.valueType = valueType;
             this.fileFormat = fileFormat;
@@ -257,6 +264,7 @@ public class DataFileWriter {
         public DataFileWriter create(BinaryRowData partition, int bucket) {
             RowType recordType = KeyValue.schema(keyType, valueType);
             return new DataFileWriter(
+                    schemaId,
                     keyType,
                     valueType,
                     fileFormat.createWriterFactory(recordType),

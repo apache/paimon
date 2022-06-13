@@ -35,6 +35,7 @@ import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunct
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreReadImpl;
 import org.apache.flink.table.store.file.operation.FileStoreWriteImpl;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -66,6 +67,7 @@ public class TestChangelogDataReadWrite {
             Comparator.comparingLong(o -> o.getLong(0));
 
     private final FileFormat avro;
+    private final Path tablePath;
     private final FileStorePathFactory pathFactory;
     private final SnapshotManager snapshotManager;
     private final ExecutorService service;
@@ -76,9 +78,10 @@ public class TestChangelogDataReadWrite {
                         Thread.currentThread().getContextClassLoader(),
                         "avro",
                         new Configuration());
+        this.tablePath = new Path(root);
         this.pathFactory =
                 new FileStorePathFactory(
-                        new Path(root),
+                        tablePath,
                         RowType.of(new IntType()),
                         "default",
                         FileStoreOptions.FILE_FORMAT.defaultValue());
@@ -99,6 +102,8 @@ public class TestChangelogDataReadWrite {
                     rowDataIteratorCreator) {
         FileStoreRead read =
                 new FileStoreReadImpl(
+                        new SchemaManager(tablePath),
+                        0,
                         WriteMode.CHANGE_LOG,
                         KEY_TYPE,
                         VALUE_TYPE,
@@ -143,6 +148,8 @@ public class TestChangelogDataReadWrite {
         MergeTreeOptions options = new MergeTreeOptions(new Configuration());
         return new FileStoreWriteImpl(
                         WriteMode.CHANGE_LOG,
+                        new SchemaManager(tablePath),
+                        0,
                         KEY_TYPE,
                         VALUE_TYPE,
                         () -> COMPARATOR,

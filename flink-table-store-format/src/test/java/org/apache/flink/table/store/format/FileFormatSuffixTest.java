@@ -66,7 +66,7 @@ public class FileFormatSuffixTest extends DataFileTest {
                         format,
                         new Configuration());
         AppendOnlyWriter appendOnlyWriter =
-                new AppendOnlyWriter(fileFormat, 10, SCHEMA, 10, dataFilePathFactory);
+                new AppendOnlyWriter(0, fileFormat, 10, SCHEMA, 10, dataFilePathFactory);
         appendOnlyWriter.write(
                 ValueKind.ADD,
                 BinaryRowDataUtil.EMPTY_ROW,

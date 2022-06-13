@@ -40,13 +40,13 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
 
     @Override
     public RowData convertTo(ManifestFileMeta meta) {
-        GenericRowData row = new GenericRowData(5);
-        row.setField(0, StringData.fromString(meta.fileName()));
-        row.setField(1, meta.fileSize());
-        row.setField(2, meta.numAddedFiles());
-        row.setField(3, meta.numDeletedFiles());
-        row.setField(4, meta.partitionStats().toRowData());
-        return row;
+        return GenericRowData.of(
+                StringData.fromString(meta.fileName()),
+                meta.fileSize(),
+                meta.numAddedFiles(),
+                meta.numDeletedFiles(),
+                meta.partitionStats().toRowData(),
+                meta.schemaId());
     }
 
     @Override
@@ -65,6 +65,7 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
                 row.getLong(1),
                 row.getLong(2),
                 row.getLong(3),
-                BinaryTableStats.fromRowData(row.getRow(4, 3)));
+                BinaryTableStats.fromRowData(row.getRow(4, 3)),
+                row.getLong(5));
     }
 }

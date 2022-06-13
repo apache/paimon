@@ -48,6 +48,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 meta.valueStats().toRowData(),
                 meta.minSequenceNumber(),
                 meta.maxSequenceNumber(),
+                meta.schemaId(),
                 meta.level());
     }
 
@@ -63,6 +64,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 BinaryTableStats.fromRowData(row.getRow(6, 3)),
                 row.getLong(7),
                 row.getLong(8),
-                row.getInt(9));
+                row.getLong(9),
+                row.getInt(10));
     }
 }

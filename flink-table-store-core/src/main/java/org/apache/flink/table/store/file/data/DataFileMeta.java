@@ -56,6 +56,7 @@ public class DataFileMeta {
 
     private final long minSequenceNumber;
     private final long maxSequenceNumber;
+    private final long schemaId;
     private final int level;
 
     public static DataFileMeta forAppend(
@@ -64,7 +65,8 @@ public class DataFileMeta {
             long rowCount,
             BinaryTableStats rowStats,
             long minSequenceNumber,
-            long maxSequenceNumber) {
+            long maxSequenceNumber,
+            long schemaId) {
         return new DataFileMeta(
                 fileName,
                 fileSize,
@@ -75,6 +77,7 @@ public class DataFileMeta {
                 rowStats,
                 minSequenceNumber,
                 maxSequenceNumber,
+                schemaId,
                 DUMMY_LEVEL);
     }
 
@@ -88,6 +91,7 @@ public class DataFileMeta {
             BinaryTableStats valueStats,
             long minSequenceNumber,
             long maxSequenceNumber,
+            long schemaId,
             int level) {
         this.fileName = fileName;
         this.fileSize = fileSize;
@@ -101,6 +105,7 @@ public class DataFileMeta {
         this.minSequenceNumber = minSequenceNumber;
         this.maxSequenceNumber = maxSequenceNumber;
         this.level = level;
+        this.schemaId = schemaId;
     }
 
     public String fileName() {
@@ -139,6 +144,10 @@ public class DataFileMeta {
         return maxSequenceNumber;
     }
 
+    public long schemaId() {
+        return schemaId;
+    }
+
     public int level() {
         return level;
     }
@@ -155,6 +164,7 @@ public class DataFileMeta {
                 valueStats,
                 minSequenceNumber,
                 maxSequenceNumber,
+                schemaId,
                 newLevel);
     }
 
@@ -173,6 +183,7 @@ public class DataFileMeta {
                 && Objects.equals(valueStats, that.valueStats)
                 && minSequenceNumber == that.minSequenceNumber
                 && maxSequenceNumber == that.maxSequenceNumber
+                && schemaId == that.schemaId
                 && level == that.level;
     }
 
@@ -188,13 +199,14 @@ public class DataFileMeta {
                 valueStats,
                 minSequenceNumber,
                 maxSequenceNumber,
+                schemaId,
                 level);
     }
 
     @Override
     public String toString() {
         return String.format(
-                "{%s, %d, %d, %s, %s, %s, %s, %d, %d, %d}",
+                "{%s, %d, %d, %s, %s, %s, %s, %d, %d, %d, %d}",
                 fileName,
                 fileSize,
                 rowCount,
@@ -204,6 +216,7 @@ public class DataFileMeta {
                 valueStats,
                 minSequenceNumber,
                 maxSequenceNumber,
+                schemaId,
                 level);
     }
 
@@ -218,6 +231,7 @@ public class DataFileMeta {
         fields.add(new RowType.RowField("_VALUE_STATS", FieldStatsArraySerializer.schema()));
         fields.add(new RowType.RowField("_MIN_SEQUENCE_NUMBER", new BigIntType(false)));
         fields.add(new RowType.RowField("_MAX_SEQUENCE_NUMBER", new BigIntType(false)));
+        fields.add(new RowType.RowField("_SCHEMA_ID", new BigIntType(false)));
         fields.add(new RowType.RowField("_LEVEL", new IntType(false)));
         return new RowType(fields);
     }

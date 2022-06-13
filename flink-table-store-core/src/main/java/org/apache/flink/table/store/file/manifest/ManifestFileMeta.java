@@ -39,18 +39,21 @@ public class ManifestFileMeta {
     private final long numAddedFiles;
     private final long numDeletedFiles;
     private final BinaryTableStats partitionStats;
+    private final long schemaId;
 
     public ManifestFileMeta(
             String fileName,
             long fileSize,
             long numAddedFiles,
             long numDeletedFiles,
-            BinaryTableStats partitionStats) {
+            BinaryTableStats partitionStats,
+            long schemaId) {
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.numAddedFiles = numAddedFiles;
         this.numDeletedFiles = numDeletedFiles;
         this.partitionStats = partitionStats;
+        this.schemaId = schemaId;
     }
 
     public String fileName() {
@@ -73,6 +76,10 @@ public class ManifestFileMeta {
         return partitionStats;
     }
 
+    public long schemaId() {
+        return schemaId;
+    }
+
     public static RowType schema() {
         List<RowType.RowField> fields = new ArrayList<>();
         fields.add(new RowType.RowField("_FILE_NAME", new VarCharType(false, Integer.MAX_VALUE)));
@@ -80,6 +87,7 @@ public class ManifestFileMeta {
         fields.add(new RowType.RowField("_NUM_ADDED_FILES", new BigIntType(false)));
         fields.add(new RowType.RowField("_NUM_DELETED_FILES", new BigIntType(false)));
         fields.add(new RowType.RowField("_PARTITION_STATS", FieldStatsArraySerializer.schema()));
+        fields.add(new RowType.RowField("_SCHEMA_ID", new BigIntType(false)));
         return new RowType(fields);
     }
 
@@ -93,19 +101,21 @@ public class ManifestFileMeta {
                 && fileSize == that.fileSize
                 && numAddedFiles == that.numAddedFiles
                 && numDeletedFiles == that.numDeletedFiles
-                && Objects.equals(partitionStats, that.partitionStats);
+                && Objects.equals(partitionStats, that.partitionStats)
+                && schemaId == that.schemaId;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(fileName, fileSize, numAddedFiles, numDeletedFiles, partitionStats);
+        return Objects.hash(
+                fileName, fileSize, numAddedFiles, numDeletedFiles, partitionStats, schemaId);
     }
 
     @Override
     public String toString() {
         return String.format(
-                "{%s, %d, %d, %d, %s}",
-                fileName, fileSize, numAddedFiles, numDeletedFiles, partitionStats);
+                "{%s, %d, %d, %d, %s, %d}",
+                fileName, fileSize, numAddedFiles, numDeletedFiles, partitionStats, schemaId);
     }
 
     /**

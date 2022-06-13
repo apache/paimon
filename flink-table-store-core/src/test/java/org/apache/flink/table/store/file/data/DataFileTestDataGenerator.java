@@ -137,6 +137,7 @@ public class DataFileTestDataGenerator {
                         valueStatsCollector.extract(),
                         minSequenceNumber,
                         maxSequenceNumber,
+                        0,
                         level),
                 kvs);
     }

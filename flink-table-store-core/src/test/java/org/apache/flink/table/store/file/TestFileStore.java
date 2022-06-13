@@ -36,6 +36,7 @@ import org.apache.flink.table.store.file.operation.FileStoreExpireImpl;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -111,6 +112,7 @@ public class TestFileStore extends FileStoreImpl {
             RowType valueType,
             MergeFunction mergeFunction) {
         super(
+                new SchemaManager(options.path()),
                 0L,
                 options,
                 WriteMode.CHANGE_LOG,

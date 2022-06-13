@@ -39,8 +39,9 @@ public class FileStoreTableFactory {
     public static FileStoreTable create(Configuration conf, String user) {
         Path tablePath = FileStoreOptions.path(conf);
         String name = tablePath.getName();
+        SchemaManager schemaManager = new SchemaManager(tablePath);
         Schema schema =
-                new SchemaManager(tablePath)
+                schemaManager
                         .latest()
                         .orElseThrow(
                                 () ->
@@ -55,12 +56,12 @@ public class FileStoreTableFactory {
         schema = schema.copy(newOptions);
 
         if (conf.get(FileStoreOptions.WRITE_MODE) == WriteMode.APPEND_ONLY) {
-            return new AppendOnlyFileStoreTable(name, schema, user);
+            return new AppendOnlyFileStoreTable(name, schemaManager, schema, user);
         } else {
             if (schema.primaryKeys().isEmpty()) {
-                return new ChangelogValueCountFileStoreTable(name, schema, user);
+                return new ChangelogValueCountFileStoreTable(name, schemaManager, schema, user);
             } else {
-                return new ChangelogWithKeyFileStoreTable(name, schema, user);
+                return new ChangelogWithKeyFileStoreTable(name, schemaManager, schema, user);
             }
         }
     }
