@@ -39,6 +39,7 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.writer.AppendOnlyWriter;
 import org.apache.flink.table.store.file.writer.CompactWriter;
 import org.apache.flink.table.store.file.writer.RecordWriter;
@@ -64,6 +65,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
     private final Supplier<Comparator<RowData>> keyComparatorSupplier;
     private final MergeFunction mergeFunction;
     private final FileStorePathFactory pathFactory;
+    private final SnapshotManager snapshotManager;
     private final FileStoreScan scan;
     private final MergeTreeOptions options;
 
@@ -75,6 +77,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
             MergeFunction mergeFunction,
             FileFormat fileFormat,
             FileStorePathFactory pathFactory,
+            SnapshotManager snapshotManager,
             FileStoreScan scan,
             MergeTreeOptions options) {
         this.valueType = valueType;
@@ -88,6 +91,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
         this.keyComparatorSupplier = keyComparatorSupplier;
         this.mergeFunction = mergeFunction;
         this.pathFactory = pathFactory;
+        this.snapshotManager = snapshotManager;
         this.scan = scan;
         this.options = options;
     }
@@ -95,7 +99,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
     @Override
     public RecordWriter createWriter(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
-        Long latestSnapshotId = pathFactory.latestSnapshotId();
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
         List<DataFileMeta> existingFileMetas = Lists.newArrayList();
         if (latestSnapshotId != null) {
             // Concat all the DataFileMeta of existing files into existingFileMetas.

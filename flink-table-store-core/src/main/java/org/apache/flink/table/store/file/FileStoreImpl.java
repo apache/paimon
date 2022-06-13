@@ -33,6 +33,7 @@ import org.apache.flink.table.store.file.operation.FileStoreScanImpl;
 import org.apache.flink.table.store.file.operation.FileStoreWriteImpl;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.KeyComparatorSupplier;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -113,6 +114,7 @@ public class FileStoreImpl implements FileStore {
                 mergeFunction,
                 options.fileFormat(),
                 pathFactory(),
+                snapshotManager(),
                 newScan(),
                 options.mergeTreeOptions());
     }
@@ -136,6 +138,7 @@ public class FileStoreImpl implements FileStore {
                 user,
                 partitionType,
                 pathFactory(),
+                snapshotManager(),
                 manifestFileFactory(),
                 manifestListFactory(),
                 newScan(),
@@ -151,6 +154,7 @@ public class FileStoreImpl implements FileStore {
                 options.snapshotNumRetainMax(),
                 options.snapshotTimeRetain().toMillis(),
                 pathFactory(),
+                snapshotManager(),
                 manifestFileFactory(),
                 manifestListFactory());
     }
@@ -161,10 +165,15 @@ public class FileStoreImpl implements FileStore {
                 partitionType,
                 keyType,
                 valueType,
-                pathFactory(),
+                snapshotManager(),
                 manifestFileFactory(),
                 manifestListFactory(),
                 options.bucket());
+    }
+
+    @Override
+    public SnapshotManager snapshotManager() {
+        return new SnapshotManager(options.path());
     }
 
     @Override

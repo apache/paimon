@@ -67,15 +67,6 @@ public class FileStorePathFactoryTest {
     }
 
     @Test
-    public void testSnapshotPath() {
-        FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(tempDir.toString()));
-        for (int i = 0; i < 20; i++) {
-            assertThat(pathFactory.toSnapshotPath(i))
-                    .isEqualTo(new Path(tempDir.toString() + "/snapshot/snapshot-" + i));
-        }
-    }
-
-    @Test
     public void testCreateDataFilePathFactoryNoPartition() {
         FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(tempDir.toString()));
         DataFilePathFactory dataFilePathFactory =

@@ -35,7 +35,7 @@ import org.apache.flink.table.store.file.predicate.PredicateConverter;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RowDataToObjectArrayConverter;
-import org.apache.flink.table.store.file.utils.SnapshotFinder;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.slf4j.Logger;
@@ -43,7 +43,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -78,6 +77,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final RowType partitionType;
     private final RowDataToObjectArrayConverter partitionObjectConverter;
     private final FileStorePathFactory pathFactory;
+    private final SnapshotManager snapshotManager;
     private final ManifestFile manifestFile;
     private final ManifestList manifestList;
     private final FileStoreScan scan;
@@ -92,6 +92,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             String commitUser,
             RowType partitionType,
             FileStorePathFactory pathFactory,
+            SnapshotManager snapshotManager,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             FileStoreScan scan,
@@ -103,6 +104,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.partitionType = partitionType;
         this.partitionObjectConverter = new RowDataToObjectArrayConverter(partitionType);
         this.pathFactory = pathFactory;
+        this.snapshotManager = snapshotManager;
         this.manifestFile = manifestFileFactory.create();
         this.manifestList = manifestListFactory.create();
         this.scan = scan;
@@ -127,7 +129,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         // if there is no previous snapshots then nothing should be filtered
-        Long latestSnapshotId = pathFactory.latestSnapshotId();
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
         if (latestSnapshotId == null) {
             return committableList;
         }
@@ -139,16 +141,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         for (long id = latestSnapshotId; id >= Snapshot.FIRST_SNAPSHOT_ID; id--) {
-            Path snapshotPath = pathFactory.toSnapshotPath(id);
-            try {
-                if (!snapshotPath.getFileSystem().exists(snapshotPath)) {
-                    // snapshots before this are expired
-                    break;
-                }
-            } catch (IOException e) {
-                throw new RuntimeException("Cannot determine if snapshot #" + id + " exists.", e);
+            if (!snapshotManager.snapshotExists(id)) {
+                // snapshots before this are expired
+                break;
             }
-            Snapshot snapshot = Snapshot.fromPath(snapshotPath);
+            Snapshot snapshot = snapshotManager.snapshot(id);
             if (commitUser.equals(snapshot.commitUser())) {
                 if (identifiers.containsKey(snapshot.commitIdentifier())) {
                     identifiers.remove(snapshot.commitIdentifier());
@@ -244,7 +241,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Snapshot.CommitKind commitKind,
             boolean checkDeletedFiles) {
         while (true) {
-            Long latestSnapshotId = pathFactory.latestSnapshotId();
+            Long latestSnapshotId = snapshotManager.latestSnapshotId();
             if (tryCommitOnce(
                     changes, hash, logOffsets, commitKind, latestSnapshotId, checkDeletedFiles)) {
                 break;
@@ -258,7 +255,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             String identifier,
             Map<Integer, Long> logOffsets) {
         while (true) {
-            Long latestSnapshotId = pathFactory.latestSnapshotId();
+            Long latestSnapshotId = snapshotManager.latestSnapshotId();
 
             List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
             if (latestSnapshotId != null) {
@@ -323,8 +320,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             boolean checkDeletedFiles) {
         long newSnapshotId =
                 latestSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshotId + 1;
-        Path newSnapshotPath = pathFactory.toSnapshotPath(newSnapshotId);
-        Path tmpSnapshotPath = pathFactory.toTmpSnapshotPath(newSnapshotId);
+        Path newSnapshotPath = snapshotManager.snapshotPath(newSnapshotId);
+        Path tmpSnapshotPath = snapshotManager.tmpSnapshotPath(newSnapshotId);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("Ready to commit changes to snapshot #" + newSnapshotId);
@@ -338,7 +335,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (checkDeletedFiles) {
                 noConflictsOrFail(latestSnapshotId, changes);
             }
-            latestSnapshot = Snapshot.fromPath(pathFactory.toSnapshotPath(latestSnapshotId));
+            latestSnapshot = snapshotManager.snapshot(latestSnapshotId);
         }
 
         Snapshot newSnapshot;
@@ -410,8 +407,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     () -> {
                         boolean committed = fs.rename(tmpSnapshotPath, newSnapshotPath);
                         if (committed) {
-                            SnapshotFinder.commitLatestHint(
-                                    pathFactory.snapshotDirectory(), newSnapshotId);
+                            snapshotManager.commitLatestHint(newSnapshotId);
                         }
                         return committed;
                     };
