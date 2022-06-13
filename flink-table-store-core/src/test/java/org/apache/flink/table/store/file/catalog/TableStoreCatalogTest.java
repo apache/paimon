@@ -27,12 +27,16 @@ import org.apache.flink.table.catalog.CatalogTestBase;
 import org.apache.flink.table.catalog.CatalogTestUtil;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
+import org.apache.flink.table.catalog.exceptions.CatalogException;
+import org.apache.flink.table.catalog.exceptions.DatabaseAlreadyExistException;
 
 import org.junit.Assert;
 import org.junit.Test;
 
 import java.util.Collections;
 import java.util.HashMap;
+
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link TableStoreCatalog}. */
 public abstract class TableStoreCatalogTest extends CatalogTestBase {
@@ -107,6 +111,22 @@ public abstract class TableStoreCatalogTest extends CatalogTestBase {
     @Override
     public void testAlterTable_differentTypedTable() {
         // TODO support this
+    }
+
+    @Test
+    public void testCreateFlinkTable() throws DatabaseAlreadyExistException {
+        // create a flink table
+        CatalogTable table = createTable();
+        HashMap<String, String> newOptions = new HashMap<>(table.getOptions());
+        newOptions.put("connector", "filesystem");
+        CatalogTable newTable = table.copy(newOptions);
+
+        catalog.createDatabase("db1", this.createDb(), false);
+
+        assertThatThrownBy(() -> catalog.createTable(this.path1, newTable, false))
+                .isInstanceOf(CatalogException.class)
+                .hasMessageContaining(
+                        "Table Store Catalog only supports table store tables, not Flink connector: filesystem");
     }
 
     // --------------------- unsupported methods ----------------------------

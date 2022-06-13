@@ -71,14 +71,6 @@ public class FileSystemCatalogITCase extends KafkaTableTestBase {
         }
     }
 
-    private void innerTestWriteRead() throws Exception {
-        BlockingIterator<Row, Row> iterator =
-                BlockingIterator.of(tEnv.from("T").execute().collect());
-        tEnv.executeSql("INSERT INTO T VALUES ('1', '2', '3'), ('4', '5', '6')").await();
-        List<Row> result = iterator.collectAndClose(2);
-        assertThat(result).containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
-    }
-
     @Test
     public void testLogWriteReadWithVirtual() throws Exception {
         String topic = UUID.randomUUID().toString();
@@ -107,5 +99,13 @@ public class FileSystemCatalogITCase extends KafkaTableTestBase {
         } finally {
             deleteTopicIfExists(topic);
         }
+    }
+
+    private void innerTestWriteRead() throws Exception {
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(tEnv.from("T").execute().collect());
+        tEnv.executeSql("INSERT INTO T VALUES ('1', '2', '3'), ('4', '5', '6')").await();
+        List<Row> result = iterator.collectAndClose(2);
+        assertThat(result).containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
     }
 }

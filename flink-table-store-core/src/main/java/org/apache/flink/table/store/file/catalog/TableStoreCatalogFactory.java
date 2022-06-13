@@ -33,24 +33,26 @@ import static org.apache.flink.table.factories.FactoryUtil.PROPERTY_VERSION;
 /** Factory for {@link TableStoreCatalog}. */
 public class TableStoreCatalogFactory implements CatalogFactory {
 
+    public static final String IDENTIFIER = "table-store";
+
     public static final ConfigOption<String> DEFAULT_DATABASE =
             ConfigOptions.key("default-database").stringType().defaultValue("default");
 
-    public static final ConfigOption<String> ROOT_PATH =
-            ConfigOptions.key("root-path")
+    public static final ConfigOption<String> WAREHOUSE =
+            ConfigOptions.key("warehouse")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("The root path of catalog.");
+                    .withDescription("The warehouse root path of catalog.");
 
     @Override
     public String factoryIdentifier() {
-        return "table-store";
+        return IDENTIFIER;
     }
 
     @Override
     public Set<ConfigOption<?>> requiredOptions() {
         Set<ConfigOption<?>> options = new HashSet<>();
-        options.add(ROOT_PATH);
+        options.add(WAREHOUSE);
         return options;
     }
 
@@ -69,6 +71,6 @@ public class TableStoreCatalogFactory implements CatalogFactory {
         helper.validate();
         ReadableConfig options = helper.getOptions();
         return new FileSystemCatalog(
-                context.getName(), new Path(options.get(ROOT_PATH)), options.get(DEFAULT_DATABASE));
+                context.getName(), new Path(options.get(WAREHOUSE)), options.get(DEFAULT_DATABASE));
     }
 }

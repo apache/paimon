@@ -49,7 +49,10 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 
 import static org.apache.flink.table.catalog.GenericInMemoryCatalogFactoryOptions.DEFAULT_DATABASE;
+import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
+import static org.apache.flink.table.store.file.catalog.TableStoreCatalogFactory.IDENTIFIER;
+import static org.apache.flink.table.store.file.utils.FileUtils.safelyListFileStatus;
 
 /** A catalog implementation for {@link FileSystem}. */
 public class FileSystemCatalog extends TableStoreCatalog {
@@ -60,30 +63,29 @@ public class FileSystemCatalog extends TableStoreCatalog {
             new CatalogDatabaseImpl(Collections.emptyMap(), null);
 
     private final FileSystem fs;
-    private final Path root;
+    private final Path warehouse;
 
-    public FileSystemCatalog(String name, Path root) {
-        this(name, root, DEFAULT_DATABASE.defaultValue());
+    public FileSystemCatalog(String name, Path warehouse) {
+        this(name, warehouse, DEFAULT_DATABASE.defaultValue());
     }
 
-    public FileSystemCatalog(String name, Path root, String defaultDatabase) {
+    public FileSystemCatalog(String name, Path warehouse, String defaultDatabase) {
         super(name, defaultDatabase);
-        this.root = root;
-        this.fs = uncheck(root::getFileSystem);
+        this.warehouse = warehouse;
+        this.fs = uncheck(warehouse::getFileSystem);
         uncheck(() -> createDatabase(defaultDatabase, DUMMY_DATABASE, true));
     }
 
     @Override
     public Optional<Factory> getFactory() {
         return Optional.of(
-                FactoryUtil.discoverFactory(
-                        classLoader(), DynamicTableFactory.class, "table-store"));
+                FactoryUtil.discoverFactory(classLoader(), DynamicTableFactory.class, IDENTIFIER));
     }
 
     @Override
     public List<String> listDatabases() throws CatalogException {
         List<String> databases = new ArrayList<>();
-        for (FileStatus status : uncheck(() -> fs.listStatus(root))) {
+        for (FileStatus status : uncheck(() -> safelyListFileStatus(warehouse))) {
             Path path = status.getPath();
             if (status.isDir() && isDatabase(path)) {
                 databases.add(database(path));
@@ -152,7 +154,7 @@ public class FileSystemCatalog extends TableStoreCatalog {
         }
 
         List<String> tables = new ArrayList<>();
-        for (FileStatus status : uncheck(() -> fs.listStatus(databasePath(databaseName)))) {
+        for (FileStatus status : uncheck(() -> safelyListFileStatus(databasePath(databaseName)))) {
             if (status.isDir() && tableExists(status.getPath())) {
                 tables.add(status.getPath().getName());
             }
@@ -267,7 +269,7 @@ public class FileSystemCatalog extends TableStoreCatalog {
     }
 
     private Path databasePath(String database) {
-        return new Path(root, database + DB_SUFFIX);
+        return new Path(warehouse, database + DB_SUFFIX);
     }
 
     private Path tablePath(ObjectPath objectPath) {
@@ -280,9 +282,14 @@ public class FileSystemCatalog extends TableStoreCatalog {
                     "Only support ResolvedCatalogTable, but is: " + baseTable.getClass());
         }
         ResolvedCatalogTable table = (ResolvedCatalogTable) baseTable;
+        Map<String, String> options = table.getOptions();
+        if (options.containsKey(CONNECTOR.key())) {
+            throw new CatalogException(
+                    "Table Store Catalog only supports table store tables, not Flink connector: "
+                            + options.get(CONNECTOR.key()));
+        }
 
         // remove table path
-        Map<String, String> options = table.getOptions();
         String specific = options.remove(PATH.key());
         if (specific != null) {
             if (!tablePath.equals(new Path(specific))) {
