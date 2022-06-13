@@ -148,8 +148,9 @@ public class FileStoreWriteImpl implements FileStoreWrite {
             int bucket,
             ExecutorService compactExecutor,
             List<DataFileMeta> restoredFiles) {
+        Levels levels = new Levels(keyComparatorSupplier.get(), restoredFiles, options.numLevels);
         return new CompactWriter(
-                CompactUnit.fromFiles(getRestoreMaxLevel(restoredFiles) - 1, restoredFiles),
+                CompactUnit.fromLevelRuns(levels.numberOfLevels() - 1, levels.levelSortedRuns()),
                 createCompactManager(
                         partition,
                         bucket,
@@ -184,7 +185,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                                 options.sizeRatio,
                                 options.numSortedRunCompactionTrigger),
                         compactExecutor),
-                new Levels(keyComparator, restoreFiles, getRestoreMaxLevel(restoreFiles)),
+                new Levels(keyComparator, restoreFiles, options.numLevels),
                 maxSequenceNumber,
                 keyComparator,
                 mergeFunction.copy(),
@@ -213,12 +214,5 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                                 outputLevel);
         return new CompactManager(
                 compactExecutor, compactStrategy, keyComparator, options.targetFileSize, rewriter);
-    }
-
-    private int getRestoreMaxLevel(List<DataFileMeta> restoredFiles) {
-        // in case the num of levels is not specified explicitly
-        return Math.max(
-                options.numLevels,
-                restoredFiles.stream().mapToInt(DataFileMeta::level).max().orElse(-1) + 1);
     }
 }

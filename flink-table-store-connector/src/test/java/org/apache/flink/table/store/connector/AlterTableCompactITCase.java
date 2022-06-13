@@ -32,9 +32,9 @@ import org.apache.flink.types.RowKind;
 
 import org.junit.Test;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -75,28 +75,52 @@ public class AlterTableCompactITCase extends FileStoreTableITCase {
     }
 
     @Test
-    public void testNonPartitioned() throws IOException {
+    public void testNonPartitioned() {
         generator = new TestKeyValueGenerator(NON_PARTITIONED);
         Random random = new Random();
         innerTest("T0", random.nextInt(10) + 1, NON_PARTITIONED);
     }
 
     @Test
-    public void testSinglePartitioned() throws IOException {
+    public void testSinglePartitioned() {
         generator = new TestKeyValueGenerator(SINGLE_PARTITIONED);
         Random random = new Random();
         innerTest("T1", random.nextInt(10) + 1, SINGLE_PARTITIONED);
     }
 
     @Test
-    public void testMultiPartitioned() throws IOException {
+    public void testMultiPartitioned() {
         generator = new TestKeyValueGenerator(MULTI_PARTITIONED);
         Random random = new Random();
         innerTest("T2", random.nextInt(10) + 1, MULTI_PARTITIONED);
     }
 
-    private void innerTest(String tableName, int batchNum, TestKeyValueGenerator.GeneratorMode mode)
-            throws IOException {
+    @Test
+    public void testChangeNumOfSortedRunTrigger() {
+        // force auto-compaction and increase trigger
+        batchSql("ALTER TABLE T0 SET ('commit.force-compact' = 'true')");
+        batchSql("ALTER TABLE T0 SET ('num-sorted-run.compaction-trigger' = '5')");
+
+        // write duplicates
+        batchSql("INSERT INTO T0 VALUES(1, 1, 1)," + "(2, 2, 2), " + "(3, 3, 3), " + "(4, 4, 4)");
+        batchSql("INSERT INTO T0 VALUES(1, 1, 1)," + "(2, 2, 2), " + "(3, 3, 3), " + "(4, 4, 4)");
+        batchSql("INSERT INTO T0 VALUES(1, 1, 1)," + "(2, 2, 2), " + "(3, 3, 3), " + "(4, 4, 4)");
+        batchSql("INSERT INTO T0 VALUES(1, 1, 1)," + "(2, 2, 2), " + "(3, 3, 3), " + "(4, 4, 4)");
+        batchSql("INSERT INTO T0 VALUES(1, 1, 1)," + "(2, 2, 2), " + "(3, 3, 3), " + "(4, 4, 4)");
+        Snapshot snapshot = findLatestSnapshot("T0");
+        assertThat(snapshot.id()).isEqualTo(6);
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+
+        // decrease trigger
+        batchSql("ALTER TABLE T0 SET ('num-sorted-run.compaction-trigger' = '1')");
+        batchSql("ALTER TABLE T0 COMPACT");
+        assertThat(findLatestSnapshot("T0"))
+                .usingComparator(Comparator.comparing(Snapshot::id))
+                .isEqualTo(snapshot);
+    }
+
+    private void innerTest(
+            String tableName, int batchNum, TestKeyValueGenerator.GeneratorMode mode) {
         // increase trigger to avoid auto-compaction
         batchSql(
                 String.format(
@@ -171,8 +195,7 @@ public class AlterTableCompactITCase extends FileStoreTableITCase {
             String compactQuery,
             String selectQuery,
             long latestSnapshot,
-            List<Row> expectedData)
-            throws IOException {
+            List<Row> expectedData) {
         batchSql(compactQuery);
         Snapshot snapshot = findLatestSnapshot(tableName);
         assertThat(snapshot.id()).isEqualTo(latestSnapshot + 1);
@@ -284,7 +307,7 @@ public class AlterTableCompactITCase extends FileStoreTableITCase {
                                         tableName)));
     }
 
-    private Snapshot findLatestSnapshot(String tableName) throws IOException {
+    private Snapshot findLatestSnapshot(String tableName) {
         SnapshotManager snapshotManager = new SnapshotManager(getTableDirectory(tableName));
         return snapshotManager.snapshot(snapshotManager.latestSnapshotId());
     }
