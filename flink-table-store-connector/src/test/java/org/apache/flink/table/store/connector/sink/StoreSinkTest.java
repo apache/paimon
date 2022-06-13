@@ -57,6 +57,7 @@ import java.util.concurrent.Callable;
 
 import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link StoreSink}. */
 @RunWith(Parameterized.class)
@@ -217,6 +218,26 @@ public class StoreSinkTest {
                         null);
         StatefulPrecommittingSinkWriter<?> writer = sink.createWriter(initContext());
         assertThat(writer).isInstanceOf(StoreSinkCompactor.class);
+
+        assertThatThrownBy(
+                        () ->
+                                new StoreSink<>(
+                                                identifier,
+                                                fileStore,
+                                                WriteMode.APPEND_ONLY,
+                                                partitions,
+                                                primaryKeys,
+                                                primaryKeys,
+                                                2,
+                                                true,
+                                                null,
+                                                () -> lock,
+                                                null,
+                                                null)
+                                        .createWriter(initContext()))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(
+                        "ALTER TABLE COMPACT is not yet supported for append only table.");
     }
 
     private void writeAndAssert(StoreSink<?, ?> sink) throws Exception {
