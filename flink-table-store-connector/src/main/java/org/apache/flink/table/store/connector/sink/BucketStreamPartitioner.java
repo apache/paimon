@@ -23,39 +23,26 @@ import org.apache.flink.runtime.plugable.SerializationDelegate;
 import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
-import org.apache.flink.table.types.logical.RowType;
 
 /** A {@link StreamPartitioner} to partition records by bucket. */
 public class BucketStreamPartitioner extends StreamPartitioner<RowData> {
 
     private final int numBucket;
-    private final RowType inputType;
-    private final int[] partitions;
-    private final int[] primaryKeys;
-    private final int[] logPrimaryKeys;
+    private final Schema schema;
 
     private transient SinkRecordConverter recordConverter;
 
-    public BucketStreamPartitioner(
-            int numBucket,
-            RowType inputType,
-            int[] partitions,
-            int[] primaryKeys,
-            final int[] logPrimaryKeys) {
+    public BucketStreamPartitioner(int numBucket, Schema schema) {
         this.numBucket = numBucket;
-        this.inputType = inputType;
-        this.partitions = partitions;
-        this.primaryKeys = primaryKeys;
-        this.logPrimaryKeys = logPrimaryKeys;
+        this.schema = schema;
     }
 
     @Override
     public void setup(int numberOfChannels) {
         super.setup(numberOfChannels);
-        this.recordConverter =
-                new SinkRecordConverter(
-                        numBucket, inputType, partitions, primaryKeys, logPrimaryKeys);
+        this.recordConverter = new SinkRecordConverter(numBucket, schema);
     }
 
     @Override

@@ -25,13 +25,12 @@ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.file.operation.FileStoreRead;
-import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.source.TableRead;
+import org.apache.flink.table.store.table.source.TableScan;
 
 import javax.annotation.Nullable;
 
@@ -47,11 +46,7 @@ public class FileStoreSource
 
     private static final long serialVersionUID = 1L;
 
-    private final FileStore fileStore;
-
-    private final WriteMode writeMode;
-
-    private final boolean valueCountMode;
+    private final FileStoreTable table;
 
     private final boolean isContinuous;
 
@@ -61,29 +56,21 @@ public class FileStoreSource
 
     @Nullable private final int[][] projectedFields;
 
-    @Nullable private final Predicate partitionPredicate;
-
-    @Nullable private final Predicate fieldPredicate;
+    @Nullable private final Predicate predicate;
 
     public FileStoreSource(
-            FileStore fileStore,
-            WriteMode writeMode,
-            boolean valueCountMode,
+            FileStoreTable table,
             boolean isContinuous,
             long discoveryInterval,
             boolean latestContinuous,
             @Nullable int[][] projectedFields,
-            @Nullable Predicate partitionPredicate,
-            @Nullable Predicate fieldPredicate) {
-        this.fileStore = fileStore;
-        this.writeMode = writeMode;
-        this.valueCountMode = valueCountMode;
+            @Nullable Predicate predicate) {
+        this.table = table;
         this.isContinuous = isContinuous;
         this.discoveryInterval = discoveryInterval;
         this.latestContinuous = latestContinuous;
         this.projectedFields = projectedFields;
-        this.partitionPredicate = partitionPredicate;
-        this.fieldPredicate = fieldPredicate;
+        this.predicate = predicate;
     }
 
     @Override
@@ -93,28 +80,11 @@ public class FileStoreSource
 
     @Override
     public SourceReader<RowData, FileStoreSourceSplit> createReader(SourceReaderContext context) {
-        FileStoreRead read = fileStore.newRead();
-
-        if (isContinuous) {
-            read.withDropDelete(false);
-        }
-
-        int[][] valueCountModeProjects = null;
+        TableRead read = table.newRead().withIncremental(isContinuous);
         if (projectedFields != null) {
-            if (valueCountMode) {
-                // push projection to file store for better performance under continuous read mode,
-                // because the merge cannot be performed anyway
-                if (isContinuous) {
-                    read.withKeyProjection(projectedFields);
-                } else {
-                    valueCountModeProjects = projectedFields;
-                }
-            } else {
-                read.withValueProjection(projectedFields);
-            }
+            read.withProjection(projectedFields);
         }
-
-        return new FileStoreSourceReader(context, read, valueCountMode, valueCountModeProjects);
+        return new FileStoreSourceReader(context, read);
     }
 
     @Override
@@ -127,18 +97,10 @@ public class FileStoreSource
     public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> restoreEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
-        SnapshotManager snapshotManager = fileStore.snapshotManager();
-        FileStoreScan scan = fileStore.newScan();
-
-        if (partitionPredicate != null) {
-            scan.withPartitionFilter(partitionPredicate);
-        }
-        if (fieldPredicate != null) {
-            if (valueCountMode) {
-                scan.withKeyFilter(fieldPredicate);
-            } else {
-                scan.withValueFilter(fieldPredicate);
-            }
+        SnapshotManager snapshotManager = table.snapshotManager();
+        TableScan scan = table.newScan();
+        if (predicate != null) {
+            scan.withFilter(predicate);
         }
 
         Long snapshotId;
@@ -152,8 +114,8 @@ public class FileStoreSource
                 snapshotId = snapshotManager.latestSnapshotId();
                 splits = new ArrayList<>();
             } else {
-                FileStoreScan.Plan plan = scan.plan();
-                snapshotId = plan.snapshotId();
+                TableScan.Plan plan = scan.plan();
+                snapshotId = plan.snapshotId;
                 splits = new FileStoreSourceSplitGenerator().createSplits(plan);
             }
         } else {

@@ -25,6 +25,7 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.data.DataFileMeta;
@@ -35,8 +36,12 @@ import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreReadImpl;
 import org.apache.flink.table.store.file.operation.FileStoreWriteImpl;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.table.source.TableRead;
+import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
+import org.apache.flink.table.store.table.source.ValueCountRowDataRecordIterator;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -46,11 +51,12 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Function;
 
 import static java.util.Collections.singletonList;
 
 /** Util class to read and write data for source tests. */
-public class TestDataReadWrite {
+public class TestChangelogDataReadWrite {
 
     private static final RowType KEY_TYPE =
             new RowType(singletonList(new RowType.RowField("k", new BigIntType())));
@@ -64,7 +70,7 @@ public class TestDataReadWrite {
     private final SnapshotManager snapshotManager;
     private final ExecutorService service;
 
-    public TestDataReadWrite(String root, ExecutorService service) {
+    public TestChangelogDataReadWrite(String root, ExecutorService service) {
         this.avro =
                 FileFormat.fromIdentifier(
                         Thread.currentThread().getContextClassLoader(),
@@ -80,15 +86,44 @@ public class TestDataReadWrite {
         this.service = service;
     }
 
-    public FileStoreRead createRead() {
-        return new FileStoreReadImpl(
-                WriteMode.CHANGE_LOG,
-                KEY_TYPE,
-                VALUE_TYPE,
-                COMPARATOR,
-                new DeduplicateMergeFunction(),
-                avro,
-                pathFactory);
+    public TableRead createReadWithKey() {
+        return createRead(ValueContentRowDataRecordIterator::new);
+    }
+
+    public TableRead createReadWithValueCount() {
+        return createRead(it -> new ValueCountRowDataRecordIterator(it, null));
+    }
+
+    private TableRead createRead(
+            Function<RecordReader.RecordIterator<KeyValue>, RecordReader.RecordIterator<RowData>>
+                    rowDataIteratorCreator) {
+        FileStoreRead read =
+                new FileStoreReadImpl(
+                        WriteMode.CHANGE_LOG,
+                        KEY_TYPE,
+                        VALUE_TYPE,
+                        COMPARATOR,
+                        new DeduplicateMergeFunction(),
+                        avro,
+                        pathFactory);
+        return new TableRead(read) {
+            @Override
+            public TableRead withProjection(int[][] projection) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public TableRead withIncremental(boolean isIncremental) {
+                read.withDropDelete(!isIncremental);
+                return this;
+            }
+
+            @Override
+            protected RecordReader.RecordIterator<RowData> rowDataRecordIteratorFromKv(
+                    RecordReader.RecordIterator<KeyValue> kvRecordIterator) {
+                return rowDataIteratorCreator.apply(kvRecordIterator);
+            }
+        };
     }
 
     public List<DataFileMeta> writeFiles(

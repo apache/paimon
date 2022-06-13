@@ -21,6 +21,7 @@ package org.apache.flink.table.store.table.sink;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.FileStoreExpire;
+import org.apache.flink.table.store.file.operation.Lock;
 
 import javax.annotation.Nullable;
 
@@ -50,8 +51,13 @@ public class TableCommit {
         return this;
     }
 
-    public List<ManifestCommittable> filterRecoveredCommittables(
-            List<ManifestCommittable> committables) {
+    public TableCommit withLock(Lock lock) {
+        commit.withLock(lock);
+        expire.withLock(lock);
+        return this;
+    }
+
+    public List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committables) {
         return commit.filterCommitted(committables);
     }
 

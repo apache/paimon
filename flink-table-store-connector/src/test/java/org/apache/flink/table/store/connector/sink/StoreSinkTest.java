@@ -22,6 +22,7 @@ import org.apache.flink.api.common.operators.MailboxExecutor;
 import org.apache.flink.api.common.operators.ProcessingTimeService;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.connector.sink2.Sink;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
 import org.apache.flink.table.catalog.CatalogLock;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -30,18 +31,23 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.connector.StatefulPrecommittingSinkWriter;
 import org.apache.flink.table.store.connector.sink.TestFileStore.TestRecordWriter;
-import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
+import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.UserCodeClassLoader;
 
 import org.junit.Assume;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
@@ -62,6 +68,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @RunWith(Parameterized.class)
 public class StoreSinkTest {
 
+    @Rule public TemporaryFolder tempFolder = new TemporaryFolder();
+
     private final boolean hasPk;
 
     private final boolean partitioned;
@@ -71,11 +79,8 @@ public class StoreSinkTest {
 
     private final TestLock lock = new TestLock();
 
-    private final RowType rowType = RowType.of(new IntType(), new IntType(), new IntType());
-
     private TestFileStore fileStore;
-    private int[] primaryKeys;
-    private int[] partitions;
+    private TestFileStoreTable table;
 
     public StoreSinkTest(boolean hasPk, boolean partitioned) {
         this.hasPk = hasPk;
@@ -83,18 +88,33 @@ public class StoreSinkTest {
     }
 
     @Before
-    public void before() {
-        primaryKeys = hasPk ? new int[] {1} : new int[0];
-        partitions = partitioned ? new int[] {0} : new int[0];
-        RowType keyType = hasPk ? RowType.of(new IntType()) : rowType;
+    public void before() throws Exception {
+        Schema schema =
+                new SchemaManager(new Path(tempFolder.newFolder().toURI().toString()))
+                        .commitNewVersion(
+                                new UpdateSchema(
+                                        RowType.of(
+                                                new LogicalType[] {
+                                                    new IntType(), new IntType(), new IntType()
+                                                },
+                                                new String[] {"a", "b", "c"}),
+                                        partitioned
+                                                ? Collections.singletonList("a")
+                                                : Collections.emptyList(),
+                                        hasPk ? Arrays.asList("a", "b") : Collections.emptyList(),
+                                        new HashMap<>(),
+                                        ""));
+
+        RowType keyType = hasPk ? schema.logicalTrimmedPrimaryKeysType() : schema.logicalRowType();
         RowType valueType =
                 hasPk
-                        ? rowType
+                        ? schema.logicalRowType()
                         : new RowType(
                                 Collections.singletonList(
                                         new RowType.RowField("COUNT", new BigIntType(false))));
-        RowType partitionType = partitioned ? RowType.of(new IntType()) : RowType.of();
+        RowType partitionType = schema.logicalPartitionType();
         fileStore = new TestFileStore(hasPk, keyType, valueType, partitionType);
+        table = new TestFileStoreTable(fileStore, schema);
     }
 
     @Parameterized.Parameters(name = "hasPk-{0}, partitioned-{1}")
@@ -128,19 +148,7 @@ public class StoreSinkTest {
     public void testNoKeyChangelogs() throws Exception {
         Assume.assumeTrue(!hasPk && partitioned);
         StoreSink<?, ?> sink =
-                new StoreSink<>(
-                        identifier,
-                        fileStore,
-                        WriteMode.CHANGE_LOG,
-                        partitions,
-                        primaryKeys,
-                        primaryKeys,
-                        2,
-                        false,
-                        null,
-                        () -> lock,
-                        new HashMap<>(),
-                        null);
+                new StoreSink<>(identifier, table, false, null, () -> lock, new HashMap<>(), null);
         writeAndCommit(
                 sink,
                 GenericRowData.ofKind(RowKind.INSERT, 0, 0, 1),
@@ -202,19 +210,7 @@ public class StoreSinkTest {
     @Test
     public void testCreateCompactor() throws Exception {
         StoreSink<?, ?> sink =
-                new StoreSink<>(
-                        identifier,
-                        fileStore,
-                        WriteMode.CHANGE_LOG,
-                        partitions,
-                        primaryKeys,
-                        primaryKeys,
-                        2,
-                        true,
-                        null,
-                        () -> lock,
-                        null,
-                        null);
+                new StoreSink<>(identifier, table, true, null, () -> lock, null, null);
         StatefulPrecommittingSinkWriter<?> writer = sink.createWriter(initContext());
         assertThat(writer).isInstanceOf(StoreSinkCompactor.class);
     }
@@ -284,18 +280,7 @@ public class StoreSinkTest {
 
     private StoreSink<?, ?> newSink(@Nullable Map<String, String> overwritePartition) {
         return new StoreSink<>(
-                identifier,
-                fileStore,
-                WriteMode.CHANGE_LOG,
-                partitions,
-                primaryKeys,
-                primaryKeys,
-                2,
-                false,
-                null,
-                () -> lock,
-                overwritePartition,
-                null);
+                identifier, table, false, null, () -> lock, overwritePartition, null);
     }
 
     private class TestLock implements CatalogLock {

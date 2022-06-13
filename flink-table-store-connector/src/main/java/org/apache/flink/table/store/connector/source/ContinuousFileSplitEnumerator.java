@@ -22,8 +22,8 @@ import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.table.source.TableScan;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,7 +54,7 @@ public class ContinuousFileSplitEnumerator
 
     private final SplitEnumeratorContext<FileStoreSourceSplit> context;
 
-    private final FileStoreScan scan;
+    private final TableScan scan;
 
     private final SnapshotManager snapshotManager;
 
@@ -72,7 +72,7 @@ public class ContinuousFileSplitEnumerator
 
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
-            FileStoreScan scan,
+            TableScan scan,
             SnapshotManager snapshotManager,
             Collection<FileStoreSourceSplit> remainSplits,
             long currentSnapshotId,

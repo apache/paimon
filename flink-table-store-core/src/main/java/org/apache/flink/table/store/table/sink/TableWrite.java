@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.table.sink;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
@@ -58,10 +59,15 @@ public abstract class TableWrite {
         return this;
     }
 
-    public void write(RowData rowData) throws Exception {
+    public SinkRecordConverter recordConverter() {
+        return recordConverter;
+    }
+
+    public SinkRecord write(RowData rowData) throws Exception {
         SinkRecord record = recordConverter.convert(rowData);
         RecordWriter writer = getWriter(record.partition(), record.bucket());
         writeSinkRecord(record, writer);
+        return record;
     }
 
     public List<FileCommittable> prepareCommit() throws Exception {
@@ -112,6 +118,11 @@ public abstract class TableWrite {
             }
         }
         writers.clear();
+    }
+
+    @VisibleForTesting
+    public Map<BinaryRowData, Map<Integer, RecordWriter>> writers() {
+        return writers;
     }
 
     protected abstract void writeSinkRecord(SinkRecord record, RecordWriter writer)

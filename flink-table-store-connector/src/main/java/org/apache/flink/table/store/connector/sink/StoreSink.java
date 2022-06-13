@@ -29,16 +29,14 @@ import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.connector.StatefulPrecommittingSinkWriter;
 import org.apache.flink.table.store.connector.sink.global.GlobalCommittingSink;
-import org.apache.flink.table.store.file.FileStore;
-import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.log.LogInitContext;
 import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.log.LogWriteCallback;
+import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.SinkRecord;
-import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 
 import javax.annotation.Nullable;
 
@@ -59,17 +57,7 @@ public class StoreSink<WriterStateT, LogCommT>
 
     private final ObjectIdentifier tableIdentifier;
 
-    private final FileStore fileStore;
-
-    private final WriteMode writeMode;
-
-    private final int[] partitions;
-
-    private final int[] primaryKeys;
-
-    private final int[] logPrimaryKeys;
-
-    private final int numBucket;
+    private final FileStoreTable table;
 
     private final boolean compactionTask;
 
@@ -83,24 +71,14 @@ public class StoreSink<WriterStateT, LogCommT>
 
     public StoreSink(
             ObjectIdentifier tableIdentifier,
-            FileStore fileStore,
-            WriteMode writeMode,
-            int[] partitions,
-            int[] primaryKeys,
-            int[] logPrimaryKeys,
-            int numBucket,
+            FileStoreTable table,
             boolean compactionTask,
             @Nullable Map<String, String> compactPartitionSpec,
             @Nullable CatalogLock.Factory lockFactory,
             @Nullable Map<String, String> overwritePartition,
             @Nullable LogSinkProvider logSinkProvider) {
         this.tableIdentifier = tableIdentifier;
-        this.fileStore = fileStore;
-        this.writeMode = writeMode;
-        this.partitions = partitions;
-        this.primaryKeys = primaryKeys;
-        this.logPrimaryKeys = logPrimaryKeys;
-        this.numBucket = numBucket;
+        this.table = table;
         this.compactionTask = compactionTask;
         this.compactPartitionSpec = compactPartitionSpec;
         this.lockFactory = lockFactory;
@@ -123,7 +101,7 @@ public class StoreSink<WriterStateT, LogCommT>
                     new StoreSinkCompactor(
                             initContext.getSubtaskId(),
                             initContext.getNumberOfParallelSubtasks(),
-                            fileStore,
+                            table.store(),
                             compactPartitionSpec == null
                                     ? Collections.emptyMap()
                                     : compactPartitionSpec);
@@ -142,17 +120,7 @@ public class StoreSink<WriterStateT, LogCommT>
                                     .restoreWriter(logInitContext, states);
         }
         return new StoreSinkWriter<>(
-                fileStore.newWrite(),
-                new SinkRecordConverter(
-                        numBucket,
-                        primaryKeys.length > 0 ? fileStore.valueType() : fileStore.keyType(),
-                        partitions,
-                        primaryKeys,
-                        logPrimaryKeys),
-                writeMode,
-                overwritePartition != null,
-                logWriter,
-                logCallback);
+                table.newWrite().withOverwrite(overwritePartition != null), logWriter, logCallback);
     }
 
     @Override
@@ -219,10 +187,8 @@ public class StoreSink<WriterStateT, LogCommT>
         }
 
         return new StoreGlobalCommitter(
-                fileStore.newCommit().withLock(lock),
-                fileStore.newExpire().withLock(lock),
-                catalogLock,
-                overwritePartition);
+                table.newCommit().withOverwritePartition(overwritePartition).withLock(lock),
+                catalogLock);
     }
 
     @SuppressWarnings("unchecked")
