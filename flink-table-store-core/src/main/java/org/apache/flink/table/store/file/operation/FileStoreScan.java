@@ -59,7 +59,10 @@ public interface FileStoreScan {
     /** Result plan of this scan. */
     interface Plan {
 
-        /** Snapshot id of this plan, return null if manifest list is specified. */
+        /**
+         * Snapshot id of this plan, return null if the table is empty or the manifest list is
+         * specified.
+         */
         @Nullable
         Long snapshotId();
 
