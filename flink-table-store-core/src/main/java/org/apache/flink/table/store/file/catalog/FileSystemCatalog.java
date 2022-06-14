@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.catalog;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
@@ -272,7 +273,8 @@ public class FileSystemCatalog extends TableStoreCatalog {
         return new Path(warehouse, database + DB_SUFFIX);
     }
 
-    private Path tablePath(ObjectPath objectPath) {
+    @VisibleForTesting
+    Path tablePath(ObjectPath objectPath) {
         return new Path(databasePath(objectPath.getDatabaseName()), objectPath.getObjectName());
     }
 
