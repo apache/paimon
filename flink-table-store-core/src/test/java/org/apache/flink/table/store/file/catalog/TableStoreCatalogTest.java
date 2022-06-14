@@ -18,13 +18,16 @@
 
 package org.apache.flink.table.store.file.catalog;
 
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.Schema;
+import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogDatabase;
 import org.apache.flink.table.catalog.CatalogDatabaseImpl;
 import org.apache.flink.table.catalog.CatalogFunction;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.CatalogTestBase;
 import org.apache.flink.table.catalog.CatalogTestUtil;
+import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.catalog.exceptions.CatalogException;
@@ -35,6 +38,8 @@ import org.junit.Test;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -44,6 +49,24 @@ public abstract class TableStoreCatalogTest extends CatalogTestBase {
     @Override
     protected boolean isGeneric() {
         return false;
+    }
+
+    @Override
+    protected Map<String, String> getBatchTableProperties() {
+        return new HashMap<String, String>() {
+            {
+                this.put("is_streaming", "false");
+            }
+        };
+    }
+
+    @Override
+    protected Map<String, String> getStreamingTableProperties() {
+        return new HashMap<String, String>() {
+            {
+                this.put("is_streaming", "true");
+            }
+        };
     }
 
     @Override
@@ -88,11 +111,11 @@ public abstract class TableStoreCatalogTest extends CatalogTestBase {
         catalog.createDatabase("db1", this.createDb(), false);
         CatalogTable table = this.createTable();
         catalog.createTable(this.path1, table, false);
-        CatalogTestUtil.checkEquals(table, (CatalogTable) catalog.getTable(this.path1));
+        checkEquals(path1, table, (CatalogTable) catalog.getTable(this.path1));
         CatalogTable newTable = this.createAnotherTable();
         catalog.alterTable(this.path1, newTable, false);
         Assert.assertNotEquals(table, catalog.getTable(this.path1));
-        CatalogTestUtil.checkEquals(newTable, (CatalogTable) catalog.getTable(this.path1));
+        checkEquals(path1, newTable, (CatalogTable) catalog.getTable(this.path1));
         catalog.dropTable(this.path1, false);
 
         // Not support views
@@ -127,6 +150,68 @@ public abstract class TableStoreCatalogTest extends CatalogTestBase {
                 .isInstanceOf(CatalogException.class)
                 .hasMessageContaining(
                         "Table Store Catalog only supports table store tables, not Flink connector: filesystem");
+    }
+
+    @Test
+    public void testCreateTable_Streaming() throws Exception {
+        catalog.createDatabase("db1", createDb(), false);
+        CatalogTable table = createStreamingTable();
+        catalog.createTable(path1, table, false);
+        checkEquals(path1, table, (CatalogTable) catalog.getTable(path1));
+    }
+
+    @Test
+    public void testAlterPartitionedTable() throws Exception {
+        catalog.createDatabase("db1", this.createDb(), false);
+        CatalogTable table = this.createPartitionedTable();
+        catalog.createTable(this.path1, table, false);
+        checkEquals(path1, table, (CatalogTable) catalog.getTable(this.path1));
+        CatalogTable newTable = this.createAnotherPartitionedTable();
+        catalog.alterTable(this.path1, newTable, false);
+        checkEquals(path1, newTable, (CatalogTable) catalog.getTable(this.path1));
+    }
+
+    @Test
+    public void testCreateTable_Batch() throws Exception {
+        catalog.createDatabase("db1", this.createDb(), false);
+        CatalogTable table = this.createTable();
+        catalog.createTable(this.path1, table, false);
+        CatalogBaseTable tableCreated = catalog.getTable(this.path1);
+        checkEquals(path1, table, (CatalogTable) tableCreated);
+        Assert.assertEquals("test comment", tableCreated.getDescription().get());
+        List<String> tables = catalog.listTables("db1");
+        Assert.assertEquals(1L, tables.size());
+        Assert.assertEquals(this.path1.getObjectName(), tables.get(0));
+        catalog.dropTable(this.path1, false);
+    }
+
+    @Test
+    public void testCreateTable_TableAlreadyExist_ignored() throws Exception {
+        catalog.createDatabase("db1", this.createDb(), false);
+        CatalogTable table = this.createTable();
+        catalog.createTable(this.path1, table, false);
+        checkEquals(path1, table, (CatalogTable) catalog.getTable(this.path1));
+        catalog.createTable(this.path1, this.createAnotherTable(), true);
+        checkEquals(path1, table, (CatalogTable) catalog.getTable(this.path1));
+    }
+
+    @Test
+    public void testCreatePartitionedTable_Batch() throws Exception {
+        catalog.createDatabase("db1", this.createDb(), false);
+        CatalogTable table = this.createPartitionedTable();
+        catalog.createTable(this.path1, table, false);
+        checkEquals(path1, table, (CatalogTable) catalog.getTable(this.path1));
+        List<String> tables = catalog.listTables("db1");
+        Assert.assertEquals(1L, tables.size());
+        Assert.assertEquals(this.path1.getObjectName(), tables.get(0));
+    }
+
+    private void checkEquals(ObjectPath path, CatalogTable t1, CatalogTable t2) {
+        Path tablePath = ((FileSystemCatalog) catalog).tablePath(path);
+        Map<String, String> options = new HashMap<>(t1.getOptions());
+        options.put("path", tablePath.toString());
+        t1 = ((ResolvedCatalogTable) t1).copy(options);
+        CatalogTestUtil.checkEquals(t1, t2);
     }
 
     // --------------------- unsupported methods ----------------------------
