@@ -52,7 +52,7 @@ public class MergeTreeReader implements RecordReader<KeyValue> {
             throws IOException {
         this.dropDelete = dropDelete;
 
-        List<ReaderSupplier> readers = new ArrayList<>();
+        List<ReaderSupplier<KeyValue>> readers = new ArrayList<>();
         for (List<SortedRun> section : sections) {
             readers.add(
                     () ->
@@ -117,7 +117,7 @@ public class MergeTreeReader implements RecordReader<KeyValue> {
 
     public static RecordReader<KeyValue> readerForRun(SortedRun run, DataFileReader dataFileReader)
             throws IOException {
-        List<ReaderSupplier> readers = new ArrayList<>();
+        List<ReaderSupplier<KeyValue>> readers = new ArrayList<>();
         for (DataFileMeta file : run.files()) {
             readers.add(() -> dataFileReader.read(file.fileName()));
         }

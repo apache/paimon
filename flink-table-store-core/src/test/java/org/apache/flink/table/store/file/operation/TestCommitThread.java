@@ -49,7 +49,7 @@ public class TestCommitThread extends Thread {
     private final Map<BinaryRowData, List<KeyValue>> result;
     private final Map<BinaryRowData, MergeTreeWriter> writers;
 
-    private final FileStoreWrite write;
+    private final FileStoreWrite<KeyValue> write;
     private final FileStoreCommit commit;
 
     public TestCommitThread(
@@ -150,7 +150,7 @@ public class TestCommitThread extends Thread {
         MergeTreeWriter writer =
                 writers.compute(partition, (p, w) -> w == null ? createWriter(p, false) : w);
         for (KeyValue kv : changes) {
-            writer.write(kv.valueKind(), kv.key(), kv.value());
+            writer.write(kv);
         }
     }
 
@@ -169,7 +169,7 @@ public class TestCommitThread extends Thread {
         MergeTreeWriter writer = createWriter(partition, true);
         writers.put(partition, writer);
         for (KeyValue kv : changes) {
-            writer.write(kv.valueKind(), kv.key(), kv.value());
+            writer.write(kv);
         }
 
         return partition;

@@ -34,7 +34,6 @@ import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -45,8 +44,6 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link AppendOnlyFileStoreTable}. */
-// TODO enable this test class after append only file store with avro format is fixed
-@Disabled
 public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
 
     @TempDir java.nio.file.Path tempDir;
@@ -59,10 +56,10 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         List<Split> splits = table.newScan().plan().splits;
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
-                .isEqualTo(
+                .hasSameElementsAs(
                         Arrays.asList("1|10|100", "1|11|101", "1|12|102", "1|11|101", "1|12|102"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
-                .isEqualTo(Arrays.asList("2|20|200", "2|21|201", "2|22|202", "2|21|201"));
+                .hasSameElementsAs(Arrays.asList("2|20|200", "2|21|201", "2|22|202", "2|21|201"));
     }
 
     @Test
@@ -73,9 +70,9 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         List<Split> splits = table.newScan().plan().splits;
         TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_PROJECTED_ROW_TO_STRING))
-                .isEqualTo(Arrays.asList("100|10", "101|11", "102|12", "101|11", "102|12"));
+                .hasSameElementsAs(Arrays.asList("100|10", "101|11", "102|12", "101|11", "102|12"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_PROJECTED_ROW_TO_STRING))
-                .isEqualTo(Arrays.asList("200|20", "201|21", "202|22", "201|21"));
+                .hasSameElementsAs(Arrays.asList("200|20", "201|21", "202|22", "201|21"));
     }
 
     @Test
@@ -90,7 +87,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
-                .isEqualTo(
+                .hasSameElementsAs(
                         Arrays.asList(
                                 "2|21|201",
                                 // this record is in the same file with the first "2|21|201"
@@ -108,7 +105,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("+1|11|101", "+1|12|102"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
-                .hasSameElementsAs(Collections.singletonList("+2|21|201"));
+                .isEqualTo(Collections.singletonList("+2|21|201"));
     }
 
     @Test
@@ -119,9 +116,9 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         List<Split> splits = table.newScan().withIncremental(true).plan().splits;
         TableRead read = table.newRead().withIncremental(true).withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
-                .hasSameElementsAs(Arrays.asList("+101|11", "+102|12"));
+                .isEqualTo(Arrays.asList("+101|11", "+102|12"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_PROJECTED_ROW_TO_STRING))
-                .hasSameElementsAs(Collections.singletonList("+201|21"));
+                .isEqualTo(Collections.singletonList("+201|21"));
     }
 
     @Test

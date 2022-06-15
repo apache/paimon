@@ -18,127 +18,23 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.operation.FileStoreWrite;
-import org.apache.flink.table.store.file.writer.RecordWriter;
-import org.apache.flink.util.concurrent.ExecutorThreadFactory;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
-/** An abstraction layer above {@link FileStoreWrite} to provide {@link RowData} writing. */
-public abstract class TableWrite {
+/**
+ * An abstraction layer above {@link org.apache.flink.table.store.file.operation.FileStoreWrite} to
+ * provide {@link RowData} writing.
+ */
+public interface TableWrite {
 
-    private final FileStoreWrite write;
-    private final SinkRecordConverter recordConverter;
+    TableWrite withOverwrite(boolean overwrite);
 
-    private final Map<BinaryRowData, Map<Integer, RecordWriter>> writers;
-    private final ExecutorService compactExecutor;
+    SinkRecordConverter recordConverter();
 
-    private boolean overwrite = false;
+    SinkRecord write(RowData rowData) throws Exception;
 
-    protected TableWrite(FileStoreWrite write, SinkRecordConverter recordConverter) {
-        this.write = write;
-        this.recordConverter = recordConverter;
+    List<FileCommittable> prepareCommit() throws Exception;
 
-        this.writers = new HashMap<>();
-        this.compactExecutor =
-                Executors.newSingleThreadScheduledExecutor(
-                        new ExecutorThreadFactory("compaction-thread"));
-    }
-
-    public TableWrite withOverwrite(boolean overwrite) {
-        this.overwrite = overwrite;
-        return this;
-    }
-
-    public SinkRecordConverter recordConverter() {
-        return recordConverter;
-    }
-
-    public SinkRecord write(RowData rowData) throws Exception {
-        SinkRecord record = recordConverter.convert(rowData);
-        RecordWriter writer = getWriter(record.partition(), record.bucket());
-        writeSinkRecord(record, writer);
-        return record;
-    }
-
-    public List<FileCommittable> prepareCommit() throws Exception {
-        List<FileCommittable> result = new ArrayList<>();
-
-        Iterator<Map.Entry<BinaryRowData, Map<Integer, RecordWriter>>> partIter =
-                writers.entrySet().iterator();
-        while (partIter.hasNext()) {
-            Map.Entry<BinaryRowData, Map<Integer, RecordWriter>> partEntry = partIter.next();
-            BinaryRowData partition = partEntry.getKey();
-            Iterator<Map.Entry<Integer, RecordWriter>> bucketIter =
-                    partEntry.getValue().entrySet().iterator();
-            while (bucketIter.hasNext()) {
-                Map.Entry<Integer, RecordWriter> entry = bucketIter.next();
-                int bucket = entry.getKey();
-                RecordWriter writer = entry.getValue();
-                FileCommittable committable =
-                        new FileCommittable(partition, bucket, writer.prepareCommit());
-                result.add(committable);
-
-                // clear if no update
-                // we need a mechanism to clear writers, otherwise there will be more and more
-                // such as yesterday's partition that no longer needs to be written.
-                if (committable.increment().newFiles().isEmpty()) {
-                    closeWriter(writer);
-                    bucketIter.remove();
-                }
-            }
-
-            if (partEntry.getValue().isEmpty()) {
-                partIter.remove();
-            }
-        }
-
-        return result;
-    }
-
-    private void closeWriter(RecordWriter writer) throws Exception {
-        writer.sync();
-        writer.close();
-    }
-
-    public void close() throws Exception {
-        compactExecutor.shutdownNow();
-        for (Map<Integer, RecordWriter> bucketWriters : writers.values()) {
-            for (RecordWriter writer : bucketWriters.values()) {
-                closeWriter(writer);
-            }
-        }
-        writers.clear();
-    }
-
-    @VisibleForTesting
-    public Map<BinaryRowData, Map<Integer, RecordWriter>> writers() {
-        return writers;
-    }
-
-    protected abstract void writeSinkRecord(SinkRecord record, RecordWriter writer)
-            throws Exception;
-
-    private RecordWriter getWriter(BinaryRowData partition, int bucket) {
-        Map<Integer, RecordWriter> buckets = writers.get(partition);
-        if (buckets == null) {
-            buckets = new HashMap<>();
-            writers.put(partition.copy(), buckets);
-        }
-        return buckets.computeIfAbsent(
-                bucket,
-                k ->
-                        overwrite
-                                ? write.createEmptyWriter(partition.copy(), bucket, compactExecutor)
-                                : write.createWriter(partition.copy(), bucket, compactExecutor));
-    }
+    void close() throws Exception;
 }

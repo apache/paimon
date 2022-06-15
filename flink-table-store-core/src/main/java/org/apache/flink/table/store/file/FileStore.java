@@ -28,24 +28,24 @@ import org.apache.flink.table.types.logical.RowType;
 
 import java.io.Serializable;
 
-/** File store interface. */
-public interface FileStore extends Serializable {
+/**
+ * File store interface.
+ *
+ * @param <T> type of record to read and write.
+ */
+public interface FileStore<T> extends Serializable {
 
-    FileStoreWrite newWrite();
+    SnapshotManager snapshotManager();
 
-    FileStoreRead newRead();
+    RowType partitionType();
+
+    FileStoreScan newScan();
+
+    FileStoreRead<T> newRead();
+
+    FileStoreWrite<T> newWrite();
 
     FileStoreCommit newCommit();
 
     FileStoreExpire newExpire();
-
-    FileStoreScan newScan();
-
-    SnapshotManager snapshotManager();
-
-    RowType keyType();
-
-    RowType valueType();
-
-    RowType partitionType();
 }

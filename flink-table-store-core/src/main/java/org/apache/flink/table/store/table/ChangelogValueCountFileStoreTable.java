@@ -20,21 +20,24 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.KeyValueFileStore;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
+import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.table.sink.AbstractTableWrite;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.store.table.source.ValueCountRowDataRecordIterator;
@@ -47,7 +50,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
-    private final FileStoreImpl store;
+    private final KeyValueFileStore store;
 
     ChangelogValueCountFileStoreTable(
             String name, SchemaManager schemaManager, Schema schema, String user) {
@@ -57,11 +60,10 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                         new LogicalType[] {new BigIntType(false)}, new String[] {"_VALUE_COUNT"});
         MergeFunction mergeFunction = new ValueCountMergeFunction();
         this.store =
-                new FileStoreImpl(
+                new KeyValueFileStore(
                         schemaManager,
                         schema.id(),
                         new FileStoreOptions(schema.options()),
-                        WriteMode.CHANGE_LOG,
                         user,
                         schema.logicalPartitionType(),
                         schema.logicalRowType(),
@@ -71,7 +73,8 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableScan newScan() {
-        return new TableScan(store.newScan(), schema, store.pathFactory()) {
+        KeyValueFileStoreScan scan = store.newScan();
+        return new TableScan(scan, schema, store.pathFactory()) {
             @Override
             protected void withNonPartitionFilter(Predicate predicate) {
                 scan.withKeyFilter(predicate);
@@ -81,7 +84,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableRead newRead() {
-        return new TableRead(store.newRead()) {
+        return new KeyValueTableRead(store.newRead()) {
             private int[][] projection = null;
             private boolean isIncremental = false;
 
@@ -114,29 +117,31 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     public TableWrite newWrite() {
         SinkRecordConverter recordConverter =
                 new SinkRecordConverter(store.options().bucket(), schema);
-        return new TableWrite(store.newWrite(), recordConverter) {
+        return new AbstractTableWrite<KeyValue>(store.newWrite(), recordConverter) {
             @Override
-            protected void writeSinkRecord(SinkRecord record, RecordWriter writer)
+            protected void writeSinkRecord(SinkRecord record, RecordWriter<KeyValue> writer)
                     throws Exception {
+                KeyValue kv = new KeyValue();
                 switch (record.row().getRowKind()) {
                     case INSERT:
                     case UPDATE_AFTER:
-                        writer.write(ValueKind.ADD, record.row(), GenericRowData.of(1L));
+                        kv.replace(record.row(), ValueKind.ADD, GenericRowData.of(1L));
                         break;
                     case UPDATE_BEFORE:
                     case DELETE:
-                        writer.write(ValueKind.ADD, record.row(), GenericRowData.of(-1L));
+                        kv.replace(record.row(), ValueKind.ADD, GenericRowData.of(-1L));
                         break;
                     default:
                         throw new UnsupportedOperationException(
                                 "Unknown row kind " + record.row().getRowKind());
                 }
+                writer.write(kv);
             }
         };
     }
 
     @Override
-    public FileStoreImpl store() {
+    public KeyValueFileStore store() {
         return store;
     }
 }

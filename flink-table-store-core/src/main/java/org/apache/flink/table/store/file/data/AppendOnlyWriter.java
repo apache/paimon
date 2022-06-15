@@ -17,19 +17,23 @@
  * under the License.
  */
 
-package org.apache.flink.table.store.file.writer;
+package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.FileUtils;
+import org.apache.flink.table.store.file.writer.BaseFileWriter;
+import org.apache.flink.table.store.file.writer.FileWriter;
+import org.apache.flink.table.store.file.writer.Metric;
+import org.apache.flink.table.store.file.writer.MetricFileWriter;
+import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.file.writer.RollingFileWriter;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
@@ -42,7 +46,7 @@ import java.util.function.Supplier;
  * A {@link RecordWriter} implementation that only accepts records which are always insert
  * operations and don't have any unique keys or sort keys.
  */
-public class AppendOnlyWriter implements RecordWriter {
+public class AppendOnlyWriter implements RecordWriter<RowData> {
     private final long schemaId;
     private final long targetFileSize;
     private final DataFilePathFactory pathFactory;
@@ -78,13 +82,12 @@ public class AppendOnlyWriter implements RecordWriter {
     }
 
     @Override
-    public void write(ValueKind valueKind, RowData key, RowData value) throws Exception {
+    public void write(RowData rowData) throws Exception {
         Preconditions.checkArgument(
-                valueKind == ValueKind.ADD,
-                "Append-only writer cannot accept ValueKind: %s",
-                valueKind);
-
-        writer.write(value);
+                rowData.getRowKind() == RowKind.INSERT,
+                "Append-only writer can only accept insert row kind, but current row kind is: %s",
+                rowData.getRowKind());
+        writer.write(rowData);
     }
 
     @Override
@@ -98,6 +101,8 @@ public class AppendOnlyWriter implements RecordWriter {
             // Reopen the writer to accept further records.
             writer = createRollingRowWriter();
         }
+
+        System.out.println(newFiles);
 
         return Increment.forAppend(newFiles);
     }

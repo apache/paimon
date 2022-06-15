@@ -31,12 +31,12 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.connector.StatefulPrecommittingSinkWriter;
 import org.apache.flink.table.store.connector.sink.TestFileStore.TestRecordWriter;
+import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.writer.RecordWriter;
-import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -105,15 +105,8 @@ public class StoreSinkTest {
                                         new HashMap<>(),
                                         ""));
 
-        RowType keyType = hasPk ? schema.logicalTrimmedPrimaryKeysType() : schema.logicalRowType();
-        RowType valueType =
-                hasPk
-                        ? schema.logicalRowType()
-                        : new RowType(
-                                Collections.singletonList(
-                                        new RowType.RowField("COUNT", new BigIntType(false))));
         RowType partitionType = schema.logicalPartitionType();
-        fileStore = new TestFileStore(hasPk, keyType, valueType, partitionType);
+        fileStore = new TestFileStore(hasPk, partitionType);
         table = new TestFileStoreTable(fileStore, schema);
     }
 
@@ -241,7 +234,7 @@ public class StoreSinkTest {
         }
 
         List<Committable> committables = ((StoreSinkWriter) writer).prepareCommit();
-        Map<BinaryRowData, Map<Integer, RecordWriter>> writers =
+        Map<BinaryRowData, Map<Integer, RecordWriter<KeyValue>>> writers =
                 new HashMap<>(((StoreSinkWriter) writer).writers());
         assertThat(writers.size()).isGreaterThan(0);
 

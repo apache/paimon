@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.writer;
 
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.Increment;
 
@@ -29,11 +27,13 @@ import java.util.List;
  * The {@code RecordWriter} is responsible for writing data and handling in-progress files used to
  * write yet un-staged data. The incremental files ready to commit is returned to the system by the
  * {@link #prepareCommit()}.
+ *
+ * @param <T> type of record to write.
  */
-public interface RecordWriter {
+public interface RecordWriter<T> {
 
     /** Add a key-value element to the writer. */
-    void write(ValueKind valueKind, RowData key, RowData value) throws Exception;
+    void write(T record) throws Exception;
 
     /**
      * Prepare for a commit.

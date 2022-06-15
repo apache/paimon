@@ -22,14 +22,12 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.binary.BinaryRowDataUtil;
-import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.table.store.file.data.AppendOnlyWriter;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.store.file.data.DataFileTest;
 import org.apache.flink.table.store.file.data.DataFileWriter;
 import org.apache.flink.table.store.file.format.FileFormat;
-import org.apache.flink.table.store.file.writer.AppendOnlyWriter;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -68,8 +66,6 @@ public class FileFormatSuffixTest extends DataFileTest {
         AppendOnlyWriter appendOnlyWriter =
                 new AppendOnlyWriter(0, fileFormat, 10, SCHEMA, 10, dataFilePathFactory);
         appendOnlyWriter.write(
-                ValueKind.ADD,
-                BinaryRowDataUtil.EMPTY_ROW,
                 GenericRowData.of(1, StringData.fromString("aaa"), StringData.fromString("1")));
         List<DataFileMeta> result = appendOnlyWriter.close();
 

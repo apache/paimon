@@ -50,8 +50,8 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link FileStoreReadImpl}. */
-public class FileStoreReadTest {
+/** Tests for {@link KeyValueFileStoreRead}. */
+public class KeyValueFileStoreReadTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -189,7 +189,7 @@ public class FileStoreReadTest {
                 scan.withSnapshot(store.snapshotManager().latestSnapshotId()).plan().files()
                         .stream()
                         .collect(Collectors.groupingBy(ManifestEntry::partition));
-        FileStoreRead read = store.newRead();
+        KeyValueFileStoreRead read = store.newRead();
         if (keyProjection != null) {
             read.withKeyProjection(keyProjection);
             read.withDropDelete(false);

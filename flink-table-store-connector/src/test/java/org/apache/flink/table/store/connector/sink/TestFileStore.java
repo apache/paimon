@@ -21,7 +21,7 @@ package org.apache.flink.table.store.connector.sink;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileStore;
-import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.mergetree.Increment;
@@ -51,31 +51,27 @@ import static org.apache.flink.table.store.file.mergetree.compact.CompactManager
 import static org.apache.flink.table.store.file.stats.StatsTestUtils.newEmptyTableStats;
 
 /** Test {@link FileStore}. */
-public class TestFileStore implements FileStore {
+public class TestFileStore implements FileStore<KeyValue> {
 
     public final Set<ManifestCommittable> committed = new HashSet<>();
 
     public final Map<BinaryRowData, Map<Integer, List<String>>> committedFiles = new HashMap<>();
 
     public final boolean hasPk;
-    private final RowType keyType;
-    private final RowType valueType;
     private final RowType partitionType;
 
     public boolean expired = false;
 
-    public TestFileStore(boolean hasPk, RowType keyType, RowType valueType, RowType partitionType) {
+    public TestFileStore(boolean hasPk, RowType partitionType) {
         this.hasPk = hasPk;
-        this.keyType = keyType;
-        this.valueType = valueType;
         this.partitionType = partitionType;
     }
 
     @Override
-    public FileStoreWrite newWrite() {
-        return new FileStoreWrite() {
+    public FileStoreWrite<KeyValue> newWrite() {
+        return new FileStoreWrite<KeyValue>() {
             @Override
-            public RecordWriter createWriter(
+            public RecordWriter<KeyValue> createWriter(
                     BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
                 TestRecordWriter writer = new TestRecordWriter(hasPk);
                 writer.records.addAll(
@@ -87,7 +83,7 @@ public class TestFileStore implements FileStore {
             }
 
             @Override
-            public RecordWriter createEmptyWriter(
+            public RecordWriter<KeyValue> createEmptyWriter(
                     BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
                 return new TestRecordWriter(hasPk);
             }
@@ -104,7 +100,7 @@ public class TestFileStore implements FileStore {
     }
 
     @Override
-    public FileStoreRead newRead() {
+    public FileStoreRead<KeyValue> newRead() {
         throw new UnsupportedOperationException();
     }
 
@@ -129,16 +125,6 @@ public class TestFileStore implements FileStore {
     }
 
     @Override
-    public RowType keyType() {
-        return keyType;
-    }
-
-    @Override
-    public RowType valueType() {
-        return valueType;
-    }
-
-    @Override
     public RowType partitionType() {
         return partitionType;
     }
@@ -153,7 +139,7 @@ public class TestFileStore implements FileStore {
         throw new UnsupportedOperationException();
     }
 
-    static class TestRecordWriter implements RecordWriter {
+    static class TestRecordWriter implements RecordWriter<KeyValue> {
 
         final List<String> records = new ArrayList<>();
         final boolean hasPk;
@@ -186,17 +172,17 @@ public class TestFileStore implements FileStore {
         }
 
         @Override
-        public void write(ValueKind valueKind, RowData key, RowData value) {
+        public void write(KeyValue kv) {
             if (!hasPk) {
-                assert value.getArity() == 1;
-                assert value.getLong(0) >= -1L;
+                assert kv.value().getArity() == 1;
+                assert kv.value().getLong(0) >= -1L;
             }
             records.add(
-                    valueKind.toString()
+                    kv.valueKind().toString()
                             + "-key-"
-                            + rowToString(key, true)
+                            + rowToString(kv.key(), true)
                             + "-value-"
-                            + rowToString(value, false));
+                            + rowToString(kv.value(), false));
         }
 
         @Override

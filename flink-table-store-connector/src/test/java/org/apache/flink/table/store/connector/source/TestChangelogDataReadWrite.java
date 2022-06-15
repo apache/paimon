@@ -27,19 +27,18 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.flink.table.store.file.operation.FileStoreRead;
-import org.apache.flink.table.store.file.operation.FileStoreReadImpl;
-import org.apache.flink.table.store.file.operation.FileStoreWriteImpl;
+import org.apache.flink.table.store.file.operation.KeyValueFileStoreRead;
+import org.apache.flink.table.store.file.operation.KeyValueFileStoreWrite;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
 import org.apache.flink.table.store.table.source.ValueCountRowDataRecordIterator;
@@ -100,18 +99,17 @@ public class TestChangelogDataReadWrite {
     private TableRead createRead(
             Function<RecordReader.RecordIterator<KeyValue>, RecordReader.RecordIterator<RowData>>
                     rowDataIteratorCreator) {
-        FileStoreRead read =
-                new FileStoreReadImpl(
+        KeyValueFileStoreRead read =
+                new KeyValueFileStoreRead(
                         new SchemaManager(tablePath),
                         0,
-                        WriteMode.CHANGE_LOG,
                         KEY_TYPE,
                         VALUE_TYPE,
                         COMPARATOR,
                         new DeduplicateMergeFunction(),
                         avro,
                         pathFactory);
-        return new TableRead(read) {
+        return new KeyValueTableRead(read) {
             @Override
             public TableRead withProjection(int[][] projection) {
                 throw new UnsupportedOperationException();
@@ -135,19 +133,23 @@ public class TestChangelogDataReadWrite {
             BinaryRowData partition, int bucket, List<Tuple2<Long, Long>> kvs) throws Exception {
         Preconditions.checkNotNull(
                 service, "ExecutorService must be provided if writeFiles is needed");
-        RecordWriter writer = createMergeTreeWriter(partition, bucket);
+        RecordWriter<KeyValue> writer = createMergeTreeWriter(partition, bucket);
         for (Tuple2<Long, Long> tuple2 : kvs) {
-            writer.write(ValueKind.ADD, GenericRowData.of(tuple2.f0), GenericRowData.of(tuple2.f1));
+            writer.write(
+                    new KeyValue()
+                            .replace(
+                                    GenericRowData.of(tuple2.f0),
+                                    ValueKind.ADD,
+                                    GenericRowData.of(tuple2.f1)));
         }
         List<DataFileMeta> files = writer.prepareCommit().newFiles();
         writer.close();
         return new ArrayList<>(files);
     }
 
-    public RecordWriter createMergeTreeWriter(BinaryRowData partition, int bucket) {
+    public RecordWriter<KeyValue> createMergeTreeWriter(BinaryRowData partition, int bucket) {
         MergeTreeOptions options = new MergeTreeOptions(new Configuration());
-        return new FileStoreWriteImpl(
-                        WriteMode.CHANGE_LOG,
+        return new KeyValueFileStoreWrite(
                         new SchemaManager(tablePath),
                         0,
                         KEY_TYPE,
