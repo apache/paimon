@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.util.Preconditions;
 
@@ -34,29 +33,29 @@ import java.util.Queue;
  * input list is already sorted by key and sequence number, and the key intervals do not overlap
  * each other.
  */
-public class ConcatRecordReader implements RecordReader<KeyValue> {
+public class ConcatRecordReader<T> implements RecordReader<T> {
 
-    private final Queue<ReaderSupplier> queue;
+    private final Queue<ReaderSupplier<T>> queue;
 
-    private RecordReader<KeyValue> current;
+    private RecordReader<T> current;
 
-    protected ConcatRecordReader(List<ReaderSupplier> readerFactories) {
+    protected ConcatRecordReader(List<ReaderSupplier<T>> readerFactories) {
         readerFactories.forEach(
                 supplier ->
                         Preconditions.checkNotNull(supplier, "Reader factory must not be null."));
         this.queue = new LinkedList<>(readerFactories);
     }
 
-    public static RecordReader<KeyValue> create(List<ReaderSupplier> readers) throws IOException {
-        return readers.size() == 1 ? readers.get(0).get() : new ConcatRecordReader(readers);
+    public static <R> RecordReader<R> create(List<ReaderSupplier<R>> readers) throws IOException {
+        return readers.size() == 1 ? readers.get(0).get() : new ConcatRecordReader<>(readers);
     }
 
     @Nullable
     @Override
-    public RecordIterator<KeyValue> readBatch() throws IOException {
+    public RecordIterator<T> readBatch() throws IOException {
         while (true) {
             if (current != null) {
-                RecordIterator<KeyValue> iterator = current.readBatch();
+                RecordIterator<T> iterator = current.readBatch();
                 if (iterator != null) {
                     return iterator;
                 }
@@ -79,7 +78,7 @@ public class ConcatRecordReader implements RecordReader<KeyValue> {
 
     /** Supplier to get {@link RecordReader}. */
     @FunctionalInterface
-    public interface ReaderSupplier {
-        RecordReader<KeyValue> get() throws IOException;
+    public interface ReaderSupplier<T> {
+        RecordReader<T> get() throws IOException;
     }
 }

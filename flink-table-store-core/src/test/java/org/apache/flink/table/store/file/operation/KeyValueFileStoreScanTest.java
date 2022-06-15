@@ -46,8 +46,8 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link FileStoreScanImpl}. */
-public class FileStoreScanTest {
+/** Tests for {@link KeyValueFileStoreScan}. */
+public class KeyValueFileStoreScanTest {
 
     private static final int NUM_BUCKETS = 10;
 
@@ -112,7 +112,7 @@ public class FileStoreScanTest {
 
         int wantedShopId = data.get(random.nextInt(data.size())).key().getInt(0);
 
-        FileStoreScan scan = store.newScan();
+        KeyValueFileStoreScan scan = store.newScan();
         scan.withSnapshot(snapshot.id());
         scan.withKeyFilter(
                 PredicateBuilder.equal(0, new Literal(new IntType(false), wantedShopId)));
@@ -121,27 +121,6 @@ public class FileStoreScanTest {
                 store.toKvMap(
                         data.stream()
                                 .filter(kv -> kv.key().getInt(0) == wantedShopId)
-                                .collect(Collectors.toList()));
-        runTestContainsAll(scan, snapshot.id(), expected);
-    }
-
-    @Test
-    public void testWithValueFilter() throws Exception {
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        List<KeyValue> data = generateData(random.nextInt(1000) + 1);
-        Snapshot snapshot = writeData(data);
-
-        int wantedShopId = data.get(random.nextInt(data.size())).value().getInt(2);
-
-        FileStoreScan scan = store.newScan();
-        scan.withSnapshot(snapshot.id());
-        scan.withValueFilter(
-                PredicateBuilder.equal(2, new Literal(new IntType(false), wantedShopId)));
-
-        Map<BinaryRowData, BinaryRowData> expected =
-                store.toKvMap(
-                        data.stream()
-                                .filter(kv -> kv.value().getInt(2) == wantedShopId)
                                 .collect(Collectors.toList()));
         runTestContainsAll(scan, snapshot.id(), expected);
     }

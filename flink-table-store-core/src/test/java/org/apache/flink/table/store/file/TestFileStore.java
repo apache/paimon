@@ -69,7 +69,7 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** {@link FileStore} for tests. */
-public class TestFileStore extends FileStoreImpl {
+public class TestFileStore extends KeyValueFileStore {
 
     private static final Logger LOG = LoggerFactory.getLogger(TestFileStore.class);
 
@@ -115,7 +115,6 @@ public class TestFileStore extends FileStoreImpl {
                 new SchemaManager(options.path()),
                 0L,
                 options,
-                WriteMode.CHANGE_LOG,
                 UUID.randomUUID().toString(),
                 partitionType,
                 keyType,
@@ -182,12 +181,17 @@ public class TestFileStore extends FileStoreImpl {
             List<KeyValue> kvs,
             Function<KeyValue, BinaryRowData> partitionCalculator,
             Function<KeyValue, Integer> bucketCalculator,
-            QuadFunction<FileStoreWrite, BinaryRowData, Integer, ExecutorService, RecordWriter>
+            QuadFunction<
+                            FileStoreWrite<KeyValue>,
+                            BinaryRowData,
+                            Integer,
+                            ExecutorService,
+                            RecordWriter<KeyValue>>
                     createWriterFunction,
             BiConsumer<FileStoreCommit, ManifestCommittable> commitFunction)
             throws Exception {
-        FileStoreWrite write = newWrite();
-        Map<BinaryRowData, Map<Integer, RecordWriter>> writers = new HashMap<>();
+        FileStoreWrite<KeyValue> write = newWrite();
+        Map<BinaryRowData, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
         for (KeyValue kv : kvs) {
             BinaryRowData partition = partitionCalculator.apply(kv);
             int bucket = bucketCalculator.apply(kv);
@@ -203,15 +207,15 @@ public class TestFileStore extends FileStoreImpl {
                                     return w;
                                 }
                             })
-                    .write(kv.valueKind(), kv.key(), kv.value());
+                    .write(kv);
         }
 
         FileStoreCommit commit = newCommit();
         ManifestCommittable committable =
                 new ManifestCommittable(String.valueOf(new Random().nextLong()));
-        for (Map.Entry<BinaryRowData, Map<Integer, RecordWriter>> entryWithPartition :
+        for (Map.Entry<BinaryRowData, Map<Integer, RecordWriter<KeyValue>>> entryWithPartition :
                 writers.entrySet()) {
-            for (Map.Entry<Integer, RecordWriter> entryWithBucket :
+            for (Map.Entry<Integer, RecordWriter<KeyValue>> entryWithBucket :
                     entryWithPartition.getValue().entrySet()) {
                 Increment increment = entryWithBucket.getValue().prepareCommit();
                 committable.addFileCommittable(
@@ -271,7 +275,7 @@ public class TestFileStore extends FileStoreImpl {
         }
 
         List<KeyValue> kvs = new ArrayList<>();
-        FileStoreRead read = newRead();
+        FileStoreRead<KeyValue> read = newRead();
         for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> entryWithPartition :
                 filesPerPartitionAndBucket.entrySet()) {
             for (Map.Entry<Integer, List<DataFileMeta>> entryWithBucket :

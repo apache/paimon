@@ -19,12 +19,13 @@
 package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.store.file.FileStore;
+import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.sink.AbstractTableWrite;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableCommit;
@@ -71,22 +72,24 @@ public class TestFileStoreTable implements FileStoreTable {
 
     @Override
     public TableWrite newWrite() {
-        return new TableWrite(store.newWrite(), new SinkRecordConverter(2, schema)) {
+        return new AbstractTableWrite<KeyValue>(
+                store.newWrite(), new SinkRecordConverter(2, schema)) {
             @Override
-            protected void writeSinkRecord(SinkRecord record, RecordWriter writer)
+            protected void writeSinkRecord(SinkRecord record, RecordWriter<KeyValue> writer)
                     throws Exception {
                 boolean isInsert =
                         record.row().getRowKind() == RowKind.INSERT
                                 || record.row().getRowKind() == RowKind.UPDATE_AFTER;
+                KeyValue kv = new KeyValue();
                 if (store.hasPk) {
-                    writer.write(
-                            isInsert ? ValueKind.ADD : ValueKind.DELETE,
+                    kv.replace(
                             record.primaryKey(),
+                            isInsert ? ValueKind.ADD : ValueKind.DELETE,
                             record.row());
                 } else {
-                    writer.write(
-                            ValueKind.ADD, record.row(), GenericRowData.of(isInsert ? 1L : -1L));
+                    kv.replace(record.row(), ValueKind.ADD, GenericRowData.of(isInsert ? 1L : -1L));
                 }
+                writer.write(kv);
             }
         };
     }
@@ -97,7 +100,7 @@ public class TestFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public FileStore store() {
+    public TestFileStore store() {
         return store;
     }
 }

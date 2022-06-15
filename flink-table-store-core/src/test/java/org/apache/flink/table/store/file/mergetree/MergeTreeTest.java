@@ -82,7 +82,7 @@ public class MergeTreeTest {
     private MergeTreeOptions options;
     private DataFileReader dataFileReader;
     private DataFileWriter dataFileWriter;
-    private RecordWriter writer;
+    private RecordWriter<KeyValue> writer;
 
     @BeforeEach
     public void beforeEach() throws IOException {
@@ -357,7 +357,8 @@ public class MergeTreeTest {
 
     private void writeAll(List<TestRecord> records) throws Exception {
         for (TestRecord record : records) {
-            writer.write(record.kind, row(record.k), row(record.v));
+            KeyValue kv = new KeyValue().replace(row(record.k), record.kind, row(record.v));
+            writer.write(kv);
         }
     }
 

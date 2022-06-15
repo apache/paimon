@@ -25,18 +25,23 @@ import org.apache.flink.table.store.file.writer.RecordWriter;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
-/** Write operation which provides {@link RecordWriter} creation. */
-public interface FileStoreWrite {
+/**
+ * Write operation which provides {@link RecordWriter} creation.
+ *
+ * @param <T> type of record to write.
+ */
+public interface FileStoreWrite<T> {
 
     /** Create a {@link RecordWriter} from partition and bucket. */
-    RecordWriter createWriter(BinaryRowData partition, int bucket, ExecutorService compactExecutor);
+    RecordWriter<T> createWriter(
+            BinaryRowData partition, int bucket, ExecutorService compactExecutor);
 
     /** Create an empty {@link RecordWriter} from partition and bucket. */
-    RecordWriter createEmptyWriter(
+    RecordWriter<T> createEmptyWriter(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor);
 
     /** Create a compact {@link RecordWriter} from partition, bucket and restore files. */
-    RecordWriter createCompactWriter(
+    RecordWriter<T> createCompactWriter(
             BinaryRowData partition,
             int bucket,
             ExecutorService compactExecutor,

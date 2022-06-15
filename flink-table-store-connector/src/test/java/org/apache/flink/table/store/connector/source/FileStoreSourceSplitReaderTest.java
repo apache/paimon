@@ -25,6 +25,7 @@ import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.writer.RecordWriter;
@@ -135,11 +136,21 @@ public class FileStoreSourceSplitReaderTest {
                 new FileStoreSourceSplitReader(rw.createReadWithKey().withIncremental(true));
 
         List<Tuple2<Long, Long>> input = kvs();
-        RecordWriter writer = rw.createMergeTreeWriter(row(1), 0);
+        RecordWriter<KeyValue> writer = rw.createMergeTreeWriter(row(1), 0);
         for (Tuple2<Long, Long> tuple2 : input) {
-            writer.write(ValueKind.ADD, GenericRowData.of(tuple2.f0), GenericRowData.of(tuple2.f1));
+            writer.write(
+                    new KeyValue()
+                            .replace(
+                                    GenericRowData.of(tuple2.f0),
+                                    ValueKind.ADD,
+                                    GenericRowData.of(tuple2.f1)));
         }
-        writer.write(ValueKind.DELETE, GenericRowData.of(222L), GenericRowData.of(333L));
+        writer.write(
+                new KeyValue()
+                        .replace(
+                                GenericRowData.of(222L),
+                                ValueKind.DELETE,
+                                GenericRowData.of(333L)));
         List<DataFileMeta> files = writer.prepareCommit().newFiles();
         writer.close();
 

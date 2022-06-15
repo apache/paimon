@@ -1,0 +1,122 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.flink.table.store.file;
+
+import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.table.store.file.manifest.ManifestFile;
+import org.apache.flink.table.store.file.manifest.ManifestList;
+import org.apache.flink.table.store.file.operation.FileStoreCommitImpl;
+import org.apache.flink.table.store.file.operation.FileStoreExpireImpl;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.types.logical.RowType;
+
+/**
+ * Base {@link FileStore} implementation.
+ *
+ * @param <T> type of record to read and write.
+ */
+public abstract class AbstractFileStore<T> implements FileStore<T> {
+
+    protected final SchemaManager schemaManager;
+    protected final long schemaId;
+    protected final FileStoreOptions options;
+    protected final String user;
+    protected final RowType partitionType;
+
+    public AbstractFileStore(
+            SchemaManager schemaManager,
+            long schemaId,
+            FileStoreOptions options,
+            String user,
+            RowType partitionType) {
+        this.schemaManager = schemaManager;
+        this.schemaId = schemaId;
+        this.options = options;
+        this.user = user;
+        this.partitionType = partitionType;
+    }
+
+    public FileStorePathFactory pathFactory() {
+        return new FileStorePathFactory(
+                options.path(),
+                partitionType,
+                options.partitionDefaultName(),
+                options.fileFormat().getFormatIdentifier());
+    }
+
+    @Override
+    public SnapshotManager snapshotManager() {
+        return new SnapshotManager(options.path());
+    }
+
+    @VisibleForTesting
+    public ManifestFile.Factory manifestFileFactory() {
+        return new ManifestFile.Factory(
+                schemaManager,
+                schemaId,
+                partitionType,
+                options.manifestFormat(),
+                pathFactory(),
+                options.manifestTargetSize().getBytes());
+    }
+
+    @VisibleForTesting
+    public ManifestList.Factory manifestListFactory() {
+        return new ManifestList.Factory(partitionType, options.manifestFormat(), pathFactory());
+    }
+
+    @Override
+    public RowType partitionType() {
+        return partitionType;
+    }
+
+    public FileStoreOptions options() {
+        return options;
+    }
+
+    @Override
+    public FileStoreCommitImpl newCommit() {
+        return new FileStoreCommitImpl(
+                schemaId,
+                user,
+                partitionType,
+                pathFactory(),
+                snapshotManager(),
+                manifestFileFactory(),
+                manifestListFactory(),
+                newScan(),
+                options.bucket(),
+                options.manifestTargetSize(),
+                options.manifestMergeMinCount());
+    }
+
+    @Override
+    public FileStoreExpireImpl newExpire() {
+        return new FileStoreExpireImpl(
+                options.snapshotNumRetainMin(),
+                options.snapshotNumRetainMax(),
+                options.snapshotTimeRetain().toMillis(),
+                pathFactory(),
+                snapshotManager(),
+                manifestFileFactory(),
+                manifestListFactory());
+    }
+}

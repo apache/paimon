@@ -53,14 +53,14 @@ public class StoreSinkCompactor implements StatefulPrecommittingSinkWriter<Void>
     private final int subTaskId;
     private final int numOfParallelInstances;
 
-    private final FileStore fileStore;
+    private final FileStore<?> fileStore;
     private final Map<String, String> partitionSpec;
     private final ExecutorService compactExecutor;
 
     public StoreSinkCompactor(
             int subTaskId,
             int numOfParallelInstances,
-            FileStore fileStore,
+            FileStore<?> fileStore,
             Map<String, String> partitionSpec) {
         this.subTaskId = subTaskId;
         this.numOfParallelInstances = numOfParallelInstances;
@@ -120,7 +120,7 @@ public class StoreSinkCompactor implements StatefulPrecommittingSinkWriter<Void>
                                 bucket,
                                 subTaskId);
                     }
-                    RecordWriter writer =
+                    RecordWriter<?> writer =
                             fileStore
                                     .newWrite()
                                     .createCompactWriter(

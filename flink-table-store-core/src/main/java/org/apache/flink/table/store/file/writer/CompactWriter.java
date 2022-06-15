@@ -18,8 +18,7 @@
 
 package org.apache.flink.table.store.file.writer;
 
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
@@ -35,7 +34,7 @@ import java.util.concurrent.ExecutionException;
  * A {@link RecordWriter} implementation that only perform compaction on existing records and does
  * not generate new records.
  */
-public class CompactWriter implements RecordWriter {
+public class CompactWriter implements RecordWriter<KeyValue> {
 
     private final CompactUnit unit;
     private final CompactManager compactManager;
@@ -73,7 +72,7 @@ public class CompactWriter implements RecordWriter {
     }
 
     @Override
-    public void write(ValueKind valueKind, RowData key, RowData value) throws Exception {
+    public void write(KeyValue kv) throws Exception {
         // nothing to write
     }
 
