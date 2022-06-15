@@ -36,7 +36,7 @@ import java.util.Optional;
 /** An abstraction layer above {@link FileStoreScan} to provide input split generation. */
 public abstract class TableScan {
 
-    protected final FileStoreScan scan;
+    private final FileStoreScan scan;
     private final Schema schema;
     private final FileStorePathFactory pathFactory;
 
