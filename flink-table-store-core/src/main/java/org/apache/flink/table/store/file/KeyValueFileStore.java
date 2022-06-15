@@ -27,8 +27,6 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.KeyComparatorSupplier;
 import org.apache.flink.table.types.logical.RowType;
 
-import javax.annotation.Nullable;
-
 import java.util.Comparator;
 import java.util.function.Supplier;
 
@@ -38,7 +36,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final RowType keyType;
     private final RowType valueType;
     private final Supplier<Comparator<RowData>> keyComparatorSupplier;
-    @Nullable private final MergeFunction mergeFunction;
+    private final MergeFunction mergeFunction;
 
     public KeyValueFileStore(
             SchemaManager schemaManager,
@@ -48,7 +46,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             RowType partitionType,
             RowType keyType,
             RowType valueType,
-            @Nullable MergeFunction mergeFunction) {
+            MergeFunction mergeFunction) {
         super(schemaManager, schemaId, options, user, partitionType);
         this.keyType = keyType;
         this.valueType = valueType;

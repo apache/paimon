@@ -55,11 +55,10 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     }
 
     @Override
-    protected boolean filterManifestEntry(ManifestEntry entry) {
-        return super.filterManifestEntry(entry)
-                && (filter == null
-                        || filter.test(
-                                entry.file().rowCount(),
-                                entry.file().valueStats().fields(rowStatsConverter)));
+    protected boolean filterByStats(ManifestEntry entry) {
+        return filter == null
+                || filter.test(
+                        entry.file().rowCount(),
+                        entry.file().valueStats().fields(rowStatsConverter));
     }
 }

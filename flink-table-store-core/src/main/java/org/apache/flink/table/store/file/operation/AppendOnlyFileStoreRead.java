@@ -18,10 +18,14 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.connector.file.src.FileSourceSplit;
+import org.apache.flink.connector.file.src.reader.BulkFormat;
+import org.apache.flink.table.connector.Projection;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.data.AppendOnlyReader;
 import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -36,7 +40,13 @@ import java.util.List;
 /** {@link FileStoreRead} for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
 
-    private final AppendOnlyReader.Factory appendOnlyReaderFactory;
+    private final SchemaManager schemaManager;
+    private final long schemaId;
+    private final RowType rowType;
+    private final FileFormat fileFormat;
+    private final FileStorePathFactory pathFactory;
+
+    private int[][] projection;
 
     public AppendOnlyFileStoreRead(
             SchemaManager schemaManager,
@@ -44,23 +54,33 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
             RowType rowType,
             FileFormat fileFormat,
             FileStorePathFactory pathFactory) {
-        this.appendOnlyReaderFactory =
-                new AppendOnlyReader.Factory(
-                        schemaManager, schemaId, rowType, fileFormat, pathFactory);
+        this.schemaManager = schemaManager;
+        this.schemaId = schemaId;
+        this.rowType = rowType;
+        this.fileFormat = fileFormat;
+        this.pathFactory = pathFactory;
+
+        this.projection = Projection.range(0, rowType.getFieldCount()).toNestedIndexes();
     }
 
     public FileStoreRead<RowData> withProjection(int[][] projectedFields) {
-        appendOnlyReaderFactory.withProjection(projectedFields);
+        projection = projectedFields;
         return this;
     }
 
     @Override
     public RecordReader<RowData> createReader(
             BinaryRowData partition, int bucket, List<DataFileMeta> files) throws IOException {
-        AppendOnlyReader appendOnlyReader = appendOnlyReaderFactory.create(partition, bucket);
+        BulkFormat<RowData, FileSourceSplit> readerFactory =
+                fileFormat.createReaderFactory(rowType, projection);
+        DataFilePathFactory dataFilePathFactory =
+                pathFactory.createDataFilePathFactory(partition, bucket);
         List<ConcatRecordReader.ReaderSupplier<RowData>> suppliers = new ArrayList<>();
         for (DataFileMeta file : files) {
-            suppliers.add(() -> appendOnlyReader.read(file.fileName()));
+            suppliers.add(
+                    () ->
+                            new AppendOnlyReader(
+                                    dataFilePathFactory.toPath(file.fileName()), readerFactory));
         }
 
         return ConcatRecordReader.create(suppliers);

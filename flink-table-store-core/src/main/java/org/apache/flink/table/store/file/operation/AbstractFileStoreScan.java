@@ -229,7 +229,11 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         manifest.partitionStats().fields(partitionStatsConverter));
     }
 
-    protected boolean filterManifestEntry(ManifestEntry entry) {
+    private boolean filterManifestEntry(ManifestEntry entry) {
+        return filterByPartitionAndBucket(entry) && filterByStats(entry);
+    }
+
+    private boolean filterByPartitionAndBucket(ManifestEntry entry) {
         if (specifiedBucket != null) {
             Preconditions.checkState(
                     specifiedBucket < entry.totalBuckets(),
@@ -239,6 +243,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         || partitionFilter.test(partitionConverter.convert(entry.partition())))
                 && (specifiedBucket == null || entry.bucket() == specifiedBucket);
     }
+
+    protected abstract boolean filterByStats(ManifestEntry entry);
 
     private List<ManifestEntry> readManifestFileMeta(ManifestFileMeta manifest) {
         return manifestFileFactory.create().read(manifest.fileName());
