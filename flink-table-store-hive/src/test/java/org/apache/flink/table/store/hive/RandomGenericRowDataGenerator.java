@@ -18,12 +18,14 @@
 
 package org.apache.flink.table.store.hive;
 
+import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.GenericMapData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.types.logical.LogicalType;
 
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
@@ -58,6 +60,26 @@ public class RandomGenericRowDataGenerator {
                     TypeInfoFactory.getListTypeInfo(TypeInfoFactory.longTypeInfo),
                     TypeInfoFactory.getMapTypeInfo(
                             TypeInfoFactory.stringTypeInfo, TypeInfoFactory.intTypeInfo));
+
+    public static final List<LogicalType> LOGICAL_TYPES =
+            Arrays.asList(
+                    DataTypes.BOOLEAN().getLogicalType(),
+                    DataTypes.TINYINT().getLogicalType(),
+                    DataTypes.SMALLINT().getLogicalType(),
+                    DataTypes.INT().getLogicalType(),
+                    DataTypes.BIGINT().getLogicalType(),
+                    DataTypes.FLOAT().getLogicalType(),
+                    DataTypes.DOUBLE().getLogicalType(),
+                    DataTypes.DECIMAL(5, 3).getLogicalType(),
+                    DataTypes.DECIMAL(28, 6).getLogicalType(),
+                    DataTypes.CHAR(10).getLogicalType(),
+                    DataTypes.VARCHAR(10).getLogicalType(),
+                    DataTypes.STRING().getLogicalType(),
+                    DataTypes.VARBINARY(Integer.MAX_VALUE).getLogicalType(),
+                    DataTypes.DATE().getLogicalType(),
+                    DataTypes.TIMESTAMP(3).getLogicalType(),
+                    DataTypes.ARRAY(DataTypes.BIGINT()).getLogicalType(),
+                    DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()).getLogicalType());
 
     public static final List<String> TYPE_NAMES =
             Arrays.asList(

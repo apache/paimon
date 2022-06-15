@@ -20,11 +20,11 @@ package org.apache.flink.table.store.hive.objectinspector;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.hive.HiveTypeUtils;
+import org.apache.flink.table.types.logical.LogicalType;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
 import org.apache.hadoop.hive.serde2.objectinspector.StructObjectInspector;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -40,21 +40,20 @@ public class TableStoreRowDataObjectInspector extends StructObjectInspector {
     private final String typeName;
 
     public TableStoreRowDataObjectInspector(
-            List<String> fieldNames, List<TypeInfo> typeInfos, List<String> fieldComments) {
+            List<String> fieldNames, List<LogicalType> fieldTypes, List<String> fieldComments) {
         this.structFields = new ArrayList<>();
         this.structFieldMap = new HashMap<>();
         StringBuilder typeNameBuilder = new StringBuilder("struct<");
 
         for (int i = 0; i < fieldNames.size(); i++) {
             String name = fieldNames.get(i);
-            TypeInfo typeInfo = typeInfos.get(i);
+            LogicalType logicalType = fieldTypes.get(i);
             TableStoreStructField structField =
                     new TableStoreStructField(
                             name,
-                            HiveTypeUtils.getObjectInspector(typeInfo),
+                            HiveTypeUtils.getObjectInspector(logicalType),
                             i,
-                            RowData.createFieldGetter(
-                                    HiveTypeUtils.typeInfoToDataType(typeInfo).getLogicalType(), i),
+                            RowData.createFieldGetter(logicalType, i),
                             fieldComments.get(i));
             structFields.add(structField);
             structFieldMap.put(name, structField);
@@ -62,7 +61,10 @@ public class TableStoreRowDataObjectInspector extends StructObjectInspector {
             if (i > 0) {
                 typeNameBuilder.append(",");
             }
-            typeNameBuilder.append(name).append(":").append(typeInfo.getTypeName());
+            typeNameBuilder
+                    .append(name)
+                    .append(":")
+                    .append(HiveTypeUtils.logicalTypeToTypeInfo(logicalType).getTypeName());
         }
 
         typeNameBuilder.append(">");

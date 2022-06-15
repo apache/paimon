@@ -24,7 +24,6 @@ import org.apache.hadoop.hive.common.type.HiveChar;
 import org.apache.hadoop.hive.serde2.io.HiveCharWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -34,8 +33,7 @@ public class TableStoreCharObjectInspectorTest {
 
     @Test
     public void testCategoryAndClass() {
-        TableStoreCharObjectInspector oi =
-                new TableStoreCharObjectInspector(TypeInfoFactory.getCharTypeInfo(10));
+        TableStoreCharObjectInspector oi = new TableStoreCharObjectInspector(10);
 
         assertThat(oi.getCategory()).isEqualTo(ObjectInspector.Category.PRIMITIVE);
         assertThat(oi.getPrimitiveCategory())
@@ -47,8 +45,7 @@ public class TableStoreCharObjectInspectorTest {
 
     @Test
     public void testGetPrimitiveJavaObject() {
-        TableStoreCharObjectInspector oi =
-                new TableStoreCharObjectInspector(TypeInfoFactory.getCharTypeInfo(10));
+        TableStoreCharObjectInspector oi = new TableStoreCharObjectInspector(10);
 
         StringData input1 = StringData.fromString("testString");
         HiveChar expected1 = new HiveChar("testString", 10);
@@ -61,8 +58,7 @@ public class TableStoreCharObjectInspectorTest {
 
     @Test
     public void testGetPrimitiveWritableObject() {
-        TableStoreCharObjectInspector oi =
-                new TableStoreCharObjectInspector(TypeInfoFactory.getCharTypeInfo(10));
+        TableStoreCharObjectInspector oi = new TableStoreCharObjectInspector(10);
 
         StringData input1 = StringData.fromString("testString");
         HiveCharWritable expected1 = new HiveCharWritable(new HiveChar("testString", 10));
@@ -75,8 +71,7 @@ public class TableStoreCharObjectInspectorTest {
 
     @Test
     public void testCopyObject() {
-        TableStoreCharObjectInspector oi =
-                new TableStoreCharObjectInspector(TypeInfoFactory.getCharTypeInfo(10));
+        TableStoreCharObjectInspector oi = new TableStoreCharObjectInspector(10);
 
         StringData input1 = StringData.fromString("testString");
         Object copy1 = oi.copyObject(input1);

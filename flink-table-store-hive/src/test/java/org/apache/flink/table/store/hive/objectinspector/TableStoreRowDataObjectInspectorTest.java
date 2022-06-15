@@ -29,7 +29,7 @@ import java.util.List;
 
 import static org.apache.flink.table.store.hive.RandomGenericRowDataGenerator.FIELD_COMMENTS;
 import static org.apache.flink.table.store.hive.RandomGenericRowDataGenerator.FIELD_NAMES;
-import static org.apache.flink.table.store.hive.RandomGenericRowDataGenerator.TYPE_INFOS;
+import static org.apache.flink.table.store.hive.RandomGenericRowDataGenerator.LOGICAL_TYPES;
 import static org.apache.flink.table.store.hive.RandomGenericRowDataGenerator.TYPE_NAMES;
 import static org.apache.flink.table.store.hive.RandomGenericRowDataGenerator.generate;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,7 +40,7 @@ public class TableStoreRowDataObjectInspectorTest {
     @Test
     public void testGetStructFieldRef() {
         TableStoreRowDataObjectInspector oi =
-                new TableStoreRowDataObjectInspector(FIELD_NAMES, TYPE_INFOS, FIELD_COMMENTS);
+                new TableStoreRowDataObjectInspector(FIELD_NAMES, LOGICAL_TYPES, FIELD_COMMENTS);
         List<? extends StructField> structFields = oi.getAllStructFieldRefs();
         List<ObjectInspector.Category> expectedOiCategories =
                 Arrays.asList(
@@ -77,7 +77,7 @@ public class TableStoreRowDataObjectInspectorTest {
     @Test
     public void testGetTypeName() {
         TableStoreRowDataObjectInspector oi =
-                new TableStoreRowDataObjectInspector(FIELD_NAMES, TYPE_INFOS, FIELD_COMMENTS);
+                new TableStoreRowDataObjectInspector(FIELD_NAMES, LOGICAL_TYPES, FIELD_COMMENTS);
         String expected =
                 "struct<"
                         + String.join(
@@ -107,7 +107,7 @@ public class TableStoreRowDataObjectInspectorTest {
     @Test
     public void testGetStructFieldData() {
         TableStoreRowDataObjectInspector oi =
-                new TableStoreRowDataObjectInspector(FIELD_NAMES, TYPE_INFOS, FIELD_COMMENTS);
+                new TableStoreRowDataObjectInspector(FIELD_NAMES, LOGICAL_TYPES, FIELD_COMMENTS);
         GenericRowData rowData = generate();
         List<Object> structFieldsData = oi.getStructFieldsDataAsList(rowData);
         for (int i = 0; i < structFieldsData.size(); i++) {

@@ -18,11 +18,11 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
+import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.StringData;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -35,7 +35,7 @@ public class TableStoreListObjectInspectorTest {
     @Test
     public void testCategoryAndTypeName() {
         TableStoreListObjectInspector oi =
-                new TableStoreListObjectInspector(TypeInfoFactory.stringTypeInfo);
+                new TableStoreListObjectInspector(DataTypes.STRING().getLogicalType());
 
         assertThat(oi.getCategory()).isEqualTo(ObjectInspector.Category.LIST);
         assertThat(oi.getTypeName()).isEqualTo("array<string>");
@@ -44,7 +44,7 @@ public class TableStoreListObjectInspectorTest {
     @Test
     public void testGetListAndElement() {
         TableStoreListObjectInspector oi =
-                new TableStoreListObjectInspector(TypeInfoFactory.stringTypeInfo);
+                new TableStoreListObjectInspector(DataTypes.STRING().getLogicalType());
 
         StringData[] stringDataArray =
                 new StringData[] {

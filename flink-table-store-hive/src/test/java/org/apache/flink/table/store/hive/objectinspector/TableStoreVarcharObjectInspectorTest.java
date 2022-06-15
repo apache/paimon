@@ -24,7 +24,6 @@ import org.apache.hadoop.hive.common.type.HiveVarchar;
 import org.apache.hadoop.hive.serde2.io.HiveVarcharWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -34,8 +33,7 @@ public class TableStoreVarcharObjectInspectorTest {
 
     @Test
     public void testCategoryAndClass() {
-        TableStoreVarcharObjectInspector oi =
-                new TableStoreVarcharObjectInspector(TypeInfoFactory.getVarcharTypeInfo(10));
+        TableStoreVarcharObjectInspector oi = new TableStoreVarcharObjectInspector(10);
 
         assertThat(oi.getCategory()).isEqualTo(ObjectInspector.Category.PRIMITIVE);
         assertThat(oi.getPrimitiveCategory())
@@ -47,8 +45,7 @@ public class TableStoreVarcharObjectInspectorTest {
 
     @Test
     public void testGetPrimitiveJavaObject() {
-        TableStoreVarcharObjectInspector oi =
-                new TableStoreVarcharObjectInspector(TypeInfoFactory.getVarcharTypeInfo(10));
+        TableStoreVarcharObjectInspector oi = new TableStoreVarcharObjectInspector(10);
 
         StringData input1 = StringData.fromString("testString");
         HiveVarchar expected1 = new HiveVarchar("testString", 10);
@@ -61,8 +58,7 @@ public class TableStoreVarcharObjectInspectorTest {
 
     @Test
     public void testGetPrimitiveWritableObject() {
-        TableStoreVarcharObjectInspector oi =
-                new TableStoreVarcharObjectInspector(TypeInfoFactory.getVarcharTypeInfo(10));
+        TableStoreVarcharObjectInspector oi = new TableStoreVarcharObjectInspector(10);
 
         StringData input1 = StringData.fromString("testString");
         HiveVarcharWritable expected1 = new HiveVarcharWritable(new HiveVarchar("testString", 10));
@@ -75,8 +71,7 @@ public class TableStoreVarcharObjectInspectorTest {
 
     @Test
     public void testCopyObject() {
-        TableStoreVarcharObjectInspector oi =
-                new TableStoreVarcharObjectInspector(TypeInfoFactory.getVarcharTypeInfo(10));
+        TableStoreVarcharObjectInspector oi = new TableStoreVarcharObjectInspector(10);
 
         StringData input1 = StringData.fromString("testString");
         Object copy1 = oi.copyObject(input1);

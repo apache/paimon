@@ -24,14 +24,14 @@ import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.serde2.io.HiveDecimalWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.HiveDecimalObjectInspector;
-import org.apache.hadoop.hive.serde2.typeinfo.DecimalTypeInfo;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
 /** {@link AbstractPrimitiveJavaObjectInspector} for DECIMAL type. */
 public class TableStoreDecimalObjectInspector extends AbstractPrimitiveJavaObjectInspector
         implements HiveDecimalObjectInspector {
 
-    public TableStoreDecimalObjectInspector(DecimalTypeInfo typeInfo) {
-        super(typeInfo);
+    public TableStoreDecimalObjectInspector(int precision, int scale) {
+        super(TypeInfoFactory.getDecimalTypeInfo(precision, scale));
     }
 
     @Override

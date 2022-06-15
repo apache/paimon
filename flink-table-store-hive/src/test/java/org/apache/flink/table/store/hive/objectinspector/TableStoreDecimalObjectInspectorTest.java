@@ -24,7 +24,6 @@ import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.serde2.io.HiveDecimalWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -36,8 +35,7 @@ public class TableStoreDecimalObjectInspectorTest {
 
     @Test
     public void testCategoryAndClass() {
-        TableStoreDecimalObjectInspector oi =
-                new TableStoreDecimalObjectInspector(TypeInfoFactory.getDecimalTypeInfo(5, 3));
+        TableStoreDecimalObjectInspector oi = new TableStoreDecimalObjectInspector(5, 3);
 
         assertThat(oi.getCategory()).isEqualTo(ObjectInspector.Category.PRIMITIVE);
         assertThat(oi.getPrimitiveCategory())
@@ -49,8 +47,7 @@ public class TableStoreDecimalObjectInspectorTest {
 
     @Test
     public void testGetPrimitiveJavaObject() {
-        TableStoreDecimalObjectInspector oi =
-                new TableStoreDecimalObjectInspector(TypeInfoFactory.getDecimalTypeInfo(5, 3));
+        TableStoreDecimalObjectInspector oi = new TableStoreDecimalObjectInspector(5, 3);
 
         DecimalData input = DecimalData.fromBigDecimal(new BigDecimal("12.345"), 5, 3);
         HiveDecimal expected = HiveDecimal.create("12.345");
@@ -60,8 +57,7 @@ public class TableStoreDecimalObjectInspectorTest {
 
     @Test
     public void testGetPrimitiveWritableObject() {
-        TableStoreDecimalObjectInspector oi =
-                new TableStoreDecimalObjectInspector(TypeInfoFactory.getDecimalTypeInfo(5, 3));
+        TableStoreDecimalObjectInspector oi = new TableStoreDecimalObjectInspector(5, 3);
 
         DecimalData input = DecimalData.fromBigDecimal(new BigDecimal("12.345"), 5, 3);
         HiveDecimalWritable expected = new HiveDecimalWritable(HiveDecimal.create("12.345"));
@@ -71,8 +67,7 @@ public class TableStoreDecimalObjectInspectorTest {
 
     @Test
     public void testCopyObject() {
-        TableStoreDecimalObjectInspector oi =
-                new TableStoreDecimalObjectInspector(TypeInfoFactory.getDecimalTypeInfo(5, 3));
+        TableStoreDecimalObjectInspector oi = new TableStoreDecimalObjectInspector(5, 3);
 
         DecimalData input1 = DecimalData.fromBigDecimal(new BigDecimal("12.345"), 5, 3);
         Object copy1 = oi.copyObject(input1);
