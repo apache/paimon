@@ -19,37 +19,20 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.utils.RecordReader;
 
 import java.io.IOException;
 import java.util.List;
 
-/** Read operation which provides {@link RecordReader} creation. */
-public interface FileStoreRead {
+/**
+ * Read operation which provides {@link RecordReader} creation.
+ *
+ * @param <T> type of record to read.
+ */
+public interface FileStoreRead<T> {
 
-    /** With drop delete records. */
-    FileStoreRead withDropDelete(boolean dropDelete);
-
-    /** With key nested projection. */
-    FileStoreRead withKeyProjection(int[][] projectedFields);
-
-    /** With value nested projection. */
-    FileStoreRead withValueProjection(int[][] projectedFields);
-
-    /**
-     * Create a {@link RecordReader} from partition and bucket and files.
-     *
-     * <p>The resulting reader has the following characteristics:
-     *
-     * <ul>
-     *   <li>If {@link FileStoreRead#withKeyProjection} is called, key-values produced by this
-     *       reader may be unordered and may contain duplicated keys.
-     *   <li>If {@link FileStoreRead#withKeyProjection} is not called, key-values produced by this
-     *       reader is guaranteed to be ordered by keys and does not contain duplicated keys.
-     * </ul>
-     */
-    RecordReader<KeyValue> createReader(
-            BinaryRowData partition, int bucket, List<DataFileMeta> files) throws IOException;
+    /** Create a {@link RecordReader} from partition and bucket and files. */
+    RecordReader<T> createReader(BinaryRowData partition, int bucket, List<DataFileMeta> files)
+            throws IOException;
 }

@@ -20,13 +20,11 @@ package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.WriteMode;
+import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.store.file.data.DataFileReader;
 import org.apache.flink.table.store.file.data.DataFileWriter;
 import org.apache.flink.table.store.file.format.FileFormat;
-import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.mergetree.Levels;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
@@ -41,12 +39,9 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.file.writer.AppendOnlyWriter;
 import org.apache.flink.table.store.file.writer.CompactWriter;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
-
-import org.apache.flink.shaded.guava30.com.google.common.collect.Lists;
 
 import java.util.Collections;
 import java.util.Comparator;
@@ -55,25 +50,16 @@ import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
-/** Default implementation of {@link FileStoreWrite}. */
-public class FileStoreWriteImpl implements FileStoreWrite {
+/** {@link FileStoreWrite} for {@link org.apache.flink.table.store.file.KeyValueFileStore}. */
+public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
 
-    private final WriteMode writeMode;
-    private final SchemaManager schemaManager;
-    private final long schemaId;
-    private final RowType valueType;
     private final DataFileReader.Factory dataFileReaderFactory;
     private final DataFileWriter.Factory dataFileWriterFactory;
-    private final FileFormat fileFormat;
     private final Supplier<Comparator<RowData>> keyComparatorSupplier;
     private final MergeFunction mergeFunction;
-    private final FileStorePathFactory pathFactory;
-    private final SnapshotManager snapshotManager;
-    private final FileStoreScan scan;
     private final MergeTreeOptions options;
 
-    public FileStoreWriteImpl(
-            WriteMode writeMode,
+    public KeyValueFileStoreWrite(
             SchemaManager schemaManager,
             long schemaId,
             RowType keyType,
@@ -85,9 +71,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             MergeTreeOptions options) {
-        this.schemaManager = schemaManager;
-        this.schemaId = schemaId;
-        this.valueType = valueType;
+        super(snapshotManager, scan);
         this.dataFileReaderFactory =
                 new DataFileReader.Factory(
                         schemaManager, schemaId, keyType, valueType, fileFormat, pathFactory);
@@ -99,69 +83,26 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                         fileFormat,
                         pathFactory,
                         options.targetFileSize);
-        this.writeMode = writeMode;
-        this.fileFormat = fileFormat;
         this.keyComparatorSupplier = keyComparatorSupplier;
         this.mergeFunction = mergeFunction;
-        this.pathFactory = pathFactory;
-        this.snapshotManager = snapshotManager;
-        this.scan = scan;
         this.options = options;
     }
 
     @Override
-    public RecordWriter createWriter(
+    public RecordWriter<KeyValue> createWriter(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
-        List<DataFileMeta> existingFileMetas = Lists.newArrayList();
-        if (latestSnapshotId != null) {
-            // Concat all the DataFileMeta of existing files into existingFileMetas.
-            scan.withSnapshot(latestSnapshotId)
-                    .withPartitionFilter(Collections.singletonList(partition)).withBucket(bucket)
-                    .plan().files().stream()
-                    .map(ManifestEntry::file)
-                    .forEach(existingFileMetas::add);
-        }
-
-        switch (writeMode) {
-            case APPEND_ONLY:
-                DataFilePathFactory factory =
-                        pathFactory.createDataFilePathFactory(partition, bucket);
-                long maxSeqNum =
-                        existingFileMetas.stream()
-                                .map(DataFileMeta::maxSequenceNumber)
-                                .max(Long::compare)
-                                .orElse(-1L);
-
-                return new AppendOnlyWriter(
-                        schemaId,
-                        fileFormat,
-                        options.targetFileSize,
-                        valueType,
-                        maxSeqNum,
-                        factory);
-
-            case CHANGE_LOG:
-                if (latestSnapshotId == null) {
-                    return createEmptyWriter(partition, bucket, compactExecutor);
-                } else {
-                    return createMergeTreeWriter(
-                            partition, bucket, existingFileMetas, compactExecutor);
-                }
-
-            default:
-                throw new UnsupportedOperationException("Unknown write mode: " + writeMode);
-        }
+        return createMergeTreeWriter(
+                partition, bucket, scanExistingFileMetas(partition, bucket), compactExecutor);
     }
 
     @Override
-    public RecordWriter createEmptyWriter(
+    public RecordWriter<KeyValue> createEmptyWriter(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
         return createMergeTreeWriter(partition, bucket, Collections.emptyList(), compactExecutor);
     }
 
     @Override
-    public RecordWriter createCompactWriter(
+    public RecordWriter<KeyValue> createCompactWriter(
             BinaryRowData partition,
             int bucket,
             ExecutorService compactExecutor,
@@ -177,16 +118,11 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                         compactExecutor));
     }
 
-    private RecordWriter createMergeTreeWriter(
+    private RecordWriter<KeyValue> createMergeTreeWriter(
             BinaryRowData partition,
             int bucket,
             List<DataFileMeta> restoreFiles,
             ExecutorService compactExecutor) {
-        long maxSequenceNumber =
-                restoreFiles.stream()
-                        .map(DataFileMeta::maxSequenceNumber)
-                        .max(Long::compare)
-                        .orElse(-1L);
         DataFileWriter dataFileWriter = dataFileWriterFactory.create(partition, bucket);
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
         return new MergeTreeWriter(
@@ -204,7 +140,7 @@ public class FileStoreWriteImpl implements FileStoreWrite {
                                 options.numSortedRunCompactionTrigger),
                         compactExecutor),
                 new Levels(keyComparator, restoreFiles, options.numLevels),
-                maxSequenceNumber,
+                getMaxSequenceNumber(restoreFiles),
                 keyComparator,
                 mergeFunction.copy(),
                 dataFileWriter,

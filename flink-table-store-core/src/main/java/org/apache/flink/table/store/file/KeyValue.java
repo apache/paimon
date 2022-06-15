@@ -46,6 +46,10 @@ public class KeyValue {
         return this;
     }
 
+    public KeyValue replace(RowData key, ValueKind valueKind, RowData value) {
+        return replace(key, -1, valueKind, value);
+    }
+
     public KeyValue replace(RowData key, long sequenceNumber, ValueKind valueKind, RowData value) {
         this.key = key;
         this.sequenceNumber = sequenceNumber;

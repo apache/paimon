@@ -21,7 +21,6 @@ package org.apache.flink.table.store.file.mergetree;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileWriter;
 import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
@@ -40,7 +39,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /** A {@link RecordWriter} to write records and generate {@link Increment}. */
-public class MergeTreeWriter implements RecordWriter {
+public class MergeTreeWriter implements RecordWriter<KeyValue> {
 
     private final MemTable memTable;
 
@@ -100,12 +99,12 @@ public class MergeTreeWriter implements RecordWriter {
     }
 
     @Override
-    public void write(ValueKind valueKind, RowData key, RowData value) throws Exception {
+    public void write(KeyValue kv) throws Exception {
         long sequenceNumber = newSequenceNumber();
-        boolean success = memTable.put(sequenceNumber, valueKind, key, value);
+        boolean success = memTable.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
         if (!success) {
             flush();
-            success = memTable.put(sequenceNumber, valueKind, key, value);
+            success = memTable.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
             if (!success) {
                 throw new RuntimeException("Mem table is too small to hold a single element.");
             }

@@ -41,10 +41,6 @@ public interface FileStoreScan {
 
     FileStoreScan withPartitionFilter(List<BinaryRowData> partitions);
 
-    FileStoreScan withKeyFilter(Predicate predicate);
-
-    FileStoreScan withValueFilter(Predicate predicate);
-
     FileStoreScan withBucket(int bucket);
 
     FileStoreScan withSnapshot(long snapshotId);

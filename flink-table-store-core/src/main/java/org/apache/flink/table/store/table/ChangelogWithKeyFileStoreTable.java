@@ -20,23 +20,26 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.FileStoreImpl;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.KeyValueFileStore;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFunction;
+import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.table.sink.AbstractTableWrite;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
@@ -53,7 +56,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
-    private final FileStoreImpl store;
+    private final KeyValueFileStore store;
 
     ChangelogWithKeyFileStoreTable(
             String name, SchemaManager schemaManager, Schema schema, String user) {
@@ -93,11 +96,10 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         }
 
         this.store =
-                new FileStoreImpl(
+                new KeyValueFileStore(
                         schemaManager,
                         schema.id(),
                         new FileStoreOptions(conf),
-                        WriteMode.CHANGE_LOG,
                         user,
                         schema.logicalPartitionType(),
                         keyType,
@@ -130,7 +132,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                     mapped.ifPresent(keyFilters::add);
                 }
                 if (keyFilters.size() > 0) {
-                    scan.withKeyFilter(PredicateBuilder.and(keyFilters));
+                    ((KeyValueFileStoreScan) scan).withKeyFilter(PredicateBuilder.and(keyFilters));
                 }
             }
         };
@@ -138,7 +140,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableRead newRead() {
-        return new TableRead(store.newRead()) {
+        return new KeyValueTableRead(store.newRead()) {
             @Override
             public TableRead withProjection(int[][] projection) {
                 read.withValueProjection(projection);
@@ -163,29 +165,31 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     public TableWrite newWrite() {
         SinkRecordConverter recordConverter =
                 new SinkRecordConverter(store.options().bucket(), schema);
-        return new TableWrite(store.newWrite(), recordConverter) {
+        return new AbstractTableWrite<KeyValue>(store.newWrite(), recordConverter) {
             @Override
-            protected void writeSinkRecord(SinkRecord record, RecordWriter writer)
+            protected void writeSinkRecord(SinkRecord record, RecordWriter<KeyValue> writer)
                     throws Exception {
+                KeyValue kv = new KeyValue();
                 switch (record.row().getRowKind()) {
                     case INSERT:
                     case UPDATE_AFTER:
-                        writer.write(ValueKind.ADD, record.primaryKey(), record.row());
+                        kv.replace(record.primaryKey(), ValueKind.ADD, record.row());
                         break;
                     case UPDATE_BEFORE:
                     case DELETE:
-                        writer.write(ValueKind.DELETE, record.primaryKey(), record.row());
+                        kv.replace(record.primaryKey(), ValueKind.DELETE, record.row());
                         break;
                     default:
                         throw new UnsupportedOperationException(
                                 "Unknown row kind " + record.row().getRowKind());
                 }
+                writer.write(kv);
             }
         };
     }
 
     @Override
-    public FileStoreImpl store() {
+    public KeyValueFileStore store() {
         return store;
     }
 }

@@ -46,11 +46,9 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /** Default implementation of {@link FileStoreScan}. */
-public class FileStoreScanImpl implements FileStoreScan {
+public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private final FieldStatsArraySerializer partitionStatsConverter;
-    private final FieldStatsArraySerializer keyStatsConverter;
-    private final FieldStatsArraySerializer valueStatsConverter;
     private final RowDataToObjectArrayConverter partitionConverter;
     private final SnapshotManager snapshotManager;
     private final ManifestFile.Factory manifestFileFactory;
@@ -58,25 +56,19 @@ public class FileStoreScanImpl implements FileStoreScan {
     private final int numOfBuckets;
 
     private Predicate partitionFilter;
-    private Predicate keyFilter;
-    private Predicate valueFilter;
 
     private Long specifiedSnapshotId = null;
     private Integer specifiedBucket = null;
     private List<ManifestFileMeta> specifiedManifests = null;
     private boolean isIncremental = false;
 
-    public FileStoreScanImpl(
+    public AbstractFileStoreScan(
             RowType partitionType,
-            RowType keyType,
-            RowType valueType,
             SnapshotManager snapshotManager,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets) {
         this.partitionStatsConverter = new FieldStatsArraySerializer(partitionType);
-        this.keyStatsConverter = new FieldStatsArraySerializer(keyType);
-        this.valueStatsConverter = new FieldStatsArraySerializer(valueType);
         this.partitionConverter = new RowDataToObjectArrayConverter(partitionType);
         this.snapshotManager = snapshotManager;
         this.manifestFileFactory = manifestFileFactory;
@@ -115,18 +107,6 @@ public class FileStoreScanImpl implements FileStoreScan {
         } else {
             return withPartitionFilter(PredicateBuilder.or(predicates));
         }
-    }
-
-    @Override
-    public FileStoreScan withKeyFilter(Predicate predicate) {
-        this.keyFilter = predicate;
-        return this;
-    }
-
-    @Override
-    public FileStoreScan withValueFilter(Predicate predicate) {
-        this.valueFilter = predicate;
-        return this;
     }
 
     @Override
@@ -249,7 +229,7 @@ public class FileStoreScanImpl implements FileStoreScan {
                         manifest.partitionStats().fields(partitionStatsConverter));
     }
 
-    private boolean filterManifestEntry(ManifestEntry entry) {
+    protected boolean filterManifestEntry(ManifestEntry entry) {
         if (specifiedBucket != null) {
             Preconditions.checkState(
                     specifiedBucket < entry.totalBuckets(),
@@ -257,14 +237,6 @@ public class FileStoreScanImpl implements FileStoreScan {
         }
         return (partitionFilter == null
                         || partitionFilter.test(partitionConverter.convert(entry.partition())))
-                && (keyFilter == null
-                        || keyFilter.test(
-                                entry.file().rowCount(),
-                                entry.file().keyStats().fields(keyStatsConverter)))
-                && (valueFilter == null
-                        || valueFilter.test(
-                                entry.file().rowCount(),
-                                entry.file().valueStats().fields(valueStatsConverter)))
                 && (specifiedBucket == null || entry.bucket() == specifiedBucket);
     }
 

@@ -19,47 +19,47 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowDataUtil;
-import org.apache.flink.table.store.file.FileStoreImpl;
+import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.AppendOnlyFileStore;
 import org.apache.flink.table.store.file.FileStoreOptions;
-import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.WriteMode;
+import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreRead;
+import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.table.sink.AbstractTableWrite;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
-import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
-import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Preconditions;
+
+import java.io.IOException;
+import java.util.List;
 
 /** {@link FileStoreTable} for {@link WriteMode#APPEND_ONLY} write mode. */
 public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
-    private final FileStoreImpl store;
+    private final AppendOnlyFileStore store;
 
     AppendOnlyFileStoreTable(String name, SchemaManager schemaManager, Schema schema, String user) {
         super(name, schema);
         this.store =
-                new FileStoreImpl(
+                new AppendOnlyFileStore(
                         schemaManager,
                         schema.id(),
                         new FileStoreOptions(schema.options()),
-                        WriteMode.APPEND_ONLY,
                         user,
                         schema.logicalPartitionType(),
-                        RowType.of(),
-                        schema.logicalRowType(),
-                        null);
+                        schema.logicalRowType());
     }
 
     @Override
@@ -67,17 +67,18 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         return new TableScan(store.newScan(), schema, store.pathFactory()) {
             @Override
             protected void withNonPartitionFilter(Predicate predicate) {
-                scan.withValueFilter(predicate);
+                ((AppendOnlyFileStoreScan) scan).withFilter(predicate);
             }
         };
     }
 
     @Override
     public TableRead newRead() {
-        return new TableRead(store.newRead()) {
+        AppendOnlyFileStoreRead read = store.newRead();
+        return new TableRead() {
             @Override
             public TableRead withProjection(int[][] projection) {
-                read.withValueProjection(projection);
+                read.withProjection(projection);
                 return this;
             }
 
@@ -87,9 +88,10 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
             }
 
             @Override
-            protected RecordReader.RecordIterator<RowData> rowDataRecordIteratorFromKv(
-                    RecordReader.RecordIterator<KeyValue> kvRecordIterator) {
-                return new ValueContentRowDataRecordIterator(kvRecordIterator);
+            public RecordReader<RowData> createReader(
+                    BinaryRowData partition, int bucket, List<DataFileMeta> files)
+                    throws IOException {
+                return read.createReader(partition, bucket, files);
             }
         };
     }
@@ -98,21 +100,21 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     public TableWrite newWrite() {
         SinkRecordConverter recordConverter =
                 new SinkRecordConverter(store.options().bucket(), schema);
-        return new TableWrite(store.newWrite(), recordConverter) {
+        return new AbstractTableWrite<RowData>(store.newWrite(), recordConverter) {
             @Override
-            protected void writeSinkRecord(SinkRecord record, RecordWriter writer)
+            protected void writeSinkRecord(SinkRecord record, RecordWriter<RowData> writer)
                     throws Exception {
                 Preconditions.checkState(
                         record.row().getRowKind() == RowKind.INSERT,
                         "Append only writer can not accept row with RowKind %s",
                         record.row().getRowKind());
-                writer.write(ValueKind.ADD, BinaryRowDataUtil.EMPTY_ROW, record.row());
+                writer.write(record.row());
             }
         };
     }
 
     @Override
-    public FileStoreImpl store() {
+    public AppendOnlyFileStore store() {
         return store;
     }
 }

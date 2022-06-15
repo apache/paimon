@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.flink.table.store.file.writer;
+package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
@@ -26,13 +26,11 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.file.FileStoreOptions;
-import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.stats.FieldStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
+import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -71,7 +69,7 @@ public class AppendOnlyWriterTest {
 
     @Test
     public void testEmptyCommits() throws Exception {
-        RecordWriter writer = createWriter(1024 * 1024L, SCHEMA, 0);
+        RecordWriter<RowData> writer = createWriter(1024 * 1024L, SCHEMA, 0);
 
         for (int i = 0; i < 3; i++) {
             writer.sync();
@@ -85,8 +83,8 @@ public class AppendOnlyWriterTest {
 
     @Test
     public void testSingleWrite() throws Exception {
-        RecordWriter writer = createWriter(1024 * 1024L, SCHEMA, 0);
-        writer.write(ValueKind.ADD, EMPTY_ROW, row(1, "AAA", PART));
+        RecordWriter<RowData> writer = createWriter(1024 * 1024L, SCHEMA, 0);
+        writer.write(row(1, "AAA", PART));
 
         List<DataFileMeta> result = writer.close();
 
@@ -115,7 +113,7 @@ public class AppendOnlyWriterTest {
 
     @Test
     public void testMultipleCommits() throws Exception {
-        RecordWriter writer = createWriter(1024 * 1024L, SCHEMA, 0);
+        RecordWriter<RowData> writer = createWriter(1024 * 1024L, SCHEMA, 0);
 
         // Commit 5 continues txn.
         for (int txn = 0; txn < 5; txn += 1) {
@@ -124,7 +122,7 @@ public class AppendOnlyWriterTest {
             int start = txn * 100;
             int end = txn * 100 + 100;
             for (int i = start; i < end; i++) {
-                writer.write(ValueKind.ADD, EMPTY_ROW, row(i, String.format("%03d", i), PART));
+                writer.write(row(i, String.format("%03d", i), PART));
             }
 
             writer.sync();
@@ -161,10 +159,10 @@ public class AppendOnlyWriterTest {
     public void testRollingWrite() throws Exception {
         // Set a very small target file size, so that we will roll over to a new file even if
         // writing one record.
-        RecordWriter writer = createWriter(10L, SCHEMA, 0);
+        RecordWriter<RowData> writer = createWriter(10L, SCHEMA, 0);
 
         for (int i = 0; i < 10; i++) {
-            writer.write(ValueKind.ADD, EMPTY_ROW, row(i, String.format("%03d", i), PART));
+            writer.write(row(i, String.format("%03d", i), PART));
         }
 
         writer.sync();
@@ -220,7 +218,8 @@ public class AppendOnlyWriterTest {
                 FileStoreOptions.FILE_FORMAT.defaultValue());
     }
 
-    private RecordWriter createWriter(long targetFileSize, RowType writeSchema, long maxSeqNum) {
+    private RecordWriter<RowData> createWriter(
+            long targetFileSize, RowType writeSchema, long maxSeqNum) {
         FileFormat fileFormat =
                 FileFormat.fromIdentifier(
                         Thread.currentThread().getContextClassLoader(), AVRO, new Configuration());

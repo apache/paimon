@@ -57,9 +57,9 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         List<Split> splits = table.newScan().plan().splits;
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
-                .hasSameElementsAs(Collections.singletonList("1|10|1000"));
+                .isEqualTo(Collections.singletonList("1|10|1000"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
-                .hasSameElementsAs(Arrays.asList("2|21|20001", "2|22|202"));
+                .isEqualTo(Arrays.asList("2|21|20001", "2|22|202"));
     }
 
     @Test
@@ -70,9 +70,9 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         List<Split> splits = table.newScan().plan().splits;
         TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_PROJECTED_ROW_TO_STRING))
-                .hasSameElementsAs(Collections.singletonList("1000|10"));
+                .isEqualTo(Collections.singletonList("1000|10"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_PROJECTED_ROW_TO_STRING))
-                .hasSameElementsAs(Arrays.asList("20001|21", "202|22"));
+                .isEqualTo(Arrays.asList("20001|21", "202|22"));
     }
 
     @Test
@@ -91,7 +91,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
-                .hasSameElementsAs(
+                .isEqualTo(
                         Arrays.asList(
                                 // only filter on key should be performed,
                                 // and records from the same file should also be selected
@@ -106,9 +106,9 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         List<Split> splits = table.newScan().withIncremental(true).plan().splits;
         TableRead read = table.newRead().withIncremental(true);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
-                .hasSameElementsAs(Collections.singletonList("-1|11|1001"));
+                .isEqualTo(Collections.singletonList("-1|11|1001"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
-                .hasSameElementsAs(Arrays.asList("+2|21|20001", "+2|22|202", "-2|20|200"));
+                .isEqualTo(Arrays.asList("-2|20|200", "+2|21|20001", "+2|22|202"));
     }
 
     @Test
@@ -120,9 +120,9 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         TableRead read = table.newRead().withIncremental(true).withProjection(PROJECTION);
 
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
-                .hasSameElementsAs(Collections.singletonList("-1001|11"));
+                .isEqualTo(Collections.singletonList("-1001|11"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_PROJECTED_ROW_TO_STRING))
-                .hasSameElementsAs(Arrays.asList("+20001|21", "+202|22", "-200|20"));
+                .isEqualTo(Arrays.asList("-200|20", "+20001|21", "+202|22"));
     }
 
     @Test
@@ -142,11 +142,11 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         TableRead read = table.newRead().withIncremental(true);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
-                .hasSameElementsAs(
+                .isEqualTo(
                         Arrays.asList(
                                 // only filter on key should be performed,
                                 // and records from the same file should also be selected
-                                "+2|21|20001", "+2|22|202", "-2|20|200"));
+                                "-2|20|200", "+2|21|20001", "+2|22|202"));
     }
 
     private void writeData() throws Exception {

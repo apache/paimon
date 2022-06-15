@@ -27,6 +27,7 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.connector.StatefulPrecommittingSinkWriter;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.store.log.LogWriteCallback;
+import org.apache.flink.table.store.table.sink.AbstractTableWrite;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
@@ -143,8 +144,9 @@ public class StoreSinkWriter<WriterStateT>
         }
     }
 
+    @SuppressWarnings("unchecked")
     @VisibleForTesting
-    Map<BinaryRowData, Map<Integer, RecordWriter>> writers() {
-        return write.writers();
+    Map<BinaryRowData, Map<Integer, RecordWriter<?>>> writers() {
+        return ((AbstractTableWrite) write).writers();
     }
 }
