@@ -109,7 +109,8 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableScan newScan() {
-        return new TableScan(store.newScan(), schema, store.pathFactory()) {
+        KeyValueFileStoreScan keyValueScan = store.newScan();
+        return new TableScan(keyValueScan, schema, store.pathFactory()) {
             @Override
             protected void withNonPartitionFilter(Predicate predicate) {
                 // currently we can only perform filter push down on keys
@@ -132,7 +133,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                     mapped.ifPresent(keyFilters::add);
                 }
                 if (keyFilters.size() > 0) {
-                    ((KeyValueFileStoreScan) scan).withKeyFilter(PredicateBuilder.and(keyFilters));
+                    keyValueScan.withKeyFilter(PredicateBuilder.and(keyFilters));
                 }
             }
         };

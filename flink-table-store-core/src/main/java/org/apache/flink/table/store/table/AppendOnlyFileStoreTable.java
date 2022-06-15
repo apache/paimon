@@ -64,10 +64,11 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableScan newScan() {
-        return new TableScan(store.newScan(), schema, store.pathFactory()) {
+        AppendOnlyFileStoreScan appendOnlyScan = store.newScan();
+        return new TableScan(appendOnlyScan, schema, store.pathFactory()) {
             @Override
             protected void withNonPartitionFilter(Predicate predicate) {
-                ((AppendOnlyFileStoreScan) scan).withFilter(predicate);
+                appendOnlyScan.withFilter(predicate);
             }
         };
     }
