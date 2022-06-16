@@ -34,7 +34,6 @@ public class TableStoreHiveMetaHook implements HiveMetaHook {
 
     @Override
     public void preCreateTable(Table table) throws MetaException {
-        // TODO support partitioned table after schema is recorded in table store files
         Preconditions.checkArgument(
                 !table.isSetPartitionKeys() || table.getPartitionKeys().isEmpty(),
                 "Flink Table Store currently does not support creating partitioned table "

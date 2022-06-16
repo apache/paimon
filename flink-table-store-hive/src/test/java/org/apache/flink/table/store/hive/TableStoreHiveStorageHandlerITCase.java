@@ -113,16 +113,9 @@ public class TableStoreHiveStorageHandlerITCase {
                 String.join(
                         "\n",
                         Arrays.asList(
-                                "CREATE EXTERNAL TABLE test_table (",
-                                "  a INT,",
-                                "  b BIGINT,",
-                                "  c STRING",
-                                ")",
+                                "CREATE EXTERNAL TABLE test_table",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
-                                "LOCATION '" + path + "'",
-                                "TBLPROPERTIES (",
-                                "  'table-store.primary-keys' = 'a, b'",
-                                ")")));
+                                "LOCATION '" + path + "'")));
         List<String> actual = hiveShell.executeQuery("SELECT b, a, c FROM test_table ORDER BY b");
         List<String> expected = Arrays.asList("10\t1\tHi Again", "20\t1\tHello", "40\t2\tTest");
         Assert.assertEquals(expected, actual);
@@ -162,11 +155,7 @@ public class TableStoreHiveStorageHandlerITCase {
                 String.join(
                         "\n",
                         Arrays.asList(
-                                "CREATE EXTERNAL TABLE test_table (",
-                                "  a INT,",
-                                "  b BIGINT,",
-                                "  c STRING",
-                                ")",
+                                "CREATE EXTERNAL TABLE test_table",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
                                 "LOCATION '" + path + "'")));
         List<String> actual = hiveShell.executeQuery("SELECT b, a, c FROM test_table ORDER BY b");
@@ -232,10 +221,7 @@ public class TableStoreHiveStorageHandlerITCase {
                                 ddl.toString(),
                                 ")",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
-                                "LOCATION '" + root + "'",
-                                "TBLPROPERTIES (",
-                                "  'table-store.primary-keys' = 'f_int'",
-                                ")")));
+                                "LOCATION '" + root + "'")));
         List<Object[]> actual =
                 hiveShell.executeStatement("SELECT * FROM test_table WHERE f_int > 0");
 
@@ -347,9 +333,7 @@ public class TableStoreHiveStorageHandlerITCase {
                 String.join(
                         "\n",
                         Arrays.asList(
-                                "CREATE EXTERNAL TABLE test_table (",
-                                "  a INT",
-                                ")",
+                                "CREATE EXTERNAL TABLE test_table",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
                                 "LOCATION '" + path + "'")));
         Assert.assertEquals(
@@ -435,10 +419,7 @@ public class TableStoreHiveStorageHandlerITCase {
                 String.join(
                         "\n",
                         Arrays.asList(
-                                "CREATE EXTERNAL TABLE test_table (",
-                                "  dt DATE,",
-                                "  ts TIMESTAMP",
-                                ")",
+                                "CREATE EXTERNAL TABLE test_table",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
                                 "LOCATION '" + path + "'")));
         Assert.assertEquals(

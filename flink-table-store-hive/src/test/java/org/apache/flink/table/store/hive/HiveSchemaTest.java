@@ -32,8 +32,6 @@ import org.junit.jupiter.api.io.TempDir;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -55,7 +53,7 @@ public class HiveSchemaTest {
 
     @Test
     public void testExtractSchema() throws Exception {
-        createSchema(Collections.singletonList("a"), Arrays.asList("a", "b"));
+        createSchema();
 
         Properties properties = new Properties();
         properties.setProperty("columns", "a,b,c");
@@ -68,14 +66,7 @@ public class HiveSchemaTest {
                                 TypeInfoFactory.stringTypeInfo.getTypeName(),
                                 TypeInfoFactory.getDecimalTypeInfo(5, 3).getTypeName())));
         properties.setProperty("columns.comments", "first comment\0second comment\0last comment");
-        properties.setProperty("partition_columns", "a");
-        properties.setProperty("table-store.primary-keys", "a,b");
-        properties.setProperty("table-store.bucket", "2");
-        properties.setProperty("table-store.file.format", "avro");
         properties.setProperty("location", tempDir.toString());
-        // useless table properties
-        properties.setProperty("table-store.useless-option", "test");
-        properties.setProperty("not.table-store.keys", "useless");
 
         HiveSchema schema = HiveSchema.extract(properties);
         assertThat(schema.fieldNames()).isEqualTo(Arrays.asList("a", "b", "c"));
@@ -87,15 +78,32 @@ public class HiveSchemaTest {
                                 DataTypes.DECIMAL(5, 3).getLogicalType()));
         assertThat(schema.fieldComments())
                 .isEqualTo(Arrays.asList("first comment", "second comment", "last comment"));
-        Map<String, String> expectedOptions = new HashMap<>();
-        expectedOptions.put("bucket", "2");
-        expectedOptions.put("file.format", "avro");
-        assertThat(schema.tableStoreOptions()).isEqualTo(expectedOptions);
+    }
+
+    @Test
+    public void testExtractSchemaWithEmptyDDL() throws Exception {
+        createSchema();
+
+        Properties properties = new Properties();
+        properties.setProperty("columns", "");
+        properties.setProperty("columns.types", "");
+        properties.setProperty("columns.comments", "");
+        properties.setProperty("location", tempDir.toString());
+
+        HiveSchema schema = HiveSchema.extract(properties);
+        assertThat(schema.fieldNames()).isEqualTo(Arrays.asList("a", "b", "c"));
+        assertThat(schema.fieldTypes())
+                .isEqualTo(
+                        Arrays.asList(
+                                DataTypes.INT().getLogicalType(),
+                                DataTypes.STRING().getLogicalType(),
+                                DataTypes.DECIMAL(5, 3).getLogicalType()));
+        assertThat(schema.fieldComments()).isEqualTo(Arrays.asList("", "", ""));
     }
 
     @Test
     public void testMismatchedColumnNameAndType() throws Exception {
-        createSchema(Collections.emptyList(), Collections.emptyList());
+        createSchema();
 
         Properties properties = new Properties();
         properties.setProperty("columns", "a,mismatched,c");
@@ -127,7 +135,7 @@ public class HiveSchemaTest {
 
     @Test
     public void testTooFewColumns() throws Exception {
-        createSchema(Collections.emptyList(), Collections.emptyList());
+        createSchema();
 
         Properties properties = new Properties();
         properties.setProperty("columns", "a");
@@ -152,7 +160,7 @@ public class HiveSchemaTest {
 
     @Test
     public void testTooManyColumns() throws Exception {
-        createSchema(Collections.emptyList(), Collections.emptyList());
+        createSchema();
 
         Properties properties = new Properties();
         properties.setProperty("columns", "a,b,c,d,e");
@@ -184,67 +192,14 @@ public class HiveSchemaTest {
         assertThat(exception).hasMessageContaining(expected);
     }
 
-    @Test
-    public void testMismatchedPartitionKeys() throws Exception {
-        createSchema(Arrays.asList("a", "b"), Collections.emptyList());
-
-        Properties properties = new Properties();
-        properties.setProperty("columns", "a,b,c");
-        properties.setProperty(
-                "columns.types",
-                String.join(
-                        ":",
-                        Arrays.asList(
-                                TypeInfoFactory.intTypeInfo.getTypeName(),
-                                TypeInfoFactory.stringTypeInfo.getTypeName(),
-                                TypeInfoFactory.getDecimalTypeInfo(5, 3).getTypeName())));
-        properties.setProperty("partition_columns", "a");
-        properties.setProperty("location", tempDir.toString());
-
-        String expected =
-                String.join(
-                        "\n",
-                        "Hive DDL and table store schema have different partition keys!",
-                        "Hive DDL          : [a]",
-                        "Table Store Schema: [a, b]");
-        IllegalArgumentException exception =
-                assertThrows(IllegalArgumentException.class, () -> HiveSchema.extract(properties));
-        assertThat(exception).hasMessageContaining(expected);
-    }
-
-    @Test
-    public void testMismatchedPrimaryKeys() throws Exception {
-        createSchema(Collections.emptyList(), Arrays.asList("a", "b"));
-
-        Properties properties = new Properties();
-        properties.setProperty("columns", "a,b,c");
-        properties.setProperty(
-                "columns.types",
-                String.join(
-                        ":",
-                        Arrays.asList(
-                                TypeInfoFactory.intTypeInfo.getTypeName(),
-                                TypeInfoFactory.stringTypeInfo.getTypeName(),
-                                TypeInfoFactory.getDecimalTypeInfo(5, 3).getTypeName())));
-        properties.setProperty("table-store.primary-keys", "a");
-        properties.setProperty("location", tempDir.toString());
-
-        String expected =
-                String.join(
-                        "\n",
-                        "Hive DDL and table store schema have different primary keys!",
-                        "Hive DDL          : [a]",
-                        "Table Store Schema: [a, b]");
-        IllegalArgumentException exception =
-                assertThrows(IllegalArgumentException.class, () -> HiveSchema.extract(properties));
-        assertThat(exception).hasMessageContaining(expected);
-    }
-
-    private void createSchema(List<String> partitionKeys, List<String> primaryKeys)
-            throws Exception {
+    private void createSchema() throws Exception {
         new SchemaManager(new Path(tempDir.toString()))
                 .commitNewVersion(
                         new UpdateSchema(
-                                ROW_TYPE, partitionKeys, primaryKeys, new HashMap<>(), ""));
+                                ROW_TYPE,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                new HashMap<>(),
+                                ""));
     }
 }

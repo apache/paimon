@@ -18,21 +18,17 @@
 
 package org.apache.flink.table.store;
 
+import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.file.FileStoreOptions;
-import org.apache.flink.table.store.hive.HiveSchema;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.utils.LogicalTypeParser;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.mapred.JobConf;
 
 import java.util.Arrays;
-import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.stream.Collectors;
 
 /**
  * Utility class to convert Hive table property keys and get file store specific configurations from
@@ -40,17 +36,13 @@ import java.util.stream.Collectors;
  */
 public class TableStoreJobConf {
 
+    private static final String TBLPROPERTIES_PREFIX = "table-store.";
     private static final String INTERNAL_TBLPROPERTIES_PREFIX =
             "table-store.internal.tblproperties.";
-    private static final String INTERNAL_SEPARATOR = "\0\0\0";
 
     private static final String INTERNAL_DB_NAME = "table-store.internal.db-name";
     private static final String INTERNAL_TABLE_NAME = "table-store.internal.table-name";
     private static final String INTERNAL_LOCATION = "table-store.internal.location";
-
-    private static final String INTERNAL_COLUMN_NAMES = "table-store.internal.column-names";
-
-    private static final String INTERNAL_COLUMN_TYPES = "table-store.internal.column-types";
 
     private static final String INTERNAL_FILE_STORE_USER = "table-store.internal.file-store.user";
 
@@ -77,15 +69,12 @@ public class TableStoreJobConf {
                 INTERNAL_LOCATION,
                 properties.getProperty(hive_metastoreConstants.META_TABLE_LOCATION));
 
-        HiveSchema hiveSchema = HiveSchema.extract(properties);
-        map.put(INTERNAL_COLUMN_NAMES, String.join(INTERNAL_SEPARATOR, hiveSchema.fieldNames()));
-        List<String> serializedLogicalTypes =
-                hiveSchema.fieldTypes().stream()
-                        .map(LogicalType::asSerializableString)
-                        .collect(Collectors.toList());
-        map.put(INTERNAL_COLUMN_TYPES, String.join(INTERNAL_SEPARATOR, serializedLogicalTypes));
-        for (Map.Entry<String, String> entry : hiveSchema.tableStoreOptions().entrySet()) {
-            map.put(INTERNAL_TBLPROPERTIES_PREFIX + entry.getKey(), entry.getValue());
+        for (ConfigOption<?> option : FileStoreOptions.allOptions()) {
+            if (properties.containsKey(TBLPROPERTIES_PREFIX + option.key())) {
+                map.put(
+                        INTERNAL_TBLPROPERTIES_PREFIX + option.key(),
+                        properties.getProperty(TBLPROPERTIES_PREFIX + option.key()));
+            }
         }
     }
 
@@ -107,16 +96,6 @@ public class TableStoreJobConf {
                 jobConf.getPropsWithPrefix(INTERNAL_TBLPROPERTIES_PREFIX).entrySet()) {
             fileStoreOptions.setString(entry.getKey(), entry.getValue());
         }
-    }
-
-    public List<String> getColumnNames() {
-        return Arrays.asList(jobConf.get(INTERNAL_COLUMN_NAMES).split(INTERNAL_SEPARATOR));
-    }
-
-    public List<LogicalType> getColumnTypes() {
-        return Arrays.stream(jobConf.get(INTERNAL_COLUMN_TYPES).split(INTERNAL_SEPARATOR))
-                .map(LogicalTypeParser::parse)
-                .collect(Collectors.toList());
     }
 
     public String getFileStoreUser() {

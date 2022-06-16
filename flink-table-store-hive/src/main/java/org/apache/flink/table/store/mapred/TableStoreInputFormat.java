@@ -23,6 +23,7 @@ import org.apache.flink.table.store.RowDataContainer;
 import org.apache.flink.table.store.SearchArgumentToPredicateConverter;
 import org.apache.flink.table.store.TableStoreJobConf;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.source.TableScan;
@@ -51,7 +52,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
     public InputSplit[] getSplits(JobConf jobConf, int numSplits) throws IOException {
         FileStoreTable table = createFileStoreTable(jobConf);
         TableScan scan = table.newScan();
-        createPredicate(jobConf).ifPresent(scan::withFilter);
+        createPredicate(table.schema(), jobConf).ifPresent(scan::withFilter);
         return scan.plan().splits.stream()
                 .map(TableStoreInputSplit::create)
                 .toArray(TableStoreInputSplit[]::new);
@@ -75,19 +76,18 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
         return FileStoreTableFactory.create(conf, wrapper.getFileStoreUser());
     }
 
-    private Optional<Predicate> createPredicate(JobConf jobConf) {
+    private Optional<Predicate> createPredicate(Schema schema, JobConf jobConf) {
         String hiveFilter = jobConf.get(TableScanDesc.FILTER_EXPR_CONF_STR);
         if (hiveFilter == null) {
             return Optional.empty();
         }
 
-        TableStoreJobConf wrapper = new TableStoreJobConf(jobConf);
         ExprNodeGenericFuncDesc exprNodeDesc =
                 SerializationUtilities.deserializeObject(hiveFilter, ExprNodeGenericFuncDesc.class);
         SearchArgument sarg = ConvertAstToSearchArg.create(jobConf, exprNodeDesc);
         SearchArgumentToPredicateConverter converter =
                 new SearchArgumentToPredicateConverter(
-                        sarg, wrapper.getColumnNames(), wrapper.getColumnTypes());
+                        sarg, schema.fieldNames(), schema.logicalRowType().getChildren());
         return converter.convert();
     }
 }

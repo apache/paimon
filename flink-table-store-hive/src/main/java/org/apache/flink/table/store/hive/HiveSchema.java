@@ -18,9 +18,7 @@
 
 package org.apache.flink.table.store.hive;
 
-import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -34,9 +32,7 @@ import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.stream.Collectors;
@@ -44,15 +40,10 @@ import java.util.stream.Collectors;
 /** Column names, types and comments of a Hive table. */
 public class HiveSchema {
 
-    private static final String TBLPROPERTIES_PREFIX = "table-store.";
-    private static final String TBLPROPERTIES_PRIMARY_KEYS = TBLPROPERTIES_PREFIX + "primary-keys";
-
     private final Schema schema;
     private final List<String> fieldComments;
-    private final Map<String, String> tableStoreOptions;
 
-    private HiveSchema(
-            Schema schema, List<String> fieldComments, Map<String, String> tableStoreOptions) {
+    private HiveSchema(Schema schema, List<String> fieldComments) {
         Preconditions.checkArgument(
                 schema.fields().size() == fieldComments.size(),
                 "Length of schema fields (%s) (%s) and comments (%s) are different.",
@@ -60,7 +51,6 @@ public class HiveSchema {
                 fieldComments.size());
         this.schema = schema;
         this.fieldComments = fieldComments;
-        this.tableStoreOptions = tableStoreOptions;
     }
 
     public List<String> fieldNames() {
@@ -75,39 +65,8 @@ public class HiveSchema {
         return fieldComments;
     }
 
-    public Map<String, String> tableStoreOptions() {
-        return tableStoreOptions;
-    }
-
     /** Extract {@link HiveSchema} from Hive serde properties. */
     public static HiveSchema extract(Properties properties) {
-        String columnNames = properties.getProperty(serdeConstants.LIST_COLUMNS);
-        String columnNameDelimiter =
-                properties.getProperty(
-                        serdeConstants.COLUMN_NAME_DELIMITER, String.valueOf(SerDeUtils.COMMA));
-        List<String> names = Arrays.asList(columnNames.split(columnNameDelimiter));
-
-        String columnTypes = properties.getProperty(serdeConstants.LIST_COLUMN_TYPES);
-        List<TypeInfo> typeInfos = TypeInfoUtils.getTypeInfosFromTypeString(columnTypes);
-
-        List<String> partitionKeys = new ArrayList<>();
-        if (properties.containsKey(hive_metastoreConstants.META_TABLE_PARTITION_COLUMNS)) {
-            String partitionKeysString =
-                    properties.getProperty(hive_metastoreConstants.META_TABLE_PARTITION_COLUMNS);
-            // see MetastoreUtils#addCols for the exact separator
-            partitionKeys = Arrays.asList(partitionKeysString.split("/"));
-        }
-
-        List<String> primaryKeys = new ArrayList<>();
-        if (properties.containsKey(TBLPROPERTIES_PRIMARY_KEYS)) {
-            String primaryKeysString = properties.getProperty(TBLPROPERTIES_PRIMARY_KEYS);
-            // TODO add a constant for this separator?
-            primaryKeys =
-                    Arrays.stream(primaryKeysString.split(","))
-                            .map(String::trim)
-                            .collect(Collectors.toList());
-        }
-
         String location = properties.getProperty(hive_metastoreConstants.META_TABLE_LOCATION);
         if (location == null) {
             String tableName = properties.getProperty(hive_metastoreConstants.META_TABLE_NAME);
@@ -126,30 +85,38 @@ public class HiveSchema {
                                                 "Schema file not found in location "
                                                         + location
                                                         + ". Please create table first."));
-        checkSchemaMatched(names, typeInfos, partitionKeys, primaryKeys, schema);
+
+        if (properties.containsKey(serdeConstants.LIST_COLUMNS)
+                && properties.containsKey(serdeConstants.LIST_COLUMN_TYPES)) {
+            String columnNames = properties.getProperty(serdeConstants.LIST_COLUMNS);
+            String columnNameDelimiter =
+                    properties.getProperty(
+                            serdeConstants.COLUMN_NAME_DELIMITER, String.valueOf(SerDeUtils.COMMA));
+            List<String> names = Arrays.asList(columnNames.split(columnNameDelimiter));
+
+            String columnTypes = properties.getProperty(serdeConstants.LIST_COLUMN_TYPES);
+            List<TypeInfo> typeInfos = TypeInfoUtils.getTypeInfosFromTypeString(columnTypes);
+
+            if (names.size() > 0 && typeInfos.size() > 0) {
+                checkSchemaMatched(names, typeInfos, schema);
+            }
+        }
 
         // see MetastoreUtils#addCols for the exact property name and separator
         String columnCommentsPropertyName = "columns.comments";
         List<String> comments =
-                Arrays.asList(properties.getProperty(columnCommentsPropertyName).split("\0", -1));
-
-        Map<String, String> tableStoreOptions = new HashMap<>();
-        for (ConfigOption<?> option : FileStoreOptions.allOptions()) {
-            if (properties.containsKey(TBLPROPERTIES_PREFIX + option.key())) {
-                tableStoreOptions.put(
-                        option.key(), properties.getProperty(TBLPROPERTIES_PREFIX + option.key()));
-            }
+                new ArrayList<>(
+                        Arrays.asList(
+                                properties.getProperty(columnCommentsPropertyName).split("\0")));
+        while (comments.size() < schema.fields().size()) {
+            comments.add("");
         }
 
-        return new HiveSchema(schema, comments, tableStoreOptions);
+        return new HiveSchema(schema, comments);
     }
 
     private static void checkSchemaMatched(
-            List<String> names,
-            List<TypeInfo> typeInfos,
-            List<String> partitionKeys,
-            List<String> primaryKeys,
-            Schema schema) {
+            List<String> names, List<TypeInfo> typeInfos, Schema schema) {
         List<String> ddlNames = new ArrayList<>(names);
         List<TypeInfo> ddlTypeInfos = new ArrayList<>(typeInfos);
         List<String> schemaNames = schema.fieldNames();
@@ -198,26 +165,6 @@ public class HiveSchema {
             throw new IllegalArgumentException(
                     "Hive DDL and table store schema mismatched! Mismatched fields are:\n"
                             + String.join("--------------------\n", mismatched));
-        }
-
-        if (!Objects.equals(partitionKeys, schema.partitionKeys())) {
-            throw new IllegalArgumentException(
-                    "Hive DDL and table store schema have different partition keys!\n"
-                            + "Hive DDL          : "
-                            + partitionKeys.toString()
-                            + "\n"
-                            + "Table Store Schema: "
-                            + schema.partitionKeys().toString());
-        }
-
-        if (!Objects.equals(primaryKeys, schema.primaryKeys())) {
-            throw new IllegalArgumentException(
-                    "Hive DDL and table store schema have different primary keys!\n"
-                            + "Hive DDL          : "
-                            + primaryKeys.toString()
-                            + "\n"
-                            + "Table Store Schema: "
-                            + schema.primaryKeys().toString());
         }
     }
 }
