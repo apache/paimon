@@ -46,8 +46,6 @@ Table Store catalog supports SQL DDL commands:
 - `SHOW DATABASES`
 - `SHOW TABLES`
 
-The path of table in catalog is `${warehouse}/${database_name}.db/${table_name}`.
-
 ## Syntax
 
 ```sql
@@ -84,6 +82,8 @@ primary key must contain the partition field.
 {{< hint info >}}
 __Note:__ Metadata column is not supported yet.
 {{< /hint >}}
+
+This will create a directory under `${warehouse}/${database_name}.db/${table_name}`.
 
 ## Table Options
 

@@ -37,25 +37,19 @@ batch processing in Flink, supporting high-speed data ingestion and timely data 
 
 As shown in the architecture above:
 
-* Users can use Flink to insert data into the Table Store, either by streaming the change log
-*  **Consumption Mode** Table Store supports a versatile way to read/write data and perform OLAP queries.
-  - For reads, it supports consuming data <1> from historical snapshots (in batch mode), <2>from the latest offset (in continuous mode), or <3> reading incremental snapshots in a hybrid way.
-  - For writes, it supports streaming synchronization of the changelog of databases(CDC) or bulk load the tables from other data warehouses. 
-OLAP queries are supported either in streaming or batch mode.
+**Read/Write:** Table Store supports a versatile way to read/write data and perform OLAP queries.
+- For reads, it supports consuming data <1> from historical snapshots (in batch mode), <2>from the
+  latest offset (in continuous mode), or <3> reading incremental snapshots in a hybrid way.
+- For writes, it supports streaming synchronization from the changelog of databases (CDC) or batch
+  insert/overwrite from offline data.
 
-* **Ecosystem** In addition to Apache Flink, Table Store also supports read/write by other computation engines like Apache Hive.
+**Ecosystem:** In addition to Apache Flink, Table Store also supports read/write by other computation
+engines like Apache Hive, Apache Spark and Trino.
 
-* **Internal** Under the hood, table Store uses a hybrid storage architecture with a lakehouse format to store historical data and a queue system to store incremental data. The former stores the columnar files on the filesystem/object-store and uses the LSM tree structure to support a large volume of data updates and high-performance queries. The latter uses Apache Kafka to capture data in real-time[1]. 
-
-[1] https://kafka.apache.org/intro
-* Users can use Flink to query the table store in different ways, including streaming queries and
-  Batch/OLAP queries. It is also worth noting that users can use other engines such as Apache Hive to
-  query from the table store as well.
-* Under the hood, table Store uses a hybrid storage architecture, using a Lake Store to store historical data
-  and a Queue system (Apache Kafka integration is currently supported) to store incremental data. It provides
-  incremental snapshots for hybrid streaming reads.
-* Table Store's Lake Store stores data as columnar files on file system / object store, and uses the LSM Structure
-  to support a large amount of data updates and high-performance queries.
+**Internal:** Under the hood, Table Store uses a hybrid storage architecture with a lake format to store
+historical data and a queue system to store incremental data. The former stores the columnar files on
+the filesystem/object-store and uses the LSM tree structure to support a large volume of data updates
+and high-performance queries. The latter uses Apache Kafka to capture data in real-time.
 
 ## Setup Table Store
 
