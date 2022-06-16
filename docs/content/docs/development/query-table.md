@@ -67,6 +67,4 @@ that the streaming reading has transactional consistency.
 Immediate data visibility is configured via
 `log.consistency` = `eventual`.
 
-In this at-least-once mode, records are sent to downstream jobs ahead of time,
-which means that duplicate data may be sent at job failover, and you may need to
-manually de-duplicate data to achieve final consistency.
+Due to the tradeoff between data freshness and completeness, immediate data visibility is barely accomplished under exactly-once semantics. Nevertheless, users can relax the constraint to use at-least-once mode to achieve it. Note that records may be sent to downstream jobs ahead of the watermark (since no barrier alignment is required), which may lead to duplicate data during job failover. As a result, users may need to manually de-duplicate data to achieve final consistency.
