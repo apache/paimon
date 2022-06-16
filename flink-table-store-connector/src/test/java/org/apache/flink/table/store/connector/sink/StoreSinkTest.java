@@ -200,14 +200,6 @@ public class StoreSinkTest {
                 .isEqualTo(Collections.singletonList("ADD-key-8-value-0/8/9"));
     }
 
-    @Test
-    public void testCreateCompactor() throws Exception {
-        StoreSink<?, ?> sink =
-                new StoreSink<>(identifier, table, true, null, () -> lock, null, null);
-        StatefulPrecommittingSinkWriter<?> writer = sink.createWriter(initContext());
-        assertThat(writer).isInstanceOf(StoreSinkCompactor.class);
-    }
-
     private void writeAndAssert(StoreSink<?, ?> sink) throws Exception {
         writeAndCommit(
                 sink,
