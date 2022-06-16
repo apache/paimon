@@ -27,7 +27,7 @@ under the License.
 # Overview
 
 Flink Table Store is a unified storage to build dynamic tables for both streaming and
-batch processing in Flink, supporting high speed data ingestion and timely data query.
+batch processing in Flink, supporting high-speed data ingestion and timely data query.
 
 ## Architecture
 
