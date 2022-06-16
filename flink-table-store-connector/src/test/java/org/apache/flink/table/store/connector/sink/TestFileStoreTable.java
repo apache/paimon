@@ -29,6 +29,7 @@ import org.apache.flink.table.store.table.sink.AbstractTableWrite;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableCommit;
+import org.apache.flink.table.store.table.sink.TableCompact;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
@@ -100,7 +101,7 @@ public class TestFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public TestFileStore store() {
-        return store;
+    public TableCompact newCompact() {
+        throw new UnsupportedOperationException();
     }
 }

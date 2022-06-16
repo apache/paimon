@@ -20,9 +20,13 @@ package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.mergetree.compact.CompactResult;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 
 /**
@@ -40,10 +44,12 @@ public interface FileStoreWrite<T> {
     RecordWriter<T> createEmptyWriter(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor);
 
-    /** Create a compact {@link RecordWriter} from partition, bucket and restore files. */
-    RecordWriter<T> createCompactWriter(
-            BinaryRowData partition,
-            int bucket,
-            ExecutorService compactExecutor,
-            List<DataFileMeta> restoredFiles);
+    /**
+     * Create a {@link Callable} compactor from partition, bucket.
+     *
+     * @param compactFiles input files of compaction. When it is null, will automatically read all
+     *     files of the current bucket.
+     */
+    Callable<CompactResult> createCompactWriter(
+            BinaryRowData partition, int bucket, @Nullable List<DataFileMeta> compactFiles);
 }

@@ -230,7 +230,7 @@ public class CompactManagerTest {
         return (numLevels, runs) -> Optional.of(CompactUnit.fromLevelRuns(numLevels - 1, runs));
     }
 
-    private CompactManager.Rewriter testRewriter(boolean expectedDropDelete) {
+    private CompactRewriter testRewriter(boolean expectedDropDelete) {
         return (outputLevel, dropDelete, sections) -> {
             assertThat(dropDelete).isEqualTo(expectedDropDelete);
             int minKey = Integer.MAX_VALUE;

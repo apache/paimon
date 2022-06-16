@@ -37,6 +37,7 @@ import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.log.LogWriteCallback;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.SinkRecord;
+import org.apache.flink.table.store.table.sink.TableCompact;
 
 import javax.annotation.Nullable;
 
@@ -45,6 +46,7 @@ import java.io.UncheckedIOException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 
@@ -92,19 +94,11 @@ public class StoreSink<WriterStateT, LogCommT>
         return restoreWriter(initContext, null);
     }
 
-    @SuppressWarnings("unchecked")
     @Override
     public StatefulPrecommittingSinkWriter<WriterStateT> restoreWriter(
             InitContext initContext, Collection<WriterStateT> states) throws IOException {
         if (compactionTask) {
-            return (StatefulPrecommittingSinkWriter<WriterStateT>)
-                    new StoreSinkCompactor(
-                            initContext.getSubtaskId(),
-                            initContext.getNumberOfParallelSubtasks(),
-                            table.store(),
-                            compactPartitionSpec == null
-                                    ? Collections.emptyMap()
-                                    : compactPartitionSpec);
+            return createCompactWriter(initContext);
         }
         SinkWriter<SinkRecord> logWriter = null;
         LogWriteCallback logCallback = null;
@@ -121,6 +115,17 @@ public class StoreSink<WriterStateT, LogCommT>
         }
         return new StoreSinkWriter<>(
                 table.newWrite().withOverwrite(overwritePartition != null), logWriter, logCallback);
+    }
+
+    private StoreSinkCompactor<WriterStateT> createCompactWriter(InitContext initContext) {
+        int task = initContext.getSubtaskId();
+        int numTask = initContext.getNumberOfParallelSubtasks();
+        TableCompact tableCompact = table.newCompact();
+        tableCompact.withPartitions(
+                compactPartitionSpec == null ? Collections.emptyMap() : compactPartitionSpec);
+        tableCompact.withFilter(
+                (partition, bucket) -> task == Math.abs(Objects.hash(partition, bucket) % numTask));
+        return new StoreSinkCompactor<>(tableCompact);
     }
 
     @Override
