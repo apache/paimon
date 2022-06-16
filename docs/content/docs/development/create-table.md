@@ -28,8 +28,7 @@ under the License.
 
 ## Catalog
 
-Table Store uses Catalog to manage all the databases and tables. You need to create a
-Table Store catalog and use it. Table Store catalog has a root directory, configured through `warehouse`.
+Table Store uses its own catalog to manage all the databases and tables. Users need to configure the type `table-store` and a root directory `warehouse` to use it.
 
 ```sql
 CREATE CATALOG my_catalog WITH (
