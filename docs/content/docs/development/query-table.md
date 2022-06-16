@@ -45,7 +45,8 @@ SELECT * FROM MyTable /*+ OPTIONS ('log.scan'='latest') */;
 
 ## Query Optimization
 
-It is highly recommended to take partition and primary key filters
+It is highly recommended to specify partition and primary key filters
+along with the query, which will speed up the data skipping of the query.
 along with the query, which will speed up the data skipping of the query.
 
 Supported filter functions are:
@@ -58,51 +59,16 @@ Supported filter functions are:
 - `in`
 - starts with `like`
 
-## Streaming Real-time
+## Real-time Streaming Consumption
 
 By default, data is only visible after the checkpoint, which means
 that the streaming reading has transactional consistency.
 
-If you want the data to be immediately visible, you need to set the following options:
+Immediate data visibility is configured via
+`log.consistency` = `eventual`.
 
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style="width: 20%">Table Option</th>
-      <th class="text-center" style="width: 5%">Default</th>
-      <th class="text-center" style="width: 60%">Description</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><h5>`log.system` = `kafka`</h5></td>
-      <td>No</td>
-      <td>You need to enable log system because the FileStore's continuous consumption only provides checkpoint-based visibility.</td>
-    </tr>
-    <tr>
-      <td><h5>`log.consistency` = `eventual`</h5></td>
-      <td>No</td>
-      <td>This means that writes are visible without using LogSystem's transaction mechanism.</td>
-    </tr>
-    </tbody>
-</table>
-
-Note: All tables need to have the primary key defined because only then can the
-data be de-duplicated by the normalizing node of the downstream job.
-
-## Streaming Low Cost
-
-By default, for the table with the primary key, the records in the table store only
-contain `INSERT`, `UPDATE_AFTER`, and `DELETE`. The downstream consuming job will
-generate a normalized node, and it stores all processed key-value to produce the
-`UPDATE_BEFORE` message, which will bring extra overhead.
-
-If you want to remove downstream normalized node (It's costly) or see the all
-changes of this table, you can configure:
-- 'log.changelog-mode' = 'all'
-- 'log.consistency' = 'transactional' (default)
-
-The inserted query written to the table store must contain all message types with
-`UPDATE_BEFORE`, otherwise the planner will throw an exception. It means that Planner
-expects the inserted query to produce a real changelog, otherwise the data would
-be wrong.
+Due to the tradeoff between data freshness and completeness, immediate data visibility is barely
+accomplished under exactly-once semantics. Nevertheless, users can relax the constraint to use
+at-least-once mode to achieve it. Note that records may be sent to downstream jobs ahead of the committing
+(since no barrier alignment is required), which may lead to duplicate data during job failover. As a result,
+users may need to manually de-duplicate data to achieve final consistency.

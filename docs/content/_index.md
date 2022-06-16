@@ -24,16 +24,13 @@ under the License.
 
 # Apache Flink Table Store
 
-Flink Table Store is a unified streaming and batch store for building dynamic
-tables on Apache Flink. It is designed to be the best connector to Flink as
-the storage for streaming warehouse. It uses a full Log-Structured Merge-Tree
-(LSM) structure for high speed and large amount of data update & query capability.
-
-Flink Table Store supports the following usage:
-- **Streaming Insert**: Write changelog streams, including CDC from database and streams.
-- **Batch Insert**: Write batch data as offline warehouse, including OVERWRITE support.
-- **Batch/OLAP Query**: Read snapshot of the storage, efficient querying of real-time data.
-- **Streaming Query**: Read changes of the storage, ensure exactly-once consistency.
+Flink Table Store is a unified storage to build dynamic tables for both streaming and
+batch processing in Flink, supporting high-speed data ingestion and timely data query.
+Table Store offers the following core capabilities:
+- Support storage of large datasets and allow read/write in both batch and streaming mode.
+- Support streaming queries with minimum latency down to milliseconds.
+- Support Batch/OLAP queries with minimum latency down to the second level.
+- Support incremental snapshots for stream consumption by default. So users do not need to combine different pipelines by themself.
 
 {{< columns >}}
 ## Try Table Store
