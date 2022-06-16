@@ -45,7 +45,8 @@ SELECT * FROM MyTable /*+ OPTIONS ('log.scan'='latest') */;
 
 ## Query Optimization
 
-It is highly recommended taking partition and primary key filters
+It is highly recommended to specify partition and primary key filters
+along with the query, which will speed up the data skipping of the query.
 along with the query, which will speed up the data skipping of the query.
 
 Supported filter functions are:
