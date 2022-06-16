@@ -21,11 +21,11 @@ package org.apache.flink.table.store.hive.objectinspector;
 import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.data.MapData;
 import org.apache.flink.table.store.hive.HiveTypeUtils;
+import org.apache.flink.table.types.logical.LogicalType;
 
 import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.objectinspector.MapObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -44,15 +44,11 @@ public class TableStoreMapObjectInspector implements MapObjectInspector {
     private final ArrayData.ElementGetter keyGetter;
     private final ArrayData.ElementGetter valueGetter;
 
-    public TableStoreMapObjectInspector(TypeInfo keyTypeInfo, TypeInfo valueTypeInfo) {
-        this.keyObjectInspector = HiveTypeUtils.getObjectInspector(keyTypeInfo);
-        this.valueObjectInspector = HiveTypeUtils.getObjectInspector(valueTypeInfo);
-        this.keyGetter =
-                ArrayData.createElementGetter(
-                        HiveTypeUtils.typeInfoToDataType(keyTypeInfo).getLogicalType());
-        this.valueGetter =
-                ArrayData.createElementGetter(
-                        HiveTypeUtils.typeInfoToDataType(valueTypeInfo).getLogicalType());
+    public TableStoreMapObjectInspector(LogicalType keyType, LogicalType valueType) {
+        this.keyObjectInspector = HiveTypeUtils.getObjectInspector(keyType);
+        this.valueObjectInspector = HiveTypeUtils.getObjectInspector(valueType);
+        this.keyGetter = ArrayData.createElementGetter(keyType);
+        this.valueGetter = ArrayData.createElementGetter(valueType);
     }
 
     @Override

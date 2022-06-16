@@ -47,7 +47,7 @@ public class TableStoreSerDe extends AbstractSerDe {
         HiveSchema schema = HiveSchema.extract(properties);
         inspector =
                 new TableStoreRowDataObjectInspector(
-                        schema.fieldNames(), schema.fieldTypeInfos(), schema.fieldComments());
+                        schema.fieldNames(), schema.fieldTypes(), schema.fieldComments());
     }
 
     @Override

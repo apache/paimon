@@ -113,11 +113,7 @@ public class TableStoreHiveStorageHandlerITCase {
                 String.join(
                         "\n",
                         Arrays.asList(
-                                "CREATE EXTERNAL TABLE test_table (",
-                                "  a INT,",
-                                "  b BIGINT,",
-                                "  c STRING",
-                                ")",
+                                "CREATE EXTERNAL TABLE test_table",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
                                 "LOCATION '" + path + "'")));
         List<String> actual = hiveShell.executeQuery("SELECT b, a, c FROM test_table ORDER BY b");
@@ -159,11 +155,7 @@ public class TableStoreHiveStorageHandlerITCase {
                 String.join(
                         "\n",
                         Arrays.asList(
-                                "CREATE EXTERNAL TABLE test_table (",
-                                "  a INT,",
-                                "  b BIGINT,",
-                                "  c STRING",
-                                ")",
+                                "CREATE EXTERNAL TABLE test_table",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
                                 "LOCATION '" + path + "'")));
         List<String> actual = hiveShell.executeQuery("SELECT b, a, c FROM test_table ORDER BY b");
@@ -181,14 +173,7 @@ public class TableStoreHiveStorageHandlerITCase {
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
-                        RowType.of(
-                                RandomGenericRowDataGenerator.TYPE_INFOS.stream()
-                                        .map(
-                                                t ->
-                                                        HiveTypeUtils.typeInfoToDataType(t)
-                                                                .getLogicalType())
-                                        .toArray(LogicalType[]::new),
-                                RandomGenericRowDataGenerator.FIELD_NAMES.toArray(new String[0])),
+                        RandomGenericRowDataGenerator.ROW_TYPE,
                         Collections.emptyList(),
                         Collections.singletonList("f_int"));
 
@@ -212,33 +197,13 @@ public class TableStoreHiveStorageHandlerITCase {
         table.newCommit().commit("0", write.prepareCommit());
         write.close();
 
-        StringBuilder ddl = new StringBuilder();
-        for (int i = 0; i < RandomGenericRowDataGenerator.FIELD_NAMES.size(); i++) {
-            if (i != 0) {
-                ddl.append(",\n");
-            }
-            ddl.append("  ")
-                    .append(RandomGenericRowDataGenerator.FIELD_NAMES.get(i))
-                    .append(" ")
-                    .append(RandomGenericRowDataGenerator.TYPE_NAMES.get(i))
-                    .append(" COMMENT '")
-                    .append(RandomGenericRowDataGenerator.FIELD_COMMENTS.get(i))
-                    .append("'");
-        }
         hiveShell.execute(
                 String.join(
                         "\n",
                         Arrays.asList(
-                                "CREATE EXTERNAL TABLE test_table (",
-                                ddl.toString(),
-                                ")",
+                                "CREATE EXTERNAL TABLE test_table",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
-                                "LOCATION '" + root + "'",
-                                "TBLPROPERTIES (",
-                                "  'table-store.catalog' = 'test_catalog',",
-                                "  'table-store.primary-keys' = 'f_int',",
-                                "  'table-store.file.format' = 'avro'",
-                                ")")));
+                                "LOCATION '" + root + "'")));
         List<Object[]> actual =
                 hiveShell.executeStatement("SELECT * FROM test_table WHERE f_int > 0");
 
@@ -261,7 +226,7 @@ public class TableStoreHiveStorageHandlerITCase {
                 }
                 ObjectInspector oi =
                         HiveTypeUtils.getObjectInspector(
-                                RandomGenericRowDataGenerator.TYPE_INFOS.get(i));
+                                RandomGenericRowDataGenerator.LOGICAL_TYPES.get(i));
                 switch (oi.getCategory()) {
                     case PRIMITIVE:
                         AbstractPrimitiveJavaObjectInspector primitiveOi =
@@ -350,15 +315,9 @@ public class TableStoreHiveStorageHandlerITCase {
                 String.join(
                         "\n",
                         Arrays.asList(
-                                "CREATE EXTERNAL TABLE test_table (",
-                                "  a INT",
-                                ")",
+                                "CREATE EXTERNAL TABLE test_table",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
-                                "LOCATION '" + path + "'",
-                                "TBLPROPERTIES (",
-                                "  'table-store.catalog' = 'test_catalog',",
-                                "  'table-store.file.format' = 'avro'",
-                                ")")));
+                                "LOCATION '" + path + "'")));
         Assert.assertEquals(
                 Arrays.asList("1", "5"),
                 hiveShell.executeQuery("SELECT * FROM test_table WHERE a = 1 OR a = 5"));
@@ -442,16 +401,9 @@ public class TableStoreHiveStorageHandlerITCase {
                 String.join(
                         "\n",
                         Arrays.asList(
-                                "CREATE EXTERNAL TABLE test_table (",
-                                "  dt DATE,",
-                                "  ts TIMESTAMP",
-                                ")",
+                                "CREATE EXTERNAL TABLE test_table",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
-                                "LOCATION '" + path + "'",
-                                "TBLPROPERTIES (",
-                                "  'table-store.catalog' = 'test_catalog',",
-                                "  'table-store.file.format' = 'avro'",
-                                ")")));
+                                "LOCATION '" + path + "'")));
         Assert.assertEquals(
                 Collections.singletonList("1971-01-11\t2022-05-17 17:29:20.0"),
                 hiveShell.executeQuery("SELECT * FROM test_table WHERE dt = '1971-01-11'"));

@@ -18,66 +18,139 @@
 
 package org.apache.flink.table.store.hive;
 
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.file.schema.DataField;
+import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.types.logical.LogicalType;
 
+import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.SerDeUtils;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.Properties;
+import java.util.stream.Collectors;
 
 /** Column names, types and comments of a Hive table. */
 public class HiveSchema {
 
-    private final List<String> fieldNames;
-    private final List<TypeInfo> fieldTypeInfos;
-    private final List<String> fieldComments;
+    private final Schema schema;
 
-    private HiveSchema(
-            List<String> fieldNames, List<TypeInfo> fieldTypeInfos, List<String> fieldComments) {
-        Preconditions.checkArgument(
-                fieldNames.size() == fieldTypeInfos.size()
-                        && fieldNames.size() == fieldComments.size(),
-                "Length of field names (%s), type infos (%s) and comments (%s) are different.",
-                fieldNames.size(),
-                fieldTypeInfos.size(),
-                fieldComments.size());
-        this.fieldNames = fieldNames;
-        this.fieldTypeInfos = fieldTypeInfos;
-        this.fieldComments = fieldComments;
+    private HiveSchema(Schema schema) {
+        this.schema = schema;
     }
 
     public List<String> fieldNames() {
-        return fieldNames;
+        return schema.fieldNames();
     }
 
-    public List<TypeInfo> fieldTypeInfos() {
-        return fieldTypeInfos;
+    public List<LogicalType> fieldTypes() {
+        return schema.logicalRowType().getChildren();
     }
 
     public List<String> fieldComments() {
-        return fieldComments;
+        return schema.fields().stream().map(DataField::description).collect(Collectors.toList());
     }
 
     /** Extract {@link HiveSchema} from Hive serde properties. */
     public static HiveSchema extract(Properties properties) {
-        String columnNames = properties.getProperty(serdeConstants.LIST_COLUMNS);
-        String columnNameDelimiter =
-                properties.getProperty(
-                        serdeConstants.COLUMN_NAME_DELIMITER, String.valueOf(SerDeUtils.COMMA));
-        List<String> names = Arrays.asList(columnNames.split(columnNameDelimiter));
+        String location = properties.getProperty(hive_metastoreConstants.META_TABLE_LOCATION);
+        if (location == null) {
+            String tableName = properties.getProperty(hive_metastoreConstants.META_TABLE_NAME);
+            throw new UnsupportedOperationException(
+                    "Location property is missing for table "
+                            + tableName
+                            + ". Currently Flink table store only supports external table for Hive "
+                            + "so location property must be set.");
+        }
+        Schema schema =
+                new SchemaManager(new Path(location))
+                        .latest()
+                        .orElseThrow(
+                                () ->
+                                        new IllegalArgumentException(
+                                                "Schema file not found in location "
+                                                        + location
+                                                        + ". Please create table first."));
 
-        String columnTypes = properties.getProperty(serdeConstants.LIST_COLUMN_TYPES);
-        List<TypeInfo> typeInfos = TypeInfoUtils.getTypeInfosFromTypeString(columnTypes);
+        if (properties.containsKey(serdeConstants.LIST_COLUMNS)
+                && properties.containsKey(serdeConstants.LIST_COLUMN_TYPES)) {
+            String columnNames = properties.getProperty(serdeConstants.LIST_COLUMNS);
+            String columnNameDelimiter =
+                    properties.getProperty(
+                            serdeConstants.COLUMN_NAME_DELIMITER, String.valueOf(SerDeUtils.COMMA));
+            List<String> names = Arrays.asList(columnNames.split(columnNameDelimiter));
 
-        // see MetastoreUtils#addCols for the exact property name and separator
-        String columnCommentsPropertyName = "columns.comments";
-        List<String> comments =
-                Arrays.asList(properties.getProperty(columnCommentsPropertyName).split("\0", -1));
+            String columnTypes = properties.getProperty(serdeConstants.LIST_COLUMN_TYPES);
+            List<TypeInfo> typeInfos = TypeInfoUtils.getTypeInfosFromTypeString(columnTypes);
 
-        return new HiveSchema(names, typeInfos, comments);
+            if (names.size() > 0 && typeInfos.size() > 0) {
+                checkSchemaMatched(names, typeInfos, schema);
+            }
+        }
+
+        return new HiveSchema(schema);
+    }
+
+    private static void checkSchemaMatched(
+            List<String> names, List<TypeInfo> typeInfos, Schema schema) {
+        List<String> ddlNames = new ArrayList<>(names);
+        List<TypeInfo> ddlTypeInfos = new ArrayList<>(typeInfos);
+        List<String> schemaNames = schema.fieldNames();
+        List<TypeInfo> schemaTypeInfos =
+                schema.logicalRowType().getChildren().stream()
+                        .map(HiveTypeUtils::logicalTypeToTypeInfo)
+                        .collect(Collectors.toList());
+
+        // make the lengths of lists equal
+        while (ddlNames.size() < schemaNames.size()) {
+            ddlNames.add(null);
+        }
+        while (schemaNames.size() < ddlNames.size()) {
+            schemaNames.add(null);
+        }
+        while (ddlTypeInfos.size() < schemaTypeInfos.size()) {
+            ddlTypeInfos.add(null);
+        }
+        while (schemaTypeInfos.size() < ddlTypeInfos.size()) {
+            schemaTypeInfos.add(null);
+        }
+
+        // compare names and type infos
+        List<String> mismatched = new ArrayList<>();
+        for (int i = 0; i < ddlNames.size(); i++) {
+            if (!Objects.equals(ddlNames.get(i), schemaNames.get(i))
+                    || !Objects.equals(ddlTypeInfos.get(i), schemaTypeInfos.get(i))) {
+                String ddlField =
+                        ddlNames.get(i) == null
+                                ? "null"
+                                : ddlNames.get(i) + " " + ddlTypeInfos.get(i).getTypeName();
+                String schemaField =
+                        schemaNames.get(i) == null
+                                ? "null"
+                                : schemaNames.get(i) + " " + schemaTypeInfos.get(i).getTypeName();
+                mismatched.add(
+                        String.format(
+                                "Field #%d\n"
+                                        + "Hive DDL          : %s\n"
+                                        + "Table Store Schema: %s\n",
+                                i, ddlField, schemaField));
+            }
+        }
+
+        if (mismatched.size() > 0) {
+            throw new IllegalArgumentException(
+                    "Hive DDL and table store schema mismatched! "
+                            + "It is recommended not to write any column definition "
+                            + "as Flink table store external table can read schema from the specified location.\n"
+                            + "Mismatched fields are:\n"
+                            + String.join("--------------------\n", mismatched));
+        }
     }
 }
