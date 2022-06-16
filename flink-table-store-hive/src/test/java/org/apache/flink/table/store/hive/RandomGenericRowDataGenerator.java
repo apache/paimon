@@ -26,10 +26,7 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.types.logical.LogicalType;
-
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
 import java.math.BigDecimal;
 import java.util.Arrays;
@@ -42,27 +39,6 @@ import java.util.stream.IntStream;
 
 /** Util class for generating random {@link GenericRowData}. */
 public class RandomGenericRowDataGenerator {
-
-    public static final List<TypeInfo> TYPE_INFOS =
-            Arrays.asList(
-                    TypeInfoFactory.booleanTypeInfo,
-                    TypeInfoFactory.byteTypeInfo,
-                    TypeInfoFactory.shortTypeInfo,
-                    TypeInfoFactory.intTypeInfo,
-                    TypeInfoFactory.longTypeInfo,
-                    TypeInfoFactory.floatTypeInfo,
-                    TypeInfoFactory.doubleTypeInfo,
-                    TypeInfoFactory.getDecimalTypeInfo(5, 3),
-                    TypeInfoFactory.getDecimalTypeInfo(28, 6),
-                    TypeInfoFactory.getCharTypeInfo(10),
-                    TypeInfoFactory.getVarcharTypeInfo(10),
-                    TypeInfoFactory.stringTypeInfo,
-                    TypeInfoFactory.binaryTypeInfo,
-                    TypeInfoFactory.dateTypeInfo,
-                    TypeInfoFactory.timestampTypeInfo,
-                    TypeInfoFactory.getListTypeInfo(TypeInfoFactory.longTypeInfo),
-                    TypeInfoFactory.getMapTypeInfo(
-                            TypeInfoFactory.stringTypeInfo, TypeInfoFactory.intTypeInfo));
 
     public static final List<LogicalType> LOGICAL_TYPES =
             Arrays.asList(
