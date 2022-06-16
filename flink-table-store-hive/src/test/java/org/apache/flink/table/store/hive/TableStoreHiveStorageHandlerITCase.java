@@ -173,10 +173,7 @@ public class TableStoreHiveStorageHandlerITCase {
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
-                        RowType.of(
-                                RandomGenericRowDataGenerator.LOGICAL_TYPES.toArray(
-                                        new LogicalType[0]),
-                                RandomGenericRowDataGenerator.FIELD_NAMES.toArray(new String[0])),
+                        RandomGenericRowDataGenerator.ROW_TYPE,
                         Collections.emptyList(),
                         Collections.singletonList("f_int"));
 
@@ -200,26 +197,11 @@ public class TableStoreHiveStorageHandlerITCase {
         table.newCommit().commit("0", write.prepareCommit());
         write.close();
 
-        StringBuilder ddl = new StringBuilder();
-        for (int i = 0; i < RandomGenericRowDataGenerator.FIELD_NAMES.size(); i++) {
-            if (i != 0) {
-                ddl.append(",\n");
-            }
-            ddl.append("  ")
-                    .append(RandomGenericRowDataGenerator.FIELD_NAMES.get(i))
-                    .append(" ")
-                    .append(RandomGenericRowDataGenerator.TYPE_NAMES.get(i))
-                    .append(" COMMENT '")
-                    .append(RandomGenericRowDataGenerator.FIELD_COMMENTS.get(i))
-                    .append("'");
-        }
         hiveShell.execute(
                 String.join(
                         "\n",
                         Arrays.asList(
-                                "CREATE EXTERNAL TABLE test_table (",
-                                ddl.toString(),
-                                ")",
+                                "CREATE EXTERNAL TABLE test_table",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
                                 "LOCATION '" + root + "'")));
         List<Object[]> actual =

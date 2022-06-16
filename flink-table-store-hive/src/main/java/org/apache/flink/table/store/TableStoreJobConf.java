@@ -18,15 +18,9 @@
 
 package org.apache.flink.table.store;
 
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.store.file.FileStoreOptions;
-import org.apache.flink.util.Preconditions;
-
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.mapred.JobConf;
 
-import java.util.Arrays;
 import java.util.Map;
 import java.util.Properties;
 
@@ -36,14 +30,7 @@ import java.util.Properties;
  */
 public class TableStoreJobConf {
 
-    private static final String TBLPROPERTIES_PREFIX = "table-store.";
-    private static final String INTERNAL_TBLPROPERTIES_PREFIX =
-            "table-store.internal.tblproperties.";
-
-    private static final String INTERNAL_DB_NAME = "table-store.internal.db-name";
-    private static final String INTERNAL_TABLE_NAME = "table-store.internal.table-name";
     private static final String INTERNAL_LOCATION = "table-store.internal.location";
-
     private static final String INTERNAL_FILE_STORE_USER = "table-store.internal.file-store.user";
 
     private final JobConf jobConf;
@@ -53,49 +40,13 @@ public class TableStoreJobConf {
     }
 
     public static void configureInputJobProperties(Properties properties, Map<String, String> map) {
-        String tableNameString = properties.getProperty(hive_metastoreConstants.META_TABLE_NAME);
-        String[] tableName = tableNameString.split("\\.");
-        Preconditions.checkState(
-                tableName.length >= 2,
-                "There is no dot in META_TABLE_NAME " + tableNameString + ". This is unexpected.");
-
-        map.put(
-                INTERNAL_DB_NAME,
-                String.join(".", Arrays.copyOfRange(tableName, 0, tableName.length - 1)));
-
-        map.put(INTERNAL_TABLE_NAME, tableName[tableName.length - 1]);
-
         map.put(
                 INTERNAL_LOCATION,
                 properties.getProperty(hive_metastoreConstants.META_TABLE_LOCATION));
-
-        for (ConfigOption<?> option : FileStoreOptions.allOptions()) {
-            if (properties.containsKey(TBLPROPERTIES_PREFIX + option.key())) {
-                map.put(
-                        INTERNAL_TBLPROPERTIES_PREFIX + option.key(),
-                        properties.getProperty(TBLPROPERTIES_PREFIX + option.key()));
-            }
-        }
-    }
-
-    public String getDbName() {
-        return jobConf.get(INTERNAL_DB_NAME);
-    }
-
-    public String getTableName() {
-        return jobConf.get(INTERNAL_TABLE_NAME);
     }
 
     public String getLocation() {
         return jobConf.get(INTERNAL_LOCATION);
-    }
-
-    public void updateFileStoreOptions(Configuration fileStoreOptions) {
-        fileStoreOptions.set(FileStoreOptions.PATH, getLocation());
-        for (Map.Entry<String, String> entry :
-                jobConf.getPropsWithPrefix(INTERNAL_TBLPROPERTIES_PREFIX).entrySet()) {
-            fileStoreOptions.setString(entry.getKey(), entry.getValue());
-        }
     }
 
     public String getFileStoreUser() {

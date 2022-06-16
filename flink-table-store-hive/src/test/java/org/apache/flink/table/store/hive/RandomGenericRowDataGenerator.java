@@ -27,6 +27,7 @@ import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.types.logical.LogicalType;
 
+import org.apache.flink.table.types.logical.RowType;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
@@ -36,6 +37,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /** Util class for generating random {@link GenericRowData}. */
 public class RandomGenericRowDataGenerator {
@@ -140,6 +143,17 @@ public class RandomGenericRowDataGenerator {
                     "comment_timestamp",
                     "comment_list_long",
                     "comment_map_string_int");
+
+    public static final RowType ROW_TYPE =
+            new RowType(
+                    IntStream.range(0, FIELD_NAMES.size())
+                            .mapToObj(
+                                    i ->
+                                            new RowType.RowField(
+                                                    FIELD_NAMES.get(i),
+                                                    LOGICAL_TYPES.get(i),
+                                                    FIELD_COMMENTS.get(i)))
+                            .collect(Collectors.toList()));
 
     public static GenericRowData generate() {
         ThreadLocalRandom random = ThreadLocalRandom.current();

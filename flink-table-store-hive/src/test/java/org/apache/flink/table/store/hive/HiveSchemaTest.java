@@ -22,7 +22,6 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
@@ -41,13 +40,16 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 public class HiveSchemaTest {
 
     private static final RowType ROW_TYPE =
-            RowType.of(
-                    new LogicalType[] {
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.STRING().getLogicalType(),
-                        DataTypes.DECIMAL(5, 3).getLogicalType()
-                    },
-                    new String[] {"a", "b", "c"});
+            new RowType(
+                    Arrays.asList(
+                            new RowType.RowField(
+                                    "a", DataTypes.INT().getLogicalType(), "first comment"),
+                            new RowType.RowField(
+                                    "b", DataTypes.STRING().getLogicalType(), "second comment"),
+                            new RowType.RowField(
+                                    "c",
+                                    DataTypes.DECIMAL(5, 3).getLogicalType(),
+                                    "last comment")));
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -65,7 +67,6 @@ public class HiveSchemaTest {
                                 TypeInfoFactory.intTypeInfo.getTypeName(),
                                 TypeInfoFactory.stringTypeInfo.getTypeName(),
                                 TypeInfoFactory.getDecimalTypeInfo(5, 3).getTypeName())));
-        properties.setProperty("columns.comments", "first comment\0second comment\0last comment");
         properties.setProperty("location", tempDir.toString());
 
         HiveSchema schema = HiveSchema.extract(properties);
@@ -87,7 +88,6 @@ public class HiveSchemaTest {
         Properties properties = new Properties();
         properties.setProperty("columns", "");
         properties.setProperty("columns.types", "");
-        properties.setProperty("columns.comments", "");
         properties.setProperty("location", tempDir.toString());
 
         HiveSchema schema = HiveSchema.extract(properties);
@@ -98,7 +98,8 @@ public class HiveSchemaTest {
                                 DataTypes.INT().getLogicalType(),
                                 DataTypes.STRING().getLogicalType(),
                                 DataTypes.DECIMAL(5, 3).getLogicalType()));
-        assertThat(schema.fieldComments()).isEqualTo(Arrays.asList("", "", ""));
+        assertThat(schema.fieldComments())
+                .isEqualTo(Arrays.asList("first comment", "second comment", "last comment"));
     }
 
     @Test
@@ -120,7 +121,10 @@ public class HiveSchemaTest {
         String expected =
                 String.join(
                         "\n",
-                        "Hive DDL and table store schema mismatched! Mismatched fields are:",
+                        "Hive DDL and table store schema mismatched! "
+                                + "It is recommended not to write any column definition "
+                                + "as Flink table store external table can read schema from the specified location.",
+                        "Mismatched fields are:",
                         "Field #1",
                         "Hive DDL          : mismatched string",
                         "Table Store Schema: b string",
@@ -145,7 +149,10 @@ public class HiveSchemaTest {
         String expected =
                 String.join(
                         "\n",
-                        "Hive DDL and table store schema mismatched! Mismatched fields are:",
+                        "Hive DDL and table store schema mismatched! "
+                                + "It is recommended not to write any column definition "
+                                + "as Flink table store external table can read schema from the specified location.",
+                        "Mismatched fields are:",
                         "Field #1",
                         "Hive DDL          : null",
                         "Table Store Schema: b string",
@@ -179,7 +186,10 @@ public class HiveSchemaTest {
         String expected =
                 String.join(
                         "\n",
-                        "Hive DDL and table store schema mismatched! Mismatched fields are:",
+                        "Hive DDL and table store schema mismatched! "
+                                + "It is recommended not to write any column definition "
+                                + "as Flink table store external table can read schema from the specified location.",
+                        "Mismatched fields are:",
                         "Field #3",
                         "Hive DDL          : d int",
                         "Table Store Schema: null",

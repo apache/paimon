@@ -22,6 +22,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.RowDataContainer;
 import org.apache.flink.table.store.SearchArgumentToPredicateConverter;
 import org.apache.flink.table.store.TableStoreJobConf;
+import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.table.FileStoreTable;
@@ -72,7 +73,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
     private FileStoreTable createFileStoreTable(JobConf jobConf) {
         TableStoreJobConf wrapper = new TableStoreJobConf(jobConf);
         Configuration conf = new Configuration();
-        wrapper.updateFileStoreOptions(conf);
+        conf.set(FileStoreOptions.PATH, wrapper.getLocation());
         return FileStoreTableFactory.create(conf, wrapper.getFileStoreUser());
     }
 

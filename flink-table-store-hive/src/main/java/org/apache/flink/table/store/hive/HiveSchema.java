@@ -19,10 +19,10 @@
 package org.apache.flink.table.store.hive;
 
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.util.Preconditions;
 
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.hive.serde.serdeConstants;
@@ -41,16 +41,9 @@ import java.util.stream.Collectors;
 public class HiveSchema {
 
     private final Schema schema;
-    private final List<String> fieldComments;
 
-    private HiveSchema(Schema schema, List<String> fieldComments) {
-        Preconditions.checkArgument(
-                schema.fields().size() == fieldComments.size(),
-                "Length of schema fields (%s) and comments (%s) are different.",
-                schema.fields().size(),
-                fieldComments.size());
+    private HiveSchema(Schema schema) {
         this.schema = schema;
-        this.fieldComments = fieldComments;
     }
 
     public List<String> fieldNames() {
@@ -62,7 +55,7 @@ public class HiveSchema {
     }
 
     public List<String> fieldComments() {
-        return fieldComments;
+        return schema.fields().stream().map(DataField::description).collect(Collectors.toList());
     }
 
     /** Extract {@link HiveSchema} from Hive serde properties. */
@@ -102,17 +95,7 @@ public class HiveSchema {
             }
         }
 
-        // see MetastoreUtils#addCols for the exact property name and separator
-        String columnCommentsPropertyName = "columns.comments";
-        List<String> comments =
-                new ArrayList<>(
-                        Arrays.asList(
-                                properties.getProperty(columnCommentsPropertyName).split("\0")));
-        while (comments.size() < schema.fields().size()) {
-            comments.add("");
-        }
-
-        return new HiveSchema(schema, comments);
+        return new HiveSchema(schema);
     }
 
     private static void checkSchemaMatched(
@@ -163,7 +146,10 @@ public class HiveSchema {
 
         if (mismatched.size() > 0) {
             throw new IllegalArgumentException(
-                    "Hive DDL and table store schema mismatched! Mismatched fields are:\n"
+                    "Hive DDL and table store schema mismatched! "
+                            + "It is recommended not to write any column definition "
+                            + "as Flink table store external table can read schema from the specified location.\n"
+                            + "Mismatched fields are:\n"
                             + String.join("--------------------\n", mismatched));
         }
     }
