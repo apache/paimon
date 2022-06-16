@@ -64,7 +64,7 @@ Supported filter functions are:
 By default, data is only visible after the checkpoint, which means
 that the streaming reading has transactional consistency.
 
-If you want the data to be immediately visible, you need to set table option:
+Immediate data visibility is configured via
 `log.consistency` = `eventual`.
 
 In this at-least-once mode, records are sent to downstream jobs ahead of time,
