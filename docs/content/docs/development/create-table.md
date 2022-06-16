@@ -26,6 +26,28 @@ under the License.
 
 # Create Table
 
+## Catalog
+
+Table Store uses its own catalog to manage all the databases and tables. Users need to configure the type `table-store` and a root directory `warehouse` to use it.
+
+```sql
+CREATE CATALOG my_catalog WITH (
+  'type'='table-store',
+  'warehouse'='hdfs://nn:8020/warehouse/path'
+);
+
+USE CATALOG my_catalog;
+```
+
+Table Store catalog supports SQL DDL commands:
+- `CREATE TABLE ... PARTITIONED BY`
+- `DROP TABLE ...`
+- `ALTER TABLE ...`
+- `SHOW DATABASES`
+- `SHOW TABLES`
+
+## Syntax
+
 ```sql
 CREATE TABLE [IF NOT EXISTS] [catalog_name.][db_name.]table_name
   (
@@ -61,36 +83,9 @@ primary key must contain the partition field.
 __Note:__ Metadata column is not supported yet.
 {{< /hint >}}
 
-Table options that do not contain the 'connector' key and value
-represent a managed table. Creating a table will create the
-corresponding physical storage.
+This will create a directory under `${warehouse}/${database_name}.db/${table_name}`.
 
-When the corresponding physical storage already exists,
-such as a file directory or kafka topic:
-- If you want to reuse it, use `CREATE TABLE IF NOT EXISTS`
-- If you don't want to reuse it, `DROP TABLE IF EXISTS`
-  or delete it yourself.
-
-It is recommended that you use a persistent catalog, such as
-`HiveCatalog`, otherwise make sure you create the table with
-the same options each time.
-
-## Session Options
-
-To create a managed table, you need to set the required
-session options in advance. Session options are only valid
-when creating a table, not interfering with reading or
-writing the table.
-
-You can set session options in the following two ways:
-- Edit `flink-conf.yaml`.
-- Via `TableEnvironment.getConfig().set`.
-
-The difference between session options and table options
-is that the session option needs to be prefixed with
-`table-store`. Take `bucket` option for example:
-- set as session level: `SET 'table-store.bucket' = '4';`
-- set as per table level: `CREATE TABLE ... WITH ('bucket' = '4')`
+## Table Options
 
 Important options include the following:
 
@@ -105,13 +100,6 @@ Important options include the following:
     </tr>
     </thead>
     <tbody>
-    <tr>
-      <td><h5>root-path</h5></td>
-      <td>Yes</td>
-      <td style="word-wrap: break-word;">(none)</td>
-      <td>String</td>
-      <td>The root file path of the table store in the filesystem.</td>
-    </tr>
     <tr>
       <td><h5>bucket</h5></td>
       <td>Yes</td>
@@ -134,23 +122,14 @@ Important options include the following:
       <td>Required Kafka server connection string for log store.</td>
     </tr>
     <tr>
-      <td><h5>log.retention</h5></td>
+      <td><h5>log.topic</h5></td>
       <td>No</td>
       <td style="word-wrap: break-word;">(none)</td>
-      <td>Duration</td>
-      <td>The duration to keep a log file before deleting it. The default value is from the log system cluster.</td>
+      <td>String</td>
+      <td>Topic of this kafka table.</td>
     </tr>
     </tbody>
 </table>
-
-## Physical storage
-
-Creating a table will create the corresponding physical storage:
-- The table's FileStore directory will be created under:
-  `${root-path}/${catalog_name}.catalog/${database_name}.db/${table_name}`
-- If `log.system` is configured as Kafka, a Topic named
-  "${catalog_name}.${database_name}.${table_name}" will be created
-  automatically when the table is created.
 
 ## Distribution
 
@@ -248,23 +227,24 @@ CREATE TABLE MyTable (
 ) WITH (
   'merge-engine' = 'partial-update'
 );
+
+INSERT INTO MyTable
+SELECT product_id, price, number, NULL FROM Src1 UNION ALL
+SELECT product_id, NULL, NULL, detail FROM Src2;
 ```
-
-{{< hint info >}}
-__Note:__ Partial update is only supported for table with primary key.
-{{< /hint >}}
-
-{{< hint info >}}
-__Note:__ Partial update is not supported for streaming consuming.
-{{< /hint >}}
 
 The value fields are updated to the latest data one by one
 under the same primary key, but null values are not overwritten.
 
-For example, the inputs: 
+For example, the inputs:
 - <1, 23.0, 10,   NULL>
-- <1, NULL, 20,   'This is a book'>
+- <1, NULL, NULL, 'This is a book'>
 - <1, 25.2, NULL, NULL>
 
-Output: 
-- <1, 25.2, 20, 'This is a book'>
+Output:
+- <1, 25.2, 10, 'This is a book'>
+
+__Note:__
+- Partial update is only supported for table with primary key.
+- Partial update is not supported for streaming consuming.
+- It is best not to have NULL values in the fields, NULL will not overwrite data.

@@ -37,59 +37,6 @@ column_list:
   (col_name1 [, column_name2, ...])
 ```
 
-## Unify Streaming and Batch
-
-Flink Table Store supports read/write under both batch and streaming mode.
-Beyond that, it can also write to the same managed table simultaneously by
-different streaming and batch jobs.
-
-Suppose you have a warehouse pipeline:
-
-{{< img src="/img/stream_batch_insert.svg" alt="Unify Streaming and Batch" >}}
-
-The DWD layer has a following table:
-
-```sql
--- a managed table ddl
-CREATE TABLE MyDwdTable (
-  user_id BIGINT,
-  item_id BIGINT,
-  dt STRING
-) PARTITIONED BY (dt);
-```
-
-And there is a real-time pipeline to perform the data sync task, followed
-by the downstream jobs to perform the rest ETL steps.
-
-```sql
--- Run a streaming job that continuously writes to the table
-SET 'execution.runtime-mode' = 'streaming';
-INSERT INTO MyDwdTable SELECT user_id, item_id, dt FROM MyCdcTable WHERE some_filter;
-
--- The downstream aggregation task
-INSERT INTO MyDwsTable
-SELECT dt, item_id, COUNT(user_id) FROM MyDwdTable GROUP BY dt, item_id;
-```
-
-Some backfill tasks are often required to correct historical data, which means
-you can start a new batch job overwriting the table's historical partition
-without influencing the current streaming pipeline and the downstream tasks.
-
-```sql
--- Run a batch job to revise yesterday's partition
-SET 'execution.runtime-mode' = 'batch';
-INSERT OVERWRITE MyDwdTable PARTITION ('dt'='20220402')
-SELECT user_id, item_id FROM MyCdcTable WHERE dt = '20220402' AND new_filter;
-```
-
-This way you revise yesterday's partition without suspending the streaming job.
-
-{{< hint info >}}
-__Note:__ Multiple jobs writing to a single partition at the same time is
-not supported. The behavior does not result in data errors, but can lead
-to job failover.
-{{< /hint >}}
-
 ## Parallelism
 
 It is recommended that the parallelism of sink should be less than or

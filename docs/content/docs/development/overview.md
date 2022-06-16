@@ -26,9 +26,30 @@ under the License.
 
 # Overview
 
-Flink Table Store is a unified streaming and batch store for building dynamic
-tables on Apache Flink. Flink Table Store serves as the storage engine behind
-Flink SQL Managed Table.
+Flink Table Store is a unified storage to build dynamic tables for both streaming and
+batch processing in Flink, supporting high-speed data ingestion and timely data query.
+
+## Architecture
+
+<center>
+<img src="/img/architecture.png" width="100%"/>
+</center>
+
+As shown in the architecture above:
+
+**Read/Write:** Table Store supports a versatile way to read/write data and perform OLAP queries.
+- For reads, it supports consuming data <1> from historical snapshots (in batch mode), <2>from the
+  latest offset (in continuous mode), or <3> reading incremental snapshots in a hybrid way.
+- For writes, it supports streaming synchronization from the changelog of databases (CDC) or batch
+  insert/overwrite from offline data.
+
+**Ecosystem:** In addition to Apache Flink, Table Store also supports read/write by other computation
+engines like Apache Hive, Apache Spark and Trino.
+
+**Internal:** Under the hood, Table Store uses a hybrid storage architecture with a lake format to store
+historical data and a queue system to store incremental data. The former stores the columnar files on
+the filesystem/object-store and uses the LSM tree structure to support a large volume of data updates
+and high-performance queries. The latter uses Apache Kafka to capture data in real-time.
 
 ## Setup Table Store
 
@@ -49,45 +70,7 @@ The steps to set up are:
 - Setting the HADOOP_CLASSPATH environment variable or copy the
   [Pre-bundled Hadoop Jar](https://flink.apache.org/downloads.html) to `flink/lib`.
 
-## Managed Table
-
-The typical usage of Flink SQL DDL is to specify the 'connector' and fill in
-the complex connection information in 'with'. The DDL just establishes an implicit
-relationship with the external system. We call such Table as external table.
-
-```sql
--- an external table ddl
-CREATE TABLE KafkaTable (
-  `user_id` BIGINT,
-  `item_id` BIGINT,
-  `behavior` STRING
-) WITH (
-  'connector' = 'kafka',
-  'topic' = 'user_behavior',
-  'properties.bootstrap.servers' = 'localhost:9092',
-  'properties.group.id' = 'testGroup',
-  'scan.startup.mode' = 'earliest-offset',
-  'format' = 'csv'
-);
-```
-
-The managed table is different, the connection information is already
-filled in the session environment, the user only needs to focus on the
-business logic when writing the table creation DDL. The DDL is no longer
-just an implicit relationship; creating a table will create the corresponding
-physical storage, and dropping a table will delete the corresponding
-physical storage.
-
-```sql
--- a managed table ddl
-CREATE TABLE MyTable (
-  `user_id` BIGINT,
-  `item_id` BIGINT,
-  `behavior` STRING
-);
-```
-
-## Unify Streaming and Batch
+## Unified Table
 
 There are three types of connectors in Flink SQL.
 - Message queue, such as Apache Kafka, it is used in both source and 
@@ -129,30 +112,3 @@ Different `log.scan` mode will result in different consuming behavior under stre
     </tr>
     </tbody>
 </table>
-
-## Architecture
-
-Flink Table Store consists of two parts, LogStore and FileStore. The
-LogStore would serve the need of message systems, while FileStore will
-play the role of file systems with columnar formats. At each point in time,
-LogStore and FileStore will store exactly the same data for the latest
-written data (LogStore has TTL), but with different physical layouts.
-Flink Table Store aims to bridge the storage layout gap between the
-batch table and streaming changelog, to provide a unified experience
-as Flink SQL:
-- LogStore: Store the latest data, support second level streaming incremental
-consumption, use Kafka by default.
-- FileStore: Store latest data + historical data, provide batch Ad-Hoc analysis.
-
-{{< img src="/img/architecture.svg" alt="Flink Table Store Architecture" >}}
-
-The manifest file is used to record changes to the SST file, and multiple
-manifest files make up a snapshot.
-
-The data in the FileStore is divided into buckets, each bucket is a
-separate LSM (log structured merge tree).
-
-The file inside LSM is called SST (Sorted Strings Table). By default, files
-are stored in columnar format (Apache ORC) for high performance of analysis
-and compression of storage.
-
