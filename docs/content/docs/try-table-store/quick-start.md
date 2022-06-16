@@ -108,13 +108,17 @@ Start the SQL Client CLI:
 ./bin/sql-client.sh embedded
 ```
 
-## Step 5: Create Dynamic Table
+## Step 5: Create Table
 
 ```sql
--- set root path to session config
-SET 'table-store.root-path' = '/tmp/table_store';
+CREATE CATALOG my_catalog WITH (
+  'type'='table-store',
+  'warehouse'='fs:/tmp/table_store'
+);
 
--- create a word count dynamic table without 'connector' option
+USE CATALOG my_catalog;
+
+-- create a word count table
 CREATE TABLE word_count (
     word STRING PRIMARY KEY NOT ENFORCED,
     cnt BIGINT
@@ -125,7 +129,7 @@ CREATE TABLE word_count (
 
 ```sql
 -- create a word data generator table
-CREATE TABLE word_table (
+CREATE TEMPORARY TABLE word_table (
     word STRING
 ) WITH (
     'connector' = 'datagen',
