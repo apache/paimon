@@ -46,7 +46,7 @@ public class HiveSchema {
     private HiveSchema(Schema schema, List<String> fieldComments) {
         Preconditions.checkArgument(
                 schema.fields().size() == fieldComments.size(),
-                "Length of schema fields (%s) (%s) and comments (%s) are different.",
+                "Length of schema fields (%s) and comments (%s) are different.",
                 schema.fields().size(),
                 fieldComments.size());
         this.schema = schema;
