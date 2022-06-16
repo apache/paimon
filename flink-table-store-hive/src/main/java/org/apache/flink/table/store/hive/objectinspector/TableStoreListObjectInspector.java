@@ -20,11 +20,11 @@ package org.apache.flink.table.store.hive.objectinspector;
 
 import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.store.hive.HiveTypeUtils;
+import org.apache.flink.table.types.logical.LogicalType;
 
 import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.objectinspector.ListObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -40,11 +40,9 @@ public class TableStoreListObjectInspector implements ListObjectInspector {
     private final ObjectInspector elementObjectInspector;
     private final ArrayData.ElementGetter elementGetter;
 
-    public TableStoreListObjectInspector(TypeInfo elementTypeInfo) {
-        this.elementObjectInspector = HiveTypeUtils.getObjectInspector(elementTypeInfo);
-        this.elementGetter =
-                ArrayData.createElementGetter(
-                        HiveTypeUtils.typeInfoToDataType(elementTypeInfo).getLogicalType());
+    public TableStoreListObjectInspector(LogicalType elementType) {
+        this.elementObjectInspector = HiveTypeUtils.getObjectInspector(elementType);
+        this.elementGetter = ArrayData.createElementGetter(elementType);
     }
 
     @Override

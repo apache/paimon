@@ -18,27 +18,33 @@
 
 package org.apache.flink.table.store.hive;
 
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.store.RowDataContainer;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.hive.objectinspector.TableStoreRowDataObjectInspector;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Properties;
-import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.hive.RandomGenericRowDataGenerator.FIELD_COMMENTS;
 import static org.apache.flink.table.store.hive.RandomGenericRowDataGenerator.FIELD_NAMES;
-import static org.apache.flink.table.store.hive.RandomGenericRowDataGenerator.TYPE_INFOS;
+import static org.apache.flink.table.store.hive.RandomGenericRowDataGenerator.ROW_TYPE;
 import static org.apache.flink.table.store.hive.RandomGenericRowDataGenerator.generate;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link TableStoreSerDe}. */
 public class TableStoreSerDeTest {
+
+    @TempDir java.nio.file.Path tempDir;
 
     @Test
     public void testInitialize() throws Exception {
@@ -66,12 +72,17 @@ public class TableStoreSerDeTest {
     }
 
     private TableStoreSerDe createInitializedSerDe() throws Exception {
+        new SchemaManager(new Path(tempDir.toString()))
+                .commitNewVersion(
+                        new UpdateSchema(
+                                ROW_TYPE,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                new HashMap<>(),
+                                ""));
+
         Properties properties = new Properties();
-        properties.setProperty("columns", String.join(",", FIELD_NAMES));
-        properties.setProperty(
-                "columns.types",
-                TYPE_INFOS.stream().map(TypeInfo::getTypeName).collect(Collectors.joining(":")));
-        properties.setProperty("columns.comments", String.join("\0", FIELD_COMMENTS));
+        properties.setProperty("location", tempDir.toString());
 
         TableStoreSerDe serDe = new TableStoreSerDe();
         serDe.initialize(null, properties);

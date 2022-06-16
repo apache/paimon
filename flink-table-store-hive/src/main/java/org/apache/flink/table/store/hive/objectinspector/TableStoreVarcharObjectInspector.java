@@ -24,7 +24,7 @@ import org.apache.hadoop.hive.common.type.HiveVarchar;
 import org.apache.hadoop.hive.serde2.io.HiveVarcharWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.HiveVarcharObjectInspector;
-import org.apache.hadoop.hive.serde2.typeinfo.VarcharTypeInfo;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
 /** {@link AbstractPrimitiveJavaObjectInspector} for VARCHAR type. */
 public class TableStoreVarcharObjectInspector extends AbstractPrimitiveJavaObjectInspector
@@ -32,9 +32,9 @@ public class TableStoreVarcharObjectInspector extends AbstractPrimitiveJavaObjec
 
     private final int len;
 
-    public TableStoreVarcharObjectInspector(VarcharTypeInfo typeInfo) {
-        super(typeInfo);
-        this.len = typeInfo.getLength();
+    public TableStoreVarcharObjectInspector(int len) {
+        super(TypeInfoFactory.getVarcharTypeInfo(len));
+        this.len = len;
     }
 
     @Override

@@ -36,8 +36,6 @@ import org.apache.hadoop.hive.serde2.Deserializer;
 import org.apache.hadoop.mapred.InputFormat;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.OutputFormat;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.Properties;
@@ -46,8 +44,6 @@ import java.util.UUID;
 /** {@link HiveStorageHandler} for table store. This is the entrance class of Hive API. */
 public class TableStoreHiveStorageHandler
         implements HiveStoragePredicateHandler, HiveStorageHandler {
-
-    private static final Logger LOG = LoggerFactory.getLogger(TableStoreHiveStorageHandler.class);
 
     private Configuration conf;
 

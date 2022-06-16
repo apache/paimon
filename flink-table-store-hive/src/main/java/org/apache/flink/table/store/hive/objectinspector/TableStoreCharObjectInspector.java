@@ -24,7 +24,7 @@ import org.apache.hadoop.hive.common.type.HiveChar;
 import org.apache.hadoop.hive.serde2.io.HiveCharWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.HiveCharObjectInspector;
-import org.apache.hadoop.hive.serde2.typeinfo.CharTypeInfo;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
 /** {@link AbstractPrimitiveJavaObjectInspector} for CHAR type. */
 public class TableStoreCharObjectInspector extends AbstractPrimitiveJavaObjectInspector
@@ -32,9 +32,9 @@ public class TableStoreCharObjectInspector extends AbstractPrimitiveJavaObjectIn
 
     private final int len;
 
-    public TableStoreCharObjectInspector(CharTypeInfo typeInfo) {
-        super(typeInfo);
-        this.len = typeInfo.getLength();
+    public TableStoreCharObjectInspector(int len) {
+        super(TypeInfoFactory.getCharTypeInfo(len));
+        this.len = len;
     }
 
     @Override

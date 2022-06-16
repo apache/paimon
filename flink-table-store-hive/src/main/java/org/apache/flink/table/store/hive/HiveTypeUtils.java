@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.hive;
 
-import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.store.hive.objectinspector.TableStoreCharObjectInspector;
 import org.apache.flink.table.store.hive.objectinspector.TableStoreDateObjectInspector;
 import org.apache.flink.table.store.hive.objectinspector.TableStoreDecimalObjectInspector;
@@ -27,111 +26,115 @@ import org.apache.flink.table.store.hive.objectinspector.TableStoreMapObjectInsp
 import org.apache.flink.table.store.hive.objectinspector.TableStoreStringObjectInspector;
 import org.apache.flink.table.store.hive.objectinspector.TableStoreTimestampObjectInspector;
 import org.apache.flink.table.store.hive.objectinspector.TableStoreVarcharObjectInspector;
-import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.logical.ArrayType;
+import org.apache.flink.table.types.logical.CharType;
+import org.apache.flink.table.types.logical.DecimalType;
+import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.MapType;
+import org.apache.flink.table.types.logical.VarCharType;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
-import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory;
-import org.apache.hadoop.hive.serde2.typeinfo.CharTypeInfo;
-import org.apache.hadoop.hive.serde2.typeinfo.DecimalTypeInfo;
-import org.apache.hadoop.hive.serde2.typeinfo.ListTypeInfo;
-import org.apache.hadoop.hive.serde2.typeinfo.MapTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.PrimitiveTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
-import org.apache.hadoop.hive.serde2.typeinfo.VarcharTypeInfo;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
 /** Utils for converting types related classes between Flink and Hive. */
 public class HiveTypeUtils {
 
-    public static DataType typeInfoToDataType(TypeInfo typeInfo) {
-        ObjectInspector.Category category = typeInfo.getCategory();
-        switch (category) {
-            case PRIMITIVE:
-                PrimitiveObjectInspector.PrimitiveCategory primitiveCategory =
-                        ((PrimitiveTypeInfo) typeInfo).getPrimitiveCategory();
-                switch (primitiveCategory) {
-                    case BOOLEAN:
-                        return DataTypes.BOOLEAN();
-                    case BYTE:
-                        return DataTypes.TINYINT();
-                    case SHORT:
-                        return DataTypes.SMALLINT();
-                    case INT:
-                        return DataTypes.INT();
-                    case LONG:
-                        return DataTypes.BIGINT();
-                    case FLOAT:
-                        return DataTypes.FLOAT();
-                    case DOUBLE:
-                        return DataTypes.DOUBLE();
-                    case DECIMAL:
-                        DecimalTypeInfo decimalTypeInfo = (DecimalTypeInfo) typeInfo;
-                        return DataTypes.DECIMAL(
-                                decimalTypeInfo.getPrecision(), decimalTypeInfo.getScale());
-                    case CHAR:
-                        return DataTypes.CHAR(((CharTypeInfo) typeInfo).getLength());
-                    case VARCHAR:
-                        return DataTypes.VARCHAR(((VarcharTypeInfo) typeInfo).getLength());
-                    case STRING:
-                        return DataTypes.STRING();
-                    case BINARY:
-                        return DataTypes.BYTES();
-                    case DATE:
-                        return DataTypes.DATE();
-                    case TIMESTAMP:
-                        // TODO verify precision
-                        return DataTypes.TIMESTAMP(3);
-                    default:
-                        throw new UnsupportedOperationException(
-                                "Unsupported primitive type info category "
-                                        + primitiveCategory.name());
+    public static TypeInfo logicalTypeToTypeInfo(LogicalType logicalType) {
+        switch (logicalType.getTypeRoot()) {
+            case BOOLEAN:
+                return TypeInfoFactory.booleanTypeInfo;
+            case TINYINT:
+                return TypeInfoFactory.byteTypeInfo;
+            case SMALLINT:
+                return TypeInfoFactory.shortTypeInfo;
+            case INTEGER:
+                return TypeInfoFactory.intTypeInfo;
+            case BIGINT:
+                return TypeInfoFactory.longTypeInfo;
+            case FLOAT:
+                return TypeInfoFactory.floatTypeInfo;
+            case DOUBLE:
+                return TypeInfoFactory.doubleTypeInfo;
+            case DECIMAL:
+                DecimalType decimalType = (DecimalType) logicalType;
+                return TypeInfoFactory.getDecimalTypeInfo(
+                        decimalType.getPrecision(), decimalType.getScale());
+            case CHAR:
+                CharType charType = (CharType) logicalType;
+                return TypeInfoFactory.getCharTypeInfo(charType.getLength());
+            case VARCHAR:
+                VarCharType varCharType = (VarCharType) logicalType;
+                if (varCharType.getLength() == VarCharType.MAX_LENGTH) {
+                    return TypeInfoFactory.stringTypeInfo;
+                } else {
+                    return TypeInfoFactory.getVarcharTypeInfo(varCharType.getLength());
                 }
-            case LIST:
-                ListTypeInfo listTypeInfo = (ListTypeInfo) typeInfo;
-                return DataTypes.ARRAY(typeInfoToDataType(listTypeInfo.getListElementTypeInfo()));
+            case BINARY:
+            case VARBINARY:
+                return TypeInfoFactory.binaryTypeInfo;
+            case DATE:
+                return TypeInfoFactory.dateTypeInfo;
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return TypeInfoFactory.timestampTypeInfo;
+            case ARRAY:
+                ArrayType arrayType = (ArrayType) logicalType;
+                return TypeInfoFactory.getListTypeInfo(
+                        logicalTypeToTypeInfo(arrayType.getElementType()));
             case MAP:
-                MapTypeInfo mapTypeInfo = (MapTypeInfo) typeInfo;
-                return DataTypes.MAP(
-                        typeInfoToDataType(mapTypeInfo.getMapKeyTypeInfo()),
-                        typeInfoToDataType(mapTypeInfo.getMapValueTypeInfo()));
+                MapType mapType = (MapType) logicalType;
+                return TypeInfoFactory.getMapTypeInfo(
+                        logicalTypeToTypeInfo(mapType.getKeyType()),
+                        logicalTypeToTypeInfo(mapType.getValueType()));
             default:
                 throw new UnsupportedOperationException(
-                        "Unsupported type info category " + category.name());
+                        "Unsupported logical type " + logicalType.asSummaryString());
         }
     }
 
-    public static ObjectInspector getObjectInspector(TypeInfo typeInfo) {
-        ObjectInspector.Category category = typeInfo.getCategory();
-        switch (category) {
-            case PRIMITIVE:
-                PrimitiveTypeInfo primitiveTypeInfo = (PrimitiveTypeInfo) typeInfo;
-                switch (primitiveTypeInfo.getPrimitiveCategory()) {
-                    case DECIMAL:
-                        return new TableStoreDecimalObjectInspector((DecimalTypeInfo) typeInfo);
-                    case CHAR:
-                        return new TableStoreCharObjectInspector((CharTypeInfo) typeInfo);
-                    case VARCHAR:
-                        return new TableStoreVarcharObjectInspector((VarcharTypeInfo) typeInfo);
-                    case STRING:
-                        return new TableStoreStringObjectInspector();
-                    case DATE:
-                        return new TableStoreDateObjectInspector();
-                    case TIMESTAMP:
-                        return new TableStoreTimestampObjectInspector();
-                    default:
-                        return PrimitiveObjectInspectorFactory.getPrimitiveJavaObjectInspector(
-                                primitiveTypeInfo);
+    public static ObjectInspector getObjectInspector(LogicalType logicalType) {
+        switch (logicalType.getTypeRoot()) {
+            case BOOLEAN:
+            case TINYINT:
+            case SMALLINT:
+            case INTEGER:
+            case BIGINT:
+            case FLOAT:
+            case DOUBLE:
+            case BINARY:
+            case VARBINARY:
+                return PrimitiveObjectInspectorFactory.getPrimitiveJavaObjectInspector(
+                        (PrimitiveTypeInfo) logicalTypeToTypeInfo(logicalType));
+            case DECIMAL:
+                DecimalType decimalType = (DecimalType) logicalType;
+                return new TableStoreDecimalObjectInspector(
+                        decimalType.getPrecision(), decimalType.getScale());
+            case CHAR:
+                CharType charType = (CharType) logicalType;
+                return new TableStoreCharObjectInspector(charType.getLength());
+            case VARCHAR:
+                VarCharType varCharType = (VarCharType) logicalType;
+                if (varCharType.getLength() == VarCharType.MAX_LENGTH) {
+                    return new TableStoreStringObjectInspector();
+                } else {
+                    return new TableStoreVarcharObjectInspector(varCharType.getLength());
                 }
-            case LIST:
-                ListTypeInfo listTypeInfo = (ListTypeInfo) typeInfo;
-                return new TableStoreListObjectInspector(listTypeInfo.getListElementTypeInfo());
+            case DATE:
+                return new TableStoreDateObjectInspector();
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return new TableStoreTimestampObjectInspector();
+            case ARRAY:
+                ArrayType arrayType = (ArrayType) logicalType;
+                return new TableStoreListObjectInspector(arrayType.getElementType());
             case MAP:
-                MapTypeInfo mapTypeInfo = (MapTypeInfo) typeInfo;
+                MapType mapType = (MapType) logicalType;
                 return new TableStoreMapObjectInspector(
-                        mapTypeInfo.getMapKeyTypeInfo(), mapTypeInfo.getMapValueTypeInfo());
+                        mapType.getKeyType(), mapType.getValueType());
             default:
                 throw new UnsupportedOperationException(
-                        "Unsupported type info category " + category.name());
+                        "Unsupported logical type " + logicalType.asSummaryString());
         }
     }
 }
