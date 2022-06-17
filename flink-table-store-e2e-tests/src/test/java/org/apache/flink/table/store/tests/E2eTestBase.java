@@ -29,6 +29,7 @@ import org.testcontainers.containers.ContainerState;
 import org.testcontainers.containers.DockerComposeContainer;
 import org.testcontainers.containers.output.OutputFrame;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
+import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.utility.MountableFile;
 
 import java.io.File;
@@ -52,25 +53,30 @@ public abstract class E2eTestBase {
     private static final Logger LOG = LoggerFactory.getLogger(E2eTestBase.class);
 
     private final boolean withKafka;
+    private final boolean withHive;
 
     protected E2eTestBase() {
-        this(false);
+        this(false, false);
     }
 
-    protected E2eTestBase(boolean withKafka) {
+    protected E2eTestBase(boolean withKafka, boolean withHive) {
         this.withKafka = withKafka;
+        this.withHive = withHive;
     }
 
     private static final String TABLE_STORE_JAR_NAME = "flink-table-store.jar";
+    protected static final String TABLE_STORE_HIVE_JAR_NAME = "flink-table-store-hive.jar";
     private static final String BUNDLED_HADOOP_JAR_NAME = "bundled-hadoop.jar";
+
     protected static final String TEST_DATA_DIR = "/test-data";
+    protected static final String HDFS_ROOT = "hdfs://namenode:8020";
 
     private static final String PRINT_SINK_IDENTIFIER = "table-store-e2e-result";
     private static final int CHECK_RESULT_INTERVAL_MS = 1000;
     private static final int CHECK_RESULT_RETRIES = 60;
     private final List<String> currentResults = new ArrayList<>();
 
-    private DockerComposeContainer<?> environment;
+    protected DockerComposeContainer<?> environment;
     private ContainerState jobManager;
 
     @BeforeEach
@@ -88,19 +94,35 @@ public abstract class E2eTestBase {
                         .withLogConsumer("jobmanager_1", new LogConsumer(LOG))
                         .withLogConsumer("taskmanager_1", new LogConsumer(LOG));
         if (withKafka) {
-            services.add("zookeeper");
-            services.add("kafka");
-            environment
-                    .withLogConsumer("zookeeper_1", new Slf4jLogConsumer(LOG))
-                    .withLogConsumer("kafka_1", new Slf4jLogConsumer(LOG));
+            List<String> kafkaServices = Arrays.asList("zookeeper", "kafka");
+            services.addAll(kafkaServices);
+            for (String s : kafkaServices) {
+                environment.withLogConsumer(s + "_1", new Slf4jLogConsumer(LOG));
+            }
         }
-        environment.withServices(services.toArray(new String[0]));
+        if (withHive) {
+            List<String> hiveServices =
+                    Arrays.asList(
+                            "namenode",
+                            "datanode",
+                            "hive-server",
+                            "hive-metastore",
+                            "hive-metastore-postgresql");
+            services.addAll(hiveServices);
+            for (String s : hiveServices) {
+                environment.withLogConsumer(s + "_1", new Slf4jLogConsumer(LOG));
+            }
+            environment.waitingFor(
+                    "hive-server_1", Wait.forLogMessage(".*Starting HiveServer2.*", 1));
+        }
+        environment.withServices(services.toArray(new String[0])).withLocalCompose(true);
 
         environment.start();
         jobManager = environment.getContainerByServiceName("jobmanager_1").get();
         jobManager.execInContainer("chown", "-R", "flink:flink", TEST_DATA_DIR);
 
         copyResource(TABLE_STORE_JAR_NAME);
+        copyResource(TABLE_STORE_HIVE_JAR_NAME);
         copyResource(BUNDLED_HADOOP_JAR_NAME);
     }
 

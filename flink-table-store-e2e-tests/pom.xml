@@ -93,6 +93,18 @@ under the License.
                             <version>${project.version}</version>
                             <destFileName>flink-table-store.jar</destFileName>
                             <type>jar</type>
+                            <overWrite>true</overWrite>
+                            <outputDirectory>${project.build.directory}/dependencies
+                            </outputDirectory>
+                        </artifactItem>
+                        <artifactItem>
+                            <groupId>org.apache.flink</groupId>
+                            <artifactId>flink-table-store-hive</artifactId>
+                            <version>${project.version}</version>
+                            <destFileName>flink-table-store-hive.jar</destFileName>
+                            <type>jar</type>
+                            <classifier>jar-with-dependencies</classifier>
+                            <overWrite>true</overWrite>
                             <outputDirectory>${project.build.directory}/dependencies
                             </outputDirectory>
                         </artifactItem>
@@ -102,6 +114,7 @@ under the License.
                             <version>2.8.3-10.0</version>
                             <destFileName>bundled-hadoop.jar</destFileName>
                             <type>jar</type>
+                            <overWrite>true</overWrite>
                             <outputDirectory>${project.build.directory}/dependencies
                             </outputDirectory>
                         </artifactItem>

@@ -26,7 +26,7 @@ import java.util.UUID;
 public class LogStoreE2eTest extends E2eTestBase {
 
     public LogStoreE2eTest() {
-        super(true);
+        super(true, false);
     }
 
     @Test
