@@ -25,6 +25,7 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.mergetree.Increment;
+import org.apache.flink.table.store.file.mergetree.compact.CompactResult;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.FileStoreExpire;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
@@ -33,9 +34,10 @@ import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.file.writer.CompactWriter;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -44,6 +46,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
@@ -89,11 +92,10 @@ public class TestFileStore implements FileStore<KeyValue> {
             }
 
             @Override
-            public CompactWriter createCompactWriter(
+            public Callable<CompactResult> createCompactWriter(
                     BinaryRowData partition,
                     int bucket,
-                    ExecutorService compactExecutor,
-                    List<DataFileMeta> restoreFiles) {
+                    @Nullable List<DataFileMeta> compactFiles) {
                 throw new UnsupportedOperationException();
             }
         };

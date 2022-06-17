@@ -24,6 +24,7 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileWriter;
 import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
+import org.apache.flink.table.store.file.mergetree.compact.CompactResult;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.util.CloseableIterator;
@@ -153,7 +154,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue> {
         return increment;
     }
 
-    private void updateCompactResult(CompactManager.CompactResult result) {
+    private void updateCompactResult(CompactResult result) {
         Set<String> afterFiles =
                 result.after().stream().map(DataFileMeta::fileName).collect(Collectors.toSet());
         for (DataFileMeta file : result.before()) {
@@ -182,8 +183,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue> {
     }
 
     private void finishCompaction(boolean blocking) throws Exception {
-        Optional<CompactManager.CompactResult> result =
-                compactManager.finishCompaction(levels, blocking);
+        Optional<CompactResult> result = compactManager.finishCompaction(levels, blocking);
         result.ifPresent(this::updateCompactResult);
     }
 
