@@ -56,7 +56,7 @@ public class FileStoreStreamE2eTest extends E2eTestBase {
                         TEST_DATA_DIR + "/" + UUID.randomUUID().toString() + ".store");
 
         // prepare first part of test data
-        writeTestData(testDataSourceDir + "/1.csv", "A,5\nB,10\nA,4\nB,9\n");
+        writeSharedFile(testDataSourceDir + "/1.csv", "A,5\nB,10\nA,4\nB,9\n");
 
         // insert data into table store
         runSql(
@@ -77,7 +77,7 @@ public class FileStoreStreamE2eTest extends E2eTestBase {
         checkResult("A, 4, 1", "A, 5, 2", "B, 9, 1", "B, 10, 2");
 
         // prepare second part of test data
-        writeTestData(testDataSourceDir + "/2.csv", "A,3\nB,8\nA,2\nB,11\n");
+        writeSharedFile(testDataSourceDir + "/2.csv", "A,3\nB,8\nA,2\nB,11\n");
 
         // check that we can read the second part of test data
         checkResult("A, 2, 1", "A, 3, 2", "A, 4, 3", "B, 8, 1", "B, 9, 2", "B, 10, 3");
