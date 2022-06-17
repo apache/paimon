@@ -85,7 +85,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
                         TEST_DATA_DIR + "/" + UUID.randomUUID().toString() + ".store");
 
         // prepare test data
-        writeTestData(testDataSourceFile, String.join("\n", data));
+        writeSharedFile(testDataSourceFile, String.join("\n", data));
 
         // insert data into table store
         runSql(
