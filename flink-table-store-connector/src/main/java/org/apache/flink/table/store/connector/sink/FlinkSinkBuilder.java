@@ -28,13 +28,21 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.connector.TableStoreFactoryOptions;
 import org.apache.flink.table.store.connector.sink.global.GlobalCommittingSinkTranslator;
 import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.table.FileStoreTable;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.Map;
+
+import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.OVERWRITE_RESCALE_BUCKET;
+import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 
 /** Sink builder to build a flink sink from input. */
 public class FlinkSinkBuilder {
@@ -43,6 +51,7 @@ public class FlinkSinkBuilder {
     private final FileStoreTable table;
     private final Configuration conf;
 
+    private boolean isContinuous = false;
     private DataStream<RowData> input;
     @Nullable private CatalogLock.Factory lockFactory;
     @Nullable private Map<String, String> overwritePartition;
@@ -57,6 +66,11 @@ public class FlinkSinkBuilder {
 
     public FlinkSinkBuilder withInput(DataStream<RowData> input) {
         this.input = input;
+        return this;
+    }
+
+    public FlinkSinkBuilder withContinuousMode(boolean isContinuous) {
+        this.isContinuous = isContinuous;
         return this;
     }
 
@@ -90,11 +104,13 @@ public class FlinkSinkBuilder {
         return JsonSerdeUtil.fromJson(json, Map.class);
     }
 
-    public DataStreamSink<?> build() {
-        int numBucket = conf.get(FileStoreOptions.BUCKET);
+    private boolean rescaleBucket() {
+        return !isContinuous && conf.get(OVERWRITE_RESCALE_BUCKET) && overwritePartition != null;
+    }
 
+    public DataStreamSink<?> build() {
         BucketStreamPartitioner partitioner =
-                new BucketStreamPartitioner(numBucket, table.schema());
+                new BucketStreamPartitioner(getLatestNumOfBucket(), table.schema());
         PartitionTransformation<RowData> partitioned =
                 new PartitionTransformation<>(input.getTransformation(), partitioner);
         if (parallelism != null) {
@@ -112,5 +128,43 @@ public class FlinkSinkBuilder {
                         logSinkProvider);
         return GlobalCommittingSinkTranslator.translate(
                 new DataStream<>(input.getExecutionEnvironment(), partitioned), sink);
+    }
+
+    private int getLatestNumOfBucket() {
+        SchemaManager schemaManager = new SchemaManager(FileStoreOptions.path(conf));
+        SnapshotManager snapshotManager = table.snapshotManager();
+        int currentBucketNum = conf.get(BUCKET);
+        try {
+            Long id = snapshotManager.findLatest();
+            if (id != null) {
+                Snapshot latestSnapshot = snapshotManager.snapshot(id);
+                int bucketNumFromSnapshot =
+                        getBucketNum(schemaManager.schema(latestSnapshot.schemaId()));
+                if (rescaleBucket()) {
+                    // special handling for managed table, because alter table does not update
+                    // schema
+                    Schema latestSchema = schemaManager.latest().get();
+                    if (currentBucketNum != getBucketNum(latestSchema)) {
+                        throw new UnsupportedOperationException(
+                                "Rescale bucket overwrite is unsupported for Flink's managed table.");
+                    }
+                } else if (bucketNumFromSnapshot != currentBucketNum) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Try to write table with a new bucket num %d, but the previous bucket num is %d. "
+                                            + "Please switch to batch mode, enable 'overwrite.rescale-bucket' and "
+                                            + "perform INSERT OVERWRITE to rescale current data layout first.",
+                                    currentBucketNum, bucketNumFromSnapshot));
+                }
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        return currentBucketNum;
+    }
+
+    private int getBucketNum(Schema schema) {
+        return Integer.parseInt(
+                schema.options().getOrDefault(BUCKET.key(), BUCKET.defaultValue().toString()));
     }
 }

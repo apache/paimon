@@ -1429,26 +1429,31 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
 
         // increase bucket num from 2 to 3
         tEnv.executeSql("ALTER TABLE rates SET ('bucket' = '3')");
+
+        // read is ok
+        assertThat(BlockingIterator.of(tEnv.executeSql("SELECT * FROM rates").collect()).collect())
+                .containsExactlyInAnyOrder(changelogRow("+I", "US Dollar", 102L));
+
         assertThatThrownBy(
                         () -> tEnv.executeSql("INSERT INTO rates VALUES('US Dollar', 102)").await())
-                .hasRootCauseInstanceOf(IllegalStateException.class)
-                .hasRootCauseMessage(
-                        "Bucket number has been changed. Manifest might be corrupted.");
-        assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM rates").await())
-                .hasRootCauseInstanceOf(IllegalStateException.class)
-                .hasRootCauseMessage(
-                        "Bucket number has been changed. Manifest might be corrupted.");
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Try to write table with a new bucket num 3, but the previous bucket num is 2. "
+                                + "Please switch to batch mode, enable 'overwrite.rescale-bucket' and "
+                                + "perform INSERT OVERWRITE to rescale current data layout first.");
 
         // decrease bucket num from 3 to 1
-        // TODO this test cannot work until alter table callback is implemented for managed table
-        /*
-        tEnv.executeSql("ALTER TABLE rates RESET ('bucket')");
-        assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM rates").await())
-                .hasRootCauseInstanceOf(IllegalStateException.class)
-                .hasRootCauseMessage(
-                        "Bucket number has been changed. Manifest might be corrupted.");
-
-         */
+        tEnv.executeSql("ALTER TABLE rates SET ('bucket' = '1')");
+        // read is ok
+        assertThat(BlockingIterator.of(tEnv.executeSql("SELECT * FROM rates").collect()).collect())
+                .containsExactlyInAnyOrder(changelogRow("+I", "US Dollar", 102L));
+        assertThatThrownBy(
+                        () -> tEnv.executeSql("INSERT INTO rates VALUES('US Dollar', 102)").await())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Try to write table with a new bucket num 1, but the previous bucket num is 2. "
+                                + "Please switch to batch mode, enable 'overwrite.rescale-bucket' and "
+                                + "perform INSERT OVERWRITE to rescale current data layout first.");
     }
 
     @Test

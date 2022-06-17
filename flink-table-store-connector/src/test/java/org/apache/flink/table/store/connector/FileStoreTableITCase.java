@@ -19,10 +19,14 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
+import org.apache.flink.table.catalog.ObjectIdentifier;
+import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
@@ -31,6 +35,8 @@ import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 
 import org.junit.Before;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
@@ -38,6 +44,7 @@ import java.util.List;
 import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
+import static org.apache.flink.table.store.file.FileStoreOptions.relativeTablePath;
 
 /** ITCase for file store table api. */
 public abstract class FileStoreTableITCase extends AbstractTestBase {
@@ -77,5 +84,25 @@ public abstract class FileStoreTableITCase extends AbstractTestBase {
         } catch (Exception e) {
             throw new RuntimeException("Failed to collect the table result.", e);
         }
+    }
+
+    protected Path getTableDirectory(String tableName, boolean managedTable) {
+        return new Path(
+                path
+                        + (managedTable
+                                ? relativeTablePath(
+                                        ObjectIdentifier.of(
+                                                bEnv.getCurrentCatalog(),
+                                                bEnv.getCurrentDatabase(),
+                                                tableName))
+                                : String.format("%s.db/%s", bEnv.getCurrentDatabase(), tableName)));
+    }
+
+    @Nullable
+    protected Snapshot findLatestSnapshot(String tableName, boolean managedTable) {
+        SnapshotManager snapshotManager =
+                new SnapshotManager(getTableDirectory(tableName, managedTable));
+        Long id = snapshotManager.latestSnapshotId();
+        return id == null ? null : snapshotManager.snapshot(id);
     }
 }

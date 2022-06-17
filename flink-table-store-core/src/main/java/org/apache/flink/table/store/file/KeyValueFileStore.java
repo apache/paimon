@@ -61,8 +61,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 keyType,
                 snapshotManager(),
                 manifestFileFactory(),
-                manifestListFactory(),
-                options.bucket());
+                manifestListFactory());
     }
 
     @Override

@@ -53,7 +53,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private final SnapshotManager snapshotManager;
     private final ManifestFile.Factory manifestFileFactory;
     private final ManifestList manifestList;
-    private final int numOfBuckets;
 
     private Predicate partitionFilter;
 
@@ -66,14 +65,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             RowType partitionType,
             SnapshotManager snapshotManager,
             ManifestFile.Factory manifestFileFactory,
-            ManifestList.Factory manifestListFactory,
-            int numOfBuckets) {
+            ManifestList.Factory manifestListFactory) {
         this.partitionStatsConverter = new FieldStatsArraySerializer(partitionType);
         this.partitionConverter = new RowDataToObjectArrayConverter(partitionType);
         this.snapshotManager = snapshotManager;
         this.manifestFileFactory = manifestFileFactory;
         this.manifestList = manifestListFactory.create();
-        this.numOfBuckets = numOfBuckets;
     }
 
     @Override
@@ -181,9 +178,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         Map<ManifestEntry.Identifier, ManifestEntry> map = new HashMap<>();
         for (ManifestEntry entry : entries) {
             ManifestEntry.Identifier identifier = entry.identifier();
-            Preconditions.checkState(
-                    entry.totalBuckets() == numOfBuckets,
-                    "Bucket number has been changed. Manifest might be corrupted.");
             switch (entry.kind()) {
                 case ADD:
                     Preconditions.checkState(
@@ -234,11 +228,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     private boolean filterByPartitionAndBucket(ManifestEntry entry) {
-        if (specifiedBucket != null) {
-            Preconditions.checkState(
-                    specifiedBucket < entry.totalBuckets(),
-                    "Bucket number has been changed. Manifest might be corrupted.");
-        }
         return (partitionFilter == null
                         || partitionFilter.test(partitionConverter.convert(entry.partition())))
                 && (specifiedBucket == null || entry.bucket() == specifiedBucket);

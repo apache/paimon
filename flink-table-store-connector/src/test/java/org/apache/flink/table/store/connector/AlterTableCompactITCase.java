@@ -18,15 +18,12 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 
@@ -41,7 +38,6 @@ import java.util.Random;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
-import static org.apache.flink.table.store.file.FileStoreOptions.relativeTablePath;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.SINGLE_PARTITIONED;
@@ -107,14 +103,14 @@ public class AlterTableCompactITCase extends FileStoreTableITCase {
         batchSql("INSERT INTO T0 VALUES(1, 1, 1)," + "(2, 2, 2), " + "(3, 3, 3), " + "(4, 4, 4)");
         batchSql("INSERT INTO T0 VALUES(1, 1, 1)," + "(2, 2, 2), " + "(3, 3, 3), " + "(4, 4, 4)");
         batchSql("INSERT INTO T0 VALUES(1, 1, 1)," + "(2, 2, 2), " + "(3, 3, 3), " + "(4, 4, 4)");
-        Snapshot snapshot = findLatestSnapshot("T0");
+        Snapshot snapshot = findLatestSnapshot("T0", true);
         assertThat(snapshot.id()).isEqualTo(6);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
 
         // decrease trigger
         batchSql("ALTER TABLE T0 SET ('num-sorted-run.compaction-trigger' = '1')");
         batchSql("ALTER TABLE T0 COMPACT");
-        assertThat(findLatestSnapshot("T0"))
+        assertThat(findLatestSnapshot("T0", true))
                 .usingComparator(Comparator.comparing(Snapshot::id))
                 .isEqualTo(snapshot);
     }
@@ -143,7 +139,7 @@ public class AlterTableCompactITCase extends FileStoreTableITCase {
                                     .map(kv -> kvAsString(kv, mode))
                                     .collect(Collectors.joining(",\n")));
             batchSql(insertQuery);
-            Snapshot snapshot = findLatestSnapshot(tableName);
+            Snapshot snapshot = findLatestSnapshot(tableName, true);
             assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
             latestSnapshot = snapshot.id();
             dataset.addAll(data);
@@ -185,7 +181,7 @@ public class AlterTableCompactITCase extends FileStoreTableITCase {
                                 .filter(kv -> partFilter(kv, part, mode))
                                 .map(kv -> convertToRow(kv, mode))
                                 .collect(Collectors.toList()));
-                latestSnapshot = findLatestSnapshot(tableName).id();
+                latestSnapshot = findLatestSnapshot(tableName, true).id();
             }
         }
     }
@@ -197,12 +193,12 @@ public class AlterTableCompactITCase extends FileStoreTableITCase {
             long latestSnapshot,
             List<Row> expectedData) {
         batchSql(compactQuery);
-        Snapshot snapshot = findLatestSnapshot(tableName);
+        Snapshot snapshot = findLatestSnapshot(tableName, true);
         assertThat(snapshot.id()).isEqualTo(latestSnapshot + 1);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
         // check idempotence
         batchSql(compactQuery);
-        assertThat(findLatestSnapshot(tableName).id()).isEqualTo(snapshot.id());
+        assertThat(findLatestSnapshot(tableName, true).id()).isEqualTo(snapshot.id());
 
         // read data
         List<Row> readData = batchSql(selectQuery);
@@ -295,20 +291,5 @@ public class AlterTableCompactITCase extends FileStoreTableITCase {
             default:
                 throw new UnsupportedOperationException("unsupported mode");
         }
-    }
-
-    private Path getTableDirectory(String tableName) {
-        return new Path(
-                path
-                        + relativeTablePath(
-                                ObjectIdentifier.of(
-                                        bEnv.getCurrentCatalog(),
-                                        bEnv.getCurrentDatabase(),
-                                        tableName)));
-    }
-
-    private Snapshot findLatestSnapshot(String tableName) {
-        SnapshotManager snapshotManager = new SnapshotManager(getTableDirectory(tableName));
-        return snapshotManager.snapshot(snapshotManager.latestSnapshotId());
     }
 }

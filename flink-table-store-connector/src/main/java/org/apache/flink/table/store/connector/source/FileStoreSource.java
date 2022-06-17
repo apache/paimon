@@ -54,8 +54,6 @@ public class FileStoreSource
 
     private final boolean latestContinuous;
 
-    private final boolean rescaleBucket;
-
     @Nullable private final int[][] projectedFields;
 
     @Nullable private final Predicate predicate;
@@ -65,14 +63,12 @@ public class FileStoreSource
             boolean isContinuous,
             long discoveryInterval,
             boolean latestContinuous,
-            boolean rescaleBucket,
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate) {
         this.table = table;
         this.isContinuous = isContinuous;
         this.discoveryInterval = discoveryInterval;
         this.latestContinuous = latestContinuous;
-        this.rescaleBucket = rescaleBucket;
         this.projectedFields = projectedFields;
         this.predicate = predicate;
     }
@@ -103,12 +99,6 @@ public class FileStoreSource
             PendingSplitsCheckpoint checkpoint) {
         SnapshotManager snapshotManager = table.snapshotManager();
         TableScan scan = table.newScan();
-        if (rescaleBucket) {
-            checkArgument(
-                    !isContinuous && !latestContinuous,
-                    "Rescale bucket is only available under batch mode.");
-            scan.withRescaleBucket(true);
-        }
         if (predicate != null) {
             scan.withFilter(predicate);
         }

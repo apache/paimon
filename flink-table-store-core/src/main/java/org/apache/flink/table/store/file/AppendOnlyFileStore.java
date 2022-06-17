@@ -48,8 +48,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
                 rowType,
                 snapshotManager(),
                 manifestFileFactory(),
-                manifestListFactory(),
-                options.bucket());
+                manifestListFactory());
     }
 
     @Override
