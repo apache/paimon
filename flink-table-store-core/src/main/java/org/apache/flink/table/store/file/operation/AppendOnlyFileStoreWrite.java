@@ -24,12 +24,16 @@ import org.apache.flink.table.store.file.data.AppendOnlyWriter;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.store.file.format.FileFormat;
+import org.apache.flink.table.store.file.mergetree.compact.CompactResult;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 
 /** {@link FileStoreWrite} for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
@@ -71,11 +75,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
     }
 
     @Override
-    public RecordWriter<RowData> createCompactWriter(
-            BinaryRowData partition,
-            int bucket,
-            ExecutorService compactExecutor,
-            List<DataFileMeta> restoredFiles) {
+    public Callable<CompactResult> createCompactWriter(
+            BinaryRowData partition, int bucket, @Nullable List<DataFileMeta> compactFiles) {
         throw new UnsupportedOperationException(
                 "Currently append only write mode does not support compaction.");
     }

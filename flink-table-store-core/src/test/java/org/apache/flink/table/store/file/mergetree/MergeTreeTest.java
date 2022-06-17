@@ -33,6 +33,7 @@ import org.apache.flink.table.store.file.data.DataFileWriter;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.format.FlushingFileFormat;
 import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
+import org.apache.flink.table.store.file.mergetree.compact.CompactRewriter;
 import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
@@ -286,7 +287,7 @@ public class MergeTreeTest {
                         options.maxSizeAmplificationPercent,
                         options.sizeRatio,
                         options.numSortedRunCompactionTrigger);
-        CompactManager.Rewriter rewriter =
+        CompactRewriter rewriter =
                 (outputLevel, dropDelete, sections) ->
                         dataFileWriter.write(
                                 new RecordReaderIterator<KeyValue>(

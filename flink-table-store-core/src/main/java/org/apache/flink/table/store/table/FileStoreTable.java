@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.sink.TableCommit;
+import org.apache.flink.table.store.table.sink.TableCompact;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
@@ -48,5 +48,5 @@ public interface FileStoreTable extends Serializable {
 
     TableCommit newCommit();
 
-    FileStore store();
+    TableCompact newCompact();
 }
