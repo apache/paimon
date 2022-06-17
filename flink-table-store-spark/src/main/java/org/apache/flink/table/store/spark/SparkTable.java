@@ -52,7 +52,7 @@ public class SparkTable implements org.apache.spark.sql.connector.catalog.Table,
 
     @Override
     public StructType schema() {
-        return SparkTypeUtils.fromFlinkRowType(table.rowType());
+        return SparkTypeUtils.fromFlinkRowType(table.schema().logicalRowType());
     }
 
     @Override
