@@ -137,7 +137,7 @@ public abstract class E2eTestBase {
                 TEST_DATA_DIR + "/" + resourceName);
     }
 
-    protected void writeTestData(String filename, String content) throws Exception {
+    protected void writeSharedFile(String filename, String content) throws Exception {
         if (content.length() == 0 || content.charAt(content.length() - 1) != '\n') {
             content += "\n";
         }
@@ -163,7 +163,7 @@ public abstract class E2eTestBase {
 
     protected void runSql(String sql) throws Exception {
         String fileName = UUID.randomUUID().toString() + ".sql";
-        writeTestData(fileName, sql);
+        writeSharedFile(fileName, sql);
         Container.ExecResult execResult =
                 jobManager.execInContainer(
                         "su",

@@ -81,7 +81,7 @@ public class LogStoreE2eTest extends E2eTestBase {
                         tableStoreStreamDdl, TEST_DATA_DIR + "/" + tableStoreDir, "kafka:9092");
 
         // prepare first part of test data
-        writeTestData(testDataSourceDir + "/1.csv", "A,10\nC,30\nD,40\n");
+        writeSharedFile(testDataSourceDir + "/1.csv", "A,10\nC,30\nD,40\n");
 
         // insert data into table store
         runSql(
@@ -101,7 +101,7 @@ public class LogStoreE2eTest extends E2eTestBase {
         checkResult(s -> s.split(",")[0], "A, 10", "B, 2", "C, 30", "D, 40");
 
         // prepare second part of test data
-        writeTestData(testDataSourceDir + "/2.csv", "A,100\nD,400\n");
+        writeSharedFile(testDataSourceDir + "/2.csv", "A,100\nD,400\n");
 
         // check that we can receive data from log store quickly
         checkResult(s -> s.split(",")[0], "A, 100", "B, 2", "C, 30", "D, 400");

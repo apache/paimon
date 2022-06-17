@@ -24,6 +24,8 @@ import org.testcontainers.containers.ContainerState;
 
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 /**
  * Tests for reading table store from Hive.
  *
@@ -70,7 +72,7 @@ public class HiveE2eTest extends E2eTestBase {
                         + HDFS_ROOT
                         + tableStorePkPath
                         + "/default_catalog.catalog/default_database.db/table_store_pk';";
-        writeTestData(
+        writeSharedFile(
                 "pk.hql",
                 // same default database name as Flink
                 ADD_JAR_HQL
@@ -90,8 +92,8 @@ public class HiveE2eTest extends E2eTestBase {
                         "hive.root.logger=INFO,console",
                         "-f",
                         TEST_DATA_DIR + "/pk.hql");
-        System.out.println(execResult.getStdout());
-        // System.out.println(execResult.getStderr());
+        assertThat(execResult.getStdout())
+                .isEqualTo("10\t1\tHi\n" + "20\t2\tHello\n" + "30\t3\tTable\n" + "40\t4\tStore\n");
         if (execResult.getExitCode() != 0) {
             throw new AssertionError("Failed when running hive sql.");
         }
