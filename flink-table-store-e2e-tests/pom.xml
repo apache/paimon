@@ -38,6 +38,12 @@ under the License.
             <version>${project.version}</version>
         </dependency>
 
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-table-store-hive</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <!-- flink dependencies -->
 
         <dependency>
