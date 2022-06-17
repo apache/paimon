@@ -32,6 +32,8 @@ import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateConverter;
+import org.apache.flink.table.store.file.utils.AtomicFileWriter;
+import org.apache.flink.table.store.file.utils.AtomicFsDataOutputStream;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RowDataToObjectArrayConverter;
@@ -43,6 +45,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -321,7 +324,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         long newSnapshotId =
                 latestSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshotId + 1;
         Path newSnapshotPath = snapshotManager.snapshotPath(newSnapshotId);
-        Path tmpSnapshotPath = snapshotManager.tmpSnapshotPath(newSnapshotId);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("Ready to commit changes to snapshot #" + newSnapshotId);
@@ -377,15 +379,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             commitKind,
                             System.currentTimeMillis(),
                             logOffsets);
-            FileUtils.writeFileUtf8(tmpSnapshotPath, newSnapshot.toJson());
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
-            cleanUpTmpSnapshot(
-                    tmpSnapshotPath,
-                    previousChangesListName,
-                    newChangesListName,
-                    oldMetas,
-                    newMetas);
+            cleanUpTmpManifests(previousChangesListName, newChangesListName, oldMetas, newMetas);
             throw new RuntimeException(
                     String.format(
                             "Exception occurs when preparing snapshot #%d (path %s) by user %s "
@@ -400,16 +396,24 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         boolean success;
         try {
-            FileSystem fs = tmpSnapshotPath.getFileSystem();
-            // atomic rename
-            // TODO rename is not work for object store, use recoverable writer
+            FileSystem fs = newSnapshotPath.getFileSystem();
             Callable<Boolean> callable =
                     () -> {
-                        boolean committed = fs.rename(tmpSnapshotPath, newSnapshotPath);
-                        if (committed) {
-                            snapshotManager.commitLatestHint(newSnapshotId);
+                        if (fs.exists(newSnapshotPath)) {
+                            return false;
                         }
-                        return committed;
+
+                        AtomicFsDataOutputStream out =
+                                AtomicFileWriter.create(fs).open(newSnapshotPath);
+                        try {
+                            FileUtils.writeFileUtf8(out, newSnapshot.toJson());
+                            boolean committed = out.closeAndCommit();
+                            snapshotManager.commitLatestHint(newSnapshotId);
+                            return committed;
+                        } catch (IOException e) {
+                            out.close();
+                            return false;
+                        }
                     };
             if (lock != null) {
                 success =
@@ -433,7 +437,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                     + "with identifier %s and kind %s. "
                                     + "Cannot clean up because we can't determine the success.",
                             newSnapshotId,
-                            newSnapshotPath.toString(),
+                            newSnapshotPath,
                             commitUser,
                             identifier,
                             commitKind.name()),
@@ -447,7 +451,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 "Successfully commit snapshot #%d (path %s) by user %s "
                                         + "with identifier %s and kind %s.",
                                 newSnapshotId,
-                                newSnapshotPath.toString(),
+                                newSnapshotPath,
                                 commitUser,
                                 identifier,
                                 commitKind.name()));
@@ -461,13 +465,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         "Atomic rename failed for snapshot #%d (path %s) by user %s "
                                 + "with identifier %s and kind %s. "
                                 + "Clean up and try again.",
-                        newSnapshotId,
-                        newSnapshotPath.toString(),
-                        commitUser,
-                        identifier,
-                        commitKind.name()));
-        cleanUpTmpSnapshot(
-                tmpSnapshotPath, previousChangesListName, newChangesListName, oldMetas, newMetas);
+                        newSnapshotId, newSnapshotPath, commitUser, identifier, commitKind.name()));
+        cleanUpTmpManifests(previousChangesListName, newChangesListName, oldMetas, newMetas);
         return false;
     }
 
@@ -516,14 +515,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
     }
 
-    private void cleanUpTmpSnapshot(
-            Path tmpSnapshotPath,
+    private void cleanUpTmpManifests(
             String previousChangesListName,
             String newChangesListName,
             List<ManifestFileMeta> oldMetas,
             List<ManifestFileMeta> newMetas) {
-        // clean up tmp snapshot file
-        FileUtils.deleteOrWarn(tmpSnapshotPath);
         // clean up newly created manifest list
         if (previousChangesListName != null) {
             manifestList.delete(previousChangesListName);

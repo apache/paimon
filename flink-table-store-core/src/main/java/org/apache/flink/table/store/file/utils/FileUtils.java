@@ -110,10 +110,14 @@ public class FileUtils {
     public static void writeFileUtf8(Path file, String content) throws IOException {
         try (FSDataOutputStream out =
                 file.getFileSystem().create(file, FileSystem.WriteMode.NO_OVERWRITE)) {
-            OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
-            writer.write(content);
-            writer.close();
+            writeFileUtf8(out, content);
         }
+    }
+
+    public static void writeFileUtf8(FSDataOutputStream out, String content) throws IOException {
+        OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
+        writer.write(content);
+        writer.flush();
     }
 
     public static void deleteOrWarn(Path file) {
