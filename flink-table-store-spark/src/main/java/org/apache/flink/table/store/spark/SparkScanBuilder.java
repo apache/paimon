@@ -47,7 +47,7 @@ public class SparkScanBuilder
 
     @Override
     public Filter[] pushFilters(Filter[] filters) {
-        SparkFilterConverter converter = new SparkFilterConverter(table.rowType());
+        SparkFilterConverter converter = new SparkFilterConverter(table.schema().logicalRowType());
         List<Predicate> predicates = new ArrayList<>();
         List<Filter> pushed = new ArrayList<>();
         for (Filter filter : filters) {
@@ -70,7 +70,7 @@ public class SparkScanBuilder
     @Override
     public void pruneColumns(StructType requiredSchema) {
         String[] pruneFields = requiredSchema.fieldNames();
-        List<String> fieldNames = table.rowType().getFieldNames();
+        List<String> fieldNames = table.schema().fieldNames();
         int[] projected = new int[pruneFields.length];
         for (int i = 0; i < projected.length; i++) {
             projected[i] = fieldNames.indexOf(pruneFields[i]);

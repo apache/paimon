@@ -47,7 +47,7 @@ public class SparkReaderFactory implements PartitionReaderFactory {
     }
 
     private RowType readRowType() {
-        return TypeUtils.project(table.rowType(), projectedFields);
+        return TypeUtils.project(table.schema().logicalRowType(), projectedFields);
     }
 
     @Override
