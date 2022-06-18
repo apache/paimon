@@ -44,13 +44,16 @@ public class DataFileReaderTest {
     public void testImplictDataTranslate() throws Exception {
         RowType actualKeyType = new RowType(singletonList(new RowType.RowField("k", new VarCharType())));
         RowType actualValueType = new RowType(singletonList(new RowType.RowField("v", new VarCharType())));
+    
+        RowType exceptedKeyType = new RowType(singletonList(new RowType.RowField("k", new VarCharType())));
+        RowType exceptedValueType = new RowType(singletonList(new RowType.RowField("v", new VarCharType())));
         
         GenericRowData excepted = new GenericRowData(actualKeyType.getFieldCount());
         excepted.setField(0, StringData.fromString("111"));
         excepted.setField(1, StringData.fromString("222"));
         
         KeyValue exceptedResult = new KeyValueSerializer(
-            TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.DEFAULT_ROW_TYPE).fromRow(excepted);
+            exceptedKeyType, exceptedValueType).fromRow(excepted);
         testWriteAndReadDataFileImpl(actualKeyType,actualValueType,"json",exceptedResult);
     }
     
