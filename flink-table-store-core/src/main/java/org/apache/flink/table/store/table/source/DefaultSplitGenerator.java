@@ -41,7 +41,7 @@ public class DefaultSplitGenerator implements SplitGenerator {
         List<Split> splits =
                 groupedDataFileMetas
                         .entrySet()
-                        .parallelStream()
+                        .stream()
                         .flatMap(
                                 entry ->
                                         entry.getValue().entrySet().stream()
