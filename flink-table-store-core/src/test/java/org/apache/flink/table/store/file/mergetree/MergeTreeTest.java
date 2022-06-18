@@ -310,7 +310,7 @@ public class MergeTreeTest {
         compactedFiles.addAll(increment.compactAfter());
     }
 
-    private List<TestRecord> writeBatch() throws Exception {
+    private List<TestRecord>  writeBatch() throws Exception {
         return writeBatch(200);
     }
 
