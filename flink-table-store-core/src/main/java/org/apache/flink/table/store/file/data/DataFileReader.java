@@ -49,6 +49,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.types.logical.LogicalTypeFamily.APPROXIMATE_NUMERIC;
@@ -56,6 +57,7 @@ import static org.apache.flink.table.types.logical.LogicalTypeFamily.EXACT_NUMER
 import static org.apache.flink.table.types.logical.LogicalTypeRoot.BINARY;
 import static org.apache.flink.table.types.logical.LogicalTypeRoot.CHAR;
 import static org.apache.flink.table.types.logical.LogicalTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE;
+import static org.apache.flink.table.types.logical.utils.LogicalTypeCasts.supportsImplicitCast;
 import static org.apache.flink.table.types.logical.utils.LogicalTypeChecks.getLength;
 import static org.apache.flink.table.types.logical.utils.LogicalTypeChecks.getPrecision;
 import static org.apache.flink.table.types.logical.utils.LogicalTypeChecks.getScale;
@@ -199,11 +201,38 @@ public class DataFileReader {
     
         private RowType translateOldToNewByRowType(RowType oldData) {
             List<RowType.RowField> newData = oldData.getFields().stream().map(x -> {
-                DataType newDataType = Objects.requireNonNull(findDataTypeOfRoot(LogicalTypeDataTypeConverter.toDataType(x.getType()), x.getType().getTypeRoot()));
+                DataType newDataType = Objects.requireNonNull(translate(LogicalTypeDataTypeConverter.toDataType(x.getType()), x.getType().getTypeRoot()));
                 LogicalType newLogicalType =  LogicalTypeDataTypeConverter.toLogicalType(newDataType);
                 return new RowType.RowField(x.getName(), newLogicalType);
             }).collect(Collectors.toList());
             return new RowType(newData);
+        }
+        
+        public static DataType translate(DataType actualDataType, LogicalTypeRoot expectedRoot){
+            final LogicalType actualType = actualDataType.getLogicalType();
+            Optional<DataType> exceptedType =  Optional.ofNullable(findDataTypeOfRoot(actualDataType, expectedRoot))
+                // set nullability
+                .map(
+                    newDataType -> {
+                        if (actualType.isNullable()) {
+                            return newDataType.nullable();
+                        }
+                        return newDataType.notNull();
+                    })
+                // preserve bridging class if possible
+                .map(
+                    newDataType -> {
+                        final Class<?> clazz = actualDataType.getConversionClass();
+                        final LogicalType newType = newDataType.getLogicalType();
+                        if (newType.supportsOutputConversion(clazz)) {
+                            return newDataType.bridgedTo(clazz);
+                        }
+                        return newDataType;
+                    })
+                // check if type can be implicitly casted
+                .filter(
+                    newDataType -> supportsImplicitCast(actualType, newDataType.getLogicalType()));
+            return exceptedType.get();
         }
     
         /**
