@@ -45,20 +45,18 @@ public class DataFileReaderTest {
     public void testImplictDataTranslate() throws Exception {
         RowType actualKeyType = new RowType(singletonList(new RowType.RowField("k", new VarCharType())));
         RowType actualValueType = new RowType(singletonList(new RowType.RowField("v", new VarCharType())));
+        
+        GenericRowData exceptedK = new GenericRowData(1);
+        exceptedK.setField(0, StringData.fromString("111"));
     
-        RowType exceptedKeyType = new RowType(singletonList(new RowType.RowField("k", new VarBinaryType())));
-        RowType exceptedValueType = new RowType(singletonList(new RowType.RowField("v", new VarBinaryType())));
+        GenericRowData exceptedV = new GenericRowData(1);
+        exceptedV.setField(0, StringData.fromString("222"));
         
-        GenericRowData excepted = new GenericRowData(actualKeyType.getFieldCount());
-        excepted.setField(0, StringData.fromString("111"));
-        excepted.setField(1, StringData.fromString("222"));
-        
-        KeyValue exceptedResult = new KeyValueSerializer(
-            exceptedKeyType, exceptedValueType).fromRow(excepted);
-        testWriteAndReadDataFileImpl(actualKeyType,actualValueType,"json",exceptedResult);
+       
+        testWriteAndReadDataFileImpl(actualKeyType,actualValueType,"avro",exceptedK,exceptedK);
     }
     
-    private void testWriteAndReadDataFileImpl(RowType keyRowType, RowType valueRowType,String format,KeyValue toExcepted) throws Exception {
+    private void testWriteAndReadDataFileImpl(RowType keyRowType, RowType valueRowType,String format,GenericRowData toExceptedK,GenericRowData toExceptedV) throws Exception {
         DataFileTestDataGenerator.Data data = gen.next();
         DataFileWriter dataFileWriter = createDataFileWriter(tempDir.toString(), format, keyRowType, valueRowType);
         DataFileReader reader = createDataFileReader(keyRowType,valueRowType, tempDir.toString(), format, null, null);
@@ -68,7 +66,8 @@ public class DataFileReaderTest {
             data,
             actualMetas,
             reader,
-            toExcepted);
+            toExceptedK,
+            toExceptedV);
     }
     
     protected DataFileReader createDataFileReader(
@@ -112,7 +111,8 @@ public class DataFileReaderTest {
         DataFileTestDataGenerator.Data data,
         List<DataFileMeta> actualMetas,
         DataFileReader fileReader,
-        KeyValue  toExpectedKv)
+        GenericRowData exceptedK,
+        GenericRowData exceptedV)
         throws Exception {
         Iterator<KeyValue> expectedIterator = data.content.iterator();
         for (DataFileMeta meta : actualMetas) {
@@ -122,7 +122,10 @@ public class DataFileReaderTest {
             while (actualKvsIterator.hasNext()) {
                 assertThat(expectedIterator.hasNext()).isTrue();
                 KeyValue actualKv = actualKvsIterator.next();
-                assertTrue(actualKv.equals(toExpectedKv));
+                RowData actualK = actualKv.key();
+                RowData actualV = actualKv.value();
+                assertTrue(actualK.equals(exceptedK));
+                assertTrue(actualV.equals(exceptedV));
             }
             actualKvsIterator.close();
         }
