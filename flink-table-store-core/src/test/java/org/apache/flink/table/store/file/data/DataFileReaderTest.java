@@ -19,6 +19,7 @@ import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.logical.VarBinaryType;
 import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
@@ -45,8 +46,8 @@ public class DataFileReaderTest {
         RowType actualKeyType = new RowType(singletonList(new RowType.RowField("k", new VarCharType())));
         RowType actualValueType = new RowType(singletonList(new RowType.RowField("v", new VarCharType())));
     
-        RowType exceptedKeyType = new RowType(singletonList(new RowType.RowField("k", new VarCharType())));
-        RowType exceptedValueType = new RowType(singletonList(new RowType.RowField("v", new VarCharType())));
+        RowType exceptedKeyType = new RowType(singletonList(new RowType.RowField("k", new VarBinaryType())));
+        RowType exceptedValueType = new RowType(singletonList(new RowType.RowField("v", new VarBinaryType())));
         
         GenericRowData excepted = new GenericRowData(actualKeyType.getFieldCount());
         excepted.setField(0, StringData.fromString("111"));
