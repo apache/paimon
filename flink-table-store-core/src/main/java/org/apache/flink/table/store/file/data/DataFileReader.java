@@ -232,7 +232,7 @@ public class DataFileReader {
                 // check if type can be implicitly casted
                 .filter(
                     newDataType -> supportsImplicitCast(actualType, newDataType.getLogicalType()));
-            return exceptedType.get();
+            return exceptedType.orElse(actualDataType);
         }
     
         /**
