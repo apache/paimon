@@ -102,8 +102,6 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
             writer = createRollingRowWriter();
         }
 
-        System.out.println(newFiles);
-
         return Increment.forAppend(newFiles);
     }
 
