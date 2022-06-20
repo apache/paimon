@@ -109,7 +109,6 @@ under the License.
                             <version>${project.version}</version>
                             <destFileName>flink-table-store-hive.jar</destFileName>
                             <type>jar</type>
-                            <classifier>jar-with-dependencies</classifier>
                             <overWrite>true</overWrite>
                             <outputDirectory>${project.build.directory}/dependencies
                             </outputDirectory>
