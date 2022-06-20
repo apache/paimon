@@ -169,6 +169,11 @@ public class FileStoreOptions implements Serializable {
         allOptions.add(SNAPSHOT_NUM_RETAINED_MIN);
         allOptions.add(SNAPSHOT_NUM_RETAINED_MAX);
         allOptions.add(SNAPSHOT_TIME_RETAINED);
+        allOptions.add(CONTINUOUS_DISCOVERY_INTERVAL);
+        allOptions.add(MERGE_ENGINE);
+        allOptions.add(WRITE_MODE);
+        allOptions.add(SOURCE_SPLIT_TARGET_SIZE);
+        allOptions.add(SOURCE_SPLIT_OPEN_FILE_COST);
         return allOptions;
     }
 

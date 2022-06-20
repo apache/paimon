@@ -66,7 +66,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 schemaId,
                 keyType,
                 valueType,
-                keyComparatorSupplier.get(),
+                newKeyComparator(),
                 mergeFunction,
                 options.fileFormat(),
                 pathFactory());
