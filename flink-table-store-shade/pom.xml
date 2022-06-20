@@ -256,10 +256,10 @@ under the License.
                                     <include>org.apache.flink:flink-table-store-codegen-loader</include>
 
                                     <!-- Others -->
-                                    <include>org.xerial.snappy:snappy-java</include>
-                                    <include>org.lz4:lz4-java</include>
-                                    <include>com.google.code.findbugs:jsr305</include>
-                                    <include>org.slf4j:slf4j-api</include>
+                                    <!-- <include>org.xerial.snappy:snappy-java</include> -->
+                                    <!-- <include>org.lz4:lz4-java</include> -->
+                                    <!-- <include>com.google.code.findbugs:jsr305</include> -->
+                                    <!-- <include>org.slf4j:slf4j-api</include> -->
                                 </includes>
                             </artifactSet>
                             <filters>
