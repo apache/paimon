@@ -25,7 +25,7 @@ import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.table.source.DefaultSplitGenerator;
+import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableScan;
 
 import org.junit.jupiter.api.Test;
@@ -77,12 +77,12 @@ public class FileStoreSourceSplitGeneratorTest {
                                 makeEntry(6, 1, "f14"));
                     }
                 };
-        TableScan.Plan tableScanPlan =
-                new TableScan.Plan(
-                        1L,
-                        new DefaultSplitGenerator(
-                                        new FileStorePathFactory(new Path(tempDir.toString())))
-                                .generate(plan.groupByPartFiles()));
+        List<Split> scanSplits =
+                TableScan.generateSplits(
+                        new FileStorePathFactory(new Path("/tmp/")),
+                        Collections::singletonList,
+                        plan.groupByPartFiles());
+        TableScan.Plan tableScanPlan = new TableScan.Plan(1L, scanSplits);
 
         List<FileStoreSourceSplit> splits =
                 new FileStoreSourceSplitGenerator().createSplits(tableScanPlan);

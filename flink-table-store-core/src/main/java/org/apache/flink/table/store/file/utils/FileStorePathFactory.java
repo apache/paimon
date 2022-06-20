@@ -111,6 +111,10 @@ public class FileStorePathFactory {
                 root, getPartitionString(partition), bucket, formatIdentifier);
     }
 
+    public Path bucketPath(BinaryRowData partition, int bucket) {
+        return DataFilePathFactory.bucketPath(root, getPartitionString(partition), bucket);
+    }
+
     /** IMPORTANT: This method is NOT THREAD SAFE. */
     public String getPartitionString(BinaryRowData partition) {
         return PartitionPathUtils.generatePartitionPath(

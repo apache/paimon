@@ -33,6 +33,7 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.store.table.sink.AbstractTableWrite;
@@ -40,6 +41,8 @@ import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.KeyValueTableRead;
+import org.apache.flink.table.store.table.source.MergeTreeSplitGenerator;
+import org.apache.flink.table.store.table.source.SplitGenerator;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
@@ -111,6 +114,14 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     public TableScan newScan() {
         KeyValueFileStoreScan scan = store.newScan();
         return new TableScan(scan, schema, store.pathFactory()) {
+            @Override
+            protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
+                return new MergeTreeSplitGenerator(
+                        store.newKeyComparator(),
+                        store.options().splitTargetSize(),
+                        store.options().splitOpenFileCost());
+            }
+
             @Override
             protected void withNonPartitionFilter(Predicate predicate) {
                 // currently we can only perform filter push down on keys

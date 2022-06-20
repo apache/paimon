@@ -20,8 +20,8 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.writer.BinaryRowWriter;
 import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.data.DataFileTestUtils;
 import org.apache.flink.table.store.file.mergetree.Levels;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 
@@ -41,6 +41,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.table.store.file.data.DataFileTestUtils.newFile;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link CompactManager}. */
@@ -203,27 +204,8 @@ public class CompactManagerTest {
         assertThat(outputs).isEqualTo(expected);
     }
 
-    private static DataFileMeta newFile(int level, int minKey, int maxKey, long maxSequence) {
-        return new DataFileMeta(
-                "",
-                maxKey - minKey + 1,
-                1,
-                row(minKey),
-                row(maxKey),
-                null,
-                null,
-                0,
-                maxSequence,
-                0,
-                level);
-    }
-
     public static BinaryRowData row(int i) {
-        BinaryRowData row = new BinaryRowData(1);
-        BinaryRowWriter writer = new BinaryRowWriter(row);
-        writer.writeInt(0, i);
-        writer.complete();
-        return row;
+        return DataFileTestUtils.row(i);
     }
 
     private CompactStrategy testStrategy() {

@@ -98,4 +98,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 options.bucket(),
                 checkNumOfBuckets);
     }
+
+    public Comparator<RowData> newKeyComparator() {
+        return keyComparatorSupplier.get();
+    }
 }
