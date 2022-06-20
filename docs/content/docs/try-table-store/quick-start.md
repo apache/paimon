@@ -113,7 +113,7 @@ Start the SQL Client CLI:
 ```sql
 CREATE CATALOG my_catalog WITH (
   'type'='table-store',
-  'warehouse'='fs:/tmp/table_store'
+  'warehouse'='file:/tmp/table_store'
 );
 
 USE CATALOG my_catalog;
