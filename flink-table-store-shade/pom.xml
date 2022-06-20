@@ -255,7 +255,7 @@ under the License.
                                     <include>org.apache.flink:flink-table-store-format</include>
                                     <include>org.apache.flink:flink-table-store-codegen-loader</include>
 
-                                    <!-- Others -->
+                                    <!-- Others, not shade to reduce conflicting -->
                                     <!-- <include>org.xerial.snappy:snappy-java</include> -->
                                     <!-- <include>org.lz4:lz4-java</include> -->
                                     <!-- <include>com.google.code.findbugs:jsr305</include> -->
