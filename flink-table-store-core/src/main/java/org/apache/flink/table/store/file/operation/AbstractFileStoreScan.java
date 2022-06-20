@@ -206,10 +206,9 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                             "Unknown value kind " + entry.kind().name());
             }
         }
-        List<ManifestEntry> files =
-                checkNumOfBuckets ? new ArrayList<>() : new ArrayList<>(map.values());
-        if (checkNumOfBuckets) {
-            for (ManifestEntry file : map.values()) {
+        List<ManifestEntry> files = new ArrayList<>();
+        for (ManifestEntry file : map.values()) {
+            if (checkNumOfBuckets) {
                 Preconditions.checkState(
                         file.totalBuckets() == numOfBuckets,
                         "Trying to add file %s "
@@ -217,9 +216,10 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         file.file().fileName(),
                         file.totalBuckets(),
                         numOfBuckets);
-                if (filterByBucket(file)) {
-                    files.add(file);
-                }
+            }
+
+            if (filterByBucket(file)) {
+                files.add(file);
             }
         }
 
