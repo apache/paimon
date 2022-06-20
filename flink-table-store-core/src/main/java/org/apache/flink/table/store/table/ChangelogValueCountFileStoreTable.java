@@ -73,7 +73,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableScan newScan() {
-        KeyValueFileStoreScan scan = store.newScan();
+        KeyValueFileStoreScan scan = store.newScan(false);
         return new TableScan(scan, schema, store.pathFactory()) {
             @Override
             protected void withNonPartitionFilter(Predicate predicate) {

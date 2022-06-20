@@ -55,7 +55,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     }
 
     @Override
-    public KeyValueFileStoreScan newScan() {
+    public KeyValueFileStoreScan newScan(boolean checkNumOfBuckets) {
         return new KeyValueFileStoreScan(
                 partitionType,
                 keyType,
@@ -63,7 +63,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 manifestFileFactory(),
                 manifestListFactory(),
                 options.bucket(),
-                false);
+                checkNumOfBuckets);
     }
 
     @Override
@@ -91,14 +91,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 options.fileFormat(),
                 pathFactory(),
                 snapshotManager(),
-                new KeyValueFileStoreScan(
-                        partitionType,
-                        keyType,
-                        snapshotManager(),
-                        manifestFileFactory(),
-                        manifestListFactory(),
-                        options.bucket(),
-                        true),
+                newScan(true),
                 options.mergeTreeOptions());
     }
 }

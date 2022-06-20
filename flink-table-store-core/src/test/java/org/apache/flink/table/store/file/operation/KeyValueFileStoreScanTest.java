@@ -87,7 +87,7 @@ public class KeyValueFileStoreScanTest {
             wantedPartitions.add(partitions.get(random.nextInt(partitions.size())));
         }
 
-        FileStoreScan scan = store.newScan();
+        FileStoreScan scan = store.newScan(false);
         scan.withSnapshot(snapshot.id());
         scan.withPartitionFilter(new ArrayList<>(wantedPartitions));
 
@@ -112,7 +112,7 @@ public class KeyValueFileStoreScanTest {
 
         int wantedShopId = data.get(random.nextInt(data.size())).key().getInt(0);
 
-        KeyValueFileStoreScan scan = store.newScan();
+        KeyValueFileStoreScan scan = store.newScan(false);
         scan.withSnapshot(snapshot.id());
         scan.withKeyFilter(
                 PredicateBuilder.equal(0, new Literal(new IntType(false), wantedShopId)));
@@ -133,7 +133,7 @@ public class KeyValueFileStoreScanTest {
 
         int wantedBucket = random.nextInt(NUM_BUCKETS);
 
-        FileStoreScan scan = store.newScan();
+        FileStoreScan scan = store.newScan(false);
         scan.withSnapshot(snapshot.id());
         scan.withBucket(wantedBucket);
 
@@ -160,7 +160,7 @@ public class KeyValueFileStoreScanTest {
         }
         long wantedSnapshot = snapshots.get(wantedCommit).id();
 
-        FileStoreScan scan = store.newScan();
+        FileStoreScan scan = store.newScan(false);
         scan.withSnapshot(wantedSnapshot);
 
         Map<BinaryRowData, BinaryRowData> expected =
@@ -185,7 +185,7 @@ public class KeyValueFileStoreScanTest {
         Snapshot wantedSnapshot = snapshotManager.snapshot(wantedSnapshotId);
         List<ManifestFileMeta> wantedManifests = wantedSnapshot.readAllManifests(manifestList);
 
-        FileStoreScan scan = store.newScan();
+        FileStoreScan scan = store.newScan(false);
         scan.withManifestList(wantedManifests);
 
         List<KeyValue> expectedKvs = store.readKvsFromSnapshot(wantedSnapshotId);

@@ -102,7 +102,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 snapshotManager(),
                 manifestFileFactory(),
                 manifestListFactory(),
-                newScan(),
+                newScan(false),
                 options.bucket(),
                 options.manifestTargetSize(),
                 options.manifestMergeMinCount());

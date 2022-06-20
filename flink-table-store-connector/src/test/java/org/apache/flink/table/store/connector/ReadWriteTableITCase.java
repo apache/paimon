@@ -25,6 +25,7 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.api.EnvironmentSettings;
+import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.sink.DataStreamSinkProvider;
@@ -1419,13 +1420,15 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                 String.format(
                         "CREATE TABLE IF NOT EXISTS rates (\n"
                                 + "currency STRING,\n"
-                                + " rate BIGINT\n"
-                                + ") WITH (\n"
+                                + " rate BIGINT,\n"
+                                + " dt STRING\n"
+                                + ") PARTITIONED BY (dt)\n"
+                                + "WITH (\n"
                                 + " 'bucket' = '2',\n"
                                 + " 'root-path' = '%s'\n"
                                 + ")",
                         rootPath));
-        tEnv.executeSql("INSERT INTO rates VALUES('US Dollar', 102)").await();
+        tEnv.executeSql("INSERT INTO rates VALUES('US Dollar', 102, '2022-06-20')").await();
 
         // increase bucket num from 2 to 3
         assertChangeBucketWithoutRescale(3);
@@ -1438,15 +1441,18 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
         tEnv.executeSql(String.format("ALTER TABLE rates SET ('bucket' = '%d')", bucketNum));
         // read is ok
         assertThat(BlockingIterator.of(tEnv.executeSql("SELECT * FROM rates").collect()).collect())
-                .containsExactlyInAnyOrder(changelogRow("+I", "US Dollar", 102L));
+                .containsExactlyInAnyOrder(changelogRow("+I", "US Dollar", 102L, "2022-06-20"));
         assertThatThrownBy(
-                        () -> tEnv.executeSql("INSERT INTO rates VALUES('US Dollar', 102)").await())
+                        () ->
+                                tEnv.executeSql(
+                                                "INSERT INTO rates VALUES('US Dollar', 102, '2022-06-20')")
+                                        .await())
                 .getRootCause()
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageMatching(
+                .isInstanceOf(TableException.class)
+                .hasMessage(
                         String.format(
-                                "Trying to add file data-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[0-9].orc "
-                                        + "with total bucket number 2, but the current bucket number is %d. Manifest might be corrupted.",
+                                "Try to write partition {dt=2022-06-20} with a new bucket num %d, but the previous bucket num is 2. "
+                                        + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
                                 bucketNum));
     }
 

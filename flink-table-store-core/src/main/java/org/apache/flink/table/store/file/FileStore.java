@@ -39,7 +39,7 @@ public interface FileStore<T> extends Serializable {
 
     RowType partitionType();
 
-    FileStoreScan newScan();
+    FileStoreScan newScan(boolean checkNumOfBuckets);
 
     FileStoreRead<T> newRead();
 

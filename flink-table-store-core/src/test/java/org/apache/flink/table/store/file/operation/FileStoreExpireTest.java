@@ -211,7 +211,7 @@ public class FileStoreExpireTest {
                 store.toKvMap(allData.subList(0, snapshotPositions.get(snapshotId - 1)));
         List<KeyValue> actualKvs =
                 store.readKvsFromManifestEntries(
-                        store.newScan().withSnapshot(snapshotId).plan().files());
+                        store.newScan(false).withSnapshot(snapshotId).plan().files());
         gen.sort(actualKvs);
         Map<BinaryRowData, BinaryRowData> actual = store.toKvMap(actualKvs);
         assertThat(actual).isEqualTo(expected);

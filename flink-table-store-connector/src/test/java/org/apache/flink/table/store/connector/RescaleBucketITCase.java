@@ -23,6 +23,7 @@ import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.runtime.jobgraph.SavepointConfigOptions;
+import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -207,10 +208,10 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
         // check write without rescale
         assertThatThrownBy(() -> batchSql("INSERT INTO %s VALUES (6)", tableName))
                 .getRootCause()
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageMatching(
-                        "Trying to add file data-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[0-9].orc "
-                                + "with total bucket number 2, but the current bucket number is 4. Manifest might be corrupted.");
+                .isInstanceOf(TableException.class)
+                .hasMessage(
+                        "Try to write table with a new bucket num 4, but the previous bucket num is 2. "
+                                + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.");
 
         batchSql(rescaleOverwriteSql, tableName, tableName);
         snapshot = findLatestSnapshot(tableName, managedTable);
@@ -218,7 +219,7 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
         assertThat(snapshot.id()).isEqualTo(2L);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
         assertSnapshotSchema(
-                schemaManager, snapshot.schemaId(), managedTable ? 0L : 2L, managedTable ? 2 : 4);
+                schemaManager, snapshot.schemaId(), managedTable ? 0L : 1L, managedTable ? 2 : 4);
         assertThat(batchSql("SELECT * FROM %s", tableName))
                 .containsExactlyInAnyOrderElementsOf(expected);
 

@@ -184,7 +184,7 @@ public class KeyValueFileStoreReadTest {
             Function<KeyValue, BinaryRowData> partitionCalculator)
             throws Exception {
         store.commitData(data, partitionCalculator, kv -> 0);
-        FileStoreScan scan = store.newScan();
+        FileStoreScan scan = store.newScan(false);
         Map<BinaryRowData, List<ManifestEntry>> filesGroupedByPartition =
                 scan.withSnapshot(store.snapshotManager().latestSnapshotId()).plan().files()
                         .stream()

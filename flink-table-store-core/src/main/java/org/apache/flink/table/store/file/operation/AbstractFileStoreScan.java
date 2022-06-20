@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.connector.file.table.FileSystemConnectorOptions;
+import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
@@ -28,6 +30,7 @@ import org.apache.flink.table.store.file.predicate.Literal;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
+import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RowDataToObjectArrayConverter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -208,16 +211,29 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         }
         List<ManifestEntry> files = new ArrayList<>();
         for (ManifestEntry file : map.values()) {
-            if (checkNumOfBuckets) {
-                Preconditions.checkState(
-                        file.totalBuckets() == numOfBuckets,
-                        "Trying to add file %s "
-                                + "with total bucket number %s, but the current bucket number is %s. Manifest might be corrupted.",
-                        file.file().fileName(),
-                        file.totalBuckets(),
-                        numOfBuckets);
+            if (checkNumOfBuckets && file.totalBuckets() != numOfBuckets) {
+                String partInfo =
+                        partitionConverter.getArity() > 0
+                                ? "partition "
+                                        + FileStorePathFactory.getPartitionComputer(
+                                                        partitionConverter.rowType(),
+                                                        FileSystemConnectorOptions
+                                                                .PARTITION_DEFAULT_NAME
+                                                                .defaultValue())
+                                                .generatePartValues(file.partition())
+                                : "table";
+                throw new TableException(
+                        String.format(
+                                "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
+                                        + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
+                                partInfo, numOfBuckets, file.totalBuckets()));
             }
 
+            // bucket filter should not be applied along with partition filter
+            // because the specifiedBucket is computed against the current numOfBuckets
+            // however entry.bucket() was computed against the old numOfBuckets
+            // and thus the filtered manifest entries might be empty
+            // which renders the bucket check invalid
             if (filterByBucket(file)) {
                 files.add(file);
             }
