@@ -55,7 +55,6 @@ public class TableStoreSink
 
     private final ObjectIdentifier tableIdentifier;
     private final FileStoreTable table;
-    private final boolean streaming;
     private final DynamicTableFactory.Context logStoreContext;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
@@ -66,12 +65,10 @@ public class TableStoreSink
     public TableStoreSink(
             ObjectIdentifier tableIdentifier,
             FileStoreTable table,
-            boolean streaming,
             DynamicTableFactory.Context logStoreContext,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
-        this.streaming = streaming;
         this.logStoreContext = logStoreContext;
         this.logStoreTableFactory = logStoreTableFactory;
     }
@@ -158,7 +155,6 @@ public class TableStoreSink
                                         new DataStream<>(
                                                 dataStream.getExecutionEnvironment(),
                                                 dataStream.getTransformation()))
-                                .withContinuousMode(streaming)
                                 .withLockFactory(lockFactory)
                                 .withLogSinkProvider(finalLogSinkProvider)
                                 .withOverwritePartition(overwrite ? staticPartitions : null)
@@ -170,8 +166,7 @@ public class TableStoreSink
     @Override
     public DynamicTableSink copy() {
         TableStoreSink copied =
-                new TableStoreSink(
-                        tableIdentifier, table, streaming, logStoreContext, logStoreTableFactory);
+                new TableStoreSink(tableIdentifier, table, logStoreContext, logStoreTableFactory);
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
         copied.lockFactory = lockFactory;

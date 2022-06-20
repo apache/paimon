@@ -53,6 +53,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private final SnapshotManager snapshotManager;
     private final ManifestFile.Factory manifestFileFactory;
     private final ManifestList manifestList;
+    private final int numOfBuckets;
+    private final boolean checkNumOfBuckets;
 
     private Predicate partitionFilter;
 
@@ -65,12 +67,16 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             RowType partitionType,
             SnapshotManager snapshotManager,
             ManifestFile.Factory manifestFileFactory,
-            ManifestList.Factory manifestListFactory) {
+            ManifestList.Factory manifestListFactory,
+            int numOfBuckets,
+            boolean checkNumOfBuckets) {
         this.partitionStatsConverter = new FieldStatsArraySerializer(partitionType);
         this.partitionConverter = new RowDataToObjectArrayConverter(partitionType);
         this.snapshotManager = snapshotManager;
         this.manifestFileFactory = manifestFileFactory;
         this.manifestList = manifestListFactory.create();
+        this.numOfBuckets = numOfBuckets;
+        this.checkNumOfBuckets = checkNumOfBuckets;
     }
 
     @Override
@@ -200,7 +206,22 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                             "Unknown value kind " + entry.kind().name());
             }
         }
-        List<ManifestEntry> files = new ArrayList<>(map.values());
+        List<ManifestEntry> files =
+                checkNumOfBuckets ? new ArrayList<>() : new ArrayList<>(map.values());
+        if (checkNumOfBuckets) {
+            for (ManifestEntry file : map.values()) {
+                Preconditions.checkState(
+                        file.totalBuckets() == numOfBuckets,
+                        "Trying to add file %s "
+                                + "with total bucket number %s, but the current bucket number is %s. Manifest might be corrupted.",
+                        file.file().fileName(),
+                        file.totalBuckets(),
+                        numOfBuckets);
+                if (filterByBucket(file)) {
+                    files.add(file);
+                }
+            }
+        }
 
         return new Plan() {
             @Nullable
@@ -224,13 +245,16 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     private boolean filterManifestEntry(ManifestEntry entry) {
-        return filterByPartitionAndBucket(entry) && filterByStats(entry);
+        return filterByPartition(entry) && filterByStats(entry);
     }
 
-    private boolean filterByPartitionAndBucket(ManifestEntry entry) {
+    private boolean filterByPartition(ManifestEntry entry) {
         return (partitionFilter == null
-                        || partitionFilter.test(partitionConverter.convert(entry.partition())))
-                && (specifiedBucket == null || entry.bucket() == specifiedBucket);
+                || partitionFilter.test(partitionConverter.convert(entry.partition())));
+    }
+
+    private boolean filterByBucket(ManifestEntry entry) {
+        return (specifiedBucket == null || entry.bucket() == specifiedBucket);
     }
 
     protected abstract boolean filterByStats(ManifestEntry entry);

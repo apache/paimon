@@ -48,7 +48,9 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
                 rowType,
                 snapshotManager(),
                 manifestFileFactory(),
-                manifestListFactory());
+                manifestListFactory(),
+                options.bucket(),
+                false);
     }
 
     @Override
@@ -65,7 +67,14 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
                 options.fileFormat(),
                 pathFactory(),
                 snapshotManager(),
-                newScan(),
+                new AppendOnlyFileStoreScan(
+                        partitionType,
+                        rowType,
+                        snapshotManager(),
+                        manifestFileFactory(),
+                        manifestListFactory(),
+                        options.bucket(),
+                        true),
                 options.mergeTreeOptions().targetFileSize);
     }
 }

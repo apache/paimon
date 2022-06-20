@@ -38,8 +38,16 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             RowType keyType,
             SnapshotManager snapshotManager,
             ManifestFile.Factory manifestFileFactory,
-            ManifestList.Factory manifestListFactory) {
-        super(partitionType, snapshotManager, manifestFileFactory, manifestListFactory);
+            ManifestList.Factory manifestListFactory,
+            int numOfBuckets,
+            boolean checkNumOfBuckets) {
+        super(
+                partitionType,
+                snapshotManager,
+                manifestFileFactory,
+                manifestListFactory,
+                numOfBuckets,
+                checkNumOfBuckets);
         this.keyStatsConverter = new FieldStatsArraySerializer(keyType);
     }
 

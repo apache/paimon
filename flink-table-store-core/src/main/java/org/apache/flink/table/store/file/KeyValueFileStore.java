@@ -61,7 +61,9 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 keyType,
                 snapshotManager(),
                 manifestFileFactory(),
-                manifestListFactory());
+                manifestListFactory(),
+                options.bucket(),
+                false);
     }
 
     @Override
@@ -89,7 +91,14 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 options.fileFormat(),
                 pathFactory(),
                 snapshotManager(),
-                newScan(),
+                new KeyValueFileStoreScan(
+                        partitionType,
+                        keyType,
+                        snapshotManager(),
+                        manifestFileFactory(),
+                        manifestListFactory(),
+                        options.bucket(),
+                        true),
                 options.mergeTreeOptions());
     }
 }

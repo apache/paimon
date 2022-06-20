@@ -1428,32 +1428,26 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
         tEnv.executeSql("INSERT INTO rates VALUES('US Dollar', 102)").await();
 
         // increase bucket num from 2 to 3
-        tEnv.executeSql("ALTER TABLE rates SET ('bucket' = '3')");
-
-        // read is ok
-        assertThat(BlockingIterator.of(tEnv.executeSql("SELECT * FROM rates").collect()).collect())
-                .containsExactlyInAnyOrder(changelogRow("+I", "US Dollar", 102L));
-
-        assertThatThrownBy(
-                        () -> tEnv.executeSql("INSERT INTO rates VALUES('US Dollar', 102)").await())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "Try to write table with a new bucket num 3, but the previous bucket num is 2. "
-                                + "Please switch to batch mode, enable 'overwrite.rescale-bucket' and "
-                                + "perform INSERT OVERWRITE to rescale current data layout first.");
+        assertChangeBucketWithoutRescale(3);
 
         // decrease bucket num from 3 to 1
-        tEnv.executeSql("ALTER TABLE rates SET ('bucket' = '1')");
+        assertChangeBucketWithoutRescale(1);
+    }
+
+    private void assertChangeBucketWithoutRescale(int bucketNum) throws Exception {
+        tEnv.executeSql(String.format("ALTER TABLE rates SET ('bucket' = '%d')", bucketNum));
         // read is ok
         assertThat(BlockingIterator.of(tEnv.executeSql("SELECT * FROM rates").collect()).collect())
                 .containsExactlyInAnyOrder(changelogRow("+I", "US Dollar", 102L));
         assertThatThrownBy(
                         () -> tEnv.executeSql("INSERT INTO rates VALUES('US Dollar', 102)").await())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "Try to write table with a new bucket num 1, but the previous bucket num is 2. "
-                                + "Please switch to batch mode, enable 'overwrite.rescale-bucket' and "
-                                + "perform INSERT OVERWRITE to rescale current data layout first.");
+                .getRootCause()
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageMatching(
+                        String.format(
+                                "Trying to add file data-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[0-9].orc "
+                                        + "with total bucket number 2, but the current bucket number is %d. Manifest might be corrupted.",
+                                bucketNum));
     }
 
     @Test

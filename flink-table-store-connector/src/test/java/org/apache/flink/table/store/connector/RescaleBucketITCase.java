@@ -37,7 +37,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.OVERWRITE_RESCALE_BUCKET;
 import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -47,8 +46,7 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
 
     private final String alterTableSql = "ALTER TABLE %s SET ('bucket' = '%d')";
 
-    private final String rescaleOverwriteSql =
-            "INSERT OVERWRITE %s /*+OPTIONS('overwrite.rescale-bucket' = 'true')*/ SELECT * FROM %s";
+    private final String rescaleOverwriteSql = "INSERT OVERWRITE %s SELECT * FROM %s";
 
     @Override
     protected List<String> ddl() {
@@ -189,16 +187,14 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
         Snapshot snapshot = findLatestSnapshot(tableName, managedTable);
         assertThat(snapshot).isNotNull();
 
-        // for managed table's first snapshot, the schema id is 1 other than 0
-        // the reason is T0 is registered twice in bEnv and sEnv
         SchemaManager schemaManager = new SchemaManager(getTableDirectory(tableName, managedTable));
-        assertSnapshotSchema(schemaManager, snapshot.schemaId(), managedTable ? 1L : 0L, 2);
+        assertSnapshotSchema(schemaManager, snapshot.schemaId(), 0L, 2);
 
         // for managed table schema id remains unchanged, for catalog table id increase from 0 to 1
         batchSql(alterTableSql, tableName, 4);
         if (managedTable) {
             // managed table cannot update schema
-            assertLatestSchema(schemaManager, 1L, 2);
+            assertLatestSchema(schemaManager, 0L, 2);
         } else {
             assertLatestSchema(schemaManager, 1L, 4);
         }
@@ -209,43 +205,28 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
                 .containsExactlyInAnyOrderElementsOf(expected);
 
         // check write without rescale
-        batchSql("ALTER TABLE %s SET ('overwrite.rescale-bucket' = 'true')", tableName);
-        if (managedTable) {
-            assertThat(schemaManager.latest().get().options())
-                    .doesNotContainKey(OVERWRITE_RESCALE_BUCKET.key());
-        } else {
-            assertThat(schemaManager.latest().get().options())
-                    .containsEntry(OVERWRITE_RESCALE_BUCKET.key(), "true");
-        }
         assertThatThrownBy(() -> batchSql("INSERT INTO %s VALUES (6)", tableName))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "Try to write table with a new bucket num 4, but the previous bucket num is 2. "
-                                + "Please switch to batch mode, enable 'overwrite.rescale-bucket' "
-                                + "and perform INSERT OVERWRITE to rescale current data layout first.");
+                .getRootCause()
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageMatching(
+                        "Trying to add file data-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[0-9].orc "
+                                + "with total bucket number 2, but the current bucket number is 4. Manifest might be corrupted.");
 
-        // rescale overwrite
-        if (managedTable) {
-            assertThatThrownBy(() -> batchSql(rescaleOverwriteSql, tableName, tableName))
-                    .isInstanceOf(UnsupportedOperationException.class)
-                    .hasMessage(
-                            "Rescale bucket overwrite is unsupported for Flink's managed table.");
-        } else {
-            batchSql(rescaleOverwriteSql, tableName, tableName);
-            snapshot = findLatestSnapshot(tableName, false);
-            assertThat(snapshot).isNotNull();
-            assertThat(snapshot.id()).isEqualTo(2L);
-            assertSnapshotSchema(schemaManager, snapshot.schemaId(), 2L, 4);
-            assertThat(batchSql("SELECT * FROM %s", tableName))
-                    .containsExactlyInAnyOrderElementsOf(expected);
+        batchSql(rescaleOverwriteSql, tableName, tableName);
+        snapshot = findLatestSnapshot(tableName, managedTable);
+        assertThat(snapshot).isNotNull();
+        assertThat(snapshot.id()).isEqualTo(2L);
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
+        assertSnapshotSchema(
+                schemaManager, snapshot.schemaId(), managedTable ? 0L : 2L, managedTable ? 2 : 4);
+        assertThat(batchSql("SELECT * FROM %s", tableName))
+                .containsExactlyInAnyOrderElementsOf(expected);
 
-            // insert new data
-            batchSql("INSERT INTO %s VALUES(6)", tableName);
-            expected =
-                    Arrays.asList(Row.of(1), Row.of(2), Row.of(3), Row.of(4), Row.of(5), Row.of(6));
-            assertThat(batchSql("SELECT * FROM %s", tableName))
-                    .containsExactlyInAnyOrderElementsOf(expected);
-        }
+        // insert new data
+        batchSql("INSERT INTO %s VALUES(6)", tableName);
+        expected = Arrays.asList(Row.of(1), Row.of(2), Row.of(3), Row.of(4), Row.of(5), Row.of(6));
+        assertThat(batchSql("SELECT * FROM %s", tableName))
+                .containsExactlyInAnyOrderElementsOf(expected);
     }
 
     private void executeBoth(List<String> sqlList) {

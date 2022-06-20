@@ -35,17 +35,6 @@ public class TableStoreFactoryOptions {
                     .noDefaultValue()
                     .withDescription("The root file path of the table store in the filesystem.");
 
-    public static final ConfigOption<Boolean> OVERWRITE_RESCALE_BUCKET =
-            ConfigOptions.key("overwrite.rescale-bucket")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "Specify the behavior for overwrite. Set value to true "
-                                    + "will lead overwrite to reorganize data files "
-                                    + "according to the bucket number from table schema. "
-                                    + "By default, overwrite does not adjust the bucket number "
-                                    + "of a partition/table.");
-
     @Internal
     public static final ConfigOption<Boolean> COMPACTION_MANUAL_TRIGGERED =
             ConfigOptions.key("compaction.manual-triggered")
@@ -81,7 +70,6 @@ public class TableStoreFactoryOptions {
 
     public static Set<ConfigOption<?>> allOptions() {
         Set<ConfigOption<?>> allOptions = new HashSet<>();
-        allOptions.add(OVERWRITE_RESCALE_BUCKET);
         allOptions.add(LOG_SYSTEM);
         allOptions.add(SINK_PARALLELISM);
         allOptions.add(SCAN_PARALLELISM);
