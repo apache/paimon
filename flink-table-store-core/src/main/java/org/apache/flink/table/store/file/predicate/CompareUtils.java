@@ -18,30 +18,23 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArrayComparator;
 import org.apache.flink.table.types.logical.LogicalType;
 
-import java.util.Optional;
+/** Utils for comparator. */
+public class CompareUtils {
+    private CompareUtils() {}
 
-/** A {@link LeafBinaryFunction} to eval is not null. */
-public class IsNotNull extends LeafUnaryFunction {
+    private static final BytePrimitiveArrayComparator BINARY_COMPARATOR =
+            new BytePrimitiveArrayComparator(true);
 
-    public static final IsNotNull INSTANCE = new IsNotNull();
-
-    private IsNotNull() {}
-
-    @Override
-    public boolean test(LogicalType type, Object field) {
-        return field != null;
-    }
-
-    @Override
-    public boolean test(LogicalType type, long rowCount, FieldStats fieldStats) {
-        return fieldStats.nullCount() < rowCount;
-    }
-
-    @Override
-    public Optional<LeafFunction> negate() {
-        return Optional.of(IsNull.INSTANCE);
+    public static int compareLiteral(LogicalType type, Object v1, Object v2) {
+        if (v1 instanceof Comparable) {
+            return ((Comparable<Object>) v1).compareTo(v2);
+        } else if (v1 instanceof byte[]) {
+            return BINARY_COMPARATOR.compare((byte[]) v1, (byte[]) v2);
+        } else {
+            throw new RuntimeException("Unsupported type: " + type);
+        }
     }
 }

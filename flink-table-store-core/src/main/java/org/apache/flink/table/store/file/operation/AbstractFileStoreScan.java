@@ -26,7 +26,6 @@ import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
-import org.apache.flink.table.store.file.predicate.Literal;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
@@ -90,16 +89,14 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withPartitionFilter(List<BinaryRowData> partitions) {
+        PredicateBuilder builder = new PredicateBuilder(partitionConverter.rowType());
         Function<BinaryRowData, Predicate> partitionToPredicate =
                 p -> {
                     List<Predicate> fieldPredicates = new ArrayList<>();
                     Object[] partitionObjects = partitionConverter.convert(p);
                     for (int i = 0; i < partitionConverter.getArity(); i++) {
-                        Literal l =
-                                new Literal(
-                                        partitionConverter.rowType().getTypeAt(i),
-                                        partitionObjects[i]);
-                        fieldPredicates.add(PredicateBuilder.equal(i, l));
+                        Object partition = partitionObjects[i];
+                        fieldPredicates.add(builder.equal(i, partition));
                     }
                     return PredicateBuilder.and(fieldPredicates);
                 };

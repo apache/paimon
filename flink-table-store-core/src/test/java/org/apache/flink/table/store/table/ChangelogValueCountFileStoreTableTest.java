@@ -20,11 +20,9 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.file.predicate.Literal;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.Schema;
@@ -79,10 +77,9 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
     public void testBatchFilter() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
+        PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
 
-        Predicate predicate =
-                PredicateBuilder.equal(
-                        2, Literal.fromJavaObject(DataTypes.BIGINT().getLogicalType(), 201L));
+        Predicate predicate = builder.equal(2, 201L);
         List<Split> splits = table.newScan().withFilter(predicate).plan().splits;
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING)).isEmpty();
@@ -124,10 +121,9 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
     public void testStreamingFilter() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
+        PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
 
-        Predicate predicate =
-                PredicateBuilder.equal(
-                        2, Literal.fromJavaObject(DataTypes.BIGINT().getLogicalType(), 201L));
+        Predicate predicate = builder.equal(2, 201L);
         List<Split> splits =
                 table.newScan().withIncremental(true).withFilter(predicate).plan().splits;
         TableRead read = table.newRead().withIncremental(true);

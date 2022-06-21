@@ -20,39 +20,38 @@ package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.data.binary.BinaryStringData;
 import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.types.logical.LogicalType;
 
 import java.util.Optional;
 
-/**
- * A {@link LeafPredicate.Function} to evaluate {@code filter like 'abc%' or filter like 'abc_'}.
- */
-public class StartsWith implements LeafPredicate.Function {
+/** A {@link LeafBinaryFunction} to evaluate {@code filter like 'abc%' or filter like 'abc_'}. */
+public class StartsWith extends LeafBinaryFunction {
 
     public static final StartsWith INSTANCE = new StartsWith();
 
     private StartsWith() {}
 
     @Override
-    public boolean test(Object[] values, int index, Literal patternLiteral) {
-        BinaryStringData field = (BinaryStringData) values[index];
-        return field != null && field.startsWith((BinaryStringData) patternLiteral.value());
+    public boolean test(LogicalType type, Object field, Object patternLiteral) {
+        BinaryStringData fieldString = (BinaryStringData) field;
+        return fieldString != null && fieldString.startsWith((BinaryStringData) patternLiteral);
     }
 
     @Override
-    public boolean test(long rowCount, FieldStats[] fieldStats, int index, Literal patternLiteral) {
-        FieldStats stats = fieldStats[index];
-        if (rowCount == stats.nullCount()) {
+    public boolean test(
+            LogicalType type, long rowCount, FieldStats fieldStats, Object patternLiteral) {
+        if (rowCount == fieldStats.nullCount()) {
             return false;
         }
-        BinaryStringData min = (BinaryStringData) stats.minValue();
-        BinaryStringData max = (BinaryStringData) stats.maxValue();
-        BinaryStringData pattern = (BinaryStringData) patternLiteral.value();
+        BinaryStringData min = (BinaryStringData) fieldStats.minValue();
+        BinaryStringData max = (BinaryStringData) fieldStats.maxValue();
+        BinaryStringData pattern = (BinaryStringData) patternLiteral;
         return (min.startsWith(pattern) || min.compareTo(pattern) <= 0)
                 && (max.startsWith(pattern) || max.compareTo(pattern) >= 0);
     }
 
     @Override
-    public Optional<Predicate> negate(int index, Literal literal) {
+    public Optional<LeafFunction> negate() {
         return Optional.empty();
     }
 }

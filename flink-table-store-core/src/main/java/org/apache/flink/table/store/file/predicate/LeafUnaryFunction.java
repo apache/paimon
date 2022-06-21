@@ -21,27 +21,25 @@ package org.apache.flink.table.store.file.predicate;
 import org.apache.flink.table.store.file.stats.FieldStats;
 import org.apache.flink.table.types.logical.LogicalType;
 
-import java.util.Optional;
+import java.util.List;
 
-/** A {@link LeafBinaryFunction} to eval is not null. */
-public class IsNotNull extends LeafUnaryFunction {
+/** Function to test a field. */
+public abstract class LeafUnaryFunction implements LeafFunction {
 
-    public static final IsNotNull INSTANCE = new IsNotNull();
+    private static final long serialVersionUID = 1L;
 
-    private IsNotNull() {}
+    public abstract boolean test(LogicalType type, Object value);
+
+    public abstract boolean test(LogicalType type, long rowCount, FieldStats fieldStats);
 
     @Override
-    public boolean test(LogicalType type, Object field) {
-        return field != null;
+    public boolean test(LogicalType type, Object value, List<Object> literals) {
+        return test(type, value);
     }
 
     @Override
-    public boolean test(LogicalType type, long rowCount, FieldStats fieldStats) {
-        return fieldStats.nullCount() < rowCount;
-    }
-
-    @Override
-    public Optional<LeafFunction> negate() {
-        return Optional.of(IsNull.INSTANCE);
+    public boolean test(
+            LogicalType type, long rowCount, FieldStats fieldStats, List<Object> literals) {
+        return test(type, rowCount, fieldStats);
     }
 }
