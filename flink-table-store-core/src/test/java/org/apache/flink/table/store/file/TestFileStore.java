@@ -253,7 +253,7 @@ public class TestFileStore extends KeyValueFileStore {
     }
 
     public List<KeyValue> readKvsFromSnapshot(long snapshotId) throws IOException {
-        List<ManifestEntry> entries = newScan(false).withSnapshot(snapshotId).plan().files();
+        List<ManifestEntry> entries = newScan().withSnapshot(snapshotId).plan().files();
         return readKvsFromManifestEntries(entries);
     }
 
@@ -349,7 +349,7 @@ public class TestFileStore extends KeyValueFileStore {
     private Set<Path> getFilesInUse() {
         FileStorePathFactory pathFactory = pathFactory();
         ManifestList manifestList = manifestListFactory().create();
-        FileStoreScan scan = newScan(false);
+        FileStoreScan scan = newScan();
         FileStorePathFactory.DataFilePathFactoryCache dataFilePathFactoryCache =
                 new FileStorePathFactory.DataFilePathFactoryCache(pathFactory);
 

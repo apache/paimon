@@ -61,7 +61,6 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public TableCompact newCompact() {
-        return new TableCompact(
-                store().newScan(false), store().newWrite(), store().partitionType());
+        return new TableCompact(store().newScan(), store().newWrite(), store().partitionType());
     }
 }

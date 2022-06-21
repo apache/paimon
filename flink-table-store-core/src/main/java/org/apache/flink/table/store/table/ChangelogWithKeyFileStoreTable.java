@@ -109,7 +109,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableScan newScan() {
-        KeyValueFileStoreScan scan = store.newScan(false);
+        KeyValueFileStoreScan scan = store.newScan();
         return new TableScan(scan, schema, store.pathFactory()) {
             @Override
             protected void withNonPartitionFilter(Predicate predicate) {

@@ -132,7 +132,7 @@ public class TestFileStore implements FileStore<KeyValue> {
     }
 
     @Override
-    public FileStoreScan newScan(boolean checkNumOfBuckets) {
+    public FileStoreScan newScan() {
         throw new UnsupportedOperationException();
     }
 
