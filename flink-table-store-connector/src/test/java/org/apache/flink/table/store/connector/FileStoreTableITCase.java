@@ -19,10 +19,23 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
+import org.apache.flink.table.api.internal.TableEnvironmentImpl;
+import org.apache.flink.table.catalog.CatalogBaseTable;
+import org.apache.flink.table.catalog.ObjectIdentifier;
+import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
+import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
+import org.apache.flink.table.catalog.exceptions.TableNotExistException;
+import org.apache.flink.table.delegation.Parser;
+import org.apache.flink.table.operations.Operation;
+import org.apache.flink.table.operations.ddl.CreateCatalogOperation;
+import org.apache.flink.table.operations.ddl.CreateTableOperation;
+import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
@@ -31,6 +44,8 @@ import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 
 import org.junit.Before;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
@@ -38,6 +53,8 @@ import java.util.List;
 import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
 import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
+import static org.apache.flink.table.store.file.FileStoreOptions.relativeTablePath;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /** ITCase for file store table api. */
 public abstract class FileStoreTableITCase extends AbstractTestBase {
@@ -52,15 +69,50 @@ public abstract class FileStoreTableITCase extends AbstractTestBase {
         sEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inStreamingMode().build());
         sEnv.getConfig().getConfiguration().set(CHECKPOINTING_INTERVAL, Duration.ofMillis(100));
         path = TEMPORARY_FOLDER.newFolder().toURI().toString();
-        prepareEnv(bEnv, path);
-        prepareEnv(sEnv, path);
+        prepareConfiguration(bEnv, path);
+        prepareConfiguration(sEnv, path);
+        prepareEnv();
     }
 
-    private void prepareEnv(TableEnvironment env, String path) {
+    private void prepareConfiguration(TableEnvironment env, String path) {
         Configuration config = env.getConfig().getConfiguration();
         config.set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 2);
         config.setString(TABLE_STORE_PREFIX + ROOT_PATH.key(), path);
-        ddl().forEach(env::executeSql);
+    }
+
+    private void prepareEnv() {
+        Parser parser = ((TableEnvironmentImpl) sEnv).getParser();
+        for (String ddl : ddl()) {
+            sEnv.executeSql(ddl);
+            List<Operation> operations = parser.parse(ddl);
+            if (operations.size() == 1) {
+                Operation operation = operations.get(0);
+                if (operation instanceof CreateCatalogOperation) {
+                    String name = ((CreateCatalogOperation) operation).getCatalogName();
+                    bEnv.registerCatalog(name, sEnv.getCatalog(name).orElse(null));
+                } else if (operation instanceof CreateTableOperation) {
+                    ObjectIdentifier tableIdentifier =
+                            ((CreateTableOperation) operation).getTableIdentifier();
+                    try {
+                        CatalogBaseTable table =
+                                sEnv.getCatalog(tableIdentifier.getCatalogName())
+                                        .get()
+                                        .getTable(tableIdentifier.toObjectPath());
+                        ((TableEnvironmentImpl) bEnv)
+                                .getCatalogManager()
+                                .getCatalog(tableIdentifier.getCatalogName())
+                                .get()
+                                .createTable(tableIdentifier.toObjectPath(), table, true);
+                    } catch (TableNotExistException
+                            | TableAlreadyExistException
+                            | DatabaseNotExistException e) {
+                        fail("This should not happen");
+                    }
+                } else {
+                    bEnv.executeSql(ddl);
+                }
+            }
+        }
     }
 
     protected abstract List<String> ddl();
@@ -77,5 +129,25 @@ public abstract class FileStoreTableITCase extends AbstractTestBase {
         } catch (Exception e) {
             throw new RuntimeException("Failed to collect the table result.", e);
         }
+    }
+
+    protected Path getTableDirectory(String tableName, boolean managedTable) {
+        return new Path(
+                path
+                        + (managedTable
+                                ? relativeTablePath(
+                                        ObjectIdentifier.of(
+                                                bEnv.getCurrentCatalog(),
+                                                bEnv.getCurrentDatabase(),
+                                                tableName))
+                                : String.format("%s.db/%s", bEnv.getCurrentDatabase(), tableName)));
+    }
+
+    @Nullable
+    protected Snapshot findLatestSnapshot(String tableName, boolean managedTable) {
+        SnapshotManager snapshotManager =
+                new SnapshotManager(getTableDirectory(tableName, managedTable));
+        Long id = snapshotManager.latestSnapshotId();
+        return id == null ? null : snapshotManager.snapshot(id);
     }
 }

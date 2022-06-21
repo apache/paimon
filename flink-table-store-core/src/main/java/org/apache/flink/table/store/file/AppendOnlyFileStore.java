@@ -43,13 +43,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
 
     @Override
     public AppendOnlyFileStoreScan newScan() {
-        return new AppendOnlyFileStoreScan(
-                partitionType,
-                rowType,
-                snapshotManager(),
-                manifestFileFactory(),
-                manifestListFactory(),
-                options.bucket());
+        return newScan(false);
     }
 
     @Override
@@ -66,7 +60,18 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
                 options.fileFormat(),
                 pathFactory(),
                 snapshotManager(),
-                newScan(),
+                newScan(true),
                 options.mergeTreeOptions().targetFileSize);
+    }
+
+    private AppendOnlyFileStoreScan newScan(boolean checkNumOfBuckets) {
+        return new AppendOnlyFileStoreScan(
+                partitionType,
+                rowType,
+                snapshotManager(),
+                manifestFileFactory(),
+                manifestListFactory(),
+                options.bucket(),
+                checkNumOfBuckets);
     }
 }
