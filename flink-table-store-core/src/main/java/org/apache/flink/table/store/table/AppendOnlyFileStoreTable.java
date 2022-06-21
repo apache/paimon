@@ -29,12 +29,15 @@ import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.store.table.sink.AbstractTableWrite;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.source.AppendOnlySplitGenerator;
+import org.apache.flink.table.store.table.source.SplitGenerator;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.types.RowKind;
@@ -66,6 +69,12 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     public TableScan newScan() {
         AppendOnlyFileStoreScan scan = store.newScan();
         return new TableScan(scan, schema, store.pathFactory()) {
+            @Override
+            protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
+                return new AppendOnlySplitGenerator(
+                        store.options().splitTargetSize(), store.options().splitOpenFileCost());
+            }
+
             @Override
             protected void withNonPartitionFilter(Predicate predicate) {
                 scan.withFilter(predicate);

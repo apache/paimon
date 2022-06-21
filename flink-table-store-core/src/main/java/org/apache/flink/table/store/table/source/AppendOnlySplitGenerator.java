@@ -18,12 +18,26 @@
 
 package org.apache.flink.table.store.table.source;
 
+import org.apache.flink.connector.file.table.BinPacking;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 
 import java.util.List;
+import java.util.function.Function;
 
-/** Generate splits from {@link DataFileMeta}s. */
-public interface SplitGenerator {
+/** Append only implementation of {@link SplitGenerator}. */
+public class AppendOnlySplitGenerator implements SplitGenerator {
 
-    List<List<DataFileMeta>> split(List<DataFileMeta> files);
+    private final long targetSplitSize;
+    private final long openFileCost;
+
+    public AppendOnlySplitGenerator(long targetSplitSize, long openFileCost) {
+        this.targetSplitSize = targetSplitSize;
+        this.openFileCost = openFileCost;
+    }
+
+    @Override
+    public List<List<DataFileMeta>> split(List<DataFileMeta> files) {
+        Function<DataFileMeta, Long> weightFunc = file -> Math.max(file.fileSize(), openFileCost);
+        return BinPacking.pack(files, weightFunc, targetSplitSize);
+    }
 }

@@ -19,6 +19,9 @@
 package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.CompoundPredicate;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
@@ -31,6 +34,7 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /** An abstraction layer above {@link FileStoreScan} to provide input split generation. */
@@ -90,10 +94,36 @@ public abstract class TableScan {
 
     public Plan plan() {
         FileStoreScan.Plan plan = scan.plan();
-        return new Plan(
-                plan.snapshotId(),
-                new DefaultSplitGenerator(pathFactory).generate(plan.groupByPartFiles()));
+        return new Plan(plan.snapshotId(), generateSplits(plan.groupByPartFiles()));
     }
+
+    private List<Split> generateSplits(
+            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
+        return generateSplits(pathFactory, splitGenerator(pathFactory), groupedDataFiles);
+    }
+
+    @VisibleForTesting
+    public static List<Split> generateSplits(
+            FileStorePathFactory pathFactory,
+            SplitGenerator splitGenerator,
+            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
+        List<Split> splits = new ArrayList<>();
+        for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> entry :
+                groupedDataFiles.entrySet()) {
+            BinaryRowData partition = entry.getKey();
+            Map<Integer, List<DataFileMeta>> buckets = entry.getValue();
+            for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry : buckets.entrySet()) {
+                int bucket = bucketEntry.getKey();
+                Path bucketPath = pathFactory.bucketPath(partition, bucket);
+                splitGenerator.split(bucketEntry.getValue()).stream()
+                        .map(files -> new Split(partition, bucket, files, bucketPath))
+                        .forEach(splits::add);
+            }
+        }
+        return splits;
+    }
+
+    protected abstract SplitGenerator splitGenerator(FileStorePathFactory pathFactory);
 
     protected abstract void withNonPartitionFilter(Predicate predicate);
 

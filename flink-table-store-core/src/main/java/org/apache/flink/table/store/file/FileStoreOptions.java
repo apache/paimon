@@ -141,6 +141,20 @@ public class FileStoreOptions implements Serializable {
                                     .list(formatEnumOption(WriteMode.CHANGE_LOG))
                                     .build());
 
+    public static final ConfigOption<MemorySize> SOURCE_SPLIT_TARGET_SIZE =
+            ConfigOptions.key("source.split.target-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(128))
+                    .withDescription("Target size of a source split when scanning a bucket.");
+
+    public static final ConfigOption<MemorySize> SOURCE_SPLIT_OPEN_FILE_COST =
+            ConfigOptions.key("source.split.open-file-cost")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(4))
+                    .withDescription(
+                            "Open file cost of a source file. It is used to avoid reading"
+                                    + " too many files with a source split, which can be very slow.");
+
     private final Configuration options;
 
     public static Set<ConfigOption<?>> allOptions() {
@@ -155,6 +169,11 @@ public class FileStoreOptions implements Serializable {
         allOptions.add(SNAPSHOT_NUM_RETAINED_MIN);
         allOptions.add(SNAPSHOT_NUM_RETAINED_MAX);
         allOptions.add(SNAPSHOT_TIME_RETAINED);
+        allOptions.add(CONTINUOUS_DISCOVERY_INTERVAL);
+        allOptions.add(MERGE_ENGINE);
+        allOptions.add(WRITE_MODE);
+        allOptions.add(SOURCE_SPLIT_TARGET_SIZE);
+        allOptions.add(SOURCE_SPLIT_OPEN_FILE_COST);
         return allOptions;
     }
 
@@ -235,6 +254,14 @@ public class FileStoreOptions implements Serializable {
 
     public int manifestMergeMinCount() {
         return options.get(MANIFEST_MERGE_MIN_COUNT);
+    }
+
+    public long splitTargetSize() {
+        return options.get(SOURCE_SPLIT_TARGET_SIZE).getBytes();
+    }
+
+    public long splitOpenFileCost() {
+        return options.get(SOURCE_SPLIT_OPEN_FILE_COST).getBytes();
     }
 
     /** Specifies the merge engine for table with primary key. */

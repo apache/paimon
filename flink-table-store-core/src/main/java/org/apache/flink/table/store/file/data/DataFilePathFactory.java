@@ -37,7 +37,7 @@ public class DataFilePathFactory {
     private final String formatIdentifier;
 
     public DataFilePathFactory(Path root, String partition, int bucket, String formatIdentifier) {
-        this.bucketDir = new Path(root + "/" + partition + "/bucket-" + bucket);
+        this.bucketDir = bucketPath(root, partition, bucket);
         this.uuid = UUID.randomUUID().toString();
 
         this.pathCount = new AtomicInteger(0);
@@ -67,5 +67,9 @@ public class DataFilePathFactory {
     @VisibleForTesting
     public String uuid() {
         return uuid;
+    }
+
+    public static Path bucketPath(Path tablePath, String partition, int bucket) {
+        return new Path(tablePath + "/" + partition + "/bucket-" + bucket);
     }
 }
