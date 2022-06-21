@@ -25,6 +25,7 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.api.EnvironmentSettings;
+import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.sink.DataStreamSinkProvider;
@@ -1419,36 +1420,40 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                 String.format(
                         "CREATE TABLE IF NOT EXISTS rates (\n"
                                 + "currency STRING,\n"
-                                + " rate BIGINT\n"
-                                + ") WITH (\n"
+                                + " rate BIGINT,\n"
+                                + " dt STRING\n"
+                                + ") PARTITIONED BY (dt)\n"
+                                + "WITH (\n"
                                 + " 'bucket' = '2',\n"
                                 + " 'root-path' = '%s'\n"
                                 + ")",
                         rootPath));
-        tEnv.executeSql("INSERT INTO rates VALUES('US Dollar', 102)").await();
+        tEnv.executeSql("INSERT INTO rates VALUES('US Dollar', 102, '2022-06-20')").await();
 
         // increase bucket num from 2 to 3
-        tEnv.executeSql("ALTER TABLE rates SET ('bucket' = '3')");
-        assertThatThrownBy(
-                        () -> tEnv.executeSql("INSERT INTO rates VALUES('US Dollar', 102)").await())
-                .hasRootCauseInstanceOf(IllegalStateException.class)
-                .hasRootCauseMessage(
-                        "Bucket number has been changed. Manifest might be corrupted.");
-        assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM rates").await())
-                .hasRootCauseInstanceOf(IllegalStateException.class)
-                .hasRootCauseMessage(
-                        "Bucket number has been changed. Manifest might be corrupted.");
+        assertChangeBucketWithoutRescale(3);
 
         // decrease bucket num from 3 to 1
-        // TODO this test cannot work until alter table callback is implemented for managed table
-        /*
-        tEnv.executeSql("ALTER TABLE rates RESET ('bucket')");
-        assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM rates").await())
-                .hasRootCauseInstanceOf(IllegalStateException.class)
-                .hasRootCauseMessage(
-                        "Bucket number has been changed. Manifest might be corrupted.");
+        assertChangeBucketWithoutRescale(1);
+    }
 
-         */
+    private void assertChangeBucketWithoutRescale(int bucketNum) throws Exception {
+        tEnv.executeSql(String.format("ALTER TABLE rates SET ('bucket' = '%d')", bucketNum));
+        // read is ok
+        assertThat(BlockingIterator.of(tEnv.executeSql("SELECT * FROM rates").collect()).collect())
+                .containsExactlyInAnyOrder(changelogRow("+I", "US Dollar", 102L, "2022-06-20"));
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql(
+                                                "INSERT INTO rates VALUES('US Dollar', 102, '2022-06-20')")
+                                        .await())
+                .getRootCause()
+                .isInstanceOf(TableException.class)
+                .hasMessage(
+                        String.format(
+                                "Try to write partition {dt=2022-06-20} with a new bucket num %d, but the previous bucket num is 2. "
+                                        + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
+                                bucketNum));
     }
 
     @Test

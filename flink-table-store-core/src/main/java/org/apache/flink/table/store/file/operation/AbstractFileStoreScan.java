@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.connector.file.table.FileSystemConnectorOptions;
+import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
@@ -28,6 +30,7 @@ import org.apache.flink.table.store.file.predicate.Literal;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
+import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RowDataToObjectArrayConverter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -54,6 +57,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private final ManifestFile.Factory manifestFileFactory;
     private final ManifestList manifestList;
     private final int numOfBuckets;
+    private final boolean checkNumOfBuckets;
 
     private Predicate partitionFilter;
 
@@ -67,13 +71,15 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             SnapshotManager snapshotManager,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
-            int numOfBuckets) {
+            int numOfBuckets,
+            boolean checkNumOfBuckets) {
         this.partitionStatsConverter = new FieldStatsArraySerializer(partitionType);
         this.partitionConverter = new RowDataToObjectArrayConverter(partitionType);
         this.snapshotManager = snapshotManager;
         this.manifestFileFactory = manifestFileFactory;
         this.manifestList = manifestListFactory.create();
         this.numOfBuckets = numOfBuckets;
+        this.checkNumOfBuckets = checkNumOfBuckets;
     }
 
     @Override
@@ -181,9 +187,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         Map<ManifestEntry.Identifier, ManifestEntry> map = new HashMap<>();
         for (ManifestEntry entry : entries) {
             ManifestEntry.Identifier identifier = entry.identifier();
-            Preconditions.checkState(
-                    entry.totalBuckets() == numOfBuckets,
-                    "Bucket number has been changed. Manifest might be corrupted.");
             switch (entry.kind()) {
                 case ADD:
                     Preconditions.checkState(
@@ -206,7 +209,35 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                             "Unknown value kind " + entry.kind().name());
             }
         }
-        List<ManifestEntry> files = new ArrayList<>(map.values());
+        List<ManifestEntry> files = new ArrayList<>();
+        for (ManifestEntry file : map.values()) {
+            if (checkNumOfBuckets && file.totalBuckets() != numOfBuckets) {
+                String partInfo =
+                        partitionConverter.getArity() > 0
+                                ? "partition "
+                                        + FileStorePathFactory.getPartitionComputer(
+                                                        partitionConverter.rowType(),
+                                                        FileSystemConnectorOptions
+                                                                .PARTITION_DEFAULT_NAME
+                                                                .defaultValue())
+                                                .generatePartValues(file.partition())
+                                : "table";
+                throw new TableException(
+                        String.format(
+                                "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
+                                        + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
+                                partInfo, numOfBuckets, file.totalBuckets()));
+            }
+
+            // bucket filter should not be applied along with partition filter
+            // because the specifiedBucket is computed against the current numOfBuckets
+            // however entry.bucket() was computed against the old numOfBuckets
+            // and thus the filtered manifest entries might be empty
+            // which renders the bucket check invalid
+            if (filterByBucket(file)) {
+                files.add(file);
+            }
+        }
 
         return new Plan() {
             @Nullable
@@ -230,18 +261,16 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     private boolean filterManifestEntry(ManifestEntry entry) {
-        return filterByPartitionAndBucket(entry) && filterByStats(entry);
+        return filterByPartition(entry) && filterByStats(entry);
     }
 
-    private boolean filterByPartitionAndBucket(ManifestEntry entry) {
-        if (specifiedBucket != null) {
-            Preconditions.checkState(
-                    specifiedBucket < entry.totalBuckets(),
-                    "Bucket number has been changed. Manifest might be corrupted.");
-        }
+    private boolean filterByPartition(ManifestEntry entry) {
         return (partitionFilter == null
-                        || partitionFilter.test(partitionConverter.convert(entry.partition())))
-                && (specifiedBucket == null || entry.bucket() == specifiedBucket);
+                || partitionFilter.test(partitionConverter.convert(entry.partition())));
+    }
+
+    private boolean filterByBucket(ManifestEntry entry) {
+        return (specifiedBucket == null || entry.bucket() == specifiedBucket);
     }
 
     protected abstract boolean filterByStats(ManifestEntry entry);
