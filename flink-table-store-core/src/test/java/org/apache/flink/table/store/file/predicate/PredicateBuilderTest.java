@@ -32,7 +32,16 @@ public class PredicateBuilderTest {
 
     @Test
     public void testSplitAnd() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        RowType.of(
+                                new IntType(),
+                                new IntType(),
+                                new IntType(),
+                                new IntType(),
+                                new IntType(),
+                                new IntType(),
+                                new IntType()));
 
         Predicate child1 =
                 PredicateBuilder.or(builder.isNull(0), builder.isNull(1), builder.isNull(2));
