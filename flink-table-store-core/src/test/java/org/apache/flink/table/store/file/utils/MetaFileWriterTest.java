@@ -28,10 +28,11 @@ import java.io.IOException;
 import java.util.UUID;
 
 import static org.apache.flink.table.store.file.utils.FileUtils.readFileUtf8;
+import static org.apache.flink.table.store.file.utils.MetaFileWriter.writeFileSafety;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link AtomicFileWriter}. */
-public class AtomicFileWriterTest {
+/** Test for {@link MetaFileWriter}. */
+public class MetaFileWriterTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -70,11 +71,11 @@ public class AtomicFileWriterTest {
 
     private void test(Path root, AtomicFileWriter writer) throws IOException {
         Path path1 = new Path(root, "f1");
-        boolean success = writer.writeFileSafety(path1, "hahaha");
+        boolean success = writeFileSafety(writer, path1, "hahaha");
         assertThat(success).isTrue();
         assertThat(readFileUtf8(path1)).isEqualTo("hahaha");
 
-        success = writer.writeFileSafety(path1, "xixixi");
+        success = writeFileSafety(writer, path1, "xixixi");
         assertThat(success).isFalse();
     }
 }

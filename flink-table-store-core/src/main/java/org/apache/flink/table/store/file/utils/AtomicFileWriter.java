@@ -37,30 +37,6 @@ public interface AtomicFileWriter {
     /** Opens a new atomic stream to write to the given path. */
     AtomicFsDataOutputStream open(Path path) throws IOException;
 
-    /**
-     * Write an utf8 string to file. In addition to that, it checks if the committed file is equal
-     * to the input {@code content}, if not, the committing has failed.
-     *
-     * <p>But this does not solve overwritten committing.
-     *
-     * @return True if the committing was successful, False otherwise
-     */
-    default boolean writeFileSafety(Path path, String content) throws IOException {
-        AtomicFsDataOutputStream out = open(path);
-        try {
-            FileUtils.writeOutputStreamUtf8(out, content);
-            boolean success = out.closeAndCommit();
-            if (success) {
-                return content.equals(FileUtils.readFileUtf8(path));
-            } else {
-                return false;
-            }
-        } catch (IOException e) {
-            out.close();
-            return false;
-        }
-    }
-
     static AtomicFileWriter create(FileSystem fs) throws IOException {
         RecoverableWriter recoverableWriter = null;
         try {

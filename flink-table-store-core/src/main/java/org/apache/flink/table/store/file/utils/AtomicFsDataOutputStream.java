@@ -32,7 +32,8 @@ public abstract class AtomicFsDataOutputStream extends FSDataOutputStream {
      * Closes the stream, ensuring persistence of all data (similar to {@link #sync()}). And commits
      * the file, publish (make visible) the file that the stream was writing to.
      *
-     * @return True if the committing was successful, False otherwise
+     * @return Returns true if the commit may be successful. Returns false if the commit definitely
+     *     fails.
      */
     public abstract boolean closeAndCommit() throws IOException;
 
