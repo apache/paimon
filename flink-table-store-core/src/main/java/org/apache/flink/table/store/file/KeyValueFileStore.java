@@ -66,7 +66,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 schemaId,
                 keyType,
                 valueType,
-                keyComparatorSupplier.get(),
+                newKeyComparator(),
                 mergeFunction,
                 options.fileFormat(),
                 pathFactory());
@@ -97,5 +97,9 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 manifestListFactory(),
                 options.bucket(),
                 checkNumOfBuckets);
+    }
+
+    public Comparator<RowData> newKeyComparator() {
+        return keyComparatorSupplier.get();
     }
 }
