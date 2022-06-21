@@ -22,7 +22,6 @@ import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.utils.AtomicFileWriter;
-import org.apache.flink.table.store.file.utils.AtomicFsDataOutputStream;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.types.logical.RowType;
@@ -140,15 +139,8 @@ public class SchemaManager implements Serializable {
                                     return false;
                                 }
 
-                                AtomicFsDataOutputStream out =
-                                        AtomicFileWriter.create(fs).open(schemaPath);
-                                try {
-                                    FileUtils.writeFileUtf8(out, schema.toString());
-                                    return out.closeAndCommit();
-                                } catch (IOException e) {
-                                    out.close();
-                                    return false;
-                                }
+                                return AtomicFileWriter.create(tableRoot.getFileSystem())
+                                        .writeFileSafety(schemaPath, schema.toString());
                             });
             if (success) {
                 return schema;

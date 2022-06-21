@@ -33,9 +33,7 @@ import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateConverter;
 import org.apache.flink.table.store.file.utils.AtomicFileWriter;
-import org.apache.flink.table.store.file.utils.AtomicFsDataOutputStream;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RowDataToObjectArrayConverter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.RowType;
@@ -45,7 +43,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -403,17 +400,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             return false;
                         }
 
-                        AtomicFsDataOutputStream out =
-                                AtomicFileWriter.create(fs).open(newSnapshotPath);
-                        try {
-                            FileUtils.writeFileUtf8(out, newSnapshot.toJson());
-                            boolean committed = out.closeAndCommit();
+                        boolean committed =
+                                AtomicFileWriter.create(fs)
+                                        .writeFileSafety(newSnapshotPath, newSnapshot.toJson());
+                        if (committed) {
                             snapshotManager.commitLatestHint(newSnapshotId);
-                            return committed;
-                        } catch (IOException e) {
-                            out.close();
-                            return false;
                         }
+                        return committed;
                     };
             if (lock != null) {
                 success =
@@ -462,7 +455,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         // atomic rename fails, clean up and try again
         LOG.warn(
                 String.format(
-                        "Atomic rename failed for snapshot #%d (path %s) by user %s "
+                        "Atomic commit failed for snapshot #%d (path %s) by user %s "
                                 + "with identifier %s and kind %s. "
                                 + "Clean up and try again.",
                         newSnapshotId, newSnapshotPath, commitUser, identifier, commitKind.name()));
