@@ -49,14 +49,24 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
     @Override
     public List<List<DataFileMeta>> split(List<DataFileMeta> files) {
         /*
-         * Suppose now there are files: [1, 2] [3, 4] [5, 180] [5, 190] [200, 600] [210, 700]
-         * Files without intersection are not related, we do not need to put all files into one
-         * split, we can slice into multiple splits, multiple parallelism execution is faster.
-         * Nor can we slice too fine, we should make each split as large as possible with 128 MB,
-         * so use BinPack to slice, the final result will be:
+         * The generator aims to parallel the scan execution by slicing the files of each bucket
+         * into multiple splits. The generation has one constraint: files with intersected key
+         * ranges (within one section) must go to the same split. Therefore, the files are first to go
+         * through the interval partition algorithm to generate sections and then through the
+         * BinPack algorithm. Note that the item to be packed here is each section, the bin capacity
+         * is denoted as the targetSplitSize, and the final number of the bins is the number of
+         * splits generated.
          *
+         * For instance, there are files: [1, 2] [3, 4] [5, 180] [5, 190] [200, 600] [210, 700]
+         * with targetSplitSize 128M. After interval partition, there are four sections:
+         * - section1: [1, 2]
+         * - section2: [3, 4]
+         * - section3: [5, 180], [5, 190]
+         * - section4: [200, 600], [210, 700]
+         *
+         * After BinPack, section1 and section2 will be put into one bin (split), so the final result will be:
          * - split1: [1, 2] [3, 4]
-         * - split2: [5, 180] [5, 190]
+         * - split2: [5, 180] [5,190]
          * - split3: [200, 600] [210, 700]
          */
         List<List<DataFileMeta>> sections =
