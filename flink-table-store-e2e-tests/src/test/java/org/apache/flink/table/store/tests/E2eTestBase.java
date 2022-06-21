@@ -128,7 +128,9 @@ public abstract class E2eTestBase {
 
     @AfterEach
     public void after() {
-        environment.stop();
+        if (environment != null) {
+            environment.stop();
+        }
     }
 
     private void copyResource(String resourceName) {
