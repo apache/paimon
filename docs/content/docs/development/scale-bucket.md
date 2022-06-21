@@ -26,15 +26,15 @@ under the License.
 
 # Scale Bucket
 
-Since the LSM trees are built against each bucket, the number of total buckets dramatically influences the performance.
-Table Store allows users to tune bucket numbers by `ALTER TABLE` command and reorganize data layout by `INSERT OVERWRITE` 
-without recreating the table/partition. When executing overwrite jobs, the framework will automatically scan the data with
-the bucket number recorded in manifest file and hash the record according to the current bucket numbers.
+Since the number of total buckets dramatically influences the performance, Table Store allows users to 
+tune bucket numbers by `ALTER TABLE` command and reorganize data layout by `INSERT OVERWRITE` 
+without recreating the table/partition. When executing overwrite jobs, the framework will automatically 
+scan the data with the bucket number recorded in manifest file and hash the record according to the current bucket numbers.
 
 ## Rescale Overwrite
 ```sql
 -- scale number of total buckets
-ALTER TABLE table_dentifier SET ('bucket' = '...')
+ALTER TABLE table_identifier SET ('bucket' = '...')
 
 -- reorganize data layout of table/partition
 INSERT OVERWRITE table_identifier [PARTITION (part_spec)]
@@ -43,7 +43,7 @@ FROM table_identifier
 [WHERE part_spec]
 ``` 
 
-Please beware that
+Please note that
 - `ALTER TABLE` only modifies the table's metadata and will **NOT** reorganize or reformat existing data. 
   Reorganize exiting data must be achieved by `INSERT OVERWRITE`.
 - Scale bucket number does not influence the read and running write jobs.
@@ -57,7 +57,7 @@ Please beware that
 
 
 {{< hint info >}}
-__Note:__ Currently, scale bucket is only supported for tables without enabling log system.
+__Note:__ For the table which enables log system(*e.g.* Kafka), please scale the topic's partition as well to keep consistency.
 {{< /hint >}}
 
 ## Use Case
@@ -93,7 +93,7 @@ and the job's latency keeps increasing. A possible workaround is to create a new
 
 However, there is a better solution with four steps.
 
-- First, suspend the streaming job.
+- First, suspend the streaming job with savepoint.
 
 - Increase the bucket number.
   ```sql
@@ -112,5 +112,5 @@ However, there is a better solution with four steps.
   WHERE dt = 'yyyy-MM-dd' AND order_status = 'verified'
   ```
 
-- Recompile the streaming job and restore from the latest checkpoint.
+- Restore the streaming job from the savepoint.
 
