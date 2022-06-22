@@ -35,7 +35,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Leaf node of a {@link Predicate} tree. Compares a field in the row with an {@link Literal}. */
+/** Leaf node of a {@link Predicate} tree. Compares a field in the row with literals. */
 public class LeafPredicate implements Predicate {
 
     private static final long serialVersionUID = 1L;
