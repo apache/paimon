@@ -71,6 +71,10 @@ public class FileStorePathFactory {
         this.manifestListCount = new AtomicInteger(0);
     }
 
+    public Path root() {
+        return root;
+    }
+
     @VisibleForTesting
     public static RowDataPartitionComputer getPartitionComputer(
             RowType partitionType, String defaultPartValue) {

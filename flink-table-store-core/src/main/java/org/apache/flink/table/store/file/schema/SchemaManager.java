@@ -18,10 +18,12 @@
 
 package org.apache.flink.table.store.file.schema;
 
+import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
+import org.apache.flink.table.store.file.utils.MetaFileWriter;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
@@ -31,7 +33,6 @@ import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
@@ -128,20 +129,21 @@ public class SchemaManager implements Serializable {
                             options,
                             updateSchema.comment());
 
-            Path temp = toTmpSchemaPath(id);
-            Path finalFile = toSchemaPath(id);
+            Path schemaPath = toSchemaPath(id);
 
-            boolean success = false;
-            try {
-                FileUtils.writeFileUtf8(temp, schema.toString());
-                success = lock.runWithLock(() -> temp.getFileSystem().rename(temp, finalFile));
-                if (success) {
-                    return schema;
-                }
-            } finally {
-                if (!success) {
-                    FileUtils.deleteOrWarn(temp);
-                }
+            FileSystem fs = schemaPath.getFileSystem();
+            boolean success =
+                    lock.runWithLock(
+                            () -> {
+                                if (fs.exists(schemaPath)) {
+                                    return false;
+                                }
+
+                                return MetaFileWriter.writeFileSafety(
+                                        schemaPath, schema.toString());
+                            });
+            if (success) {
+                return schema;
             }
         }
     }
@@ -157,10 +159,6 @@ public class SchemaManager implements Serializable {
 
     private Path schemaDirectory() {
         return new Path(tableRoot + "/schema");
-    }
-
-    private Path toTmpSchemaPath(long id) {
-        return new Path(tableRoot + "/schema/." + SCHEMA_PREFIX + id + "-" + UUID.randomUUID());
     }
 
     private Path toSchemaPath(long id) {

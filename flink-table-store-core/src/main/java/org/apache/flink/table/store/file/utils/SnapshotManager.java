@@ -51,10 +51,6 @@ public class SnapshotManager {
         return new Path(tablePath + "/snapshot/" + SNAPSHOT_PREFIX + snapshotId);
     }
 
-    public Path tmpSnapshotPath(long id) {
-        return new Path(tablePath + "/snapshot/." + SNAPSHOT_PREFIX + id + "-" + UUID.randomUUID());
-    }
-
     public Snapshot snapshot(long snapshotId) {
         return Snapshot.fromPath(snapshotPath(snapshotId));
     }
