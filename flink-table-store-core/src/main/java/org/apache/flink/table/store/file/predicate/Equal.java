@@ -19,34 +19,35 @@
 package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.types.logical.LogicalType;
 
 import java.util.Optional;
 
-/** A {@link LeafPredicate.Function} to eval equal. */
-public class Equal implements LeafPredicate.Function {
+import static org.apache.flink.table.store.file.predicate.CompareUtils.compareLiteral;
+
+/** A {@link LeafBinaryFunction} to eval equal. */
+public class Equal extends LeafBinaryFunction {
 
     public static final Equal INSTANCE = new Equal();
 
     private Equal() {}
 
     @Override
-    public boolean test(Object[] values, int index, Literal literal) {
-        Object field = values[index];
-        return field != null && literal.compareValueTo(field) == 0;
+    public boolean test(LogicalType type, Object field, Object literal) {
+        return field != null && compareLiteral(type, literal, field) == 0;
     }
 
     @Override
-    public boolean test(long rowCount, FieldStats[] fieldStats, int index, Literal literal) {
-        FieldStats stats = fieldStats[index];
-        if (rowCount == stats.nullCount()) {
+    public boolean test(LogicalType type, long rowCount, FieldStats fieldStats, Object literal) {
+        if (rowCount == fieldStats.nullCount()) {
             return false;
         }
-        return literal.compareValueTo(stats.minValue()) >= 0
-                && literal.compareValueTo(stats.maxValue()) <= 0;
+        return compareLiteral(type, literal, fieldStats.minValue()) >= 0
+                && compareLiteral(type, literal, fieldStats.maxValue()) <= 0;
     }
 
     @Override
-    public Optional<Predicate> negate(int index, Literal literal) {
-        return Optional.of(new LeafPredicate(NotEqual.INSTANCE, index, literal));
+    public Optional<LeafFunction> negate() {
+        return Optional.of(NotEqual.INSTANCE);
     }
 }

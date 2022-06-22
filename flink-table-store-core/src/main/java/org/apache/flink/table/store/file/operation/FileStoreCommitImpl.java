@@ -204,7 +204,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         List<ManifestEntry> appendChanges = collectChanges(committable.newFiles(), ValueKind.ADD);
         // sanity check, all changes must be done within the given partition
-        Predicate partitionFilter = PredicateConverter.CONVERTER.fromMap(partition, partitionType);
+        Predicate partitionFilter = PredicateConverter.fromMap(partition, partitionType);
         if (partitionFilter != null) {
             for (ManifestEntry entry : appendChanges) {
                 if (!partitionFilter.test(partitionObjectConverter.convert(entry.partition()))) {

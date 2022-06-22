@@ -56,8 +56,7 @@ public class TableCompact {
     }
 
     public TableCompact withPartitions(Map<String, String> partitionSpec) {
-        scan.withPartitionFilter(
-                PredicateConverter.CONVERTER.fromMap(partitionSpec, partitionType));
+        scan.withPartitionFilter(PredicateConverter.fromMap(partitionSpec, partitionType));
         return this;
     }
 

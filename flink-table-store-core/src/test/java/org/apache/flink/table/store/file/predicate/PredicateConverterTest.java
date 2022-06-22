@@ -24,6 +24,9 @@ import org.apache.flink.table.expressions.FieldReferenceExpression;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.expressions.ValueLiteralExpression;
 import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
+import org.apache.flink.table.types.logical.BigIntType;
+import org.apache.flink.table.types.logical.DoubleType;
+import org.apache.flink.table.types.logical.RowType;
 
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -39,7 +42,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Test for {@link PredicateConverter}. */
 public class PredicateConverterTest {
 
-    private static final PredicateConverter CONVERTER = new PredicateConverter();
+    private static final PredicateBuilder BUILDER =
+            new PredicateBuilder(RowType.of(new BigIntType(), new DoubleType()));
+
+    private static final PredicateConverter CONVERTER = new PredicateConverter(BUILDER);
 
     @MethodSource("provideResolvedExpression")
     @ParameterizedTest
@@ -57,12 +63,12 @@ public class PredicateConverterTest {
         FieldReferenceExpression longRefExpr =
                 new FieldReferenceExpression("long1", DataTypes.BIGINT(), 0, 0);
         ValueLiteralExpression intLitExpr = new ValueLiteralExpression(10);
-        Literal longLit = new Literal(DataTypes.BIGINT().getLogicalType(), 10L);
+        long longLit = 10L;
 
         FieldReferenceExpression doubleRefExpr =
                 new FieldReferenceExpression("double1", DataTypes.DOUBLE(), 0, 1);
         ValueLiteralExpression floatLitExpr = new ValueLiteralExpression(3.14f);
-        Literal doubleLit = new Literal(DataTypes.DOUBLE().getLogicalType(), 3.14d);
+        double doubleLit = 3.14d;
 
         return Stream.of(
                 Arguments.of(longRefExpr, null),
@@ -72,50 +78,50 @@ public class PredicateConverterTest {
                                 BuiltInFunctionDefinitions.IS_NULL,
                                 Collections.singletonList(longRefExpr),
                                 DataTypes.BOOLEAN()),
-                        PredicateBuilder.isNull(0)),
+                        BUILDER.isNull(0)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.IS_NOT_NULL,
                                 Collections.singletonList(doubleRefExpr),
                                 DataTypes.BOOLEAN()),
-                        PredicateBuilder.isNotNull(1)),
+                        BUILDER.isNotNull(1)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.EQUALS,
                                 // test literal on left
                                 Arrays.asList(intLitExpr, longRefExpr),
                                 DataTypes.BOOLEAN()),
-                        PredicateBuilder.equal(0, longLit)),
+                        BUILDER.equal(0, longLit)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.NOT_EQUALS,
                                 Arrays.asList(longRefExpr, intLitExpr),
                                 DataTypes.BOOLEAN()),
-                        PredicateBuilder.notEqual(0, longLit)),
+                        BUILDER.notEqual(0, longLit)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.GREATER_THAN,
                                 Arrays.asList(longRefExpr, intLitExpr),
                                 DataTypes.BOOLEAN()),
-                        PredicateBuilder.greaterThan(0, longLit)),
+                        BUILDER.greaterThan(0, longLit)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL,
                                 Arrays.asList(longRefExpr, intLitExpr),
                                 DataTypes.BOOLEAN()),
-                        PredicateBuilder.greaterOrEqual(0, longLit)),
+                        BUILDER.greaterOrEqual(0, longLit)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.LESS_THAN,
                                 Arrays.asList(longRefExpr, intLitExpr),
                                 DataTypes.BOOLEAN()),
-                        PredicateBuilder.lessThan(0, longLit)),
+                        BUILDER.lessThan(0, longLit)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL,
                                 Arrays.asList(longRefExpr, intLitExpr),
                                 DataTypes.BOOLEAN()),
-                        PredicateBuilder.lessOrEqual(0, longLit)),
+                        BUILDER.lessOrEqual(0, longLit)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.AND,
@@ -130,8 +136,7 @@ public class PredicateConverterTest {
                                                 DataTypes.BOOLEAN())),
                                 DataTypes.BOOLEAN()),
                         PredicateBuilder.and(
-                                PredicateBuilder.lessOrEqual(0, longLit),
-                                PredicateBuilder.equal(1, doubleLit))),
+                                BUILDER.lessOrEqual(0, longLit), BUILDER.equal(1, doubleLit))),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.OR,
@@ -146,7 +151,6 @@ public class PredicateConverterTest {
                                                 DataTypes.BOOLEAN())),
                                 DataTypes.BOOLEAN()),
                         PredicateBuilder.or(
-                                PredicateBuilder.notEqual(0, longLit),
-                                PredicateBuilder.equal(1, doubleLit))));
+                                BUILDER.notEqual(0, longLit), BUILDER.equal(1, doubleLit))));
     }
 }

@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store;
 
-import org.apache.flink.table.store.file.predicate.Literal;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.hadoop.hive.ql.io.sarg.ExpressionTree;
@@ -35,6 +35,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.table.store.file.predicate.PredicateBuilder.convertJavaObject;
+
 /** Converts {@link SearchArgument} to {@link Predicate} with best effort. */
 public class SearchArgumentToPredicateConverter {
 
@@ -45,6 +47,7 @@ public class SearchArgumentToPredicateConverter {
     private final List<PredicateLeaf> leaves;
     private final List<String> columnNames;
     private final List<LogicalType> columnTypes;
+    private final PredicateBuilder builder;
 
     public SearchArgumentToPredicateConverter(
             SearchArgument sarg, List<String> columnNames, List<LogicalType> columnTypes) {
@@ -52,6 +55,11 @@ public class SearchArgumentToPredicateConverter {
         this.leaves = sarg.getLeaves();
         this.columnNames = columnNames;
         this.columnTypes = columnTypes;
+        this.builder =
+                new PredicateBuilder(
+                        RowType.of(
+                                columnTypes.toArray(new LogicalType[0]),
+                                columnNames.toArray(new String[0])));
     }
 
     public Optional<Predicate> convert() {
@@ -98,35 +106,35 @@ public class SearchArgumentToPredicateConverter {
         LogicalType columnType = columnTypes.get(idx);
         switch (leaf.getOperator()) {
             case EQUALS:
-                return PredicateBuilder.equal(idx, toLiteral(columnType, leaf.getLiteral()));
+                return builder.equal(idx, toLiteral(columnType, leaf.getLiteral()));
             case LESS_THAN:
-                return PredicateBuilder.lessThan(idx, toLiteral(columnType, leaf.getLiteral()));
+                return builder.lessThan(idx, toLiteral(columnType, leaf.getLiteral()));
             case LESS_THAN_EQUALS:
-                return PredicateBuilder.lessOrEqual(idx, toLiteral(columnType, leaf.getLiteral()));
+                return builder.lessOrEqual(idx, toLiteral(columnType, leaf.getLiteral()));
             case IN:
-                return PredicateBuilder.in(
+                return builder.in(
                         idx,
                         leaf.getLiteralList().stream()
                                 .map(o -> toLiteral(columnType, o))
                                 .collect(Collectors.toList()));
             case BETWEEN:
                 List<Object> literalList = leaf.getLiteralList();
-                return PredicateBuilder.between(
+                return builder.between(
                         idx,
                         toLiteral(columnType, literalList.get(0)),
                         toLiteral(columnType, literalList.get(1)));
             case IS_NULL:
-                return PredicateBuilder.isNull(idx);
+                return builder.isNull(idx);
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported operator " + leaf.getOperator());
         }
     }
 
-    private Literal toLiteral(LogicalType literalType, Object o) {
+    private Object toLiteral(LogicalType literalType, Object o) {
         if (o instanceof HiveDecimalWritable) {
             o = ((HiveDecimalWritable) o).getHiveDecimal().bigDecimalValue();
         }
-        return Literal.fromJavaObject(literalType, o);
+        return convertJavaObject(literalType, o);
     }
 }

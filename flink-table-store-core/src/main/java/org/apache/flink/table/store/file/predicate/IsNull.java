@@ -19,28 +19,29 @@
 package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.types.logical.LogicalType;
 
 import java.util.Optional;
 
-/** A {@link LeafPredicate.Function} to eval is null. */
-public class IsNull implements LeafPredicate.Function {
+/** A {@link LeafBinaryFunction} to eval is null. */
+public class IsNull extends LeafUnaryFunction {
 
     public static final IsNull INSTANCE = new IsNull();
 
     private IsNull() {}
 
     @Override
-    public boolean test(Object[] values, int index, Literal literal) {
-        return values[index] == null;
+    public boolean test(LogicalType type, Object field) {
+        return field == null;
     }
 
     @Override
-    public boolean test(long rowCount, FieldStats[] fieldStats, int index, Literal literal) {
-        return fieldStats[index].nullCount() > 0;
+    public boolean test(LogicalType type, long rowCount, FieldStats fieldStats) {
+        return fieldStats.nullCount() > 0;
     }
 
     @Override
-    public Optional<Predicate> negate(int index, Literal literal) {
-        return Optional.of(new LeafPredicate(IsNotNull.INSTANCE, index, literal));
+    public Optional<LeafFunction> negate() {
+        return Optional.of(IsNotNull.INSTANCE);
     }
 }

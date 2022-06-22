@@ -47,6 +47,7 @@ import org.apache.flink.table.store.table.ChangelogWithKeyFileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
@@ -184,8 +185,9 @@ public class TableStoreSource
     @Override
     public Result applyFilters(List<ResolvedExpression> filters) {
         List<Predicate> converted = new ArrayList<>();
+        RowType rowType = table.schema().logicalRowType();
         for (ResolvedExpression filter : filters) {
-            PredicateConverter.convert(filter).ifPresent(converted::add);
+            PredicateConverter.convert(rowType, filter).ifPresent(converted::add);
         }
         predicate = converted.isEmpty() ? null : PredicateBuilder.and(converted);
         return Result.of(filters, filters);
