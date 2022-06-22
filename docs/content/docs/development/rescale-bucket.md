@@ -1,9 +1,9 @@
 ---
-title: "Scale Bucket"
+title: "Rescale Bucket"
 weight: 5
 type: docs
 aliases:
-- /development/scale-bucket.html
+- /development/rescale-bucket.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,12 +24,12 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Scale Bucket
+# Rescale Bucket
 
 Since the number of total buckets dramatically influences the performance, Table Store allows users to 
 tune bucket numbers by `ALTER TABLE` command and reorganize data layout by `INSERT OVERWRITE` 
 without recreating the table/partition. When executing overwrite jobs, the framework will automatically 
-scan the data with the bucket number recorded in manifest file and hash the record according to the current bucket numbers.
+scan the data with the old bucket number and hash the record according to the current bucket number.
 
 ## Rescale Overwrite
 ```sql
@@ -47,14 +47,24 @@ Please note that
 - `ALTER TABLE` only modifies the table's metadata and will **NOT** reorganize or reformat existing data. 
   Reorganize exiting data must be achieved by `INSERT OVERWRITE`.
 - Scale bucket number does not influence the read and running write jobs.
-- Once the bucket number is changed, any new `INSERT INTO` jobs without reorganize table/partition 
+- Once the bucket number is changed, any newly scheduled `INSERT INTO` jobs without reorganize existing table/partition 
   will throw a `TableException` with message like 
   ```text
   Try to write table/partition ... with a new bucket num ..., 
   but the previous bucket num is ... Please switch to batch mode, 
   and perform INSERT OVERWRITE to rescale current data layout first.
   ```
-
+- For partitioned table, it is possible to have different bucket number for different partitions. *E.g.*
+  ```sql
+  ALTER TABLE my_table SET ('bucket' = '4');
+  INSERT OVERWRITE my_table PARTITION (dt = '2022-01-01')
+  SELECT * FROM ...;
+  
+  ALTER TABLE my_table SET ('bucket' = '8');
+  INSERT OVERWRITE my_table PARTITION (dt = '2022-01-02')
+  SELECT * FROM ...;
+  ```
+- During overwrite period, make sure there are no other jobs writing the same table/partition.
 
 {{< hint info >}}
 __Note:__ For the table which enables log system(*e.g.* Kafka), please scale the topic's partition as well to keep consistency.
@@ -62,7 +72,7 @@ __Note:__ For the table which enables log system(*e.g.* Kafka), please scale the
 
 ## Use Case
 
-Suppose there is a daily streaming ETL task to sync transaction data. The table's DDL and pipeline
+Rescale bucket helps to handle sudden spikes in throughput. Suppose there is a daily streaming ETL task to sync transaction data. The table's DDL and pipeline
 are listed as follows.
 
 ```sql
@@ -87,30 +97,45 @@ SELECT trade_order_id,
 FROM raw_orders
 WHERE order_status = 'verified'
 ```
-The pipeline has been running well for the past four weeks. However, the data volume has grown fast recently, 
-and the job's latency keeps increasing. A possible workaround is to create a new table with a larger bucket number 
-(thus the parallelism can be increased accordingly) and sync data to this new table.
-
-However, there is a better solution with four steps.
-
-- First, suspend the streaming job with savepoint.
-
-- Increase the bucket number.
+The pipeline has been running well for the past few weeks. However, the data volume has grown fast recently, 
+and the job's latency keeps increasing. To improve the data freshness, users can 
+- Suspend the streaming job with a savepoint ( see 
+  [Suspended State](https://nightlies.apache.org/flink/flink-docs-master/docs/internals/job_scheduling/) and 
+  [Stopping a Job Gracefully Creating a Final Savepoint](https://nightlies.apache.org/flink/flink-docs-release-1.15/docs/deployment/cli/) )
+  ```bash
+  $ ./bin/flink stop \
+        --savepointPath /tmp/flink-savepoints \
+        $JOB_ID
+   ```
+- Increase the bucket number
   ```sql
-  -- scaling out bucket number
+  -- scaling out
   ALTER TABLE verified_orders SET ('bucket' = '32')
   ```
-
-- Switch to batch mode and `INSER OVERWRITE` the partition.
+- Switch to the batch mode and overwrite the current partition(s) to which the streaming job is writing
   ```sql
-  -- reorganize the data layout as bucket num = 32
-  INSERT OVERWRITE verified_orders PARTITION (dt = 'yyyy-MM-dd')
+  -- suppose today is 2022-06-22
+  -- case 1: there is no late event which updates the historical partitions, thus overwrite today's partition is enough
+  INSERT OVERWRITE verified_orders PARTITION (dt = '2022-06-22')
   SELECT trade_order_id,
          item_id,
          item_price
   FROM verified_orders
-  WHERE dt = 'yyyy-MM-dd' AND order_status = 'verified'
+  WHERE dt = '2022-06-22' AND order_status = 'verified'
+  
+  -- case 2: there are late events updating the historical partitions, but the range does not exceed 3 days
+  INSERT OVERWRITE verified_orders
+  SELECT trade_order_id,
+         item_id,
+         item_price,
+         dt
+  FROM verified_orders
+  WHERE dt IN ('2022-06-20', '2022-06-21', '2022-06-22') AND order_status = 'verified'
   ```
-
-- Restore the streaming job from the savepoint.
-
+- After overwrite job finished, restore the streaming job from the savepoint 
+( see [Starting a Job from a Savepoint](https://nightlies.apache.org/flink/flink-docs-release-1.15/docs/deployment/cli/) )
+  ```bash
+  $ ./bin/flink run \
+      --fromSavepoint <savepointPath> \
+      ...
+   ```
