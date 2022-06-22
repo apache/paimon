@@ -24,6 +24,7 @@ import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
+import org.apache.flink.table.store.file.utils.HeapMemorySegmentPool;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,7 +38,10 @@ import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
+import static org.apache.flink.table.store.file.TestFileStore.PAGE_SIZE;
+import static org.apache.flink.table.store.file.TestFileStore.WRITE_BUFFER_SIZE;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED;
 
 /** Testing {@link Thread}s to perform concurrent commits. */
@@ -51,6 +55,7 @@ public class TestCommitThread extends Thread {
 
     private final FileStoreWrite<KeyValue> write;
     private final FileStoreCommit commit;
+    private final ExecutorService service;
 
     public TestCommitThread(
             Map<BinaryRowData, List<KeyValue>> data,
@@ -62,6 +67,8 @@ public class TestCommitThread extends Thread {
 
         this.write = safeStore.newWrite();
         this.commit = testStore.newCommit();
+
+        this.service = Executors.newSingleThreadExecutor();
     }
 
     public Map<BinaryRowData, List<KeyValue>> getResult() {
@@ -89,6 +96,14 @@ public class TestCommitThread extends Thread {
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
+        }
+
+        // wait for canceled dirty tasks
+        service.shutdown();
+        try {
+            service.awaitTermination(1, TimeUnit.MINUTES);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -190,17 +205,13 @@ public class TestCommitThread extends Thread {
     }
 
     private MergeTreeWriter createWriter(BinaryRowData partition, boolean empty) {
-        ExecutorService service =
-                Executors.newSingleThreadExecutor(
-                        r -> {
-                            Thread t = new Thread(r);
-                            t.setName(Thread.currentThread().getName() + "-writer-service-pool");
-                            return t;
-                        });
-        if (empty) {
-            return (MergeTreeWriter) write.createEmptyWriter(partition, 0, service);
-        } else {
-            return (MergeTreeWriter) write.createWriter(partition, 0, service);
-        }
+        MergeTreeWriter writer =
+                empty
+                        ? (MergeTreeWriter) write.createEmptyWriter(partition, 0, service)
+                        : (MergeTreeWriter) write.createWriter(partition, 0, service);
+        writer.open(
+                new HeapMemorySegmentPool(
+                        WRITE_BUFFER_SIZE.getBytes(), (int) PAGE_SIZE.getBytes()));
+        return writer;
     }
 }

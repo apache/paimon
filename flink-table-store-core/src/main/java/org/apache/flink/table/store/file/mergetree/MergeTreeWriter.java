@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.runtime.util.MemorySegmentPool;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileWriter;
@@ -27,6 +28,7 @@ import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.CompactResult;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.CloseableIterator;
 
 import java.util.ArrayList;
@@ -42,7 +44,9 @@ import java.util.stream.Collectors;
 /** A {@link RecordWriter} to write records and generate {@link Increment}. */
 public class MergeTreeWriter implements RecordWriter<KeyValue> {
 
-    private final MemTable memTable;
+    private final RowType keyType;
+
+    private final RowType valueType;
 
     private final CompactManager compactManager;
 
@@ -66,8 +70,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue> {
 
     private long newSequenceNumber;
 
+    private MemTable memTable;
+
     public MergeTreeWriter(
-            MemTable memTable,
+            RowType keyType,
+            RowType valueType,
             CompactManager compactManager,
             Levels levels,
             long maxSequenceNumber,
@@ -76,7 +83,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue> {
             DataFileWriter dataFileWriter,
             boolean commitForceCompact,
             int numSortedRunStopTrigger) {
-        this.memTable = memTable;
+        this.keyType = keyType;
+        this.valueType = valueType;
         this.compactManager = compactManager;
         this.levels = levels;
         this.newSequenceNumber = maxSequenceNumber + 1;
@@ -100,6 +108,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue> {
     }
 
     @Override
+    public void open(MemorySegmentPool memoryPool) {
+        this.memTable = new SortBufferMemTable(keyType, valueType, memoryPool);
+    }
+
+    @Override
     public void write(KeyValue kv) throws Exception {
         long sequenceNumber = newSequenceNumber();
         boolean success = memTable.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
@@ -112,7 +125,13 @@ public class MergeTreeWriter implements RecordWriter<KeyValue> {
         }
     }
 
-    private void flush() throws Exception {
+    @Override
+    public long memoryOccupancy() {
+        return memTable.memoryOccupancy();
+    }
+
+    @Override
+    public void flush() throws Exception {
         if (memTable.size() > 0) {
             if (levels.numberOfSortedRuns() > numSortedRunStopTrigger) {
                 // stop writing, wait for compaction finished
@@ -189,7 +208,14 @@ public class MergeTreeWriter implements RecordWriter<KeyValue> {
 
     @Override
     public List<DataFileMeta> close() throws Exception {
-        sync();
+        boolean canceled = compactManager.cancelCurrent();
+        if (!canceled) {
+            // the task has already completed normally
+            // sync its output files
+            sync();
+        }
+        // else not wait canceled task
+
         // delete temporary files
         List<DataFileMeta> delete = new ArrayList<>(newFiles);
         for (DataFileMeta file : compactAfter) {

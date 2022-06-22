@@ -32,14 +32,14 @@ public class MergeTreeOptions {
     public static final ConfigOption<MemorySize> WRITE_BUFFER_SIZE =
             ConfigOptions.key("write-buffer-size")
                     .memoryType()
-                    .defaultValue(MemorySize.parse("128 mb"))
+                    .defaultValue(MemorySize.parse("256 mb"))
                     .withDescription(
                             "Amount of data to build up in memory before converting to a sorted on-disk file.");
 
     public static final ConfigOption<MemorySize> PAGE_SIZE =
             ConfigOptions.key("page-size")
                     .memoryType()
-                    .defaultValue(MemorySize.parse("1 mb"))
+                    .defaultValue(MemorySize.parse("64 kb"))
                     .withDescription("Memory page size.");
 
     public static final ConfigOption<MemorySize> TARGET_FILE_SIZE =
@@ -95,7 +95,7 @@ public class MergeTreeOptions {
 
     public final long writeBufferSize;
 
-    public final long pageSize;
+    public final int pageSize;
 
     public final long targetFileSize;
 
@@ -113,7 +113,7 @@ public class MergeTreeOptions {
 
     public MergeTreeOptions(
             long writeBufferSize,
-            long pageSize,
+            int pageSize,
             long targetFileSize,
             int numSortedRunCompactionTrigger,
             int numSortedRunStopTrigger,
@@ -138,7 +138,7 @@ public class MergeTreeOptions {
     public MergeTreeOptions(ReadableConfig config) {
         this(
                 config.get(WRITE_BUFFER_SIZE).getBytes(),
-                config.get(PAGE_SIZE).getBytes(),
+                (int) config.get(PAGE_SIZE).getBytes(),
                 config.get(TARGET_FILE_SIZE).getBytes(),
                 config.get(NUM_SORTED_RUNS_COMPACTION_TRIGGER),
                 config.get(NUM_SORTED_RUNS_STOP_TRIGGER),

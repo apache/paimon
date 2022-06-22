@@ -128,7 +128,8 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     public TableWrite newWrite() {
         SinkRecordConverter recordConverter =
                 new SinkRecordConverter(store.options().bucket(), tableSchema);
-        return new AbstractTableWrite<KeyValue>(store.newWrite(), recordConverter) {
+        return new AbstractTableWrite<KeyValue>(
+                store.newWrite(), recordConverter, store.options()) {
             @Override
             protected void writeSinkRecord(SinkRecord record, RecordWriter<KeyValue> writer)
                     throws Exception {

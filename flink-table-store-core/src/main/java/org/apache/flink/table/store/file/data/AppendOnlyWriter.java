@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.runtime.util.MemorySegmentPool;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
@@ -82,12 +83,25 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     }
 
     @Override
+    public void open(MemorySegmentPool memoryPool) {}
+
+    @Override
     public void write(RowData rowData) throws Exception {
         Preconditions.checkArgument(
                 rowData.getRowKind() == RowKind.INSERT,
                 "Append-only writer can only accept insert row kind, but current row kind is: %s",
                 rowData.getRowKind());
         writer.write(rowData);
+    }
+
+    @Override
+    public long memoryOccupancy() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void flush() {
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -112,7 +126,12 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
 
     @Override
     public List<DataFileMeta> close() throws Exception {
-        sync();
+        try {
+            sync();
+        } catch (Exception ignore) {
+            // The thread pool is closed and the asynchronous task will be cancelled, an exception
+            // may be thrown here, and we need to ignore it
+        }
 
         List<DataFileMeta> result = new ArrayList<>();
         if (writer != null) {

@@ -21,7 +21,12 @@ package org.apache.flink.table.store.table.sink;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.runtime.util.MemorySegmentPool;
+import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
+import org.apache.flink.table.store.file.utils.HeapMemorySegmentPool;
+import org.apache.flink.table.store.file.utils.MemoryPoolFactory;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.util.concurrent.ExecutorThreadFactory;
 
@@ -38,19 +43,30 @@ import java.util.concurrent.Executors;
  *
  * @param <T> type of record to write into {@link org.apache.flink.table.store.file.FileStore}.
  */
-public abstract class AbstractTableWrite<T> implements TableWrite {
+public abstract class AbstractTableWrite<T>
+        implements TableWrite, MemoryPoolFactory.PreemptRunner<RecordWriter<T>> {
 
     private final FileStoreWrite<T> write;
     private final SinkRecordConverter recordConverter;
 
     private final Map<BinaryRowData, Map<Integer, RecordWriter<T>>> writers;
     private final ExecutorService compactExecutor;
+    private final MemoryPoolFactory<RecordWriter<T>> memoryPoolFactory;
 
     private boolean overwrite = false;
 
-    protected AbstractTableWrite(FileStoreWrite<T> write, SinkRecordConverter recordConverter) {
+    protected AbstractTableWrite(
+            FileStoreWrite<T> write,
+            SinkRecordConverter recordConverter,
+            FileStoreOptions options) {
         this.write = write;
         this.recordConverter = recordConverter;
+
+        MergeTreeOptions mergeTreeOptions = options.mergeTreeOptions();
+        HeapMemorySegmentPool memoryPool =
+                new HeapMemorySegmentPool(
+                        mergeTreeOptions.writeBufferSize, mergeTreeOptions.pageSize);
+        this.memoryPoolFactory = new MemoryPoolFactory<>(memoryPool, this);
 
         this.writers = new HashMap<>();
         this.compactExecutor =
@@ -100,7 +116,7 @@ public abstract class AbstractTableWrite<T> implements TableWrite {
                 // we need a mechanism to clear writers, otherwise there will be more and more
                 // such as yesterday's partition that no longer needs to be written.
                 if (committable.increment().newFiles().isEmpty()) {
-                    closeWriter(writer);
+                    writer.close();
                     bucketIter.remove();
                 }
             }
@@ -113,20 +129,15 @@ public abstract class AbstractTableWrite<T> implements TableWrite {
         return result;
     }
 
-    private void closeWriter(RecordWriter<T> writer) throws Exception {
-        writer.sync();
-        writer.close();
-    }
-
     @Override
     public void close() throws Exception {
-        compactExecutor.shutdownNow();
         for (Map<Integer, RecordWriter<T>> bucketWriters : writers.values()) {
             for (RecordWriter<T> writer : bucketWriters.values()) {
-                closeWriter(writer);
+                writer.close();
             }
         }
         writers.clear();
+        compactExecutor.shutdownNow();
     }
 
     @VisibleForTesting
@@ -137,17 +148,46 @@ public abstract class AbstractTableWrite<T> implements TableWrite {
     protected abstract void writeSinkRecord(SinkRecord record, RecordWriter<T> writer)
             throws Exception;
 
+    @Override
+    public void preemptMemory(RecordWriter<T> owner) {
+        long maxMemory = -1;
+        RecordWriter<T> max = null;
+        for (Map<Integer, RecordWriter<T>> bucket : writers.values()) {
+            for (RecordWriter<T> writer : bucket.values()) {
+                // Don't preempt yourself! Write and flush at the same time, which may lead to
+                // inconsistent state
+                if (writer != owner && writer.memoryOccupancy() > maxMemory) {
+                    maxMemory = writer.memoryOccupancy();
+                    max = writer;
+                }
+            }
+        }
+
+        if (max != null) {
+            try {
+                max.flush();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
     private RecordWriter<T> getWriter(BinaryRowData partition, int bucket) {
         Map<Integer, RecordWriter<T>> buckets = writers.get(partition);
         if (buckets == null) {
             buckets = new HashMap<>();
             writers.put(partition.copy(), buckets);
         }
-        return buckets.computeIfAbsent(
-                bucket,
-                k ->
-                        overwrite
-                                ? write.createEmptyWriter(partition.copy(), bucket, compactExecutor)
-                                : write.createWriter(partition.copy(), bucket, compactExecutor));
+        return buckets.computeIfAbsent(bucket, k -> createWriter(partition.copy(), bucket));
+    }
+
+    private RecordWriter<T> createWriter(BinaryRowData partition, int bucket) {
+        RecordWriter<T> writer =
+                overwrite
+                        ? write.createEmptyWriter(partition.copy(), bucket, compactExecutor)
+                        : write.createWriter(partition.copy(), bucket, compactExecutor);
+        MemorySegmentPool memoryPool = memoryPoolFactory.create(writer);
+        writer.open(memoryPool);
+        return writer;
     }
 }

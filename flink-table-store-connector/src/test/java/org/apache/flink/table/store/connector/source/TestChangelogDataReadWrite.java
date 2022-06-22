@@ -35,6 +35,7 @@ import org.apache.flink.table.store.file.operation.KeyValueFileStoreRead;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreWrite;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.file.utils.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.writer.RecordWriter;
@@ -149,18 +150,21 @@ public class TestChangelogDataReadWrite {
 
     public RecordWriter<KeyValue> createMergeTreeWriter(BinaryRowData partition, int bucket) {
         MergeTreeOptions options = new MergeTreeOptions(new Configuration());
-        return new KeyValueFileStoreWrite(
-                        new SchemaManager(tablePath),
-                        0,
-                        KEY_TYPE,
-                        VALUE_TYPE,
-                        () -> COMPARATOR,
-                        new DeduplicateMergeFunction(),
-                        avro,
-                        pathFactory,
-                        snapshotManager,
-                        null, // not used, we only create an empty writer
-                        options)
-                .createEmptyWriter(partition, bucket, service);
+        RecordWriter<KeyValue> writer =
+                new KeyValueFileStoreWrite(
+                                new SchemaManager(tablePath),
+                                0,
+                                KEY_TYPE,
+                                VALUE_TYPE,
+                                () -> COMPARATOR,
+                                new DeduplicateMergeFunction(),
+                                avro,
+                                pathFactory,
+                                snapshotManager,
+                                null, // not used, we only create an empty writer
+                                options)
+                        .createEmptyWriter(partition, bucket, service);
+        writer.open(new HeapMemorySegmentPool(options.writeBufferSize, options.pageSize));
+        return writer;
     }
 }

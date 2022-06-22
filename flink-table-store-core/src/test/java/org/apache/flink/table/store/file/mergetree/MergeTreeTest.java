@@ -40,6 +40,7 @@ import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.file.utils.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.writer.RecordWriter;
@@ -264,20 +265,20 @@ public class MergeTreeTest {
     private MergeTreeWriter createMergeTreeWriter(List<DataFileMeta> files) {
         long maxSequenceNumber =
                 files.stream().map(DataFileMeta::maxSequenceNumber).max(Long::compare).orElse(-1L);
-        return new MergeTreeWriter(
-                new SortBufferMemTable(
+        MergeTreeWriter writer =
+                new MergeTreeWriter(
                         dataFileWriter.keyType(),
                         dataFileWriter.valueType(),
-                        options.writeBufferSize,
-                        options.pageSize),
-                createCompactManager(dataFileWriter, service),
-                new Levels(comparator, files, options.numLevels),
-                maxSequenceNumber,
-                comparator,
-                new DeduplicateMergeFunction(),
-                dataFileWriter,
-                options.commitForceCompact,
-                options.numSortedRunStopTrigger);
+                        createCompactManager(dataFileWriter, service),
+                        new Levels(comparator, files, options.numLevels),
+                        maxSequenceNumber,
+                        comparator,
+                        new DeduplicateMergeFunction(),
+                        dataFileWriter,
+                        options.commitForceCompact,
+                        options.numSortedRunStopTrigger);
+        writer.open(new HeapMemorySegmentPool(options.writeBufferSize, options.pageSize));
+        return writer;
     }
 
     private CompactManager createCompactManager(

@@ -34,9 +34,9 @@ public class HeapMemorySegmentPool implements MemorySegmentPool {
 
     private int numPage;
 
-    public HeapMemorySegmentPool(int maxPages, int pageSize) {
+    public HeapMemorySegmentPool(long maxMemory, int pageSize) {
         this.segments = new LinkedList<>();
-        this.maxPages = maxPages;
+        this.maxPages = (int) (maxMemory / pageSize);
         this.pageSize = pageSize;
         this.numPage = 0;
     }

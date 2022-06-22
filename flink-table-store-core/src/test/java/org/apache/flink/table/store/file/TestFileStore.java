@@ -38,11 +38,11 @@ import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.file.utils.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.util.function.QuadFunction;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,6 +62,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -72,6 +73,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class TestFileStore extends KeyValueFileStore {
 
     private static final Logger LOG = LoggerFactory.getLogger(TestFileStore.class);
+
+    public static final MemorySize WRITE_BUFFER_SIZE = MemorySize.parse("16 kb");
+
+    public static final MemorySize PAGE_SIZE = MemorySize.parse("4 kb");
 
     private final String root;
     private final RowDataSerializer keySerializer;
@@ -87,8 +92,8 @@ public class TestFileStore extends KeyValueFileStore {
             MergeFunction mergeFunction) {
         Configuration conf = new Configuration();
 
-        conf.set(MergeTreeOptions.WRITE_BUFFER_SIZE, MemorySize.parse("16 kb"));
-        conf.set(MergeTreeOptions.PAGE_SIZE, MemorySize.parse("4 kb"));
+        conf.set(MergeTreeOptions.WRITE_BUFFER_SIZE, WRITE_BUFFER_SIZE);
+        conf.set(MergeTreeOptions.PAGE_SIZE, PAGE_SIZE);
         conf.set(MergeTreeOptions.TARGET_FILE_SIZE, MemorySize.parse("1 kb"));
 
         conf.set(
@@ -155,7 +160,7 @@ public class TestFileStore extends KeyValueFileStore {
                 kvs,
                 partitionCalculator,
                 bucketCalculator,
-                FileStoreWrite::createWriter,
+                false,
                 (commit, committable) -> {
                     logOffsets.forEach(committable::addLogOffset);
                     commit.commit(committable, Collections.emptyMap());
@@ -172,7 +177,7 @@ public class TestFileStore extends KeyValueFileStore {
                 kvs,
                 partitionCalculator,
                 bucketCalculator,
-                FileStoreWrite::createEmptyWriter,
+                true,
                 (commit, committable) ->
                         commit.overwrite(partition, committable, Collections.emptyMap()));
     }
@@ -181,17 +186,12 @@ public class TestFileStore extends KeyValueFileStore {
             List<KeyValue> kvs,
             Function<KeyValue, BinaryRowData> partitionCalculator,
             Function<KeyValue, Integer> bucketCalculator,
-            QuadFunction<
-                            FileStoreWrite<KeyValue>,
-                            BinaryRowData,
-                            Integer,
-                            ExecutorService,
-                            RecordWriter<KeyValue>>
-                    createWriterFunction,
+            boolean emptyWriter,
             BiConsumer<FileStoreCommit, ManifestCommittable> commitFunction)
             throws Exception {
         FileStoreWrite<KeyValue> write = newWrite();
         Map<BinaryRowData, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
+        ExecutorService service = Executors.newSingleThreadExecutor();
         for (KeyValue kv : kvs) {
             BinaryRowData partition = partitionCalculator.apply(kv);
             int bucket = bucketCalculator.apply(kv);
@@ -200,9 +200,17 @@ public class TestFileStore extends KeyValueFileStore {
                             bucket,
                             (b, w) -> {
                                 if (w == null) {
-                                    ExecutorService service = Executors.newSingleThreadExecutor();
-                                    return createWriterFunction.apply(
-                                            write, partition, bucket, service);
+                                    RecordWriter<KeyValue> writer =
+                                            emptyWriter
+                                                    ? write.createEmptyWriter(
+                                                            partition, bucket, service)
+                                                    : write.createWriter(
+                                                            partition, bucket, service);
+                                    writer.open(
+                                            new HeapMemorySegmentPool(
+                                                    WRITE_BUFFER_SIZE.getBytes(),
+                                                    (int) PAGE_SIZE.getBytes()));
+                                    return writer;
                                 } else {
                                     return w;
                                 }
@@ -249,6 +257,10 @@ public class TestFileStore extends KeyValueFileStore {
         for (long id = snapshotIdBeforeCommit + 1; id <= snapshotIdAfterCommit; id++) {
             snapshots.add(snapshotManager.snapshot(id));
         }
+
+        // wait for canceled dirty tasks
+        service.shutdown();
+        service.awaitTermination(1, TimeUnit.MINUTES);
         return snapshots;
     }
 

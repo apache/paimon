@@ -27,12 +27,12 @@ import org.apache.flink.table.runtime.generated.RecordComparator;
 import org.apache.flink.table.runtime.operators.sort.BinaryInMemorySortBuffer;
 import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.runtime.typeutils.InternalSerializers;
+import org.apache.flink.table.runtime.util.MemorySegmentPool;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
-import org.apache.flink.table.store.file.utils.HeapMemorySegmentPool;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -52,7 +52,7 @@ public class SortBufferMemTable implements MemTable {
     private final KeyValueSerializer serializer;
     private final BinaryInMemorySortBuffer buffer;
 
-    public SortBufferMemTable(RowType keyType, RowType valueType, long maxMemSize, long pageSize) {
+    public SortBufferMemTable(RowType keyType, RowType valueType, MemorySegmentPool memoryPool) {
         this.keyType = keyType;
         this.valueType = valueType;
         this.serializer = new KeyValueSerializer(keyType, valueType);
@@ -69,8 +69,6 @@ public class SortBufferMemTable implements MemTable {
                 CodeGenUtils.newRecordComparator(
                         new TableConfig(), sortKeyTypes, "MemTableComparator");
 
-        HeapMemorySegmentPool memoryPool =
-                new HeapMemorySegmentPool((int) (maxMemSize / pageSize), (int) pageSize);
         if (memoryPool.freePages() < 3) {
             throw new IllegalArgumentException(
                     "Write buffer requires a minimum of 3 page memory, please increase write buffer memory size.");
@@ -93,6 +91,11 @@ public class SortBufferMemTable implements MemTable {
     @Override
     public int size() {
         return buffer.size();
+    }
+
+    @Override
+    public long memoryOccupancy() {
+        return buffer.getOccupancy();
     }
 
     @Override

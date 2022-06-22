@@ -122,6 +122,19 @@ public class CompactManager {
         taskFuture = executor.submit(task);
     }
 
+    /**
+     * Cancel current task, may interrupt if running.
+     *
+     * @return {@code false} if the task could not be cancelled, typically because it has already
+     *     completed normally; {@code true} otherwise
+     */
+    public boolean cancelCurrent() {
+        if (taskFuture != null) {
+            return taskFuture.cancel(true);
+        }
+        return false;
+    }
+
     /** Finish current task, and update result files to {@link Levels}. */
     public Optional<CompactResult> finishCompaction(Levels levels, boolean blocking)
             throws ExecutionException, InterruptedException {

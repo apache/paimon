@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.writer;
 
+import org.apache.flink.table.runtime.util.MemorySegmentPool;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.Increment;
 
@@ -32,8 +33,17 @@ import java.util.List;
  */
 public interface RecordWriter<T> {
 
+    /** Open the record write. */
+    void open(MemorySegmentPool memoryPool);
+
     /** Add a key-value element to the writer. */
     void write(T record) throws Exception;
+
+    /** Memory occupancy size of this table. */
+    long memoryOccupancy();
+
+    /** Flush memory table, release memory. */
+    void flush() throws Exception;
 
     /**
      * Prepare for a commit.
