@@ -92,10 +92,10 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
         ClusterClient<?> client = MINI_CLUSTER_RESOURCE.getClusterClient();
 
         // step1: run streaming insert
-        JobID jobId = startJobAndAssertStatusTransition(client, streamSql, null);
+        JobID jobId = startJobAndCommitSnapshot(streamSql, null);
 
         // step2: stop with savepoint
-        stopJobAndAssertStatusTransition(client, jobId);
+        stopJobSafely(client, jobId);
 
         final Snapshot snapshotBeforeRescale = findLatestSnapshot("T3", false);
         assertThat(snapshotBeforeRescale).isNotNull();
@@ -116,10 +116,9 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
         assertThat(batchSql("SELECT * FROM T3")).containsExactlyInAnyOrderElementsOf(committedData);
 
         // step5: resume streaming job
-        JobID resumedJobId =
-                startJobAndAssertStatusTransition(client, streamSql, snapshotAfterRescale.id());
+        JobID resumedJobId = startJobAndCommitSnapshot(streamSql, snapshotAfterRescale.id());
         // stop job
-        stopJobAndAssertStatusTransition(client, resumedJobId);
+        stopJobSafely(client, resumedJobId);
 
         // check snapshot and schema
         Snapshot lastSnapshot = findLatestSnapshot("T3", false);
@@ -144,22 +143,20 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
         }
     }
 
-    private JobID startJobAndAssertStatusTransition(
-            ClusterClient<?> client, String sql, @Nullable Long initSnapshotId) throws Exception {
+    private JobID startJobAndCommitSnapshot(String sql, @Nullable Long initSnapshotId)
+            throws Exception {
         JobID jobId = sEnv.executeSql(sql).getJobClient().get().getJobID();
         // let job run until the first snapshot is finished
         waitForTheNextSnapshot(initSnapshotId);
-        assertThat(client.getJobStatus(jobId).get()).isEqualTo(JobStatus.RUNNING);
         return jobId;
     }
 
-    private void stopJobAndAssertStatusTransition(ClusterClient<?> client, JobID jobId)
+    private void stopJobSafely(ClusterClient<?> client, JobID jobId)
             throws ExecutionException, InterruptedException {
         client.stopWithSavepoint(jobId, true, path, SavepointFormatType.DEFAULT);
         while (client.getJobStatus(jobId).get() == JobStatus.RUNNING) {
             Thread.sleep(2000L);
         }
-        assertThat(client.getJobStatus(jobId).get()).isEqualTo(JobStatus.FINISHED);
     }
 
     private void assertLatestSchema(
