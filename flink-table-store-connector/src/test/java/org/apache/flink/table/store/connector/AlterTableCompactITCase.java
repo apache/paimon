@@ -239,6 +239,8 @@ public class AlterTableCompactITCase extends FileStoreTableITCase {
             KeyValue kv = generator.next();
             if (kv.valueKind() == ValueKind.ADD) {
                 data.add(kv);
+            } else {
+                data.add(kv.replace(kv.key(), ValueKind.ADD, kv.value()));
             }
         }
         return data;
