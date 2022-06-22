@@ -33,7 +33,7 @@ scan the data with the old bucket number and hash the record according to the cu
 
 ## Rescale Overwrite
 ```sql
--- scale number of total buckets
+-- rescale number of total buckets
 ALTER TABLE table_identifier SET ('bucket' = '...')
 
 -- reorganize data layout of table/partition
@@ -46,9 +46,9 @@ FROM table_identifier
 Please note that
 - `ALTER TABLE` only modifies the table's metadata and will **NOT** reorganize or reformat existing data. 
   Reorganize exiting data must be achieved by `INSERT OVERWRITE`.
-- Scale bucket number does not influence the read and running write jobs.
-- Once the bucket number is changed, any newly scheduled `INSERT INTO` jobs without reorganize existing table/partition 
-  will throw a `TableException` with message like 
+- Rescale bucket number does not influence the read and running write jobs.
+- Once the bucket number is changed, any newly scheduled `INSERT INTO` jobs which write to without-reorganized 
+  existing table/partition will throw a `TableException` with message like 
   ```text
   Try to write table/partition ... with a new bucket num ..., 
   but the previous bucket num is ... Please switch to batch mode, 
@@ -67,7 +67,7 @@ Please note that
 - During overwrite period, make sure there are no other jobs writing the same table/partition.
 
 {{< hint info >}}
-__Note:__ For the table which enables log system(*e.g.* Kafka), please scale the topic's partition as well to keep consistency.
+__Note:__ For the table which enables log system(*e.g.* Kafka), please rescale the topic's partition as well to keep consistency.
 {{< /hint >}}
 
 ## Use Case
