@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.table.store.file.predicate.Literal;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -37,13 +36,17 @@ import org.apache.spark.sql.sources.Not;
 import org.apache.spark.sql.sources.Or;
 import org.apache.spark.sql.sources.StringStartsWith;
 
+import static org.apache.flink.table.store.file.predicate.PredicateBuilder.convertJavaObject;
+
 /** Conversion from {@link Filter} to {@link Predicate}. */
 public class SparkFilterConverter {
 
     private final RowType rowType;
+    private final PredicateBuilder builder;
 
     public SparkFilterConverter(RowType rowType) {
         this.rowType = rowType;
+        this.builder = new PredicateBuilder(rowType);
     }
 
     public Predicate convert(Filter filter) {
@@ -51,32 +54,32 @@ public class SparkFilterConverter {
             EqualTo eq = (EqualTo) filter;
             // TODO deal with isNaN
             int index = fieldIndex(eq.attribute());
-            Literal literal = convertLiteral(index, eq.value());
-            return PredicateBuilder.equal(index, literal);
+            Object literal = convertLiteral(index, eq.value());
+            return builder.equal(index, literal);
         } else if (filter instanceof GreaterThan) {
             GreaterThan gt = (GreaterThan) filter;
             int index = fieldIndex(gt.attribute());
-            Literal literal = convertLiteral(index, gt.value());
-            return PredicateBuilder.greaterThan(index, literal);
+            Object literal = convertLiteral(index, gt.value());
+            return builder.greaterThan(index, literal);
         } else if (filter instanceof GreaterThanOrEqual) {
             GreaterThanOrEqual gt = (GreaterThanOrEqual) filter;
             int index = fieldIndex(gt.attribute());
-            Literal literal = convertLiteral(index, gt.value());
-            return PredicateBuilder.greaterOrEqual(index, literal);
+            Object literal = convertLiteral(index, gt.value());
+            return builder.greaterOrEqual(index, literal);
         } else if (filter instanceof LessThan) {
             LessThan lt = (LessThan) filter;
             int index = fieldIndex(lt.attribute());
-            Literal literal = convertLiteral(index, lt.value());
-            return PredicateBuilder.lessThan(index, literal);
+            Object literal = convertLiteral(index, lt.value());
+            return builder.lessThan(index, literal);
         } else if (filter instanceof LessThanOrEqual) {
             LessThanOrEqual lt = (LessThanOrEqual) filter;
             int index = fieldIndex(lt.attribute());
-            Literal literal = convertLiteral(index, lt.value());
-            return PredicateBuilder.lessOrEqual(index, literal);
+            Object literal = convertLiteral(index, lt.value());
+            return builder.lessOrEqual(index, literal);
         } else if (filter instanceof IsNull) {
-            return PredicateBuilder.isNull(fieldIndex(((IsNull) filter).attribute()));
+            return builder.isNull(fieldIndex(((IsNull) filter).attribute()));
         } else if (filter instanceof IsNotNull) {
-            return PredicateBuilder.isNotNull(fieldIndex(((IsNotNull) filter).attribute()));
+            return builder.isNotNull(fieldIndex(((IsNotNull) filter).attribute()));
         } else if (filter instanceof And) {
             And and = (And) filter;
             return PredicateBuilder.and(convert(and.left()), convert(and.right()));
@@ -89,8 +92,8 @@ public class SparkFilterConverter {
         } else if (filter instanceof StringStartsWith) {
             StringStartsWith startsWith = (StringStartsWith) filter;
             int index = fieldIndex(startsWith.attribute());
-            Literal literal = convertLiteral(index, startsWith.value());
-            return PredicateBuilder.startsWith(index, literal);
+            Object literal = convertLiteral(index, startsWith.value());
+            return builder.startsWith(index, literal);
         }
 
         // TODO: In, NotIn, AlwaysTrue, AlwaysFalse, EqualNullSafe
@@ -106,8 +109,8 @@ public class SparkFilterConverter {
         return index;
     }
 
-    private Literal convertLiteral(int index, Object value) {
+    private Object convertLiteral(int index, Object value) {
         LogicalType type = rowType.getTypeAt(index);
-        return Literal.fromJavaObject(type, value);
+        return convertJavaObject(type, value);
     }
 }

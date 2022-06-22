@@ -26,10 +26,10 @@ import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.flink.table.store.file.predicate.Literal;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.types.logical.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -115,7 +115,7 @@ public class KeyValueFileStoreScanTest {
         KeyValueFileStoreScan scan = store.newScan();
         scan.withSnapshot(snapshot.id());
         scan.withKeyFilter(
-                PredicateBuilder.equal(0, new Literal(new IntType(false), wantedShopId)));
+                new PredicateBuilder(RowType.of(new IntType(false))).equal(0, wantedShopId));
 
         Map<BinaryRowData, BinaryRowData> expected =
                 store.toKvMap(

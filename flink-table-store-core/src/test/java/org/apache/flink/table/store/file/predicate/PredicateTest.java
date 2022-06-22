@@ -26,17 +26,9 @@ import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
 import org.apache.flink.table.functions.FunctionDefinition;
 import org.apache.flink.table.store.file.stats.FieldStats;
-import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.DataType;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.BinaryType;
-import org.apache.flink.table.types.logical.BooleanType;
-import org.apache.flink.table.types.logical.CharType;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.DoubleType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.SmallIntType;
-import org.apache.flink.table.types.logical.TimestampType;
+import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.types.Row;
 
@@ -45,11 +37,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -58,7 +45,6 @@ import java.util.stream.Stream;
 
 import static org.apache.flink.table.api.DataTypes.STRING;
 import static org.apache.flink.table.planner.expressions.ExpressionBuilder.literal;
-import static org.apache.flink.table.store.file.predicate.PredicateConverter.CONVERTER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -67,9 +53,10 @@ public class PredicateTest {
 
     @Test
     public void testEqual() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
         CallExpression expression =
                 call(BuiltInFunctionDefinitions.EQUALS, field(0, DataTypes.INT()), literal(5));
-        Predicate predicate = expression.accept(CONVERTER);
+        Predicate predicate = expression.accept(new PredicateConverter(builder));
 
         assertThat(predicate.test(new Object[] {4})).isEqualTo(false);
         assertThat(predicate.test(new Object[] {5})).isEqualTo(true);
@@ -81,17 +68,15 @@ public class PredicateTest {
         assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
                 .isEqualTo(false);
 
-        assertThat(predicate.negate().orElse(null))
-                .isEqualTo(
-                        PredicateBuilder.notEqual(
-                                0, new Literal(DataTypes.INT().getLogicalType(), 5)));
+        assertThat(predicate.negate().orElse(null)).isEqualTo(builder.notEqual(0, 5));
     }
 
     @Test
     public void testNotEqual() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
         CallExpression expression =
                 call(BuiltInFunctionDefinitions.NOT_EQUALS, field(0, DataTypes.INT()), literal(5));
-        Predicate predicate = expression.accept(CONVERTER);
+        Predicate predicate = expression.accept(new PredicateConverter(builder));
 
         assertThat(predicate.test(new Object[] {4})).isEqualTo(true);
         assertThat(predicate.test(new Object[] {5})).isEqualTo(false);
@@ -104,20 +89,18 @@ public class PredicateTest {
         assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
                 .isEqualTo(false);
 
-        assertThat(predicate.negate().orElse(null))
-                .isEqualTo(
-                        PredicateBuilder.equal(
-                                0, new Literal(DataTypes.INT().getLogicalType(), 5)));
+        assertThat(predicate.negate().orElse(null)).isEqualTo(builder.equal(0, 5));
     }
 
     @Test
     public void testGreater() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
         CallExpression expression =
                 call(
                         BuiltInFunctionDefinitions.GREATER_THAN,
                         field(0, DataTypes.INT()),
                         literal(5));
-        Predicate predicate = expression.accept(CONVERTER);
+        Predicate predicate = expression.accept(new PredicateConverter(builder));
 
         assertThat(predicate.test(new Object[] {4})).isEqualTo(false);
         assertThat(predicate.test(new Object[] {5})).isEqualTo(false);
@@ -131,20 +114,18 @@ public class PredicateTest {
         assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
                 .isEqualTo(false);
 
-        assertThat(predicate.negate().orElse(null))
-                .isEqualTo(
-                        PredicateBuilder.lessOrEqual(
-                                0, new Literal(DataTypes.INT().getLogicalType(), 5)));
+        assertThat(predicate.negate().orElse(null)).isEqualTo(builder.lessOrEqual(0, 5));
     }
 
     @Test
     public void testGreaterOrEqual() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
         CallExpression expression =
                 call(
                         BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL,
                         field(0, DataTypes.INT()),
                         literal(5));
-        Predicate predicate = expression.accept(CONVERTER);
+        Predicate predicate = expression.accept(new PredicateConverter(builder));
 
         assertThat(predicate.test(new Object[] {4})).isEqualTo(false);
         assertThat(predicate.test(new Object[] {5})).isEqualTo(true);
@@ -158,17 +139,15 @@ public class PredicateTest {
         assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
                 .isEqualTo(false);
 
-        assertThat(predicate.negate().orElse(null))
-                .isEqualTo(
-                        PredicateBuilder.lessThan(
-                                0, new Literal(DataTypes.INT().getLogicalType(), 5)));
+        assertThat(predicate.negate().orElse(null)).isEqualTo(builder.lessThan(0, 5));
     }
 
     @Test
     public void testLess() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
         CallExpression expression =
                 call(BuiltInFunctionDefinitions.LESS_THAN, field(0, DataTypes.INT()), literal(5));
-        Predicate predicate = expression.accept(CONVERTER);
+        Predicate predicate = expression.accept(new PredicateConverter(builder));
 
         assertThat(predicate.test(new Object[] {4})).isEqualTo(true);
         assertThat(predicate.test(new Object[] {5})).isEqualTo(false);
@@ -181,20 +160,18 @@ public class PredicateTest {
         assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
                 .isEqualTo(false);
 
-        assertThat(predicate.negate().orElse(null))
-                .isEqualTo(
-                        PredicateBuilder.greaterOrEqual(
-                                0, new Literal(DataTypes.INT().getLogicalType(), 5)));
+        assertThat(predicate.negate().orElse(null)).isEqualTo(builder.greaterOrEqual(0, 5));
     }
 
     @Test
     public void testLessOrEqual() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
         CallExpression expression =
                 call(
                         BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL,
                         field(0, DataTypes.INT()),
                         literal(5));
-        Predicate predicate = expression.accept(CONVERTER);
+        Predicate predicate = expression.accept(new PredicateConverter(builder));
 
         assertThat(predicate.test(new Object[] {4})).isEqualTo(true);
         assertThat(predicate.test(new Object[] {5})).isEqualTo(true);
@@ -207,20 +184,18 @@ public class PredicateTest {
         assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
                 .isEqualTo(false);
 
-        assertThat(predicate.negate().orElse(null))
-                .isEqualTo(
-                        PredicateBuilder.greaterThan(
-                                0, new Literal(DataTypes.INT().getLogicalType(), 5)));
+        assertThat(predicate.negate().orElse(null)).isEqualTo(builder.greaterThan(0, 5));
     }
 
     @Test
     public void testIsNull() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
         CallExpression expression =
                 call(
                         BuiltInFunctionDefinitions.IS_NULL,
                         field(0, DataTypes.INT()),
                         literal(null, DataTypes.INT()));
-        Predicate predicate = expression.accept(CONVERTER);
+        Predicate predicate = expression.accept(new PredicateConverter(builder));
 
         assertThat(predicate.test(new Object[] {4})).isEqualTo(false);
         assertThat(predicate.test(new Object[] {null})).isEqualTo(true);
@@ -228,17 +203,18 @@ public class PredicateTest {
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(6, 7, 0)})).isEqualTo(false);
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(5, 7, 1)})).isEqualTo(true);
 
-        assertThat(predicate.negate().orElse(null)).isEqualTo(PredicateBuilder.isNotNull(0));
+        assertThat(predicate.negate().orElse(null)).isEqualTo(builder.isNotNull(0));
     }
 
     @Test
     public void testIsNotNull() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
         CallExpression expression =
                 call(
                         BuiltInFunctionDefinitions.IS_NOT_NULL,
                         field(0, DataTypes.INT()),
                         literal(null, DataTypes.INT()));
-        Predicate predicate = expression.accept(CONVERTER);
+        Predicate predicate = expression.accept(new PredicateConverter(builder));
 
         assertThat(predicate.test(new Object[] {4})).isEqualTo(true);
         assertThat(predicate.test(new Object[] {null})).isEqualTo(false);
@@ -248,11 +224,12 @@ public class PredicateTest {
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(null, null, 3)}))
                 .isEqualTo(false);
 
-        assertThat(predicate.negate().orElse(null)).isEqualTo(PredicateBuilder.isNull(0));
+        assertThat(predicate.negate().orElse(null)).isEqualTo(builder.isNull(0));
     }
 
     @Test
     public void testAnd() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType(), new IntType()));
         CallExpression expression =
                 call(
                         BuiltInFunctionDefinitions.AND,
@@ -264,7 +241,7 @@ public class PredicateTest {
                                 BuiltInFunctionDefinitions.EQUALS,
                                 field(1, DataTypes.INT()),
                                 literal(5)));
-        Predicate predicate = expression.accept(CONVERTER);
+        Predicate predicate = expression.accept(new PredicateConverter(builder));
 
         assertThat(predicate.test(new Object[] {4, 5})).isEqualTo(false);
         assertThat(predicate.test(new Object[] {3, 6})).isEqualTo(false);
@@ -294,16 +271,12 @@ public class PredicateTest {
                 .isEqualTo(false);
 
         assertThat(predicate.negate().orElse(null))
-                .isEqualTo(
-                        PredicateBuilder.or(
-                                PredicateBuilder.notEqual(
-                                        0, new Literal(DataTypes.INT().getLogicalType(), 3)),
-                                PredicateBuilder.notEqual(
-                                        1, new Literal(DataTypes.INT().getLogicalType(), 5))));
+                .isEqualTo(PredicateBuilder.or(builder.notEqual(0, 3), builder.notEqual(1, 5)));
     }
 
     @Test
     public void testOr() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType(), new IntType()));
         CallExpression expression =
                 call(
                         BuiltInFunctionDefinitions.OR,
@@ -315,7 +288,7 @@ public class PredicateTest {
                                 BuiltInFunctionDefinitions.EQUALS,
                                 field(1, DataTypes.INT()),
                                 literal(5)));
-        Predicate predicate = expression.accept(CONVERTER);
+        Predicate predicate = expression.accept(new PredicateConverter(builder));
 
         assertThat(predicate.test(new Object[] {4, 6})).isEqualTo(false);
         assertThat(predicate.test(new Object[] {3, 6})).isEqualTo(true);
@@ -345,12 +318,7 @@ public class PredicateTest {
                 .isEqualTo(false);
 
         assertThat(predicate.negate().orElse(null))
-                .isEqualTo(
-                        PredicateBuilder.and(
-                                PredicateBuilder.notEqual(
-                                        0, new Literal(DataTypes.INT().getLogicalType(), 3)),
-                                PredicateBuilder.notEqual(
-                                        1, new Literal(DataTypes.INT().getLogicalType(), 5))));
+                .isEqualTo(PredicateBuilder.and(builder.notEqual(0, 3), builder.notEqual(1, 5)));
     }
 
     @MethodSource("provideLikeExpressions")
@@ -362,7 +330,8 @@ public class PredicateTest {
             List<Long> rowCountList,
             List<FieldStats[]> statsList,
             List<Boolean> expectedForStats) {
-        Predicate predicate = callExpression.accept(CONVERTER);
+        Predicate predicate =
+                callExpression.accept(new PredicateConverter(RowType.of(new VarCharType())));
         IntStream.range(0, valuesList.size())
                 .forEach(
                         i ->
@@ -388,12 +357,17 @@ public class PredicateTest {
                                 BuiltInFunctionDefinitions.SIMILAR,
                                 field(1, DataTypes.INT()),
                                 literal(5)));
-        assertThatThrownBy(() -> expression.accept(CONVERTER))
+        assertThatThrownBy(
+                        () ->
+                                expression.accept(
+                                        new PredicateConverter(
+                                                RowType.of(new IntType(), new IntType()))))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
     }
 
     @Test
     public void testUnsupportedStartsPatternForLike() {
+        PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
         // starts pattern with '_' as wildcard
         assertThatThrownBy(
                         () ->
@@ -401,7 +375,7 @@ public class PredicateTest {
                                                 BuiltInFunctionDefinitions.LIKE,
                                                 field(0, STRING()),
                                                 literal("abc_", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
         // starts pattern like 'abc%xyz' or 'abc_xyz'
@@ -411,7 +385,7 @@ public class PredicateTest {
                                                 BuiltInFunctionDefinitions.LIKE,
                                                 field(0, STRING()),
                                                 literal("abc%xyz", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
         assertThatThrownBy(
                         () ->
@@ -419,7 +393,7 @@ public class PredicateTest {
                                                 BuiltInFunctionDefinitions.LIKE,
                                                 field(0, STRING()),
                                                 literal("abc_xyz", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
         // starts pattern like 'abc%xyz' or 'abc_xyz' with '%' or '_' to escape
@@ -432,7 +406,7 @@ public class PredicateTest {
                                                         "=%abc=%%xyz=_",
                                                         STRING()), // matches "%abc%(?s:.*)xyz_"
                                                 literal("=", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
         assertThatThrownBy(
                         () ->
@@ -443,7 +417,7 @@ public class PredicateTest {
                                                         "abc=%%xyz",
                                                         STRING()), // matches "abc%(?s:.*)xyz"
                                                 literal("=", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
         assertThatThrownBy(
                         () ->
@@ -454,7 +428,7 @@ public class PredicateTest {
                                                         "abc=%_xyz",
                                                         STRING()), // matches "abc%.xyz"
                                                 literal("=", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
         assertThatThrownBy(
                         () ->
@@ -465,7 +439,7 @@ public class PredicateTest {
                                                         "abc=_%xyz",
                                                         STRING()), // matches "abc_(?s:.*)xyz"
                                                 literal("=", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
         assertThatThrownBy(
                         () ->
@@ -476,7 +450,7 @@ public class PredicateTest {
                                                         "abc=__xyz",
                                                         STRING()), // matches "abc_.xyz"
                                                 literal("=", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
         // starts pattern with wildcard '%' at the beginning to escape
@@ -487,12 +461,13 @@ public class PredicateTest {
                                                 field(0, STRING()),
                                                 literal("=%%", STRING()), // matches "%(?s:.*)"
                                                 literal("=", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
     }
 
     @Test
     public void testUnsupportedEndsPatternForLike() {
+        PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
         // ends pattern with '%' as wildcard
         assertThatThrownBy(
                         () ->
@@ -500,7 +475,7 @@ public class PredicateTest {
                                                 BuiltInFunctionDefinitions.LIKE,
                                                 field(0, STRING()),
                                                 literal("%456", STRING())) // matches "(?s:.*)456"
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
         // ends pattern with '_' as wildcard
@@ -510,7 +485,7 @@ public class PredicateTest {
                                                 BuiltInFunctionDefinitions.LIKE,
                                                 field(0, STRING()),
                                                 literal("_456", STRING())) // matches ".456"
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
         // ends pattern with '[]' as wildcard
@@ -520,7 +495,7 @@ public class PredicateTest {
                                                 BuiltInFunctionDefinitions.LIKE,
                                                 field(0, STRING()),
                                                 literal("_[456]", STRING())) // matches ".[456]"
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
         assertThatThrownBy(
                         () ->
@@ -530,7 +505,7 @@ public class PredicateTest {
                                                 literal(
                                                         "%[h-m]",
                                                         STRING())) // matches "(?s:.*)[h-m]"
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
         // ends pattern with '[^]' as wildcard
@@ -542,7 +517,7 @@ public class PredicateTest {
                                                 literal(
                                                         "%[^h-m]",
                                                         STRING())) // matches "(?s:.*)[^h-m]"
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
         assertThatThrownBy(
@@ -551,7 +526,7 @@ public class PredicateTest {
                                                 BuiltInFunctionDefinitions.LIKE,
                                                 field(0, STRING()),
                                                 literal("_[^xyz]", STRING())) // matches ".[^xyz]"
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
         // ends pattern escape wildcard '%'
@@ -564,7 +539,7 @@ public class PredicateTest {
                                                         "%=%456",
                                                         STRING()), // matches "(?s:.*)%456"
                                                 literal("=", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
         assertThatThrownBy(
                         () ->
@@ -575,7 +550,7 @@ public class PredicateTest {
                                                         "%=_456",
                                                         STRING()), // matches "(?s:.*)_456"
                                                 literal("=", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
         // ends pattern escape wildcard '_'
@@ -586,12 +561,13 @@ public class PredicateTest {
                                                 field(0, STRING()),
                                                 literal("_=_456", STRING()), // matches "._456"
                                                 literal("=", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
     }
 
     @Test
     public void testUnsupportedEqualsPatternForLike() {
+        PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
         // equals pattern
         assertThatThrownBy(
                         () ->
@@ -599,7 +575,7 @@ public class PredicateTest {
                                                 BuiltInFunctionDefinitions.LIKE,
                                                 field(0, STRING()),
                                                 literal("123456", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
         // equals pattern escape '%'
@@ -610,7 +586,7 @@ public class PredicateTest {
                                                 field(0, STRING()),
                                                 literal("12=%45", STRING()), // equals "12%45"
                                                 literal("=", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
         // equals pattern escape '_'
@@ -621,12 +597,13 @@ public class PredicateTest {
                                                 field(0, STRING()),
                                                 literal("12=_45", STRING()), // equals "12_45"
                                                 literal("=", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
     }
 
     @Test
     public void testUnsupportedMiddlePatternForLike() {
+        PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
         // middle pattern with '%' as wildcard
         assertThatThrownBy(
                         () ->
@@ -634,7 +611,7 @@ public class PredicateTest {
                                                 BuiltInFunctionDefinitions.LIKE,
                                                 field(0, STRING()),
                                                 literal("%345%", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
         // middle pattern with '_' as wildcard
@@ -644,7 +621,7 @@ public class PredicateTest {
                                                 BuiltInFunctionDefinitions.LIKE,
                                                 field(0, STRING()),
                                                 literal("_345_", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
         // middle pattern with both '%' and '_' as wildcard
@@ -654,7 +631,7 @@ public class PredicateTest {
                                                 BuiltInFunctionDefinitions.LIKE,
                                                 field(0, STRING()),
                                                 literal("_345%", STRING())) // matches ".345(?s:.*)"
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
         assertThatThrownBy(
                         () ->
@@ -662,7 +639,7 @@ public class PredicateTest {
                                                 BuiltInFunctionDefinitions.LIKE,
                                                 field(0, STRING()),
                                                 literal("%345_", STRING())) // matches "(?s:.*)345."
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
         // middle pattern with '[]' as wildcard
@@ -674,7 +651,7 @@ public class PredicateTest {
                                                 literal(
                                                         "%[a-c]_",
                                                         STRING())) // matches "(?s:.*)[a-c]."
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
         // middle pattern with '[^]' as wildcard
@@ -686,7 +663,7 @@ public class PredicateTest {
                                                 literal(
                                                         "%[^abc]_",
                                                         STRING())) // matches "(?s:.*)[^abc]."
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
         // middle pattern escape '%'
@@ -699,7 +676,7 @@ public class PredicateTest {
                                                         "%34=%5%",
                                                         STRING()), // matches "(?s:.*)34%5(.*)"
                                                 literal("=", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
         // middle pattern escape '_'
@@ -712,54 +689,21 @@ public class PredicateTest {
                                                         "%34=_5%",
                                                         STRING()), // matches "(?s:.*)34_5(.*)"
                                                 literal("=", STRING()))
-                                        .accept(CONVERTER))
+                                        .accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
     }
 
     @Test
     public void testUnsupportedType() {
+        PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
         DataType structType = DataTypes.ROW(DataTypes.INT()).bridgedTo(Row.class);
         CallExpression expression =
                 call(
                         BuiltInFunctionDefinitions.EQUALS,
                         field(0, structType),
                         literal(Row.of(1), structType));
-        assertThatThrownBy(() -> expression.accept(CONVERTER))
+        assertThatThrownBy(() -> expression.accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
-    }
-
-    @MethodSource("provideLiterals")
-    @ParameterizedTest
-    public void testSerDeLiteral(LogicalType type, Object data) throws Exception {
-        Literal literal = new Literal(type, data);
-        Object object = readObject(writeObject(literal));
-        assertThat(object).isInstanceOf(Literal.class);
-        assertThat(((Literal) object).type()).isEqualTo(literal.type());
-        assertThat(((Literal) object).compareValueTo(literal.value())).isEqualTo(0);
-    }
-
-    public static Stream<Arguments> provideLiterals() {
-        CharType charType = new CharType();
-        VarCharType varCharType = VarCharType.STRING_TYPE;
-        BooleanType booleanType = new BooleanType();
-        BinaryType binaryType = new BinaryType();
-        DecimalType decimalType = new DecimalType(2);
-        SmallIntType smallIntType = new SmallIntType();
-        BigIntType bigIntType = new BigIntType();
-        DoubleType doubleType = new DoubleType();
-        TimestampType timestampType = new TimestampType();
-        return Stream.of(
-                Arguments.of(charType, TypeUtils.castFromString("s", charType)),
-                Arguments.of(varCharType, TypeUtils.castFromString("AbCd1Xy%@*", varCharType)),
-                Arguments.of(booleanType, TypeUtils.castFromString("false", booleanType)),
-                Arguments.of(binaryType, TypeUtils.castFromString("0101", binaryType)),
-                Arguments.of(smallIntType, TypeUtils.castFromString("-2", smallIntType)),
-                Arguments.of(decimalType, TypeUtils.castFromString("22.10", decimalType)),
-                Arguments.of(bigIntType, TypeUtils.castFromString("-9999999999", bigIntType)),
-                Arguments.of(doubleType, TypeUtils.castFromString("3.14159265357", doubleType)),
-                Arguments.of(
-                        timestampType,
-                        TypeUtils.castFromString("2022-03-25 15:00:02", timestampType)));
     }
 
     public static Stream<Arguments> provideLikeExpressions() {
@@ -898,22 +842,6 @@ public class PredicateTest {
                         rowCountList4,
                         statsList4,
                         expectedForStats4));
-    }
-
-    private byte[] writeObject(Literal literal) throws IOException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream(4096);
-        ObjectOutputStream oos = new ObjectOutputStream(baos);
-        oos.writeObject(literal);
-        oos.close();
-        return baos.toByteArray();
-    }
-
-    private Object readObject(byte[] bytes) throws IOException, ClassNotFoundException {
-        ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
-        ObjectInputStream ois = new ObjectInputStream(bais);
-        Object object = ois.readObject();
-        ois.close();
-        return object;
     }
 
     private static FieldReferenceExpression field(int i, DataType type) {

@@ -18,6 +18,9 @@
 
 package org.apache.flink.table.store.file.predicate;
 
+import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.types.logical.RowType;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -29,25 +32,30 @@ public class PredicateBuilderTest {
 
     @Test
     public void testSplitAnd() {
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        RowType.of(
+                                new IntType(),
+                                new IntType(),
+                                new IntType(),
+                                new IntType(),
+                                new IntType(),
+                                new IntType(),
+                                new IntType()));
+
         Predicate child1 =
-                PredicateBuilder.or(
-                        PredicateBuilder.isNull(0),
-                        PredicateBuilder.isNull(1),
-                        PredicateBuilder.isNull(2));
+                PredicateBuilder.or(builder.isNull(0), builder.isNull(1), builder.isNull(2));
         Predicate child2 =
-                PredicateBuilder.and(
-                        PredicateBuilder.isNull(3),
-                        PredicateBuilder.isNull(4),
-                        PredicateBuilder.isNull(5));
-        Predicate child3 = PredicateBuilder.isNull(6);
+                PredicateBuilder.and(builder.isNull(3), builder.isNull(4), builder.isNull(5));
+        Predicate child3 = builder.isNull(6);
 
         assertThat(PredicateBuilder.splitAnd(PredicateBuilder.and(child1, child2, child3)))
                 .isEqualTo(
                         Arrays.asList(
                                 child1,
-                                PredicateBuilder.isNull(3),
-                                PredicateBuilder.isNull(4),
-                                PredicateBuilder.isNull(5),
+                                builder.isNull(3),
+                                builder.isNull(4),
+                                builder.isNull(5),
                                 child3));
     }
 }

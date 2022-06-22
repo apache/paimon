@@ -146,7 +146,10 @@ public abstract class TableScan {
             if (mapped >= 0) {
                 return Optional.of(
                         new LeafPredicate(
-                                leafPredicate.function(), mapped, leafPredicate.literal()));
+                                leafPredicate.function(),
+                                leafPredicate.type(),
+                                mapped,
+                                leafPredicate.literals()));
             } else {
                 return Optional.empty();
             }

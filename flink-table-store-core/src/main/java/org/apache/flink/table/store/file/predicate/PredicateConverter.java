@@ -34,7 +34,6 @@ import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.LogicalTypeFamily;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.VarCharType;
 
 import javax.annotation.Nullable;
 
@@ -51,28 +50,18 @@ import static org.apache.flink.table.types.logical.utils.LogicalTypeCasts.suppor
 /** Convert {@link Expression} to {@link Predicate}. */
 public class PredicateConverter implements ExpressionVisitor<Predicate> {
 
-    public static final PredicateConverter CONVERTER = new PredicateConverter();
+    private final PredicateBuilder builder;
+
+    public PredicateConverter(RowType type) {
+        this(new PredicateBuilder(type));
+    }
+
+    public PredicateConverter(PredicateBuilder builder) {
+        this.builder = builder;
+    }
 
     /** Accepts simple LIKE patterns like "abc%". */
     private static final Pattern BEGIN_PATTERN = Pattern.compile("([^%]+)%");
-
-    @Nullable
-    public Predicate fromMap(Map<String, String> map, RowType rowType) {
-        // TODO: It is somewhat misleading that an empty map creates a null predicate filter
-        List<String> fieldNames = rowType.getFieldNames();
-        Predicate predicate = null;
-        for (Map.Entry<String, String> entry : map.entrySet()) {
-            int idx = fieldNames.indexOf(entry.getKey());
-            LogicalType type = rowType.getTypeAt(idx);
-            Literal literal = new Literal(type, TypeUtils.castFromString(entry.getValue(), type));
-            if (predicate == null) {
-                predicate = PredicateBuilder.equal(idx, literal);
-            } else {
-                predicate = PredicateBuilder.and(predicate, PredicateBuilder.equal(idx, literal));
-            }
-        }
-        return predicate;
-    }
 
     @Override
     public Predicate visit(CallExpression call) {
@@ -84,31 +73,26 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         } else if (func == BuiltInFunctionDefinitions.OR) {
             return PredicateBuilder.or(children.get(0).accept(this), children.get(1).accept(this));
         } else if (func == BuiltInFunctionDefinitions.EQUALS) {
-            return visitBiFunction(children, PredicateBuilder::equal, PredicateBuilder::equal);
+            return visitBiFunction(children, builder::equal, builder::equal);
         } else if (func == BuiltInFunctionDefinitions.NOT_EQUALS) {
-            return visitBiFunction(
-                    children, PredicateBuilder::notEqual, PredicateBuilder::notEqual);
+            return visitBiFunction(children, builder::notEqual, builder::notEqual);
         } else if (func == BuiltInFunctionDefinitions.GREATER_THAN) {
-            return visitBiFunction(
-                    children, PredicateBuilder::greaterThan, PredicateBuilder::lessThan);
+            return visitBiFunction(children, builder::greaterThan, builder::lessThan);
         } else if (func == BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL) {
-            return visitBiFunction(
-                    children, PredicateBuilder::greaterOrEqual, PredicateBuilder::lessOrEqual);
+            return visitBiFunction(children, builder::greaterOrEqual, builder::lessOrEqual);
         } else if (func == BuiltInFunctionDefinitions.LESS_THAN) {
-            return visitBiFunction(
-                    children, PredicateBuilder::lessThan, PredicateBuilder::greaterThan);
+            return visitBiFunction(children, builder::lessThan, builder::greaterThan);
         } else if (func == BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL) {
-            return visitBiFunction(
-                    children, PredicateBuilder::lessOrEqual, PredicateBuilder::greaterOrEqual);
+            return visitBiFunction(children, builder::lessOrEqual, builder::greaterOrEqual);
         } else if (func == BuiltInFunctionDefinitions.IS_NULL) {
             return extractFieldReference(children.get(0))
                     .map(FieldReferenceExpression::getFieldIndex)
-                    .map(PredicateBuilder::isNull)
+                    .map(builder::isNull)
                     .orElseThrow(UnsupportedExpression::new);
         } else if (func == BuiltInFunctionDefinitions.IS_NOT_NULL) {
             return extractFieldReference(children.get(0))
                     .map(FieldReferenceExpression::getFieldIndex)
-                    .map(PredicateBuilder::isNotNull)
+                    .map(builder::isNotNull)
                     .orElseThrow(UnsupportedExpression::new);
         } else if (func == BuiltInFunctionDefinitions.LIKE) {
             FieldReferenceExpression fieldRefExpr =
@@ -120,14 +104,12 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                 String sqlPattern =
                         extractLiteral(fieldRefExpr.getOutputDataType(), children.get(1))
                                 .orElseThrow(UnsupportedExpression::new)
-                                .value()
                                 .toString();
                 String escape =
                         children.size() <= 2
                                 ? null
                                 : extractLiteral(fieldRefExpr.getOutputDataType(), children.get(2))
                                         .orElseThrow(UnsupportedExpression::new)
-                                        .value()
                                         .toString();
                 String escapedSqlPattern = sqlPattern;
                 boolean allowQuick = false;
@@ -171,11 +153,9 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                 if (allowQuick) {
                     Matcher beginMatcher = BEGIN_PATTERN.matcher(escapedSqlPattern);
                     if (beginMatcher.matches()) {
-                        return PredicateBuilder.startsWith(
+                        return builder.startsWith(
                                 fieldRefExpr.getFieldIndex(),
-                                new Literal(
-                                        VarCharType.STRING_TYPE,
-                                        BinaryStringData.fromString(beginMatcher.group(1))));
+                                BinaryStringData.fromString(beginMatcher.group(1)));
                     }
                 }
             }
@@ -188,10 +168,10 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
 
     private Predicate visitBiFunction(
             List<Expression> children,
-            BiFunction<Integer, Literal, Predicate> visit1,
-            BiFunction<Integer, Literal, Predicate> visit2) {
+            BiFunction<Integer, Object, Predicate> visit1,
+            BiFunction<Integer, Object, Predicate> visit2) {
         Optional<FieldReferenceExpression> fieldRefExpr = extractFieldReference(children.get(0));
-        Optional<Literal> literal;
+        Optional<Object> literal;
         if (fieldRefExpr.isPresent()) {
             literal = extractLiteral(fieldRefExpr.get().getOutputDataType(), children.get(1));
             if (literal.isPresent()) {
@@ -217,12 +197,12 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         return Optional.empty();
     }
 
-    private Optional<Literal> extractLiteral(DataType expectedType, Expression expression) {
+    private Optional<Object> extractLiteral(DataType expectedType, Expression expression) {
         LogicalType expectedLogicalType = expectedType.getLogicalType();
         if (!supportsPredicate(expectedLogicalType)) {
             return Optional.empty();
         }
-        Literal literal = null;
+        Object literal = null;
         if (expression instanceof ValueLiteralExpression) {
             ValueLiteralExpression valueExpression = (ValueLiteralExpression) expression;
             DataType actualType = valueExpression.getOutputDataType();
@@ -233,14 +213,11 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             }
             Object value = valueOpt.get();
             if (actualLogicalType.getTypeRoot().equals(expectedLogicalType.getTypeRoot())) {
-                literal =
-                        new Literal(
-                                expectedLogicalType,
-                                getConverter(expectedType).toInternalOrNull(value));
+                literal = getConverter(expectedType).toInternalOrNull(value);
             } else if (supportsImplicitCast(actualLogicalType, expectedLogicalType)) {
                 try {
                     value = TypeUtils.castFromString(value.toString(), expectedLogicalType);
-                    literal = new Literal(expectedLogicalType, value);
+                    literal = value;
                 } catch (Exception ignored) {
                     // ignore here, let #visit throw UnsupportedExpression
                 }
@@ -303,12 +280,31 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
      * @param filter a resolved expression
      * @return {@link Predicate} if no {@link UnsupportedExpression} thrown.
      */
-    public static Optional<Predicate> convert(ResolvedExpression filter) {
+    public static Optional<Predicate> convert(RowType rowType, ResolvedExpression filter) {
         try {
-            return Optional.ofNullable(filter.accept(PredicateConverter.CONVERTER));
+            return Optional.ofNullable(filter.accept(new PredicateConverter(rowType)));
         } catch (UnsupportedExpression e) {
             return Optional.empty();
         }
+    }
+
+    @Nullable
+    public static Predicate fromMap(Map<String, String> map, RowType rowType) {
+        // TODO: It is somewhat misleading that an empty map creates a null predicate filter
+        List<String> fieldNames = rowType.getFieldNames();
+        Predicate predicate = null;
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        for (Map.Entry<String, String> entry : map.entrySet()) {
+            int idx = fieldNames.indexOf(entry.getKey());
+            LogicalType type = rowType.getTypeAt(idx);
+            Object literal = TypeUtils.castFromString(entry.getValue(), type);
+            if (predicate == null) {
+                predicate = builder.equal(idx, literal);
+            } else {
+                predicate = PredicateBuilder.and(predicate, builder.equal(idx, literal));
+            }
+        }
+        return predicate;
     }
 
     /** Encounter an unsupported expression, the caller can choose to ignore this filter branch. */
