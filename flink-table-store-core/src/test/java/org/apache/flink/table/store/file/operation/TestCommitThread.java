@@ -99,7 +99,7 @@ public class TestCommitThread extends Thread {
         }
 
         // wait for canceled dirty tasks
-        service.shutdown();
+        service.shutdownNow();
         try {
             service.awaitTermination(1, TimeUnit.MINUTES);
         } catch (InterruptedException e) {

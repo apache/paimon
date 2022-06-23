@@ -259,7 +259,7 @@ public class TestFileStore extends KeyValueFileStore {
         }
 
         // wait for canceled dirty tasks
-        service.shutdown();
+        service.shutdownNow();
         service.awaitTermination(1, TimeUnit.MINUTES);
         return snapshots;
     }
