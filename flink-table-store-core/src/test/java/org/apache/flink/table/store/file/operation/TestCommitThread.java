@@ -38,7 +38,6 @@ import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
 
 import static org.apache.flink.table.store.file.TestFileStore.PAGE_SIZE;
 import static org.apache.flink.table.store.file.TestFileStore.WRITE_BUFFER_SIZE;
@@ -55,7 +54,6 @@ public class TestCommitThread extends Thread {
 
     private final FileStoreWrite<KeyValue> write;
     private final FileStoreCommit commit;
-    private final ExecutorService service;
 
     public TestCommitThread(
             Map<BinaryRowData, List<KeyValue>> data,
@@ -67,8 +65,6 @@ public class TestCommitThread extends Thread {
 
         this.write = safeStore.newWrite();
         this.commit = testStore.newCommit();
-
-        this.service = Executors.newSingleThreadExecutor();
     }
 
     public Map<BinaryRowData, List<KeyValue>> getResult() {
@@ -96,14 +92,6 @@ public class TestCommitThread extends Thread {
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
-        }
-
-        // wait for canceled dirty tasks
-        service.shutdownNow();
-        try {
-            service.awaitTermination(1, TimeUnit.MINUTES);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
         }
     }
 
@@ -205,6 +193,13 @@ public class TestCommitThread extends Thread {
     }
 
     private MergeTreeWriter createWriter(BinaryRowData partition, boolean empty) {
+        ExecutorService service =
+                Executors.newSingleThreadExecutor(
+                        r -> {
+                            Thread t = new Thread(r);
+                            t.setName(Thread.currentThread().getName() + "-writer-service-pool");
+                            return t;
+                        });
         MergeTreeWriter writer =
                 empty
                         ? (MergeTreeWriter) write.createEmptyWriter(partition, 0, service)

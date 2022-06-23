@@ -208,14 +208,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue> {
 
     @Override
     public List<DataFileMeta> close() throws Exception {
-        boolean canceled = compactManager.cancelCurrent();
-        if (!canceled) {
-            // the task has already completed normally
-            // sync its output files
-            sync();
-        }
-        // else not wait canceled task
-
+        sync();
         // delete temporary files
         List<DataFileMeta> delete = new ArrayList<>(newFiles);
         for (DataFileMeta file : compactAfter) {

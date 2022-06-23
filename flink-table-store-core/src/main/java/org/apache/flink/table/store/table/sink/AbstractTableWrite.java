@@ -40,7 +40,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Base {@link TableWrite} implementation.
@@ -144,10 +143,6 @@ public abstract class AbstractTableWrite<T>
         }
         writers.clear();
         compactExecutor.shutdownNow();
-        boolean terminated = compactExecutor.awaitTermination(1, TimeUnit.MINUTES);
-        if (!terminated) {
-            LOG.error("Compact Executor shutdown failed, wait 1 minute.");
-        }
     }
 
     @VisibleForTesting

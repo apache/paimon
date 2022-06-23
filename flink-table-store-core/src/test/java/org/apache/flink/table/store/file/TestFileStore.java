@@ -62,7 +62,6 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -191,7 +190,6 @@ public class TestFileStore extends KeyValueFileStore {
             throws Exception {
         FileStoreWrite<KeyValue> write = newWrite();
         Map<BinaryRowData, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
-        ExecutorService service = Executors.newSingleThreadExecutor();
         for (KeyValue kv : kvs) {
             BinaryRowData partition = partitionCalculator.apply(kv);
             int bucket = bucketCalculator.apply(kv);
@@ -200,6 +198,7 @@ public class TestFileStore extends KeyValueFileStore {
                             bucket,
                             (b, w) -> {
                                 if (w == null) {
+                                    ExecutorService service = Executors.newSingleThreadExecutor();
                                     RecordWriter<KeyValue> writer =
                                             emptyWriter
                                                     ? write.createEmptyWriter(
@@ -257,10 +256,6 @@ public class TestFileStore extends KeyValueFileStore {
         for (long id = snapshotIdBeforeCommit + 1; id <= snapshotIdAfterCommit; id++) {
             snapshots.add(snapshotManager.snapshot(id));
         }
-
-        // wait for canceled dirty tasks
-        service.shutdownNow();
-        service.awaitTermination(1, TimeUnit.MINUTES);
         return snapshots;
     }
 
