@@ -31,52 +31,52 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-/** A {@link JsonSerializer} for {@link Schema}. */
-public class SchemaSerializer implements JsonSerializer<Schema> {
+/** A {@link JsonSerializer} for {@link TableSchema}. */
+public class SchemaSerializer implements JsonSerializer<TableSchema> {
 
     public static final SchemaSerializer INSTANCE = new SchemaSerializer();
 
     @Override
-    public void serialize(Schema schema, JsonGenerator generator) throws IOException {
+    public void serialize(TableSchema tableSchema, JsonGenerator generator) throws IOException {
         generator.writeStartObject();
 
-        generator.writeNumberField("id", schema.id());
+        generator.writeNumberField("id", tableSchema.id());
 
         generator.writeArrayFieldStart("fields");
-        for (DataField field : schema.fields()) {
+        for (DataField field : tableSchema.fields()) {
             DataFieldSerializer.INSTANCE.serialize(field, generator);
         }
         generator.writeEndArray();
 
-        generator.writeNumberField("highestFieldId", schema.highestFieldId());
+        generator.writeNumberField("highestFieldId", tableSchema.highestFieldId());
 
         generator.writeArrayFieldStart("partitionKeys");
-        for (String partitionKey : schema.partitionKeys()) {
+        for (String partitionKey : tableSchema.partitionKeys()) {
             generator.writeString(partitionKey);
         }
         generator.writeEndArray();
 
         generator.writeArrayFieldStart("primaryKeys");
-        for (String primaryKey : schema.primaryKeys()) {
+        for (String primaryKey : tableSchema.primaryKeys()) {
             generator.writeString(primaryKey);
         }
         generator.writeEndArray();
 
         generator.writeObjectFieldStart("options");
-        for (Map.Entry<String, String> entry : schema.options().entrySet()) {
+        for (Map.Entry<String, String> entry : tableSchema.options().entrySet()) {
             generator.writeStringField(entry.getKey(), entry.getValue());
         }
         generator.writeEndObject();
 
-        if (!StringUtils.isNullOrWhitespaceOnly(schema.comment())) {
-            generator.writeStringField("comment", schema.comment());
+        if (!StringUtils.isNullOrWhitespaceOnly(tableSchema.comment())) {
+            generator.writeStringField("comment", tableSchema.comment());
         }
 
         generator.writeEndObject();
     }
 
     @Override
-    public Schema deserialize(JsonNode node) {
+    public TableSchema deserialize(JsonNode node) {
         int id = node.get("id").asInt();
 
         Iterator<JsonNode> fieldJsons = node.get("fields").elements();
@@ -113,6 +113,7 @@ public class SchemaSerializer implements JsonSerializer<Schema> {
             comment = commentNode.asText();
         }
 
-        return new Schema(id, fields, highestFieldId, partitionKeys, primaryKeys, options, comment);
+        return new TableSchema(
+                id, fields, highestFieldId, partitionKeys, primaryKeys, options, comment);
     }
 }

@@ -22,8 +22,8 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -40,7 +40,7 @@ public class FileStoreTableFactory {
         Path tablePath = FileStoreOptions.path(conf);
         String name = tablePath.getName();
         SchemaManager schemaManager = new SchemaManager(tablePath);
-        Schema schema =
+        TableSchema tableSchema =
                 schemaManager
                         .latest()
                         .orElseThrow(
@@ -51,17 +51,18 @@ public class FileStoreTableFactory {
                                                         + ". Please create table first."));
 
         // merge dynamic options into schema.options
-        Map<String, String> newOptions = new HashMap<>(schema.options());
+        Map<String, String> newOptions = new HashMap<>(tableSchema.options());
         newOptions.putAll(conf.toMap());
-        schema = schema.copy(newOptions);
+        tableSchema = tableSchema.copy(newOptions);
 
         if (conf.get(FileStoreOptions.WRITE_MODE) == WriteMode.APPEND_ONLY) {
-            return new AppendOnlyFileStoreTable(name, schemaManager, schema, user);
+            return new AppendOnlyFileStoreTable(name, schemaManager, tableSchema, user);
         } else {
-            if (schema.primaryKeys().isEmpty()) {
-                return new ChangelogValueCountFileStoreTable(name, schemaManager, schema, user);
+            if (tableSchema.primaryKeys().isEmpty()) {
+                return new ChangelogValueCountFileStoreTable(
+                        name, schemaManager, tableSchema, user);
             } else {
-                return new ChangelogWithKeyFileStoreTable(name, schemaManager, schema, user);
+                return new ChangelogWithKeyFileStoreTable(name, schemaManager, tableSchema, user);
             }
         }
     }

@@ -27,8 +27,8 @@ import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreRead;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.writer.RecordWriter;
@@ -53,22 +53,23 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     private final AppendOnlyFileStore store;
 
-    AppendOnlyFileStoreTable(String name, SchemaManager schemaManager, Schema schema, String user) {
-        super(name, schema);
+    AppendOnlyFileStoreTable(
+            String name, SchemaManager schemaManager, TableSchema tableSchema, String user) {
+        super(name, tableSchema);
         this.store =
                 new AppendOnlyFileStore(
                         schemaManager,
-                        schema.id(),
-                        new FileStoreOptions(schema.options()),
+                        tableSchema.id(),
+                        new FileStoreOptions(tableSchema.options()),
                         user,
-                        schema.logicalPartitionType(),
-                        schema.logicalRowType());
+                        tableSchema.logicalPartitionType(),
+                        tableSchema.logicalRowType());
     }
 
     @Override
     public TableScan newScan() {
         AppendOnlyFileStoreScan scan = store.newScan();
-        return new TableScan(scan, schema, store.pathFactory()) {
+        return new TableScan(scan, tableSchema, store.pathFactory()) {
             @Override
             protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
                 return new AppendOnlySplitGenerator(
@@ -109,7 +110,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public TableWrite newWrite() {
         SinkRecordConverter recordConverter =
-                new SinkRecordConverter(store.options().bucket(), schema);
+                new SinkRecordConverter(store.options().bucket(), tableSchema);
         return new AbstractTableWrite<RowData>(store.newWrite(), recordConverter) {
             @Override
             protected void writeSinkRecord(SinkRecord record, RecordWriter<RowData> writer)

@@ -32,7 +32,7 @@ import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.connector.source.TableStoreSource;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
-import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
@@ -164,7 +164,7 @@ public abstract class AbstractTableStoreFactory
                 FileStoreTableFactory.create(
                         Configuration.fromMap(context.getCatalogTable().getOptions()));
 
-        Schema schema = table.schema();
+        TableSchema tableSchema = table.schema();
         UpdateSchema updateSchema = UpdateSchema.fromCatalogTable(context.getCatalogTable());
 
         RowType rowType = updateSchema.rowType();
@@ -173,24 +173,24 @@ public abstract class AbstractTableStoreFactory
 
         // compare fields to ignore isNullable for row type
         Preconditions.checkArgument(
-                schema.logicalRowType().getFields().equals(rowType.getFields()),
+                tableSchema.logicalRowType().getFields().equals(rowType.getFields()),
                 "Flink schema and store schema are not the same, "
                         + "store schema is %s, Flink schema is %s",
-                schema.logicalRowType(),
+                tableSchema.logicalRowType(),
                 rowType);
 
         Preconditions.checkArgument(
-                schema.partitionKeys().equals(partitionKeys),
+                tableSchema.partitionKeys().equals(partitionKeys),
                 "Flink partitionKeys and store partitionKeys are not the same, "
                         + "store partitionKeys is %s, Flink partitionKeys is %s",
-                schema.partitionKeys(),
+                tableSchema.partitionKeys(),
                 partitionKeys);
 
         Preconditions.checkArgument(
-                schema.primaryKeys().equals(primaryKeys),
+                tableSchema.primaryKeys().equals(primaryKeys),
                 "Flink primaryKeys and store primaryKeys are not the same, "
                         + "store primaryKeys is %s, Flink primaryKeys is %s",
-                schema.primaryKeys(),
+                tableSchema.primaryKeys(),
                 primaryKeys);
 
         return table;

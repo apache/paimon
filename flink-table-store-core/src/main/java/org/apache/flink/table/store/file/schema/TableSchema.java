@@ -37,8 +37,8 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-/** Schema of table store. */
-public class Schema implements Serializable {
+/** Schema of a table. */
+public class TableSchema implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -57,7 +57,7 @@ public class Schema implements Serializable {
 
     private final String comment;
 
-    public Schema(
+    public TableSchema(
             long id,
             List<DataField> fields,
             int highestFieldId,
@@ -160,8 +160,8 @@ public class Schema implements Serializable {
                         .logicalType;
     }
 
-    public Schema copy(Map<String, String> newOptions) {
-        return new Schema(
+    public TableSchema copy(Map<String, String> newOptions) {
+        return new TableSchema(
                 id, fields, highestFieldId, partitionKeys, primaryKeys, newOptions, comment);
     }
 
@@ -178,12 +178,12 @@ public class Schema implements Serializable {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        Schema schema = (Schema) o;
-        return Objects.equals(fields, schema.fields)
-                && Objects.equals(partitionKeys, schema.partitionKeys)
-                && Objects.equals(primaryKeys, schema.primaryKeys)
-                && Objects.equals(options, schema.options)
-                && Objects.equals(comment, schema.comment);
+        TableSchema tableSchema = (TableSchema) o;
+        return Objects.equals(fields, tableSchema.fields)
+                && Objects.equals(partitionKeys, tableSchema.partitionKeys)
+                && Objects.equals(primaryKeys, tableSchema.primaryKeys)
+                && Objects.equals(options, tableSchema.options)
+                && Objects.equals(comment, tableSchema.comment);
     }
 
     @Override

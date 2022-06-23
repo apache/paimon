@@ -33,8 +33,8 @@ import org.apache.flink.table.store.connector.StatefulPrecommittingSinkWriter;
 import org.apache.flink.table.store.connector.sink.TestFileStore.TestRecordWriter;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
-import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.IntType;
@@ -89,7 +89,7 @@ public class StoreSinkTest {
 
     @Before
     public void before() throws Exception {
-        Schema schema =
+        TableSchema tableSchema =
                 new SchemaManager(new Path(tempFolder.newFolder().toURI().toString()))
                         .commitNewVersion(
                                 new UpdateSchema(
@@ -105,9 +105,9 @@ public class StoreSinkTest {
                                         new HashMap<>(),
                                         ""));
 
-        RowType partitionType = schema.logicalPartitionType();
+        RowType partitionType = tableSchema.logicalPartitionType();
         fileStore = new TestFileStore(hasPk, partitionType);
-        table = new TestFileStoreTable(fileStore, schema);
+        table = new TestFileStoreTable(fileStore, tableSchema);
     }
 
     @Parameterized.Parameters(name = "hasPk-{0}, partitioned-{1}")

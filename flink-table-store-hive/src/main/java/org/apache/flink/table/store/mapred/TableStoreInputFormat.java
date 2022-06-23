@@ -24,7 +24,7 @@ import org.apache.flink.table.store.SearchArgumentToPredicateConverter;
 import org.apache.flink.table.store.TableStoreJobConf;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.source.TableScan;
@@ -77,7 +77,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
         return FileStoreTableFactory.create(conf, wrapper.getFileStoreUser());
     }
 
-    private Optional<Predicate> createPredicate(Schema schema, JobConf jobConf) {
+    private Optional<Predicate> createPredicate(TableSchema tableSchema, JobConf jobConf) {
         String hiveFilter = jobConf.get(TableScanDesc.FILTER_EXPR_CONF_STR);
         if (hiveFilter == null) {
             return Optional.empty();
@@ -88,7 +88,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
         SearchArgument sarg = ConvertAstToSearchArg.create(jobConf, exprNodeDesc);
         SearchArgumentToPredicateConverter converter =
                 new SearchArgumentToPredicateConverter(
-                        sarg, schema.fieldNames(), schema.logicalRowType().getChildren());
+                        sarg, tableSchema.fieldNames(), tableSchema.logicalRowType().getChildren());
         return converter.convert();
     }
 }

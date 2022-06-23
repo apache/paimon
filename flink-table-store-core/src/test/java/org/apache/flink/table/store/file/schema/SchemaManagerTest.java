@@ -83,9 +83,10 @@ public class SchemaManagerTest {
 
     @Test
     public void testCommitNewVersion() throws Exception {
-        Schema schema = retryArtificialException(() -> manager.commitNewVersion(updateSchema));
+        TableSchema tableSchema =
+                retryArtificialException(() -> manager.commitNewVersion(updateSchema));
 
-        Optional<Schema> latest = retryArtificialException(() -> manager.latest());
+        Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
 
         List<DataField> fields =
                 Arrays.asList(
@@ -94,11 +95,11 @@ public class SchemaManagerTest {
                         new DataField(2, "f2", new AtomicDataType(new VarCharType())));
 
         assertThat(latest.isPresent()).isTrue();
-        assertThat(schema).isEqualTo(latest.get());
-        assertThat(schema.fields()).isEqualTo(fields);
-        assertThat(schema.partitionKeys()).isEqualTo(partitionKeys);
-        assertThat(schema.primaryKeys()).isEqualTo(primaryKeys);
-        assertThat(schema.options()).isEqualTo(options);
+        assertThat(tableSchema).isEqualTo(latest.get());
+        assertThat(tableSchema.fields()).isEqualTo(fields);
+        assertThat(tableSchema.partitionKeys()).isEqualTo(partitionKeys);
+        assertThat(tableSchema.primaryKeys()).isEqualTo(primaryKeys);
+        assertThat(tableSchema.options()).isEqualTo(options);
     }
 
     @Test
@@ -108,7 +109,7 @@ public class SchemaManagerTest {
         UpdateSchema updateSchema =
                 new UpdateSchema(rowType, partitionKeys, primaryKeys, newOptions, "my_comment_2");
         retryArtificialException(() -> manager.commitNewVersion(updateSchema));
-        Optional<Schema> latest = retryArtificialException(() -> manager.latest());
+        Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
         assertThat(latest.isPresent()).isTrue();
         assertThat(latest.get().options()).isEqualTo(newOptions);
     }
