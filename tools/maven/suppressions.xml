@@ -80,6 +80,6 @@ under the License.
 			files="[\\/]target[\\/]"
 			checks=".*"/>
 		<suppress
-			files="org[\\/]apache[\\/]flink[\\/]formats[\\/]avro[\\/]glue[\\/]tableSchema[\\/]registry[\\/]User.java"
+			files="org[\\/]apache[\\/]flink[\\/]formats[\\/]avro[\\/]glue[\\/]schema[\\/]registry[\\/]User.java"
 			checks=".*"/>
 </suppressions>
