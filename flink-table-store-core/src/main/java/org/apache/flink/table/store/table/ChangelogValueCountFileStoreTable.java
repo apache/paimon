@@ -29,8 +29,8 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.writer.RecordWriter;
@@ -56,8 +56,8 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     private final KeyValueFileStore store;
 
     ChangelogValueCountFileStoreTable(
-            String name, SchemaManager schemaManager, Schema schema, String user) {
-        super(name, schema);
+            String name, SchemaManager schemaManager, TableSchema tableSchema, String user) {
+        super(name, tableSchema);
         RowType countType =
                 RowType.of(
                         new LogicalType[] {new BigIntType(false)}, new String[] {"_VALUE_COUNT"});
@@ -65,11 +65,11 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
         this.store =
                 new KeyValueFileStore(
                         schemaManager,
-                        schema.id(),
-                        new FileStoreOptions(schema.options()),
+                        tableSchema.id(),
+                        new FileStoreOptions(tableSchema.options()),
                         user,
-                        schema.logicalPartitionType(),
-                        schema.logicalRowType(),
+                        tableSchema.logicalPartitionType(),
+                        tableSchema.logicalRowType(),
                         countType,
                         mergeFunction);
     }
@@ -77,7 +77,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     @Override
     public TableScan newScan() {
         KeyValueFileStoreScan scan = store.newScan();
-        return new TableScan(scan, schema, store.pathFactory()) {
+        return new TableScan(scan, tableSchema, store.pathFactory()) {
             @Override
             protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
                 return new MergeTreeSplitGenerator(
@@ -127,7 +127,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     @Override
     public TableWrite newWrite() {
         SinkRecordConverter recordConverter =
-                new SinkRecordConverter(store.options().bucket(), schema);
+                new SinkRecordConverter(store.options().bucket(), tableSchema);
         return new AbstractTableWrite<KeyValue>(store.newWrite(), recordConverter) {
             @Override
             protected void writeSinkRecord(SinkRecord record, RecordWriter<KeyValue> writer)

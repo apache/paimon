@@ -20,8 +20,8 @@ package org.apache.flink.table.store.hive;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.schema.DataField;
-import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.types.logical.LogicalType;
 
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
@@ -40,22 +40,24 @@ import java.util.stream.Collectors;
 /** Column names, types and comments of a Hive table. */
 public class HiveSchema {
 
-    private final Schema schema;
+    private final TableSchema tableSchema;
 
-    private HiveSchema(Schema schema) {
-        this.schema = schema;
+    private HiveSchema(TableSchema tableSchema) {
+        this.tableSchema = tableSchema;
     }
 
     public List<String> fieldNames() {
-        return schema.fieldNames();
+        return tableSchema.fieldNames();
     }
 
     public List<LogicalType> fieldTypes() {
-        return schema.logicalRowType().getChildren();
+        return tableSchema.logicalRowType().getChildren();
     }
 
     public List<String> fieldComments() {
-        return schema.fields().stream().map(DataField::description).collect(Collectors.toList());
+        return tableSchema.fields().stream()
+                .map(DataField::description)
+                .collect(Collectors.toList());
     }
 
     /** Extract {@link HiveSchema} from Hive serde properties. */
@@ -69,7 +71,7 @@ public class HiveSchema {
                             + ". Currently Flink table store only supports external table for Hive "
                             + "so location property must be set.");
         }
-        Schema schema =
+        TableSchema tableSchema =
                 new SchemaManager(new Path(location))
                         .latest()
                         .orElseThrow(
@@ -91,20 +93,20 @@ public class HiveSchema {
             List<TypeInfo> typeInfos = TypeInfoUtils.getTypeInfosFromTypeString(columnTypes);
 
             if (names.size() > 0 && typeInfos.size() > 0) {
-                checkSchemaMatched(names, typeInfos, schema);
+                checkSchemaMatched(names, typeInfos, tableSchema);
             }
         }
 
-        return new HiveSchema(schema);
+        return new HiveSchema(tableSchema);
     }
 
     private static void checkSchemaMatched(
-            List<String> names, List<TypeInfo> typeInfos, Schema schema) {
+            List<String> names, List<TypeInfo> typeInfos, TableSchema tableSchema) {
         List<String> ddlNames = new ArrayList<>(names);
         List<TypeInfo> ddlTypeInfos = new ArrayList<>(typeInfos);
-        List<String> schemaNames = schema.fieldNames();
+        List<String> schemaNames = tableSchema.fieldNames();
         List<TypeInfo> schemaTypeInfos =
-                schema.logicalRowType().getChildren().stream()
+                tableSchema.logicalRowType().getChildren().stream()
                         .map(HiveTypeUtils::logicalTypeToTypeInfo)
                         .collect(Collectors.toList());
 

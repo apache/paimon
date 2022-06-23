@@ -25,8 +25,8 @@ import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
@@ -167,7 +167,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         conf.set(FileStoreOptions.FILE_FORMAT, "avro");
         conf.set(FileStoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
         SchemaManager schemaManager = new SchemaManager(tablePath);
-        Schema schema =
+        TableSchema tableSchema =
                 schemaManager.commitNewVersion(
                         new UpdateSchema(
                                 ROW_TYPE,
@@ -175,6 +175,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 Collections.emptyList(),
                                 conf.toMap(),
                                 ""));
-        return new AppendOnlyFileStoreTable(tablePath.getName(), schemaManager, schema, "user");
+        return new AppendOnlyFileStoreTable(
+                tablePath.getName(), schemaManager, tableSchema, "user");
     }
 }

@@ -27,7 +27,7 @@ import org.apache.flink.table.store.file.predicate.CompoundPredicate;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 
 import javax.annotation.Nullable;
@@ -41,12 +41,13 @@ import java.util.Optional;
 public abstract class TableScan {
 
     private final FileStoreScan scan;
-    private final Schema schema;
+    private final TableSchema tableSchema;
     private final FileStorePathFactory pathFactory;
 
-    protected TableScan(FileStoreScan scan, Schema schema, FileStorePathFactory pathFactory) {
+    protected TableScan(
+            FileStoreScan scan, TableSchema tableSchema, FileStorePathFactory pathFactory) {
         this.scan = scan;
-        this.schema = schema;
+        this.tableSchema = tableSchema;
         this.pathFactory = pathFactory;
     }
 
@@ -63,9 +64,11 @@ public abstract class TableScan {
     }
 
     public TableScan withFilter(Predicate predicate) {
-        List<String> partitionKeys = schema.partitionKeys();
+        List<String> partitionKeys = tableSchema.partitionKeys();
         int[] fieldIdxToPartitionIdx =
-                schema.fields().stream().mapToInt(f -> partitionKeys.indexOf(f.name())).toArray();
+                tableSchema.fields().stream()
+                        .mapToInt(f -> partitionKeys.indexOf(f.name()))
+                        .toArray();
 
         List<Predicate> partitionFilters = new ArrayList<>();
         List<Predicate> nonPartitionFilters = new ArrayList<>();

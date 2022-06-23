@@ -37,8 +37,8 @@ import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.Factory;
 import org.apache.flink.table.factories.FactoryUtil;
-import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.util.function.RunnableWithException;
 
@@ -167,12 +167,12 @@ public class FileSystemCatalog extends TableStoreCatalog {
     public CatalogBaseTable getTable(ObjectPath tablePath)
             throws TableNotExistException, CatalogException {
         Path path = tablePath(tablePath);
-        Schema schema =
+        TableSchema tableSchema =
                 new SchemaManager(path)
                         .latest()
                         .orElseThrow(() -> new TableNotExistException(getName(), tablePath));
 
-        CatalogTable table = schema.toUpdateSchema().toCatalogTable();
+        CatalogTable table = tableSchema.toUpdateSchema().toCatalogTable();
         // add path to source and sink
         table.getOptions().put(PATH.key(), path.toString());
         return table;

@@ -50,7 +50,7 @@ public class SchemaManager implements Serializable {
     }
 
     /** @return latest schema. */
-    public Optional<Schema> latest() {
+    public Optional<TableSchema> latest() {
         try {
             return listVersionedFiles(schemaDirectory(), SCHEMA_PREFIX)
                     .reduce(Math::max)
@@ -61,7 +61,7 @@ public class SchemaManager implements Serializable {
     }
 
     /** List all schema. */
-    public List<Schema> listAll() {
+    public List<TableSchema> listAll() {
         return listAllIds().stream().map(this::schema).collect(Collectors.toList());
     }
 
@@ -76,12 +76,12 @@ public class SchemaManager implements Serializable {
     }
 
     /** Create a new schema from {@link UpdateSchema}. */
-    public Schema commitNewVersion(UpdateSchema updateSchema) throws Exception {
+    public TableSchema commitNewVersion(UpdateSchema updateSchema) throws Exception {
         return commitNewVersion(Callable::call, updateSchema);
     }
 
     /** Create a new schema from {@link UpdateSchema}. */
-    public Schema commitNewVersion(Lock lock, UpdateSchema updateSchema) throws Exception {
+    public TableSchema commitNewVersion(Lock lock, UpdateSchema updateSchema) throws Exception {
         RowType rowType = updateSchema.rowType();
         List<String> partitionKeys = updateSchema.partitionKeys();
         List<String> primaryKeys = updateSchema.primaryKeys();
@@ -91,36 +91,36 @@ public class SchemaManager implements Serializable {
             long id;
             int highestFieldId;
             List<DataField> fields;
-            Optional<Schema> latest = latest();
+            Optional<TableSchema> latest = latest();
             if (latest.isPresent()) {
-                Schema oldSchema = latest.get();
+                TableSchema oldTableSchema = latest.get();
                 Preconditions.checkArgument(
-                        oldSchema.primaryKeys().equals(primaryKeys),
+                        oldTableSchema.primaryKeys().equals(primaryKeys),
                         "Primary key modification is not supported, "
                                 + "old primaryKeys is %s, new primaryKeys is %s",
-                        oldSchema.primaryKeys(),
+                        oldTableSchema.primaryKeys(),
                         primaryKeys);
 
                 if (!updateSchema
                                 .rowType()
                                 .getFields()
-                                .equals(oldSchema.logicalRowType().getFields())
-                        || !updateSchema.partitionKeys().equals(oldSchema.partitionKeys())) {
+                                .equals(oldTableSchema.logicalRowType().getFields())
+                        || !updateSchema.partitionKeys().equals(oldTableSchema.partitionKeys())) {
                     throw new UnsupportedOperationException(
                             "TODO: support update field types and partition keys. ");
                 }
 
-                fields = oldSchema.fields();
-                id = oldSchema.id() + 1;
-                highestFieldId = oldSchema.highestFieldId();
+                fields = oldTableSchema.fields();
+                id = oldTableSchema.id() + 1;
+                highestFieldId = oldTableSchema.highestFieldId();
             } else {
-                fields = Schema.newFields(rowType);
-                highestFieldId = Schema.currentHighestFieldId(fields);
+                fields = TableSchema.newFields(rowType);
+                highestFieldId = TableSchema.currentHighestFieldId(fields);
                 id = 0;
             }
 
-            Schema schema =
-                    new Schema(
+            TableSchema tableSchema =
+                    new TableSchema(
                             id,
                             fields,
                             highestFieldId,
@@ -140,18 +140,19 @@ public class SchemaManager implements Serializable {
                                 }
 
                                 return MetaFileWriter.writeFileSafety(
-                                        schemaPath, schema.toString());
+                                        schemaPath, tableSchema.toString());
                             });
             if (success) {
-                return schema;
+                return tableSchema;
             }
         }
     }
 
     /** Read schema for schema id. */
-    public Schema schema(long id) {
+    public TableSchema schema(long id) {
         try {
-            return JsonSerdeUtil.fromJson(FileUtils.readFileUtf8(toSchemaPath(id)), Schema.class);
+            return JsonSerdeUtil.fromJson(
+                    FileUtils.readFileUtf8(toSchemaPath(id)), TableSchema.class);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
