@@ -28,7 +28,6 @@ import org.apache.flink.table.catalog.CatalogPartition;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ObjectPath;
-import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.exceptions.CatalogException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
@@ -159,11 +158,11 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     private UpdateSchema convertTableToSchema(ObjectPath tablePath, CatalogBaseTable baseTable) {
-        if (!(baseTable instanceof ResolvedCatalogTable)) {
+        if (!(baseTable instanceof CatalogTable)) {
             throw new UnsupportedOperationException(
-                    "Only support ResolvedCatalogTable, but is: " + baseTable.getClass());
+                    "Only support CatalogTable, but is: " + baseTable.getClass());
         }
-        ResolvedCatalogTable table = (ResolvedCatalogTable) baseTable;
+        CatalogTable table = (CatalogTable) baseTable;
         Map<String, String> options = table.getOptions();
         if (options.containsKey(CONNECTOR.key())) {
             throw new CatalogException(
