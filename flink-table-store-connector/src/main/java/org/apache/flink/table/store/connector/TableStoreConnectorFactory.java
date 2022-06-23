@@ -20,7 +20,7 @@ package org.apache.flink.table.store.connector;
 
 import org.apache.flink.table.factories.DynamicTableFactory;
 
-import static org.apache.flink.table.store.file.catalog.TableStoreCatalogFactory.IDENTIFIER;
+import static org.apache.flink.table.store.connector.FlinkCatalogFactory.IDENTIFIER;
 
 /** A table store {@link DynamicTableFactory} to create source and sink. */
 public class TableStoreConnectorFactory extends AbstractTableStoreFactory {

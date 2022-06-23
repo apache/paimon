@@ -1,0 +1,184 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.flink.table.store.file.catalog;
+
+import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.file.schema.UpdateSchema;
+
+import java.util.List;
+
+/**
+ * This interface is responsible for reading and writing metadata such as database/table from a
+ * table store catalog.
+ */
+public interface Catalog extends AutoCloseable {
+
+    /**
+     * Get the names of all databases in this catalog.
+     *
+     * @return a list of the names of all databases
+     */
+    List<String> listDatabases();
+
+    /**
+     * Drop a database.
+     *
+     * @param name Name of the database to be dropped.
+     * @param cascade Flag to specify behavior when the database contains table or function: if set
+     *     to true, delete all tables and functions in the database and then delete the database, if
+     *     set to false, throw an exception.
+     * @throws DatabaseNotEmptyException if the given database is not empty and isRestrict is true
+     */
+    void dropDatabase(String name, boolean cascade) throws DatabaseNotEmptyException;
+
+    /**
+     * Get names of all tables under this database. An empty list is returned if none exists.
+     *
+     * @return a list of the names of all tables in this database
+     */
+    List<String> listTables(String databaseName);
+
+    /**
+     * Returns the table location path identified by the given {@link ObjectPath}.
+     *
+     * @param tablePath Path of the table
+     * @return The requested table location
+     */
+    Path getTableLocation(ObjectPath tablePath);
+
+    /**
+     * Returns a {@link TableSchema} identified by the given {@link ObjectPath}.
+     *
+     * @param tablePath Path of the table
+     * @return The requested table
+     * @throws TableNotExistException if the target does not exist
+     */
+    TableSchema getTable(ObjectPath tablePath) throws TableNotExistException;
+
+    /**
+     * Check if a table exists in this catalog.
+     *
+     * @param tablePath Path of the table
+     * @return true if the given table exists in the catalog false otherwise
+     */
+    boolean tableExists(ObjectPath tablePath);
+
+    /**
+     * Drop a table.
+     *
+     * @param tablePath Path of the table to be dropped
+     * @param ignoreIfNotExists Flag to specify behavior when the table does not exist: if set to
+     *     false, throw an exception, if set to true, do nothing.
+     * @throws TableNotExistException if the table does not exist
+     */
+    void dropTable(ObjectPath tablePath, boolean ignoreIfNotExists) throws TableNotExistException;
+
+    /**
+     * Creates a new table.
+     *
+     * @param tablePath path of the table to be created
+     * @param tableSchema the table definition
+     * @param ignoreIfExists flag to specify behavior when a table already exists at the given path:
+     *     if set to false, it throws a TableAlreadyExistException, if set to true, do nothing.
+     * @throws TableAlreadyExistException if table already exists and ignoreIfExists is false
+     */
+    void createTable(ObjectPath tablePath, UpdateSchema tableSchema, boolean ignoreIfExists)
+            throws TableAlreadyExistException;
+
+    /**
+     * Modifies an existing table.
+     *
+     * @param tablePath path of the table to be modified
+     * @param newTableSchema the new table definition
+     * @param ignoreIfNotExists flag to specify behavior when the table does not exist: if set to
+     *     false, throw an exception, if set to true, do nothing.
+     * @throws TableNotExistException if the table does not exist
+     */
+    void alterTable(ObjectPath tablePath, UpdateSchema newTableSchema, boolean ignoreIfNotExists)
+            throws TableNotExistException;
+
+    /** Exception for trying to drop on a database that is not empty. */
+    class DatabaseNotEmptyException extends Exception {
+        private static final String MSG = "Database %s is not empty.";
+
+        private final String database;
+
+        public DatabaseNotEmptyException(String database, Throwable cause) {
+            super(String.format(MSG, database), cause);
+            this.database = database;
+        }
+
+        public DatabaseNotEmptyException(String database) {
+            this(database, null);
+        }
+
+        public String database() {
+            return database;
+        }
+    }
+
+    /** Exception for trying to create a table that already exists. */
+    class TableAlreadyExistException extends Exception {
+
+        private static final String MSG = "Table %s already exists.";
+
+        private final ObjectPath tablePath;
+
+        public TableAlreadyExistException(ObjectPath tablePath) {
+            this(tablePath, null);
+        }
+
+        public TableAlreadyExistException(ObjectPath tablePath, Throwable cause) {
+            super(String.format(MSG, tablePath.getFullName()), cause);
+            this.tablePath = tablePath;
+        }
+
+        public ObjectPath tablePath() {
+            return tablePath;
+        }
+    }
+
+    /** Exception for trying to operate on a table that doesn't exist. */
+    class TableNotExistException extends Exception {
+
+        private static final String MSG = "Table %s does not exist.";
+
+        private final ObjectPath tablePath;
+
+        public TableNotExistException(ObjectPath tablePath) {
+            this(tablePath, null);
+        }
+
+        public TableNotExistException(ObjectPath tablePath, Throwable cause) {
+            super(String.format(MSG, tablePath.getFullName()), cause);
+            this.tablePath = tablePath;
+        }
+
+        public ObjectPath tablePath() {
+            return tablePath;
+        }
+    }
+
+    /** Create a {@link Catalog} from warehouse path. */
+    static Catalog create(Path warehouse) {
+        return new FileSystemCatalog(warehouse);
+    }
+}
