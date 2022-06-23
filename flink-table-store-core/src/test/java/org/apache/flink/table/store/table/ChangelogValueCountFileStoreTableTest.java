@@ -25,8 +25,8 @@ import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
@@ -170,7 +170,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         conf.set(FileStoreOptions.FILE_FORMAT, "avro");
         conf.set(FileStoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
         SchemaManager schemaManager = new SchemaManager(tablePath);
-        Schema schema =
+        TableSchema tableSchema =
                 schemaManager.commitNewVersion(
                         new UpdateSchema(
                                 ROW_TYPE,
@@ -179,6 +179,6 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
                                 conf.toMap(),
                                 ""));
         return new ChangelogValueCountFileStoreTable(
-                tablePath.getName(), schemaManager, schema, "user");
+                tablePath.getName(), schemaManager, tableSchema, "user");
     }
 }

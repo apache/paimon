@@ -21,7 +21,7 @@ package org.apache.flink.table.store.connector.sink;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.ValueKind;
-import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.store.table.FileStoreTable;
@@ -39,11 +39,11 @@ import org.apache.flink.types.RowKind;
 public class TestFileStoreTable implements FileStoreTable {
 
     private final TestFileStore store;
-    private final Schema schema;
+    private final TableSchema tableSchema;
 
-    public TestFileStoreTable(TestFileStore store, Schema schema) {
+    public TestFileStoreTable(TestFileStore store, TableSchema tableSchema) {
         this.store = store;
-        this.schema = schema;
+        this.tableSchema = tableSchema;
     }
 
     @Override
@@ -52,8 +52,8 @@ public class TestFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public Schema schema() {
-        return schema;
+    public TableSchema schema() {
+        return tableSchema;
     }
 
     @Override
@@ -74,7 +74,7 @@ public class TestFileStoreTable implements FileStoreTable {
     @Override
     public TableWrite newWrite() {
         return new AbstractTableWrite<KeyValue>(
-                store.newWrite(), new SinkRecordConverter(2, schema)) {
+                store.newWrite(), new SinkRecordConverter(2, tableSchema)) {
             @Override
             protected void writeSinkRecord(SinkRecord record, RecordWriter<KeyValue> writer)
                     throws Exception {

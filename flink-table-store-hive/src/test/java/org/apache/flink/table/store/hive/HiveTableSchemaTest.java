@@ -37,7 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Tests for {@link HiveSchema}. */
-public class HiveSchemaTest {
+public class HiveTableSchemaTest {
 
     private static final RowType ROW_TYPE =
             new RowType(

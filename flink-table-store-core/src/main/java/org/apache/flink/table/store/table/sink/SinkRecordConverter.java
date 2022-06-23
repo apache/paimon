@@ -22,7 +22,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.generated.Projection;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
-import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 
@@ -44,13 +44,13 @@ public class SinkRecordConverter {
 
     @Nullable private final Projection<RowData, BinaryRowData> logPkProjection;
 
-    public SinkRecordConverter(int numBucket, Schema schema) {
+    public SinkRecordConverter(int numBucket, TableSchema tableSchema) {
         this(
                 numBucket,
-                schema.logicalRowType(),
-                schema.projection(schema.partitionKeys()),
-                schema.projection(schema.trimmedPrimaryKeys()),
-                schema.projection(schema.primaryKeys()));
+                tableSchema.logicalRowType(),
+                tableSchema.projection(tableSchema.partitionKeys()),
+                tableSchema.projection(tableSchema.trimmedPrimaryKeys()),
+                tableSchema.projection(tableSchema.primaryKeys()));
     }
 
     public SinkRecordConverter(

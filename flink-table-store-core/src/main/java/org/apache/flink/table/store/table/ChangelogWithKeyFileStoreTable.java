@@ -31,8 +31,8 @@ import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFun
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.writer.RecordWriter;
@@ -62,14 +62,14 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     private final KeyValueFileStore store;
 
     ChangelogWithKeyFileStoreTable(
-            String name, SchemaManager schemaManager, Schema schema, String user) {
-        super(name, schema);
-        RowType rowType = schema.logicalRowType();
+            String name, SchemaManager schemaManager, TableSchema tableSchema, String user) {
+        super(name, tableSchema);
+        RowType rowType = tableSchema.logicalRowType();
 
         // add _KEY_ prefix to avoid conflict with value
         RowType keyType =
                 new RowType(
-                        schema.logicalTrimmedPrimaryKeysType().getFields().stream()
+                        tableSchema.logicalTrimmedPrimaryKeysType().getFields().stream()
                                 .map(
                                         f ->
                                                 new RowType.RowField(
@@ -78,7 +78,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                                                         f.getDescription().orElse(null)))
                                 .collect(Collectors.toList()));
 
-        Configuration conf = Configuration.fromMap(schema.options());
+        Configuration conf = Configuration.fromMap(tableSchema.options());
 
         FileStoreOptions.MergeEngine mergeEngine = conf.get(FileStoreOptions.MERGE_ENGINE);
         MergeFunction mergeFunction;
@@ -101,10 +101,10 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         this.store =
                 new KeyValueFileStore(
                         schemaManager,
-                        schema.id(),
+                        tableSchema.id(),
                         new FileStoreOptions(conf),
                         user,
-                        schema.logicalPartitionType(),
+                        tableSchema.logicalPartitionType(),
                         keyType,
                         rowType,
                         mergeFunction);
@@ -113,7 +113,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public TableScan newScan() {
         KeyValueFileStoreScan scan = store.newScan();
-        return new TableScan(scan, schema, store.pathFactory()) {
+        return new TableScan(scan, tableSchema, store.pathFactory()) {
             @Override
             protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
                 return new MergeTreeSplitGenerator(
@@ -133,9 +133,9 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                 // file 2 will be ignored, and the final result will be key = a, value = 1 while the
                 // correct result is an empty set
                 // TODO support value filter
-                List<String> trimmedPrimaryKeys = schema.trimmedPrimaryKeys();
+                List<String> trimmedPrimaryKeys = tableSchema.trimmedPrimaryKeys();
                 int[] fieldIdxToKeyIdx =
-                        schema.fields().stream()
+                        tableSchema.fields().stream()
                                 .mapToInt(f -> trimmedPrimaryKeys.indexOf(f.name()))
                                 .toArray();
                 List<Predicate> keyFilters = new ArrayList<>();
@@ -176,7 +176,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public TableWrite newWrite() {
         SinkRecordConverter recordConverter =
-                new SinkRecordConverter(store.options().bucket(), schema);
+                new SinkRecordConverter(store.options().bucket(), tableSchema);
         return new AbstractTableWrite<KeyValue>(store.newWrite(), recordConverter) {
             @Override
             protected void writeSinkRecord(SinkRecord record, RecordWriter<KeyValue> writer)

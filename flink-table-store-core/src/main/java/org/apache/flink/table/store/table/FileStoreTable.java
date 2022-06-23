@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableCompact;
@@ -36,7 +36,7 @@ public interface FileStoreTable extends Serializable {
 
     String name();
 
-    Schema schema();
+    TableSchema schema();
 
     SnapshotManager snapshotManager();
 

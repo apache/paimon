@@ -29,11 +29,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.flink.table.store.file.schema.SchemaTest.newRowType;
+import static org.apache.flink.table.store.file.schema.TableSchemaTest.newRowType;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for serialize {@link Schema}. */
-public class SchemaSerializationTest {
+/** Test for serialize {@link TableSchema}. */
+public class TableSchemaSerializationTest {
 
     @Test
     public void testSchema() {
@@ -50,11 +50,11 @@ public class SchemaSerializationTest {
         options.put("option-1", "value-1");
         options.put("option-2", "value-2");
 
-        Schema schema =
-                new Schema(1, fields, 10, partitionKeys, primaryKeys, options, "my_comment");
-        String serialized = JsonSerdeUtil.toJson(schema);
+        TableSchema tableSchema =
+                new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "my_comment");
+        String serialized = JsonSerdeUtil.toJson(tableSchema);
 
-        Schema deserialized = JsonSerdeUtil.fromJson(serialized, Schema.class);
-        assertThat(deserialized).isEqualTo(schema);
+        TableSchema deserialized = JsonSerdeUtil.fromJson(serialized, TableSchema.class);
+        assertThat(deserialized).isEqualTo(tableSchema);
     }
 }

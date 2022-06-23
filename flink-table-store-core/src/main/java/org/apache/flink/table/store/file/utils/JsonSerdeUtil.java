@@ -21,8 +21,8 @@ package org.apache.flink.table.store.file.utils;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.DataFieldSerializer;
-import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaSerializer;
+import org.apache.flink.table.store.file.schema.TableSchema;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonParser;
@@ -71,7 +71,7 @@ public class JsonSerdeUtil {
 
     private static Module createTableStoreJacksonModule() {
         SimpleModule module = new SimpleModule("Table store");
-        registerJsonObjects(module, Schema.class, SchemaSerializer.INSTANCE);
+        registerJsonObjects(module, TableSchema.class, SchemaSerializer.INSTANCE);
         registerJsonObjects(module, DataField.class, DataFieldSerializer.INSTANCE);
         return module;
     }

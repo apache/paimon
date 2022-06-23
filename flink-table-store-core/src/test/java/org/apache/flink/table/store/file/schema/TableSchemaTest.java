@@ -36,8 +36,8 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link Schema}. */
-public class SchemaTest {
+/** Test for {@link TableSchema}. */
+public class TableSchemaTest {
 
     @Test
     public void testInvalidPrimaryKeys() {
@@ -52,7 +52,7 @@ public class SchemaTest {
 
         Assertions.assertThrows(
                 IllegalStateException.class,
-                () -> new Schema(1, fields, 10, partitionKeys, primaryKeys, options, ""));
+                () -> new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, ""));
     }
 
     @Test
@@ -61,7 +61,8 @@ public class SchemaTest {
                 Arrays.asList(
                         new DataField(0, "f0", new AtomicDataType(new IntType())),
                         new DataField(0, "f1", new AtomicDataType(new IntType())));
-        Assertions.assertThrows(RuntimeException.class, () -> Schema.currentHighestFieldId(fields));
+        Assertions.assertThrows(
+                RuntimeException.class, () -> TableSchema.currentHighestFieldId(fields));
     }
 
     @Test
@@ -70,7 +71,7 @@ public class SchemaTest {
                 Arrays.asList(
                         new DataField(0, "f0", new AtomicDataType(new IntType())),
                         new DataField(20, "f1", new AtomicDataType(new IntType())));
-        assertThat(Schema.currentHighestFieldId(fields)).isEqualTo(20);
+        assertThat(TableSchema.currentHighestFieldId(fields)).isEqualTo(20);
     }
 
     @Test
@@ -94,7 +95,7 @@ public class SchemaTest {
                         new DataField(5, "f3", new MultisetDataType(newRowType(6))),
                         new DataField(7, "f4", new MapDataType(newRowType(8), newRowType(9))));
 
-        assertThat(Schema.newFields(type)).isEqualTo(fields);
+        assertThat(TableSchema.newFields(type)).isEqualTo(fields);
     }
 
     static RowType newLogicalRowType() {

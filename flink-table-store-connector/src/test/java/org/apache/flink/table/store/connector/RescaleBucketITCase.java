@@ -25,8 +25,8 @@ import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.runtime.jobgraph.SavepointConfigOptions;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.types.Row;
 
@@ -162,9 +162,10 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
     private void assertLatestSchema(
             SchemaManager schemaManager, long expectedSchemaId, int expectedBucketNum) {
         assertThat(schemaManager.latest()).isPresent();
-        Schema schema = schemaManager.latest().get();
-        assertThat(schema.id()).isEqualTo(expectedSchemaId);
-        assertThat(schema.options()).containsEntry(BUCKET.key(), String.valueOf(expectedBucketNum));
+        TableSchema tableSchema = schemaManager.latest().get();
+        assertThat(tableSchema.id()).isEqualTo(expectedSchemaId);
+        assertThat(tableSchema.options())
+                .containsEntry(BUCKET.key(), String.valueOf(expectedBucketNum));
     }
 
     private void assertSnapshotSchema(
@@ -173,8 +174,9 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
             long expectedSchemaId,
             int expectedBucketNum) {
         assertThat(schemaIdFromSnapshot).isEqualTo(expectedSchemaId);
-        Schema schema = schemaManager.schema(schemaIdFromSnapshot);
-        assertThat(schema.options()).containsEntry(BUCKET.key(), String.valueOf(expectedBucketNum));
+        TableSchema tableSchema = schemaManager.schema(schemaIdFromSnapshot);
+        assertThat(tableSchema.options())
+                .containsEntry(BUCKET.key(), String.valueOf(expectedBucketNum));
     }
 
     private void innerTest(String catalogName, String tableName, boolean managedTable) {
