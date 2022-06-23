@@ -25,8 +25,8 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
-import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.TableWrite;
@@ -95,7 +95,7 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
         conf.set(MergeTreeOptions.WRITE_BUFFER_SIZE, new MemorySize(30 * 1024));
         conf.set(MergeTreeOptions.PAGE_SIZE, new MemorySize(1024));
         SchemaManager schemaManager = new SchemaManager(tablePath);
-        Schema schema =
+        TableSchema schema =
                 schemaManager.commitNewVersion(
                         new UpdateSchema(
                                 ROW_TYPE,
