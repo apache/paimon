@@ -39,6 +39,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -167,11 +168,12 @@ public class SchemaManagerTest {
             thread.join();
         }
 
-        // assert
-        List<String> ids =
+        // assert ids
+        // use set, possible duplicate committing
+        Set<String> ids =
                 retryArtificialException(() -> manager.listAll()).stream()
                         .map(schema -> schema.options().get("id"))
-                        .collect(Collectors.toList());
+                        .collect(Collectors.toSet());
         assertThat(ids)
                 .containsExactlyInAnyOrder(
                         IntStream.range(0, threadNumber)
