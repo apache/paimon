@@ -22,69 +22,32 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.catalog.CatalogBaseTable;
-import org.apache.flink.table.catalog.CatalogDatabase;
-import org.apache.flink.table.catalog.CatalogDatabaseImpl;
-import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ObjectPath;
-import org.apache.flink.table.catalog.ResolvedCatalogTable;
-import org.apache.flink.table.catalog.exceptions.CatalogException;
-import org.apache.flink.table.catalog.exceptions.DatabaseAlreadyExistException;
-import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
-import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
-import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
-import org.apache.flink.table.catalog.exceptions.TableNotExistException;
-import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.flink.table.factories.Factory;
-import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.util.function.RunnableWithException;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.Callable;
 
-import static org.apache.flink.table.catalog.GenericInMemoryCatalogFactoryOptions.DEFAULT_DATABASE;
-import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
-import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
-import static org.apache.flink.table.store.file.catalog.TableStoreCatalogFactory.IDENTIFIER;
 import static org.apache.flink.table.store.file.utils.FileUtils.safelyListFileStatus;
 
 /** A catalog implementation for {@link FileSystem}. */
-public class FileSystemCatalog extends TableStoreCatalog {
+public class FileSystemCatalog implements Catalog {
 
     public static final String DB_SUFFIX = ".db";
-
-    public static final CatalogDatabaseImpl DUMMY_DATABASE =
-            new CatalogDatabaseImpl(Collections.emptyMap(), null);
 
     private final FileSystem fs;
     private final Path warehouse;
 
-    public FileSystemCatalog(String name, Path warehouse) {
-        this(name, warehouse, DEFAULT_DATABASE.defaultValue());
-    }
-
-    public FileSystemCatalog(String name, Path warehouse, String defaultDatabase) {
-        super(name, defaultDatabase);
+    public FileSystemCatalog(Path warehouse) {
         this.warehouse = warehouse;
         this.fs = uncheck(warehouse::getFileSystem);
-        uncheck(() -> createDatabase(defaultDatabase, DUMMY_DATABASE, true));
     }
 
     @Override
-    public Optional<Factory> getFactory() {
-        return Optional.of(
-                FactoryUtil.discoverFactory(classLoader(), DynamicTableFactory.class, IDENTIFIER));
-    }
-
-    @Override
-    public List<String> listDatabases() throws CatalogException {
+    public List<String> listDatabases() {
         List<String> databases = new ArrayList<>();
         for (FileStatus status : uncheck(() -> safelyListFileStatus(warehouse))) {
             Path path = status.getPath();
@@ -96,62 +59,44 @@ public class FileSystemCatalog extends TableStoreCatalog {
     }
 
     @Override
-    public CatalogDatabase getDatabase(String databaseName)
-            throws DatabaseNotExistException, CatalogException {
-        if (!databaseExists(databaseName)) {
-            throw new DatabaseNotExistException(getName(), databaseName);
-        }
-        return new CatalogDatabaseImpl(Collections.emptyMap(), "");
-    }
-
-    @Override
-    public boolean databaseExists(String databaseName) throws CatalogException {
+    public boolean databaseExists(String databaseName) {
         return uncheck(() -> fs.exists(databasePath(databaseName)));
     }
 
     @Override
-    public void createDatabase(String name, CatalogDatabase database, boolean ignoreIfExists)
-            throws DatabaseAlreadyExistException, CatalogException {
-        if (database.getProperties().size() > 0) {
-            throw new UnsupportedOperationException(
-                    "Create database with properties is unsupported.");
+    public void createDatabase(String name, boolean ignoreIfExists)
+            throws DatabaseAlreadyExistException {
+        if (databaseExists(name)) {
+            if (ignoreIfExists) {
+                return;
+            }
+            throw new DatabaseAlreadyExistException(name);
         }
-
-        if (database.getDescription().isPresent() && !database.getDescription().get().equals("")) {
-            throw new UnsupportedOperationException(
-                    "Create database with description is unsupported.");
-        }
-
-        if (!ignoreIfExists && databaseExists(name)) {
-            throw new DatabaseAlreadyExistException(getName(), name);
-        }
-
         uncheck(() -> fs.mkdirs(databasePath(name)));
     }
 
     @Override
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
-            throws DatabaseNotExistException, DatabaseNotEmptyException, CatalogException {
+            throws DatabaseNotExistException, DatabaseNotEmptyException {
         if (!databaseExists(name)) {
             if (ignoreIfNotExists) {
                 return;
             }
 
-            throw new DatabaseNotExistException(getName(), name);
+            throw new DatabaseNotExistException(name);
         }
 
-        if (listTables(name).size() > 0) {
-            throw new DatabaseNotEmptyException(getName(), name);
+        if (!cascade && listTables(name).size() > 0) {
+            throw new DatabaseNotEmptyException(name);
         }
 
         uncheck(() -> fs.delete(databasePath(name), true));
     }
 
     @Override
-    public List<String> listTables(String databaseName)
-            throws DatabaseNotExistException, CatalogException {
+    public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         if (!databaseExists(databaseName)) {
-            throw new DatabaseNotExistException(getName(), databaseName);
+            throw new DatabaseNotExistException(databaseName);
         }
 
         List<String> tables = new ArrayList<>();
@@ -164,22 +109,20 @@ public class FileSystemCatalog extends TableStoreCatalog {
     }
 
     @Override
-    public CatalogBaseTable getTable(ObjectPath tablePath)
-            throws TableNotExistException, CatalogException {
-        Path path = tablePath(tablePath);
-        TableSchema tableSchema =
-                new SchemaManager(path)
-                        .latest()
-                        .orElseThrow(() -> new TableNotExistException(getName(), tablePath));
-
-        CatalogTable table = tableSchema.toUpdateSchema().toCatalogTable();
-        // add path to source and sink
-        table.getOptions().put(PATH.key(), path.toString());
-        return table;
+    public Path getTableLocation(ObjectPath tablePath) {
+        return tablePath(tablePath);
     }
 
     @Override
-    public boolean tableExists(ObjectPath tablePath) throws CatalogException {
+    public TableSchema getTable(ObjectPath tablePath) throws TableNotExistException {
+        Path path = tablePath(tablePath);
+        return new SchemaManager(path)
+                .latest()
+                .orElseThrow(() -> new TableNotExistException(tablePath));
+    }
+
+    @Override
+    public boolean tableExists(ObjectPath tablePath) {
         return tableExists(tablePath(tablePath));
     }
 
@@ -189,24 +132,24 @@ public class FileSystemCatalog extends TableStoreCatalog {
 
     @Override
     public void dropTable(ObjectPath tablePath, boolean ignoreIfNotExists)
-            throws TableNotExistException, CatalogException {
+            throws TableNotExistException {
         Path path = tablePath(tablePath);
         if (!tableExists(path)) {
             if (ignoreIfNotExists) {
                 return;
             }
 
-            throw new TableNotExistException(getName(), tablePath);
+            throw new TableNotExistException(tablePath);
         }
 
         uncheck(() -> fs.delete(path, true));
     }
 
     @Override
-    public void createTable(ObjectPath tablePath, CatalogBaseTable table, boolean ignoreIfExists)
-            throws TableAlreadyExistException, DatabaseNotExistException, CatalogException {
+    public void createTable(ObjectPath tablePath, UpdateSchema table, boolean ignoreIfExists)
+            throws TableAlreadyExistException, DatabaseNotExistException {
         if (!databaseExists(tablePath.getDatabaseName())) {
-            throw new DatabaseNotExistException(getName(), tablePath.getDatabaseName());
+            throw new DatabaseNotExistException(tablePath.getDatabaseName());
         }
 
         Path path = tablePath(tablePath);
@@ -215,23 +158,22 @@ public class FileSystemCatalog extends TableStoreCatalog {
                 return;
             }
 
-            throw new TableAlreadyExistException(getName(), tablePath);
+            throw new TableAlreadyExistException(tablePath);
         }
 
         commitTableChange(path, table);
     }
 
     @Override
-    public void alterTable(
-            ObjectPath tablePath, CatalogBaseTable newTable, boolean ignoreIfNotExists)
-            throws TableNotExistException, CatalogException {
+    public void alterTable(ObjectPath tablePath, UpdateSchema newTable, boolean ignoreIfNotExists)
+            throws TableNotExistException {
         Path path = tablePath(tablePath);
         if (!tableExists(path)) {
             if (ignoreIfNotExists) {
                 return;
             }
 
-            throw new TableNotExistException(getName(), tablePath);
+            throw new TableNotExistException(tablePath);
         }
 
         commitTableChange(path, newTable);
@@ -241,23 +183,8 @@ public class FileSystemCatalog extends TableStoreCatalog {
         try {
             return callable.call();
         } catch (Exception e) {
-            if (e instanceof RuntimeException) {
-                throw (RuntimeException) e;
-            }
-            throw new CatalogException(e);
+            throw new RuntimeException(e);
         }
-    }
-
-    private static void uncheck(RunnableWithException runnable) {
-        FileSystemCatalog.uncheck(
-                () -> {
-                    runnable.run();
-                    return null;
-                });
-    }
-
-    private static ClassLoader classLoader() {
-        return FileSystemCatalog.class.getClassLoader();
     }
 
     private static boolean isDatabase(Path path) {
@@ -278,30 +205,10 @@ public class FileSystemCatalog extends TableStoreCatalog {
         return new Path(databasePath(objectPath.getDatabaseName()), objectPath.getObjectName());
     }
 
-    private void commitTableChange(Path tablePath, CatalogBaseTable baseTable) {
-        if (!(baseTable instanceof ResolvedCatalogTable)) {
-            throw new UnsupportedOperationException(
-                    "Only support ResolvedCatalogTable, but is: " + baseTable.getClass());
-        }
-        ResolvedCatalogTable table = (ResolvedCatalogTable) baseTable;
-        Map<String, String> options = table.getOptions();
-        if (options.containsKey(CONNECTOR.key())) {
-            throw new CatalogException(
-                    "Table Store Catalog only supports table store tables, not Flink connector: "
-                            + options.get(CONNECTOR.key()));
-        }
-
-        // remove table path
-        String specific = options.remove(PATH.key());
-        if (specific != null) {
-            if (!tablePath.equals(new Path(specific))) {
-                throw new IllegalArgumentException(
-                        "Illegal table path in table options: " + specific);
-            }
-            table = table.copy(options);
-        }
-
-        UpdateSchema updateSchema = UpdateSchema.fromCatalogTable(table);
-        uncheck(() -> new SchemaManager(tablePath).commitNewVersion(updateSchema));
+    private void commitTableChange(Path tablePath, UpdateSchema table) {
+        uncheck(() -> new SchemaManager(tablePath).commitNewVersion(table));
     }
+
+    @Override
+    public void close() throws Exception {}
 }

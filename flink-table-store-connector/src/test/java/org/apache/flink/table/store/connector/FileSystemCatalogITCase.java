@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.table.store.file.catalog.FileSystemCatalog;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.kafka.KafkaTableTestBase;
 import org.apache.flink.types.Row;
@@ -32,7 +31,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** ITCase for {@link FileSystemCatalog}. */
+/** ITCase for {@link FlinkCatalog}. */
 public class FileSystemCatalogITCase extends KafkaTableTestBase {
 
     @Before
