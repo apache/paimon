@@ -204,7 +204,7 @@ public class TestCommitThread extends Thread {
                 empty
                         ? (MergeTreeWriter) write.createEmptyWriter(partition, 0, service)
                         : (MergeTreeWriter) write.createWriter(partition, 0, service);
-        writer.open(
+        writer.setMemoryPool(
                 new HeapMemorySegmentPool(
                         WRITE_BUFFER_SIZE.getBytes(), (int) PAGE_SIZE.getBytes()));
         return writer;

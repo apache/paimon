@@ -38,6 +38,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.file.writer.MemoryRecordWriter;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -164,7 +165,9 @@ public class TestChangelogDataReadWrite {
                                 null, // not used, we only create an empty writer
                                 options)
                         .createEmptyWriter(partition, bucket, service);
-        writer.open(new HeapMemorySegmentPool(options.writeBufferSize, options.pageSize));
+        ((MemoryRecordWriter) writer)
+                .setMemoryPool(
+                        new HeapMemorySegmentPool(options.writeBufferSize, options.pageSize));
         return writer;
     }
 }

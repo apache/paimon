@@ -234,9 +234,9 @@ public class StoreSinkTest {
         writers.forEach(
                 (part, map) ->
                         map.forEach(
-                                (bucket, recordWriter) -> {
-                                    assertThat(((TestRecordWriter) recordWriter).closed).isTrue();
-                                }));
+                                (bucket, recordWriter) ->
+                                        assertThat(((TestRecordWriter) recordWriter).closed)
+                                                .isTrue()));
         return committables;
     }
 

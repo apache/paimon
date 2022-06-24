@@ -277,7 +277,7 @@ public class MergeTreeTest {
                         dataFileWriter,
                         options.commitForceCompact,
                         options.numSortedRunStopTrigger);
-        writer.open(new HeapMemorySegmentPool(options.writeBufferSize, options.pageSize));
+        writer.setMemoryPool(new HeapMemorySegmentPool(options.writeBufferSize, options.pageSize));
         return writer;
     }
 

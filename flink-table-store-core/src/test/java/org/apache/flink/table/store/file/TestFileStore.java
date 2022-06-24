@@ -41,6 +41,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.file.writer.MemoryRecordWriter;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -205,10 +206,11 @@ public class TestFileStore extends KeyValueFileStore {
                                                             partition, bucket, service)
                                                     : write.createWriter(
                                                             partition, bucket, service);
-                                    writer.open(
-                                            new HeapMemorySegmentPool(
-                                                    WRITE_BUFFER_SIZE.getBytes(),
-                                                    (int) PAGE_SIZE.getBytes()));
+                                    ((MemoryRecordWriter) writer)
+                                            .setMemoryPool(
+                                                    new HeapMemorySegmentPool(
+                                                            WRITE_BUFFER_SIZE.getBytes(),
+                                                            (int) PAGE_SIZE.getBytes()));
                                     return writer;
                                 } else {
                                     return w;

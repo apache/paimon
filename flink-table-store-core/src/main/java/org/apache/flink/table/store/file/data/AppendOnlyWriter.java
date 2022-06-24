@@ -112,12 +112,7 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
 
     @Override
     public List<DataFileMeta> close() throws Exception {
-        try {
-            sync();
-        } catch (Exception ignore) {
-            // The thread pool is closed and the asynchronous task will be cancelled, an exception
-            // may be thrown here, and we need to ignore it
-        }
+        sync();
 
         List<DataFileMeta> result = new ArrayList<>();
         if (writer != null) {
