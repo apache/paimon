@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.catalog;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 
@@ -76,6 +77,7 @@ public interface Catalog extends AutoCloseable {
      * Get names of all tables under this database. An empty list is returned if none exists.
      *
      * @return a list of the names of all tables in this database
+     * @throws DatabaseNotExistException if the database does not exist
      */
     List<String> listTables(String databaseName) throws DatabaseNotExistException;
 
@@ -122,6 +124,7 @@ public interface Catalog extends AutoCloseable {
      * @param ignoreIfExists flag to specify behavior when a table already exists at the given path:
      *     if set to false, it throws a TableAlreadyExistException, if set to true, do nothing.
      * @throws TableAlreadyExistException if table already exists and ignoreIfExists is false
+     * @throws DatabaseNotExistException if the database in tablePath doesn't exist
      */
     void createTable(ObjectPath tablePath, UpdateSchema tableSchema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException;
