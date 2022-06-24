@@ -105,7 +105,6 @@ public class SearchArgumentToPredicateConverterTest {
                     DataTypes.INT().getLogicalType(),
                     DataTypes.BIGINT().getLogicalType(),
                     DataTypes.DOUBLE().getLogicalType());
-    private static final LogicalType BIGINT_TYPE = DataTypes.BIGINT().getLogicalType();
     private static final PredicateBuilder BUILDER =
             new PredicateBuilder(
                     RowType.of(
@@ -318,6 +317,33 @@ public class SearchArgumentToPredicateConverterTest {
         Predicate expected =
                 PredicateBuilder.or(
                         BUILDER.equal(1, 100L), BUILDER.equal(1, 200L), BUILDER.equal(1, 300L));
+        assertExpected(sarg, expected);
+    }
+
+    @Test
+    public void testUnsupported() {
+        SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
+        SearchArgument sarg =
+                builder.nullSafeEquals("f_bigint", PredicateLeaf.Type.LONG, 100L).build();
+        assertExpected(sarg, null);
+    }
+
+    @Test
+    public void testKeepPartialResult() {
+        SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
+        SearchArgument sarg =
+                builder.startAnd()
+                        .startNot()
+                        .nullSafeEquals("f_bigint", PredicateLeaf.Type.LONG, 100L)
+                        .end()
+                        .lessThanEquals("f_bigint", PredicateLeaf.Type.LONG, 200L)
+                        .startNot()
+                        .lessThan("f_bigint", PredicateLeaf.Type.LONG, 0L)
+                        .end()
+                        .end()
+                        .build();
+        Predicate expected =
+                PredicateBuilder.and(BUILDER.lessOrEqual(1, 200L), BUILDER.greaterOrEqual(1, 0L));
         assertExpected(sarg, expected);
     }
 
