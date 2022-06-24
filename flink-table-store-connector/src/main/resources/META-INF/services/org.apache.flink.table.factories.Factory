@@ -15,3 +15,4 @@
 
 org.apache.flink.table.store.connector.TableStoreManagedFactory
 org.apache.flink.table.store.connector.TableStoreConnectorFactory
+org.apache.flink.table.store.connector.FlinkCatalogFactory

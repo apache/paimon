@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.catalog;
+package org.apache.flink.table.store.connector;
 
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
@@ -24,14 +24,15 @@ import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.factories.CatalogFactory;
 import org.apache.flink.table.factories.FactoryUtil;
+import org.apache.flink.table.store.file.catalog.Catalog;
 
 import java.util.HashSet;
 import java.util.Set;
 
 import static org.apache.flink.table.factories.FactoryUtil.PROPERTY_VERSION;
 
-/** Factory for {@link TableStoreCatalog}. */
-public class TableStoreCatalogFactory implements CatalogFactory {
+/** Factory for {@link FlinkCatalog}. */
+public class FlinkCatalogFactory implements CatalogFactory {
 
     public static final String IDENTIFIER = "table-store";
 
@@ -65,12 +66,21 @@ public class TableStoreCatalogFactory implements CatalogFactory {
     }
 
     @Override
-    public TableStoreCatalog createCatalog(Context context) {
+    public FlinkCatalog createCatalog(Context context) {
         FactoryUtil.CatalogFactoryHelper helper =
                 FactoryUtil.createCatalogFactoryHelper(this, context);
         helper.validate();
         ReadableConfig options = helper.getOptions();
-        return new FileSystemCatalog(
-                context.getName(), new Path(options.get(WAREHOUSE)), options.get(DEFAULT_DATABASE));
+        return createCatalog(
+                new Path(options.get(WAREHOUSE)), context.getName(), options.get(DEFAULT_DATABASE));
+    }
+
+    public static FlinkCatalog createCatalog(Path warehouse, String catalogName) {
+        return createCatalog(warehouse, catalogName, DEFAULT_DATABASE.defaultValue());
+    }
+
+    public static FlinkCatalog createCatalog(
+            Path warehouse, String catalogName, String defaultDatabase) {
+        return new FlinkCatalog(Catalog.create(warehouse), catalogName, defaultDatabase);
     }
 }
