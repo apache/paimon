@@ -27,6 +27,7 @@ import org.apache.flink.table.store.file.data.DataFileWriter;
 import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.CompactResult;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.writer.MemoryRecordWriter;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.CloseableIterator;
@@ -42,7 +43,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /** A {@link RecordWriter} to write records and generate {@link Increment}. */
-public class MergeTreeWriter implements RecordWriter<KeyValue> {
+public class MergeTreeWriter implements MemoryRecordWriter<KeyValue> {
 
     private final RowType keyType;
 
@@ -108,7 +109,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue> {
     }
 
     @Override
-    public void open(MemorySegmentPool memoryPool) {
+    public void setMemoryPool(MemorySegmentPool memoryPool) {
         this.memTable = new SortBufferMemTable(keyType, valueType, memoryPool);
     }
 
@@ -117,7 +118,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue> {
         long sequenceNumber = newSequenceNumber();
         boolean success = memTable.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
         if (!success) {
-            flush();
+            flushMemory();
             success = memTable.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
             if (!success) {
                 throw new RuntimeException("Mem table is too small to hold a single element.");
@@ -131,7 +132,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue> {
     }
 
     @Override
-    public void flush() throws Exception {
+    public void flushMemory() throws Exception {
         if (memTable.size() > 0) {
             if (levels.numberOfSortedRuns() > numSortedRunStopTrigger) {
                 // stop writing, wait for compaction finished
@@ -149,7 +150,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue> {
 
     @Override
     public Increment prepareCommit() throws Exception {
-        flush();
+        flushMemory();
         if (commitForceCompact) {
             finishCompaction(true);
         }

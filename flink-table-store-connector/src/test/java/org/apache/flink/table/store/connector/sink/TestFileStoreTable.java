@@ -18,9 +18,7 @@
 
 package org.apache.flink.table.store.connector.sink;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -76,9 +74,7 @@ public class TestFileStoreTable implements FileStoreTable {
     @Override
     public TableWrite newWrite() {
         return new AbstractTableWrite<KeyValue>(
-                store.newWrite(),
-                new SinkRecordConverter(2, tableSchema),
-                new FileStoreOptions(new Configuration())) {
+                store.newWrite(), new SinkRecordConverter(2, tableSchema)) {
             @Override
             protected void writeSinkRecord(SinkRecord record, RecordWriter<KeyValue> writer)
                     throws Exception {

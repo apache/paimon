@@ -20,7 +20,6 @@ package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.runtime.util.MemorySegmentPool;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.data.DataFileMeta;
@@ -173,9 +172,6 @@ public class TestFileStore implements FileStore<KeyValue> {
         }
 
         @Override
-        public void open(MemorySegmentPool memoryPool) {}
-
-        @Override
         public void write(KeyValue kv) {
             if (!hasPk) {
                 assert kv.value().getArity() == 1;
@@ -188,14 +184,6 @@ public class TestFileStore implements FileStore<KeyValue> {
                             + "-value-"
                             + rowToString(kv.value(), false));
         }
-
-        @Override
-        public long memoryOccupancy() {
-            return 0;
-        }
-
-        @Override
-        public void flush() {}
 
         @Override
         public Increment prepareCommit() {
