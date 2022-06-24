@@ -31,6 +31,7 @@ import org.apache.hadoop.hive.serde2.io.HiveDecimalWritable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -63,15 +64,29 @@ public class SearchArgumentToPredicateConverter {
     }
 
     public Optional<Predicate> convert() {
-        try {
-            return Optional.of(convertTree(root));
-        } catch (UnsupportedOperationException e) {
-            LOG.warn(
-                    "Failed to convert predicate due to unsupported feature. "
-                            + "Filter will be processed by Hive instead.",
-                    e);
-            return Optional.empty();
+        List<ExpressionTree> trees = new ArrayList<>();
+        if (root.getOperator() == ExpressionTree.Operator.AND) {
+            trees.addAll(root.getChildren());
+        } else {
+            trees.add(root);
         }
+
+        List<Predicate> converted = new ArrayList<>();
+        for (ExpressionTree tree : trees) {
+            try {
+                converted.add(convertTree(tree));
+            } catch (UnsupportedOperationException e) {
+                LOG.warn(
+                        "Failed to convert predicate "
+                                + tree
+                                + "  due to unsupported feature. "
+                                + "This part of filter will be processed by Hive instead.",
+                        e);
+            }
+        }
+        return converted.isEmpty()
+                ? Optional.empty()
+                : Optional.of(PredicateBuilder.and(converted));
     }
 
     private Predicate convertTree(ExpressionTree tree) {
