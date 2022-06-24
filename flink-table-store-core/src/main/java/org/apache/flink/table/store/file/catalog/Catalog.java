@@ -20,7 +20,6 @@ package org.apache.flink.table.store.file.catalog;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectPath;
-import org.apache.flink.table.catalog.exceptions.CatalogException;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 
@@ -44,7 +43,6 @@ public interface Catalog extends AutoCloseable {
      *
      * @param databaseName Name of the database
      * @return true if the given database exists in the catalog false otherwise
-     * @throws CatalogException in case of any runtime exception
      */
     boolean databaseExists(String databaseName);
 
@@ -57,7 +55,6 @@ public interface Catalog extends AutoCloseable {
      *     nothing.
      * @throws DatabaseAlreadyExistException if the given database already exists and ignoreIfExists
      *     is false
-     * @throws CatalogException in case of any runtime exception
      */
     void createDatabase(String name, boolean ignoreIfExists) throws DatabaseAlreadyExistException;
 
