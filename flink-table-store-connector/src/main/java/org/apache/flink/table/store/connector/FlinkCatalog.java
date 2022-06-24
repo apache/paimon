@@ -29,6 +29,7 @@ import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.CatalogException;
+import org.apache.flink.table.catalog.exceptions.DatabaseAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.FunctionNotExistException;
@@ -62,6 +63,10 @@ public class FlinkCatalog extends AbstractCatalog {
     public FlinkCatalog(Catalog catalog, String name, String defaultDatabase) {
         super(name, defaultDatabase);
         this.catalog = catalog;
+        try {
+            this.catalog.createDatabase(defaultDatabase, true);
+        } catch (Catalog.DatabaseAlreadyExistException ignore) {
+        }
     }
 
     @VisibleForTesting
@@ -82,22 +87,52 @@ public class FlinkCatalog extends AbstractCatalog {
 
     @Override
     public boolean databaseExists(String databaseName) throws CatalogException {
-        return true;
+        return catalog.databaseExists(databaseName);
     }
 
     @Override
-    public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
-            throws DatabaseNotEmptyException, CatalogException {
+    public void createDatabase(String name, CatalogDatabase database, boolean ignoreIfExists)
+            throws DatabaseAlreadyExistException, CatalogException {
+        if (database != null) {
+            if (database.getProperties().size() > 0) {
+                throw new UnsupportedOperationException(
+                        "Create database with properties is unsupported.");
+            }
+
+            if (database.getDescription().isPresent()
+                    && !database.getDescription().get().equals("")) {
+                throw new UnsupportedOperationException(
+                        "Create database with description is unsupported.");
+            }
+        }
+
         try {
-            catalog.dropDatabase(name, cascade);
-        } catch (Catalog.DatabaseNotEmptyException e) {
-            throw new DatabaseNotEmptyException(getName(), e.database());
+            catalog.createDatabase(name, ignoreIfExists);
+        } catch (Catalog.DatabaseAlreadyExistException e) {
+            throw new DatabaseAlreadyExistException(getName(), e.database());
         }
     }
 
     @Override
-    public List<String> listTables(String databaseName) throws CatalogException {
-        return catalog.listTables(databaseName);
+    public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
+            throws DatabaseNotEmptyException, DatabaseNotExistException, CatalogException {
+        try {
+            catalog.dropDatabase(name, ignoreIfNotExists, cascade);
+        } catch (Catalog.DatabaseNotEmptyException e) {
+            throw new DatabaseNotEmptyException(getName(), e.database());
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new DatabaseNotExistException(getName(), e.database());
+        }
+    }
+
+    @Override
+    public List<String> listTables(String databaseName)
+            throws DatabaseNotExistException, CatalogException {
+        try {
+            return catalog.listTables(databaseName);
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new DatabaseNotExistException(getName(), e.database());
+        }
     }
 
     @Override
@@ -138,6 +173,8 @@ public class FlinkCatalog extends AbstractCatalog {
             catalog.createTable(tablePath, convertTableToSchema(tablePath, table), ignoreIfExists);
         } catch (Catalog.TableAlreadyExistException e) {
             throw new TableAlreadyExistException(getName(), e.tablePath());
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new DatabaseNotExistException(getName(), e.database());
         }
     }
 
@@ -184,12 +221,6 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     // --------------------- unsupported methods ----------------------------
-
-    @Override
-    public void createDatabase(String name, CatalogDatabase database, boolean ignoreIfExists)
-            throws CatalogException {
-        throw new UnsupportedOperationException();
-    }
 
     @Override
     public final void open() throws CatalogException {}

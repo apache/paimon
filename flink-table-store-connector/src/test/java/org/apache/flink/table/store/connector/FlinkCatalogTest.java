@@ -23,13 +23,16 @@ import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
+import org.apache.flink.table.catalog.CatalogDatabaseImpl;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.catalog.exceptions.CatalogException;
+import org.apache.flink.table.catalog.exceptions.DatabaseAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
+import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 
@@ -45,6 +48,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -159,6 +163,7 @@ public class FlinkCatalogTest {
 
     @Test
     public void testAlterTable() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
         CatalogTable table = this.createTable();
         catalog.createTable(this.path1, table, false);
         checkEquals(path1, table, (CatalogTable) catalog.getTable(this.path1));
@@ -173,6 +178,7 @@ public class FlinkCatalogTest {
 
     @Test
     public void testListTables() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(), false);
         catalog.createTable(this.path3, this.createTable(), false);
         Assert.assertEquals(2L, catalog.listTables("db1").size());
@@ -201,6 +207,7 @@ public class FlinkCatalogTest {
 
     @Test
     public void testCreateTable_Streaming() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
         CatalogTable table = createStreamingTable();
         catalog.createTable(path1, table, false);
         checkEquals(path1, table, (CatalogTable) catalog.getTable(path1));
@@ -208,6 +215,7 @@ public class FlinkCatalogTest {
 
     @Test
     public void testAlterPartitionedTable() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
         CatalogTable table = this.createPartitionedTable();
         catalog.createTable(this.path1, table, false);
         checkEquals(path1, table, (CatalogTable) catalog.getTable(this.path1));
@@ -218,6 +226,7 @@ public class FlinkCatalogTest {
 
     @Test
     public void testCreateTable_Batch() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
         CatalogTable table = this.createTable();
         catalog.createTable(this.path1, table, false);
         CatalogBaseTable tableCreated = catalog.getTable(this.path1);
@@ -231,6 +240,7 @@ public class FlinkCatalogTest {
 
     @Test
     public void testCreateTable_TableAlreadyExist_ignored() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
         CatalogTable table = this.createTable();
         catalog.createTable(this.path1, table, false);
         checkEquals(path1, table, (CatalogTable) catalog.getTable(this.path1));
@@ -240,6 +250,7 @@ public class FlinkCatalogTest {
 
     @Test
     public void testCreatePartitionedTable_Batch() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
         CatalogTable table = this.createPartitionedTable();
         catalog.createTable(this.path1, table, false);
         checkEquals(path1, table, (CatalogTable) catalog.getTable(this.path1));
@@ -250,6 +261,7 @@ public class FlinkCatalogTest {
 
     @Test
     public void testDropDb_DatabaseNotEmptyException() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(), false);
         this.exception.expect(DatabaseNotEmptyException.class);
         this.exception.expectMessage("Database db1 in catalog test-catalog is not empty");
@@ -258,6 +270,7 @@ public class FlinkCatalogTest {
 
     @Test
     public void testTableExists() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
         Assert.assertFalse(catalog.tableExists(this.path1));
         catalog.createTable(this.path1, this.createTable(), false);
         Assert.assertTrue(catalog.tableExists(this.path1));
@@ -276,6 +289,7 @@ public class FlinkCatalogTest {
 
     @Test
     public void testCreateTable_TableAlreadyExistException() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(), false);
         this.exception.expect(TableAlreadyExistException.class);
         this.exception.expectMessage("Table (or view) db1.t1 already exists in Catalog");
@@ -284,6 +298,7 @@ public class FlinkCatalogTest {
 
     @Test
     public void testDropTable_nonPartitionedTable() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(), false);
         Assert.assertTrue(catalog.tableExists(this.path1));
         catalog.dropTable(this.path1, false);
@@ -299,6 +314,7 @@ public class FlinkCatalogTest {
 
     @Test
     public void testDbExists() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(), false);
         Assert.assertTrue(catalog.databaseExists("db1"));
     }
@@ -320,6 +336,60 @@ public class FlinkCatalogTest {
         this.exception.expect(TableNotExistException.class);
         this.exception.expectMessage("Table (or view) non.exist does not exist in Catalog");
         catalog.dropTable(this.nonExistDbPath, false);
+    }
+
+    @Test
+    public void testCreateDb_Database() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
+        List<String> dbs = catalog.listDatabases();
+        assertThat(dbs).hasSize(2);
+        assertThat(new HashSet<>(dbs))
+                .isEqualTo(
+                        new HashSet<>(
+                                Arrays.asList(
+                                        path1.getDatabaseName(), catalog.getDefaultDatabase())));
+    }
+
+    @Test
+    public void testCreateDb_DatabaseAlreadyExistException() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
+
+        assertThatThrownBy(() -> catalog.createDatabase(path1.getDatabaseName(), null, false))
+                .isInstanceOf(DatabaseAlreadyExistException.class)
+                .hasMessage("Database db1 already exists in Catalog test-catalog.");
+    }
+
+    @Test
+    public void testCreateDb_DatabaseWithPropertiesException() {
+        CatalogDatabaseImpl database =
+                new CatalogDatabaseImpl(Collections.singletonMap("haa", "ccc"), null);
+        assertThatThrownBy(() -> catalog.createDatabase(path1.getDatabaseName(), database, false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Create database with properties is unsupported.");
+    }
+
+    @Test
+    public void testCreateDb_DatabaseWithCommentException() {
+        CatalogDatabaseImpl database = new CatalogDatabaseImpl(Collections.emptyMap(), "haha");
+        assertThatThrownBy(() -> catalog.createDatabase(path1.getDatabaseName(), database, false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Create database with description is unsupported.");
+    }
+
+    @Test
+    public void testCreateTable_DatabaseNotExistException() {
+        assertThat(catalog.databaseExists(path1.getDatabaseName())).isFalse();
+
+        assertThatThrownBy(() -> catalog.createTable(nonExistObjectPath, createTable(), false))
+                .isInstanceOf(DatabaseNotExistException.class)
+                .hasMessage("Database db1 does not exist in Catalog test-catalog.");
+    }
+
+    @Test
+    public void testDropDb_DatabaseNotExistException() {
+        assertThatThrownBy(() -> catalog.dropDatabase(path1.getDatabaseName(), false, false))
+                .isInstanceOf(DatabaseNotExistException.class)
+                .hasMessage("Database db1 does not exist in Catalog test-catalog.");
     }
 
     private void checkEquals(ObjectPath path, CatalogTable t1, CatalogTable t2) {

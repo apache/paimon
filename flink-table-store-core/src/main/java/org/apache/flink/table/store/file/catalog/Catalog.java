@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.catalog;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.catalog.exceptions.CatalogException;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 
@@ -39,25 +40,50 @@ public interface Catalog extends AutoCloseable {
     List<String> listDatabases();
 
     /**
+     * Check if a database exists in this catalog.
+     *
+     * @param databaseName Name of the database
+     * @return true if the given database exists in the catalog false otherwise
+     * @throws CatalogException in case of any runtime exception
+     */
+    boolean databaseExists(String databaseName);
+
+    /**
+     * Create a database.
+     *
+     * @param name Name of the database to be created
+     * @param ignoreIfExists Flag to specify behavior when a database with the given name already
+     *     exists: if set to false, throw a DatabaseAlreadyExistException, if set to true, do
+     *     nothing.
+     * @throws DatabaseAlreadyExistException if the given database already exists and ignoreIfExists
+     *     is false
+     * @throws CatalogException in case of any runtime exception
+     */
+    void createDatabase(String name, boolean ignoreIfExists) throws DatabaseAlreadyExistException;
+
+    /**
      * Drop a database.
      *
      * @param name Name of the database to be dropped.
+     * @param ignoreIfNotExists Flag to specify behavior when the database does not exist: if set to
+     *     false, throw an exception, if set to true, do nothing.
      * @param cascade Flag to specify behavior when the database contains table or function: if set
      *     to true, delete all tables and functions in the database and then delete the database, if
      *     set to false, throw an exception.
      * @throws DatabaseNotEmptyException if the given database is not empty and isRestrict is true
      */
-    void dropDatabase(String name, boolean cascade) throws DatabaseNotEmptyException;
+    void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
+            throws DatabaseNotExistException, DatabaseNotEmptyException;
 
     /**
      * Get names of all tables under this database. An empty list is returned if none exists.
      *
      * @return a list of the names of all tables in this database
      */
-    List<String> listTables(String databaseName);
+    List<String> listTables(String databaseName) throws DatabaseNotExistException;
 
     /**
-     * Returns the table location path identified by the given {@link ObjectPath}.
+     * Return the table location path identified by the given {@link ObjectPath}.
      *
      * @param tablePath Path of the table
      * @return The requested table location
@@ -65,7 +91,7 @@ public interface Catalog extends AutoCloseable {
     Path getTableLocation(ObjectPath tablePath);
 
     /**
-     * Returns a {@link TableSchema} identified by the given {@link ObjectPath}.
+     * Return a {@link TableSchema} identified by the given {@link ObjectPath}.
      *
      * @param tablePath Path of the table
      * @return The requested table
@@ -92,7 +118,7 @@ public interface Catalog extends AutoCloseable {
     void dropTable(ObjectPath tablePath, boolean ignoreIfNotExists) throws TableNotExistException;
 
     /**
-     * Creates a new table.
+     * Create a new table.
      *
      * @param tablePath path of the table to be created
      * @param tableSchema the table definition
@@ -101,10 +127,10 @@ public interface Catalog extends AutoCloseable {
      * @throws TableAlreadyExistException if table already exists and ignoreIfExists is false
      */
     void createTable(ObjectPath tablePath, UpdateSchema tableSchema, boolean ignoreIfExists)
-            throws TableAlreadyExistException;
+            throws TableAlreadyExistException, DatabaseNotExistException;
 
     /**
-     * Modifies an existing table.
+     * Modify an existing table.
      *
      * @param tablePath path of the table to be modified
      * @param newTableSchema the new table definition
@@ -127,6 +153,46 @@ public interface Catalog extends AutoCloseable {
         }
 
         public DatabaseNotEmptyException(String database) {
+            this(database, null);
+        }
+
+        public String database() {
+            return database;
+        }
+    }
+
+    /** Exception for trying to create a database that already exists. */
+    class DatabaseAlreadyExistException extends Exception {
+        private static final String MSG = "Database %s already exists.";
+
+        private final String database;
+
+        public DatabaseAlreadyExistException(String database, Throwable cause) {
+            super(String.format(MSG, database), cause);
+            this.database = database;
+        }
+
+        public DatabaseAlreadyExistException(String database) {
+            this(database, null);
+        }
+
+        public String database() {
+            return database;
+        }
+    }
+
+    /** Exception for trying to operate on a database that doesn't exist. */
+    class DatabaseNotExistException extends Exception {
+        private static final String MSG = "Database %s does not exist.";
+
+        private final String database;
+
+        public DatabaseNotExistException(String database, Throwable cause) {
+            super(String.format(MSG, database), cause);
+            this.database = database;
+        }
+
+        public DatabaseNotExistException(String database) {
             this(database, null);
         }
 

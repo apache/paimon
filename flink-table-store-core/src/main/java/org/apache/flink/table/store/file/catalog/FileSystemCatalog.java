@@ -28,7 +28,6 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Callable;
 
@@ -60,7 +59,33 @@ public class FileSystemCatalog implements Catalog {
     }
 
     @Override
-    public void dropDatabase(String name, boolean cascade) throws DatabaseNotEmptyException {
+    public boolean databaseExists(String databaseName) {
+        return uncheck(() -> fs.exists(databasePath(databaseName)));
+    }
+
+    @Override
+    public void createDatabase(String name, boolean ignoreIfExists)
+            throws DatabaseAlreadyExistException {
+        if (databaseExists(name)) {
+            if (ignoreIfExists) {
+                return;
+            }
+            throw new DatabaseAlreadyExistException(name);
+        }
+        uncheck(() -> fs.mkdirs(databasePath(name)));
+    }
+
+    @Override
+    public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
+            throws DatabaseNotExistException, DatabaseNotEmptyException {
+        if (!databaseExists(name)) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+
+            throw new DatabaseNotExistException(name);
+        }
+
         if (!cascade && listTables(name).size() > 0) {
             throw new DatabaseNotEmptyException(name);
         }
@@ -69,9 +94,9 @@ public class FileSystemCatalog implements Catalog {
     }
 
     @Override
-    public List<String> listTables(String databaseName) {
-        if (!uncheck(() -> fs.exists(databasePath(databaseName)))) {
-            return Collections.emptyList();
+    public List<String> listTables(String databaseName) throws DatabaseNotExistException {
+        if (!databaseExists(databaseName)) {
+            throw new DatabaseNotExistException(databaseName);
         }
 
         List<String> tables = new ArrayList<>();
@@ -122,7 +147,11 @@ public class FileSystemCatalog implements Catalog {
 
     @Override
     public void createTable(ObjectPath tablePath, UpdateSchema table, boolean ignoreIfExists)
-            throws TableAlreadyExistException {
+            throws TableAlreadyExistException, DatabaseNotExistException {
+        if (!databaseExists(tablePath.getDatabaseName())) {
+            throw new DatabaseNotExistException(tablePath.getDatabaseName());
+        }
+
         Path path = tablePath(tablePath);
         if (tableExists(path)) {
             if (ignoreIfExists) {
