@@ -89,8 +89,9 @@ public class StoreSinkTest {
 
     @Before
     public void before() throws Exception {
+        Path path = new Path(tempFolder.newFolder().toURI().toString());
         TableSchema tableSchema =
-                new SchemaManager(new Path(tempFolder.newFolder().toURI().toString()))
+                new SchemaManager(path)
                         .commitNewVersion(
                                 new UpdateSchema(
                                         RowType.of(
@@ -107,7 +108,7 @@ public class StoreSinkTest {
 
         RowType partitionType = tableSchema.logicalPartitionType();
         fileStore = new TestFileStore(hasPk, partitionType);
-        table = new TestFileStoreTable(fileStore, tableSchema);
+        table = new TestFileStoreTable(path, fileStore, tableSchema);
     }
 
     @Parameterized.Parameters(name = "hasPk-{0}, partitioned-{1}")

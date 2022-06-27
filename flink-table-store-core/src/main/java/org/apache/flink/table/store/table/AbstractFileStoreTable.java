@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -29,19 +30,19 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
-    private final String name;
+    private final Path path;
     protected final TableSchema tableSchema;
 
-    public AbstractFileStoreTable(String name, TableSchema tableSchema) {
-        this.name = name;
+    public AbstractFileStoreTable(Path path, TableSchema tableSchema) {
+        this.path = path;
         this.tableSchema = tableSchema;
     }
 
     protected abstract FileStore<?> store();
 
     @Override
-    public String name() {
-        return name;
+    public Path location() {
+        return path;
     }
 
     @Override

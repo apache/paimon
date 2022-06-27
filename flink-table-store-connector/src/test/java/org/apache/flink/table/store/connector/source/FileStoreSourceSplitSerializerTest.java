@@ -19,13 +19,16 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.core.io.SimpleVersionedSerialization;
+import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
+import org.apache.flink.table.store.table.source.Split;
 
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.List;
 
 import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,7 +39,7 @@ public class FileStoreSourceSplitSerializerTest {
     @Test
     public void serializeSplit() throws Exception {
         final FileStoreSourceSplit split =
-                new FileStoreSourceSplit("id", row(1), 2, Arrays.asList(newFile(0), newFile(1)));
+                newSourceSplit("id", row(1), 2, Arrays.asList(newFile(0), newFile(1)));
 
         final FileStoreSourceSplit deSerialized = serializeAndDeserialize(split);
 
@@ -46,8 +49,7 @@ public class FileStoreSourceSplitSerializerTest {
     @Test
     public void serializeSplitWithReaderPosition() throws Exception {
         final FileStoreSourceSplit split =
-                new FileStoreSourceSplit(
-                        "id", row(1), 2, Arrays.asList(newFile(0), newFile(1)), 29);
+                newSourceSplit("id", row(1), 2, Arrays.asList(newFile(0), newFile(1)), 29);
 
         final FileStoreSourceSplit deSerialized = serializeAndDeserialize(split);
 
@@ -57,8 +59,7 @@ public class FileStoreSourceSplitSerializerTest {
     @Test
     public void repeatedSerialization() throws Exception {
         final FileStoreSourceSplit split =
-                new FileStoreSourceSplit(
-                        "id", row(1), 2, Arrays.asList(newFile(0), newFile(1)), 29);
+                newSourceSplit("id", row(1), 2, Arrays.asList(newFile(0), newFile(1)), 29);
 
         serializeAndDeserialize(split);
         serializeAndDeserialize(split);
@@ -84,6 +85,40 @@ public class FileStoreSourceSplitSerializerTest {
                 1,
                 0,
                 level);
+    }
+
+    public static FileStoreSourceSplit newSourceSplit(
+            String id, BinaryRowData partition, int bucket, List<DataFileMeta> files) {
+        return newSourceSplit(id, partition, bucket, files, false, 0);
+    }
+
+    public static FileStoreSourceSplit newSourceSplit(
+            String id,
+            BinaryRowData partition,
+            int bucket,
+            List<DataFileMeta> files,
+            boolean isIncremental) {
+        return newSourceSplit(id, partition, bucket, files, isIncremental, 0);
+    }
+
+    public static FileStoreSourceSplit newSourceSplit(
+            String id,
+            BinaryRowData partition,
+            int bucket,
+            List<DataFileMeta> files,
+            long recordsToSkip) {
+        return newSourceSplit(id, partition, bucket, files, false, recordsToSkip);
+    }
+
+    public static FileStoreSourceSplit newSourceSplit(
+            String id,
+            BinaryRowData partition,
+            int bucket,
+            List<DataFileMeta> files,
+            boolean isIncremental,
+            long recordsToSkip) {
+        return new FileStoreSourceSplit(
+                id, new Split(partition, bucket, files, isIncremental), recordsToSkip);
     }
 
     private static FileStoreSourceSplit serializeAndDeserialize(FileStoreSourceSplit split)

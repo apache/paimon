@@ -47,7 +47,7 @@ public class SparkTable implements org.apache.spark.sql.connector.catalog.Table,
 
     @Override
     public String name() {
-        return table.name();
+        return table.location().getName();
     }
 
     @Override

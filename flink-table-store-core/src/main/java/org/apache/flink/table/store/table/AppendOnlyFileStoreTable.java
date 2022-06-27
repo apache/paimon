@@ -18,12 +18,11 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.AppendOnlyFileStore;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreRead;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -37,6 +36,7 @@ import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.AppendOnlySplitGenerator;
+import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.SplitGenerator;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
@@ -44,7 +44,6 @@ import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
-import java.util.List;
 
 /** {@link FileStoreTable} for {@link WriteMode#APPEND_ONLY} write mode. */
 public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
@@ -54,8 +53,8 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     private final AppendOnlyFileStore store;
 
     AppendOnlyFileStoreTable(
-            String name, SchemaManager schemaManager, TableSchema tableSchema, String user) {
-        super(name, tableSchema);
+            Path path, SchemaManager schemaManager, TableSchema tableSchema, String user) {
+        super(path, tableSchema);
         this.store =
                 new AppendOnlyFileStore(
                         schemaManager,
@@ -94,15 +93,8 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
             }
 
             @Override
-            public TableRead withIncremental(boolean isIncremental) {
-                return this;
-            }
-
-            @Override
-            public RecordReader<RowData> createReader(
-                    BinaryRowData partition, int bucket, List<DataFileMeta> files)
-                    throws IOException {
-                return read.createReader(partition, bucket, files);
+            public RecordReader<RowData> createReader(Split split) throws IOException {
+                return read.createReader(split);
             }
         };
     }

@@ -40,9 +40,8 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -181,7 +180,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             throw new RuntimeException("Failed to read ManifestEntry list concurrently", e);
         }
 
-        Map<ManifestEntry.Identifier, ManifestEntry> map = new HashMap<>();
+        LinkedHashMap<ManifestEntry.Identifier, ManifestEntry> map = new LinkedHashMap<>();
         for (ManifestEntry entry : entries) {
             ManifestEntry.Identifier identifier = entry.identifier();
             switch (entry.kind()) {

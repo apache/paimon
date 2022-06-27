@@ -57,7 +57,7 @@ public class SparkScan implements Scan, SupportsReportStatistics {
     @Override
     public String description() {
         // TODO add filters
-        return String.format("tablestore(%s)", table.name());
+        return String.format("tablestore(%s)", table.location().getName());
     }
 
     @Override

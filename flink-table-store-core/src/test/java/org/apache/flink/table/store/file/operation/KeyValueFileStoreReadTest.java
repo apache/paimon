@@ -30,6 +30,7 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
+import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -192,7 +193,6 @@ public class KeyValueFileStoreReadTest {
         KeyValueFileStoreRead read = store.newRead();
         if (keyProjection != null) {
             read.withKeyProjection(keyProjection);
-            read.withDropDelete(false);
         }
         if (valueProjection != null) {
             read.withValueProjection(valueProjection);
@@ -203,11 +203,13 @@ public class KeyValueFileStoreReadTest {
                 filesGroupedByPartition.entrySet()) {
             RecordReader<KeyValue> reader =
                     read.createReader(
-                            entry.getKey(),
-                            0,
-                            entry.getValue().stream()
-                                    .map(ManifestEntry::file)
-                                    .collect(Collectors.toList()));
+                            new Split(
+                                    entry.getKey(),
+                                    0,
+                                    entry.getValue().stream()
+                                            .map(ManifestEntry::file)
+                                            .collect(Collectors.toList()),
+                                    false));
             RecordReaderIterator<KeyValue> actualIterator = new RecordReaderIterator<>(reader);
             while (actualIterator.hasNext()) {
                 result.add(

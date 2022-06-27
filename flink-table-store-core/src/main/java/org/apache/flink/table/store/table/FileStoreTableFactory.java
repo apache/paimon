@@ -56,13 +56,14 @@ public class FileStoreTableFactory {
         tableSchema = tableSchema.copy(newOptions);
 
         if (conf.get(FileStoreOptions.WRITE_MODE) == WriteMode.APPEND_ONLY) {
-            return new AppendOnlyFileStoreTable(name, schemaManager, tableSchema, user);
+            return new AppendOnlyFileStoreTable(tablePath, schemaManager, tableSchema, user);
         } else {
             if (tableSchema.primaryKeys().isEmpty()) {
                 return new ChangelogValueCountFileStoreTable(
-                        name, schemaManager, tableSchema, user);
+                        tablePath, schemaManager, tableSchema, user);
             } else {
-                return new ChangelogWithKeyFileStoreTable(name, schemaManager, tableSchema, user);
+                return new ChangelogWithKeyFileStoreTable(
+                        tablePath, schemaManager, tableSchema, user);
             }
         }
     }

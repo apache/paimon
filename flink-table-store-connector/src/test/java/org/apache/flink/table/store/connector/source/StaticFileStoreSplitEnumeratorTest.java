@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 
 import static org.apache.flink.table.store.connector.source.FileStoreSourceSplitSerializerTest.newFile;
+import static org.apache.flink.table.store.connector.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
 import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -96,7 +97,7 @@ public class StaticFileStoreSplitEnumeratorTest {
     // ------------------------------------------------------------------------
 
     private static FileStoreSourceSplit createRandomSplit() {
-        return new FileStoreSourceSplit("split", row(1), 2, Arrays.asList(newFile(0), newFile(1)));
+        return newSourceSplit("split", row(1), 2, Arrays.asList(newFile(0), newFile(1)));
     }
 
     private static StaticFileStoreSplitEnumerator createEnumerator(

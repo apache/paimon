@@ -19,16 +19,13 @@
 package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreRead;
 import org.apache.flink.table.store.file.utils.RecordReader;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.List;
 
 /**
  * An abstraction layer above {@link KeyValueFileStoreRead} to provide reading of {@link RowData}.
@@ -42,9 +39,8 @@ public abstract class KeyValueTableRead implements TableRead {
     }
 
     @Override
-    public RecordReader<RowData> createReader(
-            BinaryRowData partition, int bucket, List<DataFileMeta> files) throws IOException {
-        return new RowDataRecordReader(read.createReader(partition, bucket, files));
+    public RecordReader<RowData> createReader(Split split) throws IOException {
+        return new RowDataRecordReader(read.createReader(split));
     }
 
     protected abstract RecordReader.RecordIterator<RowData> rowDataRecordIteratorFromKv(
