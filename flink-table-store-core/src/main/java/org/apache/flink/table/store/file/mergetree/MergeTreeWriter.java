@@ -20,13 +20,16 @@ package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.runtime.util.MemorySegmentPool;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileWriter;
+import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.CompactResult;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.CloseableIterator;
 
 import java.util.ArrayList;
@@ -40,9 +43,11 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /** A {@link RecordWriter} to write records and generate {@link Increment}. */
-public class MergeTreeWriter implements RecordWriter<KeyValue> {
+public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
-    private final MemTable memTable;
+    private final RowType keyType;
+
+    private final RowType valueType;
 
     private final CompactManager compactManager;
 
@@ -66,8 +71,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue> {
 
     private long newSequenceNumber;
 
+    private MemTable memTable;
+
     public MergeTreeWriter(
-            MemTable memTable,
+            RowType keyType,
+            RowType valueType,
             CompactManager compactManager,
             Levels levels,
             long maxSequenceNumber,
@@ -76,7 +84,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue> {
             DataFileWriter dataFileWriter,
             boolean commitForceCompact,
             int numSortedRunStopTrigger) {
-        this.memTable = memTable;
+        this.keyType = keyType;
+        this.valueType = valueType;
         this.compactManager = compactManager;
         this.levels = levels;
         this.newSequenceNumber = maxSequenceNumber + 1;
@@ -100,11 +109,16 @@ public class MergeTreeWriter implements RecordWriter<KeyValue> {
     }
 
     @Override
+    public void setMemoryPool(MemorySegmentPool memoryPool) {
+        this.memTable = new SortBufferMemTable(keyType, valueType, memoryPool);
+    }
+
+    @Override
     public void write(KeyValue kv) throws Exception {
         long sequenceNumber = newSequenceNumber();
         boolean success = memTable.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
         if (!success) {
-            flush();
+            flushMemory();
             success = memTable.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
             if (!success) {
                 throw new RuntimeException("Mem table is too small to hold a single element.");
@@ -112,7 +126,13 @@ public class MergeTreeWriter implements RecordWriter<KeyValue> {
         }
     }
 
-    private void flush() throws Exception {
+    @Override
+    public long memoryOccupancy() {
+        return memTable.memoryOccupancy();
+    }
+
+    @Override
+    public void flushMemory() throws Exception {
         if (memTable.size() > 0) {
             if (levels.numberOfSortedRuns() > numSortedRunStopTrigger) {
                 // stop writing, wait for compaction finished
@@ -130,7 +150,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue> {
 
     @Override
     public Increment prepareCommit() throws Exception {
-        flush();
+        flushMemory();
         if (commitForceCompact) {
             finishCompaction(true);
         }

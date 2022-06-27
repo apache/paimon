@@ -146,8 +146,6 @@ public class TestFileStore implements FileStore<KeyValue> {
         final List<String> records = new ArrayList<>();
         final boolean hasPk;
 
-        boolean synced = false;
-
         boolean closed = false;
 
         TestRecordWriter(boolean hasPk) {
@@ -210,9 +208,7 @@ public class TestFileStore implements FileStore<KeyValue> {
         }
 
         @Override
-        public void sync() {
-            synced = true;
-        }
+        public void sync() {}
 
         @Override
         public List<DataFileMeta> close() {

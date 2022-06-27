@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.table.runtime.generated.RecordComparator;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionTestUtils;
@@ -54,8 +55,7 @@ public abstract class SortBufferMemTableTestBase {
                     new RowType(
                             Collections.singletonList(
                                     new RowType.RowField("value", new BigIntType()))),
-                    32 * 1024 * 3L,
-                    32 * 1024);
+                    new HeapMemorySegmentPool(32 * 1024 * 3L, 32 * 1024));
 
     protected abstract boolean addOnly();
 

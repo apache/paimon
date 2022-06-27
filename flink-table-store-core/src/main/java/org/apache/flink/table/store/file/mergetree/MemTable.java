@@ -44,6 +44,9 @@ public interface MemTable {
     /** Record size of this table. */
     int size();
 
+    /** Memory occupancy size of this table. */
+    long memoryOccupancy();
+
     /**
      * Returns an iterator over the records in this table. The elements are returned in the order of
      * key and sequence number and elements with the same key will be merged by the given {@link

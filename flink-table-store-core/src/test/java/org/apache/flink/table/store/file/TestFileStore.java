@@ -28,6 +28,8 @@ import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
+import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
+import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
@@ -42,7 +44,6 @@ import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.util.function.QuadFunction;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,6 +74,10 @@ public class TestFileStore extends KeyValueFileStore {
 
     private static final Logger LOG = LoggerFactory.getLogger(TestFileStore.class);
 
+    public static final MemorySize WRITE_BUFFER_SIZE = MemorySize.parse("16 kb");
+
+    public static final MemorySize PAGE_SIZE = MemorySize.parse("4 kb");
+
     private final String root;
     private final RowDataSerializer keySerializer;
     private final RowDataSerializer valueSerializer;
@@ -87,8 +92,8 @@ public class TestFileStore extends KeyValueFileStore {
             MergeFunction mergeFunction) {
         Configuration conf = new Configuration();
 
-        conf.set(MergeTreeOptions.WRITE_BUFFER_SIZE, MemorySize.parse("16 kb"));
-        conf.set(MergeTreeOptions.PAGE_SIZE, MemorySize.parse("4 kb"));
+        conf.set(MergeTreeOptions.WRITE_BUFFER_SIZE, WRITE_BUFFER_SIZE);
+        conf.set(MergeTreeOptions.PAGE_SIZE, PAGE_SIZE);
         conf.set(MergeTreeOptions.TARGET_FILE_SIZE, MemorySize.parse("1 kb"));
 
         conf.set(
@@ -155,7 +160,7 @@ public class TestFileStore extends KeyValueFileStore {
                 kvs,
                 partitionCalculator,
                 bucketCalculator,
-                FileStoreWrite::createWriter,
+                false,
                 (commit, committable) -> {
                     logOffsets.forEach(committable::addLogOffset);
                     commit.commit(committable, Collections.emptyMap());
@@ -172,7 +177,7 @@ public class TestFileStore extends KeyValueFileStore {
                 kvs,
                 partitionCalculator,
                 bucketCalculator,
-                FileStoreWrite::createEmptyWriter,
+                true,
                 (commit, committable) ->
                         commit.overwrite(partition, committable, Collections.emptyMap()));
     }
@@ -181,13 +186,7 @@ public class TestFileStore extends KeyValueFileStore {
             List<KeyValue> kvs,
             Function<KeyValue, BinaryRowData> partitionCalculator,
             Function<KeyValue, Integer> bucketCalculator,
-            QuadFunction<
-                            FileStoreWrite<KeyValue>,
-                            BinaryRowData,
-                            Integer,
-                            ExecutorService,
-                            RecordWriter<KeyValue>>
-                    createWriterFunction,
+            boolean emptyWriter,
             BiConsumer<FileStoreCommit, ManifestCommittable> commitFunction)
             throws Exception {
         FileStoreWrite<KeyValue> write = newWrite();
@@ -201,8 +200,18 @@ public class TestFileStore extends KeyValueFileStore {
                             (b, w) -> {
                                 if (w == null) {
                                     ExecutorService service = Executors.newSingleThreadExecutor();
-                                    return createWriterFunction.apply(
-                                            write, partition, bucket, service);
+                                    RecordWriter<KeyValue> writer =
+                                            emptyWriter
+                                                    ? write.createEmptyWriter(
+                                                            partition, bucket, service)
+                                                    : write.createWriter(
+                                                            partition, bucket, service);
+                                    ((MemoryOwner) writer)
+                                            .setMemoryPool(
+                                                    new HeapMemorySegmentPool(
+                                                            WRITE_BUFFER_SIZE.getBytes(),
+                                                            (int) PAGE_SIZE.getBytes()));
+                                    return writer;
                                 } else {
                                     return w;
                                 }

@@ -29,7 +29,6 @@ import org.apache.flink.table.store.file.mergetree.Levels;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
-import org.apache.flink.table.store.file.mergetree.SortBufferMemTable;
 import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.CompactResult;
 import org.apache.flink.table.store.file.mergetree.compact.CompactRewriter;
@@ -119,7 +118,7 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
         return new CompactTask(keyComparator, options.targetFileSize, rewriter, unit, true);
     }
 
-    private RecordWriter<KeyValue> createMergeTreeWriter(
+    private MergeTreeWriter createMergeTreeWriter(
             BinaryRowData partition,
             int bucket,
             List<DataFileMeta> restoreFiles,
@@ -127,11 +126,8 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
         DataFileWriter dataFileWriter = dataFileWriterFactory.create(partition, bucket);
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
         return new MergeTreeWriter(
-                new SortBufferMemTable(
-                        dataFileWriter.keyType(),
-                        dataFileWriter.valueType(),
-                        options.writeBufferSize,
-                        options.pageSize),
+                dataFileWriter.keyType(),
+                dataFileWriter.valueType(),
                 createCompactManager(
                         partition,
                         bucket,
