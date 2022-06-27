@@ -21,17 +21,19 @@ package org.apache.flink.table.store.file.data;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
+import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.VarCharType;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
 import static org.apache.flink.table.data.binary.BinaryRowDataUtil.EMPTY_ROW;
 import static org.apache.flink.table.store.file.utils.SerializationUtils.newBytesType;
+import static org.apache.flink.table.store.file.utils.SerializationUtils.newStringType;
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 /** Metadata of a data file. */
@@ -58,6 +60,8 @@ public class DataFileMeta {
     private final long maxSequenceNumber;
     private final long schemaId;
     private final int level;
+
+    private final List<String> extraFiles;
 
     public static DataFileMeta forAppend(
             String fileName,
@@ -93,6 +97,34 @@ public class DataFileMeta {
             long maxSequenceNumber,
             long schemaId,
             int level) {
+        this(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                Collections.emptyList());
+    }
+
+    public DataFileMeta(
+            String fileName,
+            long fileSize,
+            long rowCount,
+            BinaryRowData minKey,
+            BinaryRowData maxKey,
+            BinaryTableStats keyStats,
+            BinaryTableStats valueStats,
+            long minSequenceNumber,
+            long maxSequenceNumber,
+            long schemaId,
+            int level,
+            List<String> extraFiles) {
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.rowCount = rowCount;
@@ -106,6 +138,7 @@ public class DataFileMeta {
         this.maxSequenceNumber = maxSequenceNumber;
         this.level = level;
         this.schemaId = schemaId;
+        this.extraFiles = Collections.unmodifiableList(extraFiles);
     }
 
     public String fileName() {
@@ -152,6 +185,10 @@ public class DataFileMeta {
         return level;
     }
 
+    public List<String> extraFiles() {
+        return extraFiles;
+    }
+
     public DataFileMeta upgrade(int newLevel) {
         checkArgument(newLevel > this.level);
         return new DataFileMeta(
@@ -165,7 +202,24 @@ public class DataFileMeta {
                 minSequenceNumber,
                 maxSequenceNumber,
                 schemaId,
-                newLevel);
+                newLevel,
+                extraFiles);
+    }
+
+    public DataFileMeta copy(List<String> newExtraFiles) {
+        return new DataFileMeta(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                newExtraFiles);
     }
 
     @Override
@@ -184,7 +238,8 @@ public class DataFileMeta {
                 && minSequenceNumber == that.minSequenceNumber
                 && maxSequenceNumber == that.maxSequenceNumber
                 && schemaId == that.schemaId
-                && level == that.level;
+                && level == that.level
+                && Objects.equals(extraFiles, that.extraFiles);
     }
 
     @Override
@@ -200,13 +255,14 @@ public class DataFileMeta {
                 minSequenceNumber,
                 maxSequenceNumber,
                 schemaId,
-                level);
+                level,
+                extraFiles);
     }
 
     @Override
     public String toString() {
         return String.format(
-                "{%s, %d, %d, %s, %s, %s, %s, %d, %d, %d, %d}",
+                "{%s, %d, %d, %s, %s, %s, %s, %d, %d, %d, %d, %s}",
                 fileName,
                 fileSize,
                 rowCount,
@@ -217,12 +273,13 @@ public class DataFileMeta {
                 minSequenceNumber,
                 maxSequenceNumber,
                 schemaId,
-                level);
+                level,
+                extraFiles);
     }
 
     public static RowType schema() {
         List<RowType.RowField> fields = new ArrayList<>();
-        fields.add(new RowType.RowField("_FILE_NAME", new VarCharType(false, Integer.MAX_VALUE)));
+        fields.add(new RowType.RowField("_FILE_NAME", newStringType(false)));
         fields.add(new RowType.RowField("_FILE_SIZE", new BigIntType(false)));
         fields.add(new RowType.RowField("_ROW_COUNT", new BigIntType(false)));
         fields.add(new RowType.RowField("_MIN_KEY", newBytesType(false)));
@@ -233,6 +290,8 @@ public class DataFileMeta {
         fields.add(new RowType.RowField("_MAX_SEQUENCE_NUMBER", new BigIntType(false)));
         fields.add(new RowType.RowField("_SCHEMA_ID", new BigIntType(false)));
         fields.add(new RowType.RowField("_LEVEL", new IntType(false)));
+        fields.add(
+                new RowType.RowField("_EXTRA_FILES", new ArrayType(false, newStringType(false))));
         return new RowType(fields);
     }
 }

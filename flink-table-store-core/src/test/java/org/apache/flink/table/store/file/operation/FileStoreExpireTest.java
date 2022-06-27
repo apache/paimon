@@ -18,13 +18,18 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
+import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 
 import org.junit.jupiter.api.AfterEach;
@@ -34,10 +39,12 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static org.apache.flink.table.data.binary.BinaryRowDataUtil.EMPTY_ROW;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link FileStoreExpireImpl}. */
@@ -66,6 +73,49 @@ public class FileStoreExpireTest {
     @AfterEach
     public void afterEach() throws IOException {
         store.assertCleaned();
+    }
+
+    @Test
+    public void testExpireExtraFiles() throws IOException {
+        FileStoreExpireImpl expire = store.newExpire(1, 3, Long.MAX_VALUE);
+
+        // write test files
+        BinaryRowData partition = gen.getPartition(gen.next());
+        Path bucketPath = store.pathFactory().bucketPath(partition, 0);
+        Path myDataFile = new Path(bucketPath, "myDataFile");
+        FileUtils.writeFileUtf8(myDataFile, "1");
+        Path extra1 = new Path(bucketPath, "extra1");
+        FileUtils.writeFileUtf8(extra1, "2");
+        Path extra2 = new Path(bucketPath, "extra2");
+        FileUtils.writeFileUtf8(extra2, "3");
+
+        // create DataFileMeta and ManifestEntry
+        List<String> extraFiles = Arrays.asList("extra1", "extra2");
+        DataFileMeta dataFile =
+                new DataFileMeta(
+                        "myDataFile",
+                        1,
+                        1,
+                        EMPTY_ROW,
+                        EMPTY_ROW,
+                        null,
+                        null,
+                        0,
+                        1,
+                        0,
+                        0,
+                        extraFiles);
+        ManifestEntry add = new ManifestEntry(ValueKind.ADD, partition, 0, 1, dataFile);
+        ManifestEntry delete = new ManifestEntry(ValueKind.DELETE, partition, 0, 1, dataFile);
+
+        // expire
+        expire.expireDataFiles(Arrays.asList(add, delete));
+
+        // check
+        FileSystem fs = myDataFile.getFileSystem();
+        assertThat(fs.exists(myDataFile)).isFalse();
+        assertThat(fs.exists(extra1)).isFalse();
+        assertThat(fs.exists(extra2)).isFalse();
     }
 
     @Test

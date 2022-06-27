@@ -350,8 +350,6 @@ public class TestFileStore extends KeyValueFileStore {
         FileStorePathFactory pathFactory = pathFactory();
         ManifestList manifestList = manifestListFactory().create();
         FileStoreScan scan = newScan();
-        FileStorePathFactory.DataFilePathFactoryCache dataFilePathFactoryCache =
-                new FileStorePathFactory.DataFilePathFactoryCache(pathFactory);
 
         SnapshotManager snapshotManager = snapshotManager();
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
@@ -387,9 +385,9 @@ public class TestFileStore extends KeyValueFileStore {
             List<ManifestEntry> entries = scan.withManifestList(manifests).plan().files();
             for (ManifestEntry entry : entries) {
                 result.add(
-                        dataFilePathFactoryCache
-                                .getDataFilePathFactory(entry.partition(), entry.bucket())
-                                .toPath(entry.file().fileName()));
+                        new Path(
+                                pathFactory.bucketPath(entry.partition(), entry.bucket()),
+                                entry.file().fileName()));
             }
         }
         return result;
