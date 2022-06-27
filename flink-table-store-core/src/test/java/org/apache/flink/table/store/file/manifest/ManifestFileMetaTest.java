@@ -24,14 +24,12 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
 import org.apache.flink.table.store.file.FileStoreOptions;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -56,8 +54,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ManifestFileMetaTest {
 
     private static final RowType PARTITION_TYPE = RowType.of(new IntType());
-    private static final RowType KEY_TYPE = RowType.of(new IntType());
-    private static final RowType ROW_TYPE = RowType.of(new BigIntType());
 
     private final FileFormat avro;
 
@@ -236,7 +232,7 @@ public class ManifestFileMetaTest {
         writer.complete();
 
         return new ManifestEntry(
-                isAdd ? ValueKind.ADD : ValueKind.DELETE,
+                isAdd ? FileKind.ADD : FileKind.DELETE,
                 binaryRowData, // not used
                 0, // not used
                 0, // not used

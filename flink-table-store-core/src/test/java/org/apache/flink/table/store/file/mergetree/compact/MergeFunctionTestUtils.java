@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.utils.ReusingTestData;
+import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
@@ -38,13 +38,13 @@ public class MergeFunctionTestUtils {
         for (int i = 0; i < input.size(); i++) {
             ReusingTestData data = input.get(i);
             Preconditions.checkArgument(
-                    data.valueKind == ValueKind.ADD,
+                    data.valueKind == RowKind.INSERT,
                     "Only ADD value kind is supported for value count merge function.");
             c += data.value;
             if (i + 1 >= input.size() || data.key != input.get(i + 1).key) {
                 if (c != 0) {
                     expected.add(
-                            new ReusingTestData(data.key, data.sequenceNumber, ValueKind.ADD, c));
+                            new ReusingTestData(data.key, data.sequenceNumber, RowKind.INSERT, c));
                 }
                 c = 0;
             }

@@ -23,7 +23,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueFileStore;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
@@ -178,24 +177,14 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         SinkRecordConverter recordConverter =
                 new SinkRecordConverter(store.options().bucket(), tableSchema);
         return new MemoryTableWrite<KeyValue>(store.newWrite(), recordConverter, store.options()) {
+
+            private final KeyValue kv = new KeyValue();
+
             @Override
             protected void writeSinkRecord(SinkRecord record, RecordWriter<KeyValue> writer)
                     throws Exception {
-                KeyValue kv = new KeyValue();
-                switch (record.row().getRowKind()) {
-                    case INSERT:
-                    case UPDATE_AFTER:
-                        kv.replace(record.primaryKey(), ValueKind.ADD, record.row());
-                        break;
-                    case UPDATE_BEFORE:
-                    case DELETE:
-                        kv.replace(record.primaryKey(), ValueKind.DELETE, record.row());
-                        break;
-                    default:
-                        throw new UnsupportedOperationException(
-                                "Unknown row kind " + record.row().getRowKind());
-                }
-                writer.write(kv);
+                writer.write(
+                        kv.replace(record.primaryKey(), record.row().getRowKind(), record.row()));
             }
         };
     }

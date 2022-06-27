@@ -20,8 +20,8 @@ package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.types.RowKind;
 
 import java.io.IOException;
 import java.util.Comparator;
@@ -38,7 +38,7 @@ public interface MemTable {
      *
      * @return True, if the record was successfully written, false, if the mem table was full.
      */
-    boolean put(long sequenceNumber, ValueKind valueKind, RowData key, RowData value)
+    boolean put(long sequenceNumber, RowKind valueKind, RowData key, RowData value)
             throws IOException;
 
     /** Record size of this table. */

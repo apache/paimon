@@ -24,6 +24,7 @@ import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.TinyIntType;
+import org.apache.flink.types.RowKind;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,7 +39,7 @@ public class KeyValue {
 
     private RowData key;
     private long sequenceNumber;
-    private ValueKind valueKind;
+    private RowKind valueKind;
     private RowData value;
 
     public KeyValue setValue(RowData value) {
@@ -46,11 +47,11 @@ public class KeyValue {
         return this;
     }
 
-    public KeyValue replace(RowData key, ValueKind valueKind, RowData value) {
+    public KeyValue replace(RowData key, RowKind valueKind, RowData value) {
         return replace(key, -1, valueKind, value);
     }
 
-    public KeyValue replace(RowData key, long sequenceNumber, ValueKind valueKind, RowData value) {
+    public KeyValue replace(RowData key, long sequenceNumber, RowKind valueKind, RowData value) {
         this.key = key;
         this.sequenceNumber = sequenceNumber;
         this.valueKind = valueKind;
@@ -66,7 +67,7 @@ public class KeyValue {
         return sequenceNumber;
     }
 
-    public ValueKind valueKind() {
+    public RowKind valueKind() {
         return valueKind;
     }
 

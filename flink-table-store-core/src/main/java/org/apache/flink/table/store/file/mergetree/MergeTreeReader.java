@@ -20,7 +20,6 @@ package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileReader;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
@@ -28,6 +27,7 @@ import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader.Re
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.SortMergeReader;
 import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
 
@@ -84,7 +84,8 @@ public class MergeTreeReader implements RecordReader<KeyValue> {
                         return null;
                     }
 
-                    if (kv.valueKind() == ValueKind.ADD) {
+                    if (kv.valueKind() == RowKind.INSERT
+                            || kv.valueKind() == RowKind.UPDATE_AFTER) {
                         return kv;
                     }
                 }

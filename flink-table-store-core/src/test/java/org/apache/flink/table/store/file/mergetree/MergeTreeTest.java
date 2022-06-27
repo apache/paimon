@@ -26,7 +26,6 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileReader;
 import org.apache.flink.table.store.file.data.DataFileWriter;
@@ -46,6 +45,7 @@ import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.types.RowKind;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -199,7 +199,7 @@ public class MergeTreeTest {
             for (int j = 0; j < perBatch; j++) {
                 records.add(
                         new TestRecord(
-                                random.nextBoolean() ? ValueKind.ADD : ValueKind.DELETE,
+                                random.nextBoolean() ? RowKind.INSERT : RowKind.DELETE,
                                 random.nextInt(perBatch / 2) - i * (perBatch / 2),
                                 random.nextInt()));
             }
@@ -351,7 +351,7 @@ public class MergeTreeTest {
         }
         if (dropDelete) {
             return map.values().stream()
-                    .filter(record -> record.kind == ValueKind.ADD)
+                    .filter(record -> record.kind == RowKind.INSERT)
                     .collect(Collectors.toList());
         }
         return new ArrayList<>(map.values());
@@ -394,7 +394,7 @@ public class MergeTreeTest {
         for (int i = 0; i < perBatch; i++) {
             records.add(
                     new TestRecord(
-                            random.nextBoolean() ? ValueKind.ADD : ValueKind.DELETE,
+                            random.nextBoolean() ? RowKind.INSERT : RowKind.DELETE,
                             random.nextInt(perBatch / 2),
                             random.nextInt()));
         }
@@ -403,11 +403,11 @@ public class MergeTreeTest {
 
     private static class TestRecord {
 
-        private final ValueKind kind;
+        private final RowKind kind;
         private final int k;
         private final int v;
 
-        private TestRecord(ValueKind kind, int k, int v) {
+        private TestRecord(RowKind kind, int k, int v) {
             this.kind = kind;
             this.k = k;
             this.v = v;

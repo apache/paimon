@@ -20,7 +20,6 @@ package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.writer.RecordWriter;
@@ -85,10 +84,11 @@ public class TestFileStoreTable implements FileStoreTable {
                 if (store.hasPk) {
                     kv.replace(
                             record.primaryKey(),
-                            isInsert ? ValueKind.ADD : ValueKind.DELETE,
+                            isInsert ? RowKind.INSERT : RowKind.DELETE,
                             record.row());
                 } else {
-                    kv.replace(record.row(), ValueKind.ADD, GenericRowData.of(isInsert ? 1L : -1L));
+                    kv.replace(
+                            record.row(), RowKind.INSERT, GenericRowData.of(isInsert ? 1L : -1L));
                 }
                 writer.write(kv);
             }
