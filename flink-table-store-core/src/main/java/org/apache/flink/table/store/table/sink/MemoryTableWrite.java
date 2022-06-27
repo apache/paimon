@@ -18,24 +18,25 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.runtime.util.MemorySegmentPool;
 import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
+import org.apache.flink.table.store.file.memory.MemoryOwner;
+import org.apache.flink.table.store.file.memory.MemoryPoolFactory;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
-import org.apache.flink.table.store.file.utils.HeapMemorySegmentPool;
-import org.apache.flink.table.store.file.utils.MemoryPoolFactory;
-import org.apache.flink.table.store.file.writer.MemoryRecordWriter;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 
+import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
+
+import java.util.Iterator;
 import java.util.Map;
 
 /**
  * A {@link TableWrite} which supports using shared memory and preempting memory from other writers.
  */
-public abstract class MemoryTableWrite<T> extends AbstractTableWrite<T>
-        implements MemoryPoolFactory.PreemptRunner<MemoryRecordWriter<T>> {
+public abstract class MemoryTableWrite<T> extends AbstractTableWrite<T> {
 
-    private final MemoryPoolFactory<MemoryRecordWriter<T>> memoryPoolFactory;
+    private final MemoryPoolFactory memoryPoolFactory;
 
     protected MemoryTableWrite(
             FileStoreWrite<T> write,
@@ -47,44 +48,35 @@ public abstract class MemoryTableWrite<T> extends AbstractTableWrite<T>
         HeapMemorySegmentPool memoryPool =
                 new HeapMemorySegmentPool(
                         mergeTreeOptions.writeBufferSize, mergeTreeOptions.pageSize);
-        this.memoryPoolFactory = new MemoryPoolFactory<>(memoryPool, this);
+        this.memoryPoolFactory = new MemoryPoolFactory(memoryPool, this::memoryOwners);
     }
 
-    @Override
-    public void preemptMemory(MemoryRecordWriter<T> owner) {
-        long maxMemory = -1;
-        MemoryRecordWriter<T> max = null;
-        for (Map<Integer, RecordWriter<T>> bucket : writers.values()) {
-            for (RecordWriter<T> recordWriter : bucket.values()) {
-                MemoryRecordWriter<T> writer = (MemoryRecordWriter<T>) recordWriter;
-                // Don't preempt yourself! Write and flush at the same time, which may lead to
-                // inconsistent state
-                if (writer != owner && writer.memoryOccupancy() > maxMemory) {
-                    maxMemory = writer.memoryOccupancy();
-                    max = writer;
-                }
-            }
-        }
+    private Iterator<MemoryOwner> memoryOwners() {
+        Iterator<Map<Integer, RecordWriter<T>>> iterator = writers.values().iterator();
+        return Iterators.concat(
+                new Iterator<Iterator<MemoryOwner>>() {
+                    @Override
+                    public boolean hasNext() {
+                        return iterator.hasNext();
+                    }
 
-        if (max != null) {
-            try {
-                max.flushMemory();
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        }
+                    @Override
+                    public Iterator<MemoryOwner> next() {
+                        return Iterators.transform(
+                                iterator.next().values().iterator(),
+                                writer -> (MemoryOwner) writer);
+                    }
+                });
     }
 
     @Override
     protected void notifyNewWriter(RecordWriter<T> writer) {
-        if (!(writer instanceof MemoryRecordWriter)) {
+        if (!(writer instanceof MemoryOwner)) {
             throw new RuntimeException(
-                    "Should create a MemoryRecordWriter for MemoryTableWrite,"
+                    "Should create a MemoryOwner for MemoryTableWrite,"
                             + " but this is: "
                             + writer.getClass());
         }
-        MemoryRecordWriter<T> memoryRecordWriter = (MemoryRecordWriter<T>) writer;
-        MemorySegmentPool memoryPool = memoryPoolFactory.create(memoryRecordWriter);
-        memoryRecordWriter.setMemoryPool(memoryPool);
+        memoryPoolFactory.notifyNewOwner((MemoryOwner) writer);
     }
 }

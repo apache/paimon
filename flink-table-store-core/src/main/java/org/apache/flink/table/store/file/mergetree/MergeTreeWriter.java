@@ -24,10 +24,10 @@ import org.apache.flink.table.runtime.util.MemorySegmentPool;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileWriter;
+import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.CompactResult;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
-import org.apache.flink.table.store.file.writer.MemoryRecordWriter;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.CloseableIterator;
@@ -43,7 +43,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /** A {@link RecordWriter} to write records and generate {@link Increment}. */
-public class MergeTreeWriter implements MemoryRecordWriter<KeyValue> {
+public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private final RowType keyType;
 

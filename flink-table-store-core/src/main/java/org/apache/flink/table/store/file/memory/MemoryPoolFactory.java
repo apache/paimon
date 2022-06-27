@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.utils;
+package org.apache.flink.table.store.file.memory;
 
 import org.apache.flink.core.memory.MemorySegment;
 import org.apache.flink.table.runtime.util.MemorySegmentPool;
@@ -24,28 +24,50 @@ import org.apache.flink.table.runtime.util.MemorySegmentPool;
 import java.util.List;
 
 /**
- * A factory which creates {@link MemorySegmentPool} from {@link OwnerT}. The returned memory pool
- * will try to preempt memory when there is no memory left.
+ * A factory which creates {@link MemorySegmentPool} from {@link MemoryOwner}. The returned memory
+ * pool will try to preempt memory when there is no memory left.
  */
-public class MemoryPoolFactory<OwnerT> {
+public class MemoryPoolFactory {
 
     private final MemorySegmentPool innerPool;
-    private final PreemptRunner<OwnerT> preemptRunner;
+    private final Iterable<MemoryOwner> owners;
 
-    public MemoryPoolFactory(MemorySegmentPool innerPool, PreemptRunner<OwnerT> preemptRunner) {
+    public MemoryPoolFactory(MemorySegmentPool innerPool, Iterable<MemoryOwner> owners) {
         this.innerPool = innerPool;
-        this.preemptRunner = preemptRunner;
+        this.owners = owners;
     }
 
-    public MemorySegmentPool create(OwnerT owner) {
-        return new OwnerMemoryPool(owner);
+    public void notifyNewOwner(MemoryOwner owner) {
+        MemorySegmentPool memoryPool = new OwnerMemoryPool(owner);
+        owner.setMemoryPool(memoryPool);
+    }
+
+    private void preemptMemory(MemoryOwner owner) {
+        long maxMemory = -1;
+        MemoryOwner max = null;
+        for (MemoryOwner other : owners) {
+            // Don't preempt yourself! Write and flush at the same time, which may lead to
+            // inconsistent state
+            if (other != owner && other.memoryOccupancy() > maxMemory) {
+                maxMemory = other.memoryOccupancy();
+                max = other;
+            }
+        }
+
+        if (max != null) {
+            try {
+                max.flushMemory();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 
     private class OwnerMemoryPool implements MemorySegmentPool {
 
-        private final OwnerT owner;
+        private final MemoryOwner owner;
 
-        public OwnerMemoryPool(OwnerT owner) {
+        public OwnerMemoryPool(MemoryOwner owner) {
             this.owner = owner;
         }
 
@@ -68,15 +90,10 @@ public class MemoryPoolFactory<OwnerT> {
         public MemorySegment nextSegment() {
             MemorySegment segment = innerPool.nextSegment();
             if (segment == null) {
-                preemptRunner.preemptMemory(owner);
+                preemptMemory(owner);
                 return innerPool.nextSegment();
             }
             return segment;
         }
-    }
-
-    /** A runner to preempt memory. */
-    public interface PreemptRunner<T> {
-        void preemptMemory(T owner);
     }
 }

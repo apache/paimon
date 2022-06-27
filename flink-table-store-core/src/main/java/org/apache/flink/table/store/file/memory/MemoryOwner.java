@@ -16,19 +16,19 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.writer;
+package org.apache.flink.table.store.file.memory;
 
 import org.apache.flink.table.runtime.util.MemorySegmentPool;
 
-/** The {@link RecordWriter} provides memory related methods. */
-public interface MemoryRecordWriter<T> extends RecordWriter<T> {
+/** A class provides memory related methods. */
+public interface MemoryOwner {
 
-    /** Set {@link MemorySegmentPool} for the writer. */
+    /** Set {@link MemorySegmentPool} for the owner. */
     void setMemoryPool(MemorySegmentPool memoryPool);
 
-    /** Memory occupancy size of this table. */
+    /** Memory occupancy size of this owner. */
     long memoryOccupancy();
 
-    /** Flush memory table, release memory. */
+    /** Flush memory of owner, release memory. */
     void flushMemory() throws Exception;
 }

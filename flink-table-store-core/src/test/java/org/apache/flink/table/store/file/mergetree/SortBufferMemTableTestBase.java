@@ -20,11 +20,11 @@ package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.table.runtime.generated.RecordComparator;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionTestUtils;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
-import org.apache.flink.table.store.file.utils.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.utils.ReusingKeyValue;
 import org.apache.flink.table.store.file.utils.ReusingTestData;
 import org.apache.flink.table.types.logical.BigIntType;
