@@ -43,7 +43,7 @@ public abstract class AbstractTableWrite<T> implements TableWrite {
     private final FileStoreWrite<T> write;
     private final SinkRecordConverter recordConverter;
 
-    private final Map<BinaryRowData, Map<Integer, RecordWriter<T>>> writers;
+    protected final Map<BinaryRowData, Map<Integer, RecordWriter<T>>> writers;
     private final ExecutorService compactExecutor;
 
     private boolean overwrite = false;
@@ -100,7 +100,7 @@ public abstract class AbstractTableWrite<T> implements TableWrite {
                 // we need a mechanism to clear writers, otherwise there will be more and more
                 // such as yesterday's partition that no longer needs to be written.
                 if (committable.increment().newFiles().isEmpty()) {
-                    closeWriter(writer);
+                    writer.close();
                     bucketIter.remove();
                 }
             }
@@ -113,20 +113,15 @@ public abstract class AbstractTableWrite<T> implements TableWrite {
         return result;
     }
 
-    private void closeWriter(RecordWriter<T> writer) throws Exception {
-        writer.sync();
-        writer.close();
-    }
-
     @Override
     public void close() throws Exception {
-        compactExecutor.shutdownNow();
         for (Map<Integer, RecordWriter<T>> bucketWriters : writers.values()) {
             for (RecordWriter<T> writer : bucketWriters.values()) {
-                closeWriter(writer);
+                writer.close();
             }
         }
         writers.clear();
+        compactExecutor.shutdownNow();
     }
 
     @VisibleForTesting
@@ -143,11 +138,17 @@ public abstract class AbstractTableWrite<T> implements TableWrite {
             buckets = new HashMap<>();
             writers.put(partition.copy(), buckets);
         }
-        return buckets.computeIfAbsent(
-                bucket,
-                k ->
-                        overwrite
-                                ? write.createEmptyWriter(partition.copy(), bucket, compactExecutor)
-                                : write.createWriter(partition.copy(), bucket, compactExecutor));
+        return buckets.computeIfAbsent(bucket, k -> createWriter(partition.copy(), bucket));
     }
+
+    private RecordWriter<T> createWriter(BinaryRowData partition, int bucket) {
+        RecordWriter<T> writer =
+                overwrite
+                        ? write.createEmptyWriter(partition.copy(), bucket, compactExecutor)
+                        : write.createWriter(partition.copy(), bucket, compactExecutor);
+        notifyNewWriter(writer);
+        return writer;
+    }
+
+    protected void notifyNewWriter(RecordWriter<T> writer) {}
 }

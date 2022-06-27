@@ -23,6 +23,7 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
+import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
 
 import org.slf4j.Logger;
@@ -38,6 +39,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static org.apache.flink.table.store.file.TestFileStore.PAGE_SIZE;
+import static org.apache.flink.table.store.file.TestFileStore.WRITE_BUFFER_SIZE;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED;
 
 /** Testing {@link Thread}s to perform concurrent commits. */
@@ -197,10 +200,13 @@ public class TestCommitThread extends Thread {
                             t.setName(Thread.currentThread().getName() + "-writer-service-pool");
                             return t;
                         });
-        if (empty) {
-            return (MergeTreeWriter) write.createEmptyWriter(partition, 0, service);
-        } else {
-            return (MergeTreeWriter) write.createWriter(partition, 0, service);
-        }
+        MergeTreeWriter writer =
+                empty
+                        ? (MergeTreeWriter) write.createEmptyWriter(partition, 0, service)
+                        : (MergeTreeWriter) write.createWriter(partition, 0, service);
+        writer.setMemoryPool(
+                new HeapMemorySegmentPool(
+                        WRITE_BUFFER_SIZE.getBytes(), (int) PAGE_SIZE.getBytes()));
+        return writer;
     }
 }

@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.utils;
+package org.apache.flink.table.store.file.memory;
 
 import org.apache.flink.core.memory.MemorySegment;
 import org.apache.flink.core.memory.MemorySegmentFactory;
@@ -34,9 +34,9 @@ public class HeapMemorySegmentPool implements MemorySegmentPool {
 
     private int numPage;
 
-    public HeapMemorySegmentPool(int maxPages, int pageSize) {
+    public HeapMemorySegmentPool(long maxMemory, int pageSize) {
         this.segments = new LinkedList<>();
-        this.maxPages = maxPages;
+        this.maxPages = (int) (maxMemory / pageSize);
         this.pageSize = pageSize;
         this.numPage = 0;
     }
