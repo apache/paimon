@@ -69,6 +69,9 @@ public abstract class FileStoreTableTestBase {
             rowData ->
                     (rowData.getRowKind() == RowKind.INSERT ? "+" : "-")
                             + BATCH_PROJECTED_ROW_TO_STRING.apply(rowData);
+    protected static final Function<RowData, String> CHANGELOG_ROW_TO_STRING =
+            rowData ->
+                    rowData.getRowKind().shortString() + " " + BATCH_ROW_TO_STRING.apply(rowData);
 
     @Test
     public void testOverwrite() throws Exception {

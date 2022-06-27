@@ -30,7 +30,6 @@ import org.apache.flink.table.store.file.mergetree.compact.CompactResult;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.util.CloseableIterator;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -63,6 +62,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private final int numSortedRunStopTrigger;
 
+    private final boolean changelogFile;
+
     private final LinkedHashSet<DataFileMeta> newFiles;
 
     private final LinkedHashMap<String, DataFileMeta> compactBefore;
@@ -83,7 +84,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             MergeFunction mergeFunction,
             DataFileWriter dataFileWriter,
             boolean commitForceCompact,
-            int numSortedRunStopTrigger) {
+            int numSortedRunStopTrigger,
+            boolean changelogFile) {
         this.keyType = keyType;
         this.valueType = valueType;
         this.compactManager = compactManager;
@@ -94,6 +96,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.dataFileWriter = dataFileWriter;
         this.commitForceCompact = commitForceCompact;
         this.numSortedRunStopTrigger = numSortedRunStopTrigger;
+        this.changelogFile = changelogFile;
         this.newFiles = new LinkedHashSet<>();
         this.compactBefore = new LinkedHashMap<>();
         this.compactAfter = new LinkedHashSet<>();
@@ -138,11 +141,15 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 // stop writing, wait for compaction finished
                 finishCompaction(true);
             }
-            Iterator<KeyValue> iterator = memTable.iterator(keyComparator, mergeFunction);
-            List<DataFileMeta> files =
-                    dataFileWriter.write(CloseableIterator.adapterForIterator(iterator), 0);
-            newFiles.addAll(files);
-            files.forEach(levels::addLevel0File);
+            List<String> extraFiles = new ArrayList<>();
+            if (changelogFile) {
+                extraFiles.add(
+                        dataFileWriter.writeLevel0Changelog(memTable.rawIterator()).getName());
+            }
+            Iterator<KeyValue> iterator = memTable.mergeIterator(keyComparator, mergeFunction);
+            DataFileMeta file = dataFileWriter.writeLevel0(iterator).copy(extraFiles);
+            newFiles.add(file);
+            levels.addLevel0File(file);
             memTable.clear();
             submitCompaction();
         }

@@ -38,6 +38,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
+
+import static org.apache.flink.table.store.file.data.DataFilePathFactory.CHANGELOG_FILE_PREFIX;
 
 /**
  * {@link FileStoreRead} implementation for {@link
@@ -86,7 +89,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             // Return the raw file contents without merging
             List<ConcatRecordReader.ReaderSupplier<KeyValue>> suppliers = new ArrayList<>();
             for (DataFileMeta file : split.files()) {
-                suppliers.add(() -> dataFileReader.read(file.fileName()));
+                suppliers.add(
+                        () -> dataFileReader.read(changelogFile(file).orElse(file.fileName())));
             }
             return ConcatRecordReader.create(suppliers);
         } else {
@@ -107,5 +111,14 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                     ? reader
                     : new ProjectKeyRecordReader(reader, keyProjectedFields);
         }
+    }
+
+    private Optional<String> changelogFile(DataFileMeta fileMeta) {
+        for (String file : fileMeta.extraFiles()) {
+            if (file.startsWith(CHANGELOG_FILE_PREFIX)) {
+                return Optional.of(file);
+            }
+        }
+        return Optional.empty();
     }
 }
