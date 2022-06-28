@@ -20,6 +20,7 @@ package org.apache.flink.table.store.mapred;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.data.DataFileTestDataGenerator;
+import org.apache.flink.table.store.table.source.Split;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -52,13 +53,15 @@ public class TableStoreInputSplitTest {
         BinaryRowData wantedPartition = generated.get(0).partition;
         TableStoreInputSplit split =
                 new TableStoreInputSplit(
-                        wantedPartition,
-                        0,
-                        generated.stream()
-                                .filter(d -> d.partition.equals(wantedPartition))
-                                .map(d -> d.meta)
-                                .collect(Collectors.toList()),
-                        tempDir.toString());
+                        tempDir.toString(),
+                        new Split(
+                                wantedPartition,
+                                0,
+                                generated.stream()
+                                        .filter(d -> d.partition.equals(wantedPartition))
+                                        .map(d -> d.meta)
+                                        .collect(Collectors.toList()),
+                                false));
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         DataOutputStream output = new DataOutputStream(baos);

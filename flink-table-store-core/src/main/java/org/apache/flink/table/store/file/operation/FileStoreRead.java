@@ -18,12 +18,10 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.table.source.Split;
 
 import java.io.IOException;
-import java.util.List;
 
 /**
  * Read operation which provides {@link RecordReader} creation.
@@ -32,7 +30,6 @@ import java.util.List;
  */
 public interface FileStoreRead<T> {
 
-    /** Create a {@link RecordReader} from partition and bucket and files. */
-    RecordReader<T> createReader(BinaryRowData partition, int bucket, List<DataFileMeta> files)
-            throws IOException;
+    /** Create a {@link RecordReader} from split. */
+    RecordReader<T> createReader(Split split) throws IOException;
 }

@@ -19,12 +19,9 @@
 package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.utils.ProjectedRowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.types.RowKind;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 
@@ -35,16 +32,11 @@ import java.io.IOException;
  */
 public class ValueCountRowDataRecordIterator extends ResetRowKindRecordIterator {
 
-    private final @Nullable ProjectedRowData projectedRowData;
-
     private RowData rowData;
     private long count;
 
-    public ValueCountRowDataRecordIterator(
-            RecordReader.RecordIterator<KeyValue> kvIterator, @Nullable int[][] projection) {
+    public ValueCountRowDataRecordIterator(RecordReader.RecordIterator<KeyValue> kvIterator) {
         super(kvIterator);
-        this.projectedRowData = projection == null ? null : ProjectedRowData.from(projection);
-
         this.rowData = null;
         this.count = 0;
     }
@@ -61,8 +53,7 @@ public class ValueCountRowDataRecordIterator extends ResetRowKindRecordIterator 
                     return null;
                 }
 
-                rowData =
-                        projectedRowData == null ? kv.key() : projectedRowData.replaceRow(kv.key());
+                rowData = kv.key();
                 long value = kv.value().getLong(0);
                 if (value < 0) {
                     rowData.setRowKind(RowKind.DELETE);

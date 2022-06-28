@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.table.data.binary.BinaryRowData;
@@ -31,26 +30,20 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-import static org.apache.flink.table.store.file.utils.SerializationUtils.deserializedBytes;
-import static org.apache.flink.table.store.file.utils.SerializationUtils.serializeBytes;
-import static org.apache.flink.util.InstantiationUtil.deserializeObject;
-import static org.apache.flink.util.InstantiationUtil.serializeObject;
-
 /** Input splits. Needed by most batch computation engines. */
 public class Split {
 
     private final BinaryRowData partition;
     private final int bucket;
     private final List<DataFileMeta> files;
+    private final boolean isIncremental;
 
-    private final Path bucketPath;
-
-    public Split(BinaryRowData partition, int bucket, List<DataFileMeta> files, Path bucketPath) {
+    public Split(
+            BinaryRowData partition, int bucket, List<DataFileMeta> files, boolean isIncremental) {
         this.partition = partition;
         this.bucket = bucket;
         this.files = files;
-
-        this.bucketPath = bucketPath;
+        this.isIncremental = isIncremental;
     }
 
     public BinaryRowData partition() {
@@ -65,8 +58,8 @@ public class Split {
         return files;
     }
 
-    public Path bucketPath() {
-        return bucketPath;
+    public boolean isIncremental() {
+        return isIncremental;
     }
 
     @Override
@@ -81,12 +74,12 @@ public class Split {
         return bucket == split.bucket
                 && Objects.equals(partition, split.partition)
                 && Objects.equals(files, split.files)
-                && Objects.equals(bucketPath, split.bucketPath);
+                && isIncremental == split.isIncremental;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(partition, bucket, files, bucketPath);
+        return Objects.hash(partition, bucket, files, isIncremental);
     }
 
     public void serialize(DataOutputView out) throws IOException {
@@ -97,7 +90,7 @@ public class Split {
         for (DataFileMeta file : files) {
             dataFileSer.serialize(file, out);
         }
-        serializeBytes(out, serializeObject(bucketPath));
+        out.writeBoolean(isIncremental);
     }
 
     public static Split deserialize(DataInputView in) throws IOException {
@@ -109,14 +102,6 @@ public class Split {
         for (int i = 0; i < fileNumber; i++) {
             files.add(dataFileSer.deserialize(in));
         }
-        Path bucketPath;
-        try {
-            bucketPath =
-                    deserializeObject(
-                            deserializedBytes(in), Thread.currentThread().getContextClassLoader());
-        } catch (ClassNotFoundException e) {
-            throw new IOException(e);
-        }
-        return new Split(partition, bucket, files, bucketPath);
+        return new Split(partition, bucket, files, in.readBoolean());
     }
 }

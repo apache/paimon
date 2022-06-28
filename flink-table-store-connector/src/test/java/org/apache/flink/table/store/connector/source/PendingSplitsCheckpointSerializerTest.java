@@ -27,6 +27,7 @@ import java.util.Arrays;
 import java.util.Collections;
 
 import static org.apache.flink.table.store.connector.source.FileStoreSourceSplitSerializerTest.newFile;
+import static org.apache.flink.table.store.connector.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
 import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -82,15 +83,15 @@ public class PendingSplitsCheckpointSerializerTest {
     // ------------------------------------------------------------------------
 
     private static FileStoreSourceSplit testSplit1() {
-        return new FileStoreSourceSplit("id1", row(1), 2, Arrays.asList(newFile(0), newFile(1)));
+        return newSourceSplit("id1", row(1), 2, Arrays.asList(newFile(0), newFile(1)));
     }
 
     private static FileStoreSourceSplit testSplit2() {
-        return new FileStoreSourceSplit("id2", row(2), 3, Arrays.asList(newFile(2), newFile(3)));
+        return newSourceSplit("id2", row(2), 3, Arrays.asList(newFile(2), newFile(3)));
     }
 
     private static FileStoreSourceSplit testSplit3() {
-        return new FileStoreSourceSplit("id3", row(3), 4, Arrays.asList(newFile(5), newFile(6)));
+        return newSourceSplit("id3", row(3), 4, Arrays.asList(newFile(5), newFile(6)));
     }
 
     private static PendingSplitsCheckpoint serializeAndDeserialize(

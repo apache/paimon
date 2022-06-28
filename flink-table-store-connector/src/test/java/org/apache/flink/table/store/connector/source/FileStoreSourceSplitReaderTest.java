@@ -44,6 +44,7 @@ import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.flink.table.store.connector.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
 import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -95,7 +96,7 @@ public class FileStoreSourceSplitReaderTest {
         List<Tuple2<Long, Long>> input = kvs();
         List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
 
-        assignSplit(reader, new FileStoreSourceSplit("id1", row(1), 0, files, skip));
+        assignSplit(reader, newSourceSplit("id1", row(1), 0, files, skip));
 
         RecordsWithSplitIds<RecordAndPosition<RowData>> records = reader.fetch();
 
@@ -131,8 +132,7 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testPrimaryKeyWithDelete() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
-        FileStoreSourceSplitReader reader =
-                new FileStoreSourceSplitReader(rw.createReadWithKey().withIncremental(true));
+        FileStoreSourceSplitReader reader = new FileStoreSourceSplitReader(rw.createReadWithKey());
 
         List<Tuple2<Long, Long>> input = kvs();
         RecordWriter<KeyValue> writer = rw.createMergeTreeWriter(row(1), 0);
@@ -150,7 +150,7 @@ public class FileStoreSourceSplitReaderTest {
         List<DataFileMeta> files = writer.prepareCommit().newFiles();
         writer.close();
 
-        assignSplit(reader, new FileStoreSourceSplit("id1", row(1), 0, files));
+        assignSplit(reader, newSourceSplit("id1", row(1), 0, files, true));
         RecordsWithSplitIds<RecordAndPosition<RowData>> records = reader.fetch();
 
         List<Tuple2<RowKind, Long>> expected =
@@ -180,7 +180,7 @@ public class FileStoreSourceSplitReaderTest {
         List<DataFileMeta> files2 = rw.writeFiles(row(1), 0, input2);
         files.addAll(files2);
 
-        assignSplit(reader, new FileStoreSourceSplit("id1", row(1), 0, files));
+        assignSplit(reader, newSourceSplit("id1", row(1), 0, files));
 
         RecordsWithSplitIds<RecordAndPosition<RowData>> records = reader.fetch();
         assertRecords(
@@ -212,7 +212,7 @@ public class FileStoreSourceSplitReaderTest {
         List<Tuple2<Long, Long>> input = kvs();
         List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
 
-        assignSplit(reader, new FileStoreSourceSplit("id1", row(1), 0, files, 3));
+        assignSplit(reader, newSourceSplit("id1", row(1), 0, files, 3));
 
         RecordsWithSplitIds<RecordAndPosition<RowData>> records = reader.fetch();
         assertRecords(
@@ -242,7 +242,7 @@ public class FileStoreSourceSplitReaderTest {
         List<DataFileMeta> files2 = rw.writeFiles(row(1), 0, input2);
         files.addAll(files2);
 
-        assignSplit(reader, new FileStoreSourceSplit("id1", row(1), 0, files, 7));
+        assignSplit(reader, newSourceSplit("id1", row(1), 0, files, 7));
 
         RecordsWithSplitIds<RecordAndPosition<RowData>> records = reader.fetch();
         assertRecords(
@@ -268,11 +268,11 @@ public class FileStoreSourceSplitReaderTest {
 
         List<Tuple2<Long, Long>> input1 = kvs();
         List<DataFileMeta> files1 = rw.writeFiles(row(1), 0, input1);
-        assignSplit(reader, new FileStoreSourceSplit("id1", row(1), 0, files1));
+        assignSplit(reader, newSourceSplit("id1", row(1), 0, files1));
 
         List<Tuple2<Long, Long>> input2 = kvs();
         List<DataFileMeta> files2 = rw.writeFiles(row(2), 1, input2);
-        assignSplit(reader, new FileStoreSourceSplit("id2", row(2), 1, files2));
+        assignSplit(reader, newSourceSplit("id2", row(2), 1, files2));
 
         RecordsWithSplitIds<RecordAndPosition<RowData>> records = reader.fetch();
         assertRecords(

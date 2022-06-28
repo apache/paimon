@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 
 import static org.apache.flink.table.store.connector.source.FileStoreSourceSplitSerializerTest.newFile;
+import static org.apache.flink.table.store.connector.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
 import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -66,7 +67,7 @@ public class FileStoreSourceSplitStateTest {
     }
 
     private static FileStoreSourceSplit getTestSplit(long recordsToSkip) {
-        return new FileStoreSourceSplit(
+        return newSourceSplit(
                 "id", row(1), 2, Arrays.asList(newFile(0), newFile(1)), recordsToSkip);
     }
 }

@@ -123,9 +123,7 @@ public class FileStoreSourceSplitReader
         }
 
         currentSplitId = nextSplit.splitId();
-        currentReader =
-                tableRead.createReader(
-                        nextSplit.partition(), nextSplit.bucket(), nextSplit.files());
+        currentReader = tableRead.createReader(nextSplit.split());
         currentNumRead = nextSplit.recordsToSkip();
         if (currentNumRead > 0) {
             seek(currentNumRead);

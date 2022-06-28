@@ -95,7 +95,7 @@ public class ContinuousFileSplitEnumerator
     }
 
     private void addSplit(FileStoreSourceSplit split) {
-        bucketSplits.computeIfAbsent(split.bucket(), i -> new LinkedList<>()).add(split);
+        bucketSplits.computeIfAbsent(split.split().bucket(), i -> new LinkedList<>()).add(split);
     }
 
     @Override

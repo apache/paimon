@@ -19,10 +19,8 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.api.connector.source.SourceSplit;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.table.source.Split;
 
-import java.util.List;
 import java.util.Objects;
 
 /** {@link SourceSplit} of file store. */
@@ -31,42 +29,22 @@ public class FileStoreSourceSplit implements SourceSplit {
     /** The unique ID of the split. Unique within the scope of this source. */
     private final String id;
 
-    private final BinaryRowData partition;
-
-    private final int bucket;
-
-    private final List<DataFileMeta> files;
+    private final Split split;
 
     private final long recordsToSkip;
 
-    public FileStoreSourceSplit(
-            String id, BinaryRowData partition, int bucket, List<DataFileMeta> files) {
-        this(id, partition, bucket, files, 0);
+    public FileStoreSourceSplit(String id, Split split) {
+        this(id, split, 0);
     }
 
-    public FileStoreSourceSplit(
-            String id,
-            BinaryRowData partition,
-            int bucket,
-            List<DataFileMeta> files,
-            long recordsToSkip) {
+    public FileStoreSourceSplit(String id, Split split, long recordsToSkip) {
         this.id = id;
-        this.partition = partition;
-        this.bucket = bucket;
-        this.files = files;
+        this.split = split;
         this.recordsToSkip = recordsToSkip;
     }
 
-    public BinaryRowData partition() {
-        return partition;
-    }
-
-    public int bucket() {
-        return bucket;
-    }
-
-    public List<DataFileMeta> files() {
-        return files;
+    public Split split() {
+        return split;
     }
 
     public long recordsToSkip() {
@@ -79,7 +57,7 @@ public class FileStoreSourceSplit implements SourceSplit {
     }
 
     public FileStoreSourceSplit updateWithRecordsToSkip(long recordsToSkip) {
-        return new FileStoreSourceSplit(id, partition, bucket, files, recordsToSkip);
+        return new FileStoreSourceSplit(id, split, recordsToSkip);
     }
 
     @Override
@@ -90,16 +68,14 @@ public class FileStoreSourceSplit implements SourceSplit {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        FileStoreSourceSplit split = (FileStoreSourceSplit) o;
-        return bucket == split.bucket
-                && recordsToSkip == split.recordsToSkip
-                && Objects.equals(id, split.id)
-                && Objects.equals(partition, split.partition)
-                && Objects.equals(files, split.files);
+        FileStoreSourceSplit other = (FileStoreSourceSplit) o;
+        return Objects.equals(id, other.id)
+                && Objects.equals(this.split, other.split)
+                && recordsToSkip == other.recordsToSkip;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, partition, bucket, files, recordsToSkip);
+        return Objects.hash(id, split, recordsToSkip);
     }
 }

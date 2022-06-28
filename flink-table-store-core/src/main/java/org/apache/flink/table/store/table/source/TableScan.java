@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
@@ -43,6 +42,8 @@ public abstract class TableScan {
     private final FileStoreScan scan;
     private final TableSchema tableSchema;
     private final FileStorePathFactory pathFactory;
+
+    private boolean isIncremental = false;
 
     protected TableScan(
             FileStoreScan scan, TableSchema tableSchema, FileStorePathFactory pathFactory) {
@@ -91,6 +92,7 @@ public abstract class TableScan {
     }
 
     public TableScan withIncremental(boolean isIncremental) {
+        this.isIncremental = isIncremental;
         scan.withIncremental(isIncremental);
         return this;
     }
@@ -102,12 +104,12 @@ public abstract class TableScan {
 
     private List<Split> generateSplits(
             Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
-        return generateSplits(pathFactory, splitGenerator(pathFactory), groupedDataFiles);
+        return generateSplits(isIncremental, splitGenerator(pathFactory), groupedDataFiles);
     }
 
     @VisibleForTesting
     public static List<Split> generateSplits(
-            FileStorePathFactory pathFactory,
+            boolean isIncremental,
             SplitGenerator splitGenerator,
             Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
         List<Split> splits = new ArrayList<>();
@@ -117,10 +119,14 @@ public abstract class TableScan {
             Map<Integer, List<DataFileMeta>> buckets = entry.getValue();
             for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry : buckets.entrySet()) {
                 int bucket = bucketEntry.getKey();
-                Path bucketPath = pathFactory.bucketPath(partition, bucket);
-                splitGenerator.split(bucketEntry.getValue()).stream()
-                        .map(files -> new Split(partition, bucket, files, bucketPath))
-                        .forEach(splits::add);
+                if (isIncremental) {
+                    // Don't split when incremental
+                    splits.add(new Split(partition, bucket, bucketEntry.getValue(), true));
+                } else {
+                    splitGenerator.split(bucketEntry.getValue()).stream()
+                            .map(files -> new Split(partition, bucket, files, false))
+                            .forEach(splits::add);
+                }
             }
         }
         return splits;

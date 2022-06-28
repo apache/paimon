@@ -25,6 +25,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Collections;
 
+import static org.apache.flink.table.store.connector.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
 import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -63,6 +64,6 @@ public class FileStoreSourceReaderTest {
     }
 
     private static FileStoreSourceSplit createTestFileSplit() {
-        return new FileStoreSourceSplit("id1", row(1), 0, Collections.emptyList());
+        return newSourceSplit("id1", row(1), 0, Collections.emptyList());
     }
 }

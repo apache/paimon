@@ -97,7 +97,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
 
         List<Split> splits = table.newScan().withIncremental(true).plan().splits;
-        TableRead read = table.newRead().withIncremental(true);
+        TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(Collections.singletonList("-1|11|1001"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
@@ -110,7 +110,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
 
         List<Split> splits = table.newScan().withIncremental(true).plan().splits;
-        TableRead read = table.newRead().withIncremental(true).withProjection(PROJECTION);
+        TableRead read = table.newRead().withProjection(PROJECTION);
 
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Collections.singletonList("-1001|11"));
@@ -127,7 +127,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         Predicate predicate = PredicateBuilder.and(builder.equal(2, 201L), builder.equal(1, 21));
         List<Split> splits =
                 table.newScan().withIncremental(true).withFilter(predicate).plan().splits;
-        TableRead read = table.newRead().withIncremental(true);
+        TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
@@ -177,7 +177,6 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 Arrays.asList("pt", "a"),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogWithKeyFileStoreTable(
-                tablePath.getName(), schemaManager, tableSchema, "user");
+        return new ChangelogWithKeyFileStoreTable(tablePath, schemaManager, tableSchema, "user");
     }
 }

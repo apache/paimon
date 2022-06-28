@@ -21,7 +21,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -52,13 +51,12 @@ public class SparkReaderFactory implements PartitionReaderFactory {
 
     @Override
     public PartitionReader<InternalRow> createReader(InputPartition partition) {
-        Split split = ((SparkInputPartition) partition).split();
         RecordReader<RowData> reader;
         try {
             reader =
                     table.newRead()
                             .withProjection(projectedFields)
-                            .createReader(split.partition(), split.bucket(), split.files());
+                            .createReader(((SparkInputPartition) partition).split());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

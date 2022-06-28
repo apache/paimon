@@ -18,13 +18,11 @@
 
 package org.apache.flink.table.store.connector.source;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.FileKind;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
-import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableScan;
 
@@ -79,17 +77,16 @@ public class FileStoreSourceSplitGeneratorTest {
                 };
         List<Split> scanSplits =
                 TableScan.generateSplits(
-                        new FileStorePathFactory(new Path(tempDir.toUri().toString())),
-                        Collections::singletonList,
-                        plan.groupByPartFiles());
+                        false, Collections::singletonList, plan.groupByPartFiles());
         TableScan.Plan tableScanPlan = new TableScan.Plan(1L, scanSplits);
 
         List<FileStoreSourceSplit> splits =
                 new FileStoreSourceSplitGenerator().createSplits(tableScanPlan);
         assertThat(splits.size()).isEqualTo(12);
         splits.sort(
-                Comparator.comparingInt(o -> ((FileStoreSourceSplit) o).partition().getInt(0))
-                        .thenComparing(o -> ((FileStoreSourceSplit) o).bucket()));
+                Comparator.comparingInt(
+                                o -> ((FileStoreSourceSplit) o).split().partition().getInt(0))
+                        .thenComparing(o -> ((FileStoreSourceSplit) o).split().bucket()));
         assertSplit(splits.get(0), "0000000007", 1, 0, Arrays.asList("f0", "f1"));
         assertSplit(splits.get(1), "0000000008", 1, 1, Collections.singletonList("f2"));
         assertSplit(splits.get(2), "0000000003", 2, 0, Arrays.asList("f3", "f4", "f5"));
@@ -107,9 +104,12 @@ public class FileStoreSourceSplitGeneratorTest {
     private void assertSplit(
             FileStoreSourceSplit split, String splitId, int part, int bucket, List<String> files) {
         assertThat(split.splitId()).isEqualTo(splitId);
-        assertThat(split.partition().getInt(0)).isEqualTo(part);
-        assertThat(split.bucket()).isEqualTo(bucket);
-        assertThat(split.files().stream().map(DataFileMeta::fileName).collect(Collectors.toList()))
+        assertThat(split.split().partition().getInt(0)).isEqualTo(part);
+        assertThat(split.split().bucket()).isEqualTo(bucket);
+        assertThat(
+                        split.split().files().stream()
+                                .map(DataFileMeta::fileName)
+                                .collect(Collectors.toList()))
                 .isEqualTo(files);
     }
 

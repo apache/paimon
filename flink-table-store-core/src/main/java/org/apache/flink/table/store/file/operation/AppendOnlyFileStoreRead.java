@@ -22,7 +22,6 @@ import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.table.connector.Projection;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.data.AppendOnlyReader;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
@@ -31,6 +30,7 @@ import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.io.IOException;
@@ -69,14 +69,13 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
     }
 
     @Override
-    public RecordReader<RowData> createReader(
-            BinaryRowData partition, int bucket, List<DataFileMeta> files) throws IOException {
+    public RecordReader<RowData> createReader(Split split) throws IOException {
         BulkFormat<RowData, FileSourceSplit> readerFactory =
                 fileFormat.createReaderFactory(rowType, projection);
         DataFilePathFactory dataFilePathFactory =
-                pathFactory.createDataFilePathFactory(partition, bucket);
+                pathFactory.createDataFilePathFactory(split.partition(), split.bucket());
         List<ConcatRecordReader.ReaderSupplier<RowData>> suppliers = new ArrayList<>();
-        for (DataFileMeta file : files) {
+        for (DataFileMeta file : split.files()) {
             suppliers.add(
                     () ->
                             new AppendOnlyReader(

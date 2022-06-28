@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector.sink;
 
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -37,17 +38,19 @@ import org.apache.flink.types.RowKind;
 /** {@link FileStoreTable} for tests. */
 public class TestFileStoreTable implements FileStoreTable {
 
+    private final Path path;
     private final TestFileStore store;
     private final TableSchema tableSchema;
 
-    public TestFileStoreTable(TestFileStore store, TableSchema tableSchema) {
+    public TestFileStoreTable(Path path, TestFileStore store, TableSchema tableSchema) {
+        this.path = path;
         this.store = store;
         this.tableSchema = tableSchema;
     }
 
     @Override
-    public String name() {
-        return "test";
+    public Path location() {
+        return path;
     }
 
     @Override

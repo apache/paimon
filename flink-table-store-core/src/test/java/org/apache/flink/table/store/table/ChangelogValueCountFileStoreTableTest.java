@@ -97,7 +97,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         FileStoreTable table = createFileStoreTable();
 
         List<Split> splits = table.newScan().withIncremental(true).plan().splits;
-        TableRead read = table.newRead().withIncremental(true);
+        TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("-1|10|100", "+1|11|101"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
@@ -110,7 +110,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         FileStoreTable table = createFileStoreTable();
 
         List<Split> splits = table.newScan().withIncremental(true).plan().splits;
-        TableRead read = table.newRead().withIncremental(true).withProjection(PROJECTION);
+        TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("-100|10", "+101|11"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_PROJECTED_ROW_TO_STRING))
@@ -126,7 +126,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         Predicate predicate = builder.equal(2, 201L);
         List<Split> splits =
                 table.newScan().withIncremental(true).withFilter(predicate).plan().splits;
-        TableRead read = table.newRead().withIncremental(true);
+        TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
@@ -178,7 +178,6 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
                                 Collections.emptyList(),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogValueCountFileStoreTable(
-                tablePath.getName(), schemaManager, tableSchema, "user");
+        return new ChangelogValueCountFileStoreTable(tablePath, schemaManager, tableSchema, "user");
     }
 }

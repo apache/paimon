@@ -103,7 +103,6 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
                                 Arrays.asList("pt", "a"),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogWithKeyFileStoreTable(
-                tablePath.getName(), schemaManager, schema, "user");
+        return new ChangelogWithKeyFileStoreTable(tablePath, schemaManager, schema, "user");
     }
 }
