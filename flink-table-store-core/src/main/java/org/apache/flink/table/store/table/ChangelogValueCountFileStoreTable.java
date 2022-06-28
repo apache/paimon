@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.FileStoreOptions;
@@ -56,8 +57,8 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     private final KeyValueFileStore store;
 
     ChangelogValueCountFileStoreTable(
-            String name, SchemaManager schemaManager, TableSchema tableSchema, String user) {
-        super(name, tableSchema);
+            Path path, SchemaManager schemaManager, TableSchema tableSchema, String user) {
+        super(path, tableSchema);
         RowType countType =
                 RowType.of(
                         new LogicalType[] {new BigIntType(false)}, new String[] {"_VALUE_COUNT"});
@@ -96,30 +97,17 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     @Override
     public TableRead newRead() {
         return new KeyValueTableRead(store.newRead()) {
-            private int[][] projection = null;
-            private boolean isIncremental = false;
 
             @Override
             public TableRead withProjection(int[][] projection) {
-                if (isIncremental) {
-                    read.withKeyProjection(projection);
-                } else {
-                    this.projection = projection;
-                }
-                return this;
-            }
-
-            @Override
-            public TableRead withIncremental(boolean isIncremental) {
-                this.isIncremental = isIncremental;
-                read.withDropDelete(!isIncremental);
+                read.withKeyProjection(projection);
                 return this;
             }
 
             @Override
             protected RecordReader.RecordIterator<RowData> rowDataRecordIteratorFromKv(
                     RecordReader.RecordIterator<KeyValue> kvRecordIterator) {
-                return new ValueCountRowDataRecordIterator(kvRecordIterator, projection);
+                return new ValueCountRowDataRecordIterator(kvRecordIterator);
             }
         };
     }

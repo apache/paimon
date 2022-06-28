@@ -43,6 +43,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.slf4j.Logger;
@@ -292,9 +293,11 @@ public class TestFileStore extends KeyValueFileStore {
                 RecordReaderIterator<KeyValue> iterator =
                         new RecordReaderIterator<>(
                                 read.createReader(
-                                        entryWithPartition.getKey(),
-                                        entryWithBucket.getKey(),
-                                        entryWithBucket.getValue()));
+                                        new Split(
+                                                entryWithPartition.getKey(),
+                                                entryWithBucket.getKey(),
+                                                entryWithBucket.getValue(),
+                                                false)));
                 while (iterator.hasNext()) {
                     kvs.add(iterator.next().copy(keySerializer, valueSerializer));
                 }

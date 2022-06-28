@@ -95,7 +95,7 @@ public class TestChangelogDataReadWrite {
     }
 
     public TableRead createReadWithValueCount() {
-        return createRead(it -> new ValueCountRowDataRecordIterator(it, null));
+        return createRead(ValueCountRowDataRecordIterator::new);
     }
 
     private TableRead createRead(
@@ -115,12 +115,6 @@ public class TestChangelogDataReadWrite {
             @Override
             public TableRead withProjection(int[][] projection) {
                 throw new UnsupportedOperationException();
-            }
-
-            @Override
-            public TableRead withIncremental(boolean isIncremental) {
-                read.withDropDelete(!isIncremental);
-                return this;
             }
 
             @Override

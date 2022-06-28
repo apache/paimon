@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.table.store.file.data.DataFileMeta;
@@ -45,7 +44,7 @@ public class SplitTest {
         for (int i = 0; i < ThreadLocalRandom.current().nextInt(10); i++) {
             files.add(gen.next().meta);
         }
-        Split split = new Split(data.partition, data.bucket, files, new Path("/tmp/test"));
+        Split split = new Split(data.partition, data.bucket, files, false);
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         split.serialize(new DataOutputViewStreamWrapper(out));

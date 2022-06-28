@@ -134,6 +134,7 @@ public class DataFileReader {
         private final FileFormat fileFormat;
         private final FileStorePathFactory pathFactory;
 
+        private final int[][] fullKeyProjection;
         private int[][] keyProjection;
         private int[][] valueProjection;
         private RowType projectedKeyType;
@@ -153,7 +154,8 @@ public class DataFileReader {
             this.fileFormat = fileFormat;
             this.pathFactory = pathFactory;
 
-            this.keyProjection = Projection.range(0, keyType.getFieldCount()).toNestedIndexes();
+            this.fullKeyProjection = Projection.range(0, keyType.getFieldCount()).toNestedIndexes();
+            this.keyProjection = fullKeyProjection;
             this.valueProjection = Projection.range(0, valueType.getFieldCount()).toNestedIndexes();
             applyProjection();
         }
@@ -171,6 +173,13 @@ public class DataFileReader {
         }
 
         public DataFileReader create(BinaryRowData partition, int bucket) {
+            return create(partition, bucket, true);
+        }
+
+        public DataFileReader create(BinaryRowData partition, int bucket, boolean projectKeys) {
+            int[][] keyProjection = projectKeys ? this.keyProjection : fullKeyProjection;
+            RowType projectedKeyType = projectKeys ? this.projectedKeyType : keyType;
+
             RowType recordType = KeyValue.schema(keyType, valueType);
             int[][] projection =
                     KeyValue.project(keyProjection, valueProjection, keyType.getFieldCount());

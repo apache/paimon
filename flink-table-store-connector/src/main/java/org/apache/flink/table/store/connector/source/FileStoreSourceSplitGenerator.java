@@ -37,10 +37,7 @@ public class FileStoreSourceSplitGenerator {
 
     public List<FileStoreSourceSplit> createSplits(TableScan.Plan plan) {
         return plan.splits.stream()
-                .map(
-                        s ->
-                                new FileStoreSourceSplit(
-                                        getNextId(), s.partition(), s.bucket(), s.files()))
+                .map(s -> new FileStoreSourceSplit(getNextId(), s))
                 .collect(Collectors.toList());
     }
 

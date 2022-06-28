@@ -98,7 +98,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
 
         List<Split> splits = table.newScan().withIncremental(true).plan().splits;
-        TableRead read = table.newRead().withIncremental(true);
+        TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("+1|11|101", "+1|12|102"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
@@ -111,7 +111,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
 
         List<Split> splits = table.newScan().withIncremental(true).plan().splits;
-        TableRead read = table.newRead().withIncremental(true).withProjection(PROJECTION);
+        TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("+101|11", "+102|12"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_PROJECTED_ROW_TO_STRING))
@@ -127,7 +127,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         Predicate predicate = builder.equal(2, 101L);
         List<Split> splits =
                 table.newScan().withIncremental(true).withFilter(predicate).plan().splits;
-        TableRead read = table.newRead().withIncremental(true);
+        TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
                         Arrays.asList(
@@ -175,7 +175,6 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 Collections.emptyList(),
                                 conf.toMap(),
                                 ""));
-        return new AppendOnlyFileStoreTable(
-                tablePath.getName(), schemaManager, tableSchema, "user");
+        return new AppendOnlyFileStoreTable(tablePath, schemaManager, tableSchema, "user");
     }
 }

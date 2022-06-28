@@ -18,24 +18,17 @@
 
 package org.apache.flink.table.store.mapred;
 
-import org.apache.flink.core.memory.DataInputViewStreamWrapper;
-import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.core.memory.DataInputDeserializer;
+import org.apache.flink.core.memory.DataOutputSerializer;
 import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.data.DataFileMetaSerializer;
-import org.apache.flink.table.store.file.utils.SerializationUtils;
 import org.apache.flink.table.store.table.source.Split;
 
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.mapred.FileSplit;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.List;
 import java.util.Objects;
 
 /**
@@ -46,42 +39,28 @@ public class TableStoreInputSplit extends FileSplit {
 
     private static final String[] ANYWHERE = new String[] {"*"};
 
-    private BinaryRowData partition;
-    private int bucket;
-    private List<DataFileMeta> files;
-    private String bucketPath;
+    private String path;
+    private Split split;
 
     // public no-argument constructor for deserialization
     public TableStoreInputSplit() {}
 
-    public TableStoreInputSplit(
-            BinaryRowData partition, int bucket, List<DataFileMeta> files, String bucketPath) {
-        this.partition = partition;
-        this.bucket = bucket;
-        this.files = files;
-        this.bucketPath = bucketPath;
+    public TableStoreInputSplit(String path, Split split) {
+        this.path = path;
+        this.split = split;
     }
 
-    public static TableStoreInputSplit create(Split split) {
-        return new TableStoreInputSplit(
-                split.partition(), split.bucket(), split.files(), split.bucketPath().toString());
+    public static TableStoreInputSplit create(String path, Split split) {
+        return new TableStoreInputSplit(path, split);
     }
 
-    public BinaryRowData partition() {
-        return partition;
-    }
-
-    public int bucket() {
-        return bucket;
-    }
-
-    public List<DataFileMeta> files() {
-        return files;
+    public Split split() {
+        return split;
     }
 
     @Override
     public Path getPath() {
-        return new Path(bucketPath);
+        return new Path(path);
     }
 
     @Override
@@ -91,7 +70,7 @@ public class TableStoreInputSplit extends FileSplit {
 
     @Override
     public long getLength() {
-        return files.stream().mapToLong(DataFileMeta::fileSize).sum();
+        return split.files().stream().mapToLong(DataFileMeta::fileSize).sum();
     }
 
     @Override
@@ -101,63 +80,41 @@ public class TableStoreInputSplit extends FileSplit {
 
     @Override
     public void write(DataOutput dataOutput) throws IOException {
-        dataOutput.writeInt(bucket);
-
-        try (ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
-            DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(bos);
-            SerializationUtils.serializeBinaryRow(partition, view);
-            DataFileMetaSerializer metaSerializer = new DataFileMetaSerializer();
-            metaSerializer.serializeList(files, view);
-            byte[] bytes = bos.toByteArray();
-            dataOutput.writeInt(bytes.length);
-            dataOutput.write(bytes);
-        }
-
-        byte[] bucketPathBytes = bucketPath.getBytes();
-        dataOutput.writeInt(bucketPathBytes.length);
-        dataOutput.write(bucketPathBytes);
+        dataOutput.writeUTF(path);
+        DataOutputSerializer out = new DataOutputSerializer(128);
+        split.serialize(out);
+        dataOutput.writeInt(out.length());
+        dataOutput.write(out.getCopyOfBuffer());
     }
 
     @Override
     public void readFields(DataInput dataInput) throws IOException {
-        bucket = dataInput.readInt();
-
-        byte[] fieldBytes = new byte[dataInput.readInt()];
-        dataInput.readFully(fieldBytes);
-        try (ByteArrayInputStream bis = new ByteArrayInputStream(fieldBytes)) {
-            DataInputViewStreamWrapper view = new DataInputViewStreamWrapper(bis);
-            partition = SerializationUtils.deserializeBinaryRow(view);
-            DataFileMetaSerializer metaSerializer = new DataFileMetaSerializer();
-            files = metaSerializer.deserializeList(view);
-        }
-
-        byte[] bucketPathBytes = new byte[dataInput.readInt()];
-        dataInput.readFully(bucketPathBytes);
-        bucketPath = new String(bucketPathBytes);
+        path = dataInput.readUTF();
+        int length = dataInput.readInt();
+        byte[] bytes = new byte[length];
+        dataInput.readFully(bytes);
+        split = Split.deserialize(new DataInputDeserializer(bytes));
     }
 
     @Override
     public String toString() {
-        return "{"
-                + String.join(
-                        ", ",
-                        Arrays.asList(
-                                "partition: " + partition.toString(),
-                                "bucket: " + bucket,
-                                "files: " + files.toString(),
-                                "bucketPath: " + bucketPath))
-                + "}";
+        return "{" + "path='" + path + '\'' + ", split=" + split + '}';
     }
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof TableStoreInputSplit)) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
             return false;
         }
         TableStoreInputSplit that = (TableStoreInputSplit) o;
-        return Objects.equals(partition, that.partition)
-                && bucket == that.bucket
-                && Objects.equals(files, that.files)
-                && Objects.equals(bucketPath, that.bucketPath);
+        return Objects.equals(path, that.path) && Objects.equals(split, that.split);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(path, split);
     }
 }

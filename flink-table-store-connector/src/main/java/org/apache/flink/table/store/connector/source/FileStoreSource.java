@@ -80,7 +80,7 @@ public class FileStoreSource
 
     @Override
     public SourceReader<RowData, FileStoreSourceSplit> createReader(SourceReaderContext context) {
-        TableRead read = table.newRead().withIncremental(isContinuous);
+        TableRead read = table.newRead();
         if (projectedFields != null) {
             read.withProjection(projectedFields);
         }

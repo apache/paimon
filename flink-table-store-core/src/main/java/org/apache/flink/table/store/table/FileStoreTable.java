@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.sink.TableCommit;
@@ -34,7 +35,7 @@ import java.io.Serializable;
  */
 public interface FileStoreTable extends Serializable {
 
-    String name();
+    Path location();
 
     TableSchema schema();
 

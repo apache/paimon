@@ -59,6 +59,11 @@ public class KeyValue {
         return this;
     }
 
+    public KeyValue replaceKey(RowData key) {
+        this.key = key;
+        return this;
+    }
+
     public RowData key() {
         return key;
     }

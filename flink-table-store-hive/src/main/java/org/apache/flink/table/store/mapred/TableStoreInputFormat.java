@@ -55,7 +55,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
         TableScan scan = table.newScan();
         createPredicate(table.schema(), jobConf).ifPresent(scan::withFilter);
         return scan.plan().splits.stream()
-                .map(TableStoreInputSplit::create)
+                .map(split -> TableStoreInputSplit.create(table.location().toString(), split))
                 .toArray(TableStoreInputSplit[]::new);
     }
 
@@ -65,9 +65,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
         FileStoreTable table = createFileStoreTable(jobConf);
         TableStoreInputSplit split = (TableStoreInputSplit) inputSplit;
         long splitLength = split.getLength();
-        return new TableStoreRecordReader(
-                table.newRead().createReader(split.partition(), split.bucket(), split.files()),
-                splitLength);
+        return new TableStoreRecordReader(table.newRead().createReader(split.split()), splitLength);
     }
 
     private FileStoreTable createFileStoreTable(JobConf jobConf) {

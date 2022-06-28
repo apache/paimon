@@ -23,7 +23,8 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
-import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
+import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.table.sink.TableWrite;
@@ -103,8 +104,11 @@ public abstract class FileStoreTableTestBase {
             int bucket,
             Function<RowData, String> rowDataToString)
             throws Exception {
-        RecordReader<RowData> recordReader =
-                read.createReader(partition, bucket, getFilesFor(splits, partition, bucket));
+        List<ReaderSupplier<RowData>> readers = new ArrayList<>();
+        for (Split split : getSplitsFor(splits, partition, bucket)) {
+            readers.add(() -> read.createReader(split));
+        }
+        RecordReader<RowData> recordReader = ConcatRecordReader.create(readers);
         RecordReaderIterator<RowData> iterator = new RecordReaderIterator<>(recordReader);
         List<String> result = new ArrayList<>();
         while (iterator.hasNext()) {
@@ -115,12 +119,11 @@ public abstract class FileStoreTableTestBase {
         return result;
     }
 
-    private List<DataFileMeta> getFilesFor(
-            List<Split> splits, BinaryRowData partition, int bucket) {
-        List<DataFileMeta> result = new ArrayList<>();
+    private List<Split> getSplitsFor(List<Split> splits, BinaryRowData partition, int bucket) {
+        List<Split> result = new ArrayList<>();
         for (Split split : splits) {
             if (split.partition().equals(partition) && split.bucket() == bucket) {
-                result.addAll(split.files());
+                result.add(split);
             }
         }
         return result;

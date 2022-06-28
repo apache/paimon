@@ -19,14 +19,11 @@
 package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.utils.RecordReader;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.List;
 
 /** An abstraction layer above {@link FileStoreRead} to provide reading of {@link RowData}. */
 public interface TableRead {
@@ -41,8 +38,5 @@ public interface TableRead {
 
     TableRead withProjection(int[][] projection);
 
-    TableRead withIncremental(boolean isIncremental);
-
-    RecordReader<RowData> createReader(
-            BinaryRowData partition, int bucket, List<DataFileMeta> files) throws IOException;
+    RecordReader<RowData> createReader(Split split) throws IOException;
 }

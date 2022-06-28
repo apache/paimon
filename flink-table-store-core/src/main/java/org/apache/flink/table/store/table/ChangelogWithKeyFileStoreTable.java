@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
@@ -61,8 +62,8 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     private final KeyValueFileStore store;
 
     ChangelogWithKeyFileStoreTable(
-            String name, SchemaManager schemaManager, TableSchema tableSchema, String user) {
-        super(name, tableSchema);
+            Path path, SchemaManager schemaManager, TableSchema tableSchema, String user) {
+        super(path, tableSchema);
         RowType rowType = tableSchema.logicalRowType();
 
         // add _KEY_ prefix to avoid conflict with value
@@ -155,12 +156,6 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
             @Override
             public TableRead withProjection(int[][] projection) {
                 read.withValueProjection(projection);
-                return this;
-            }
-
-            @Override
-            public TableRead withIncremental(boolean isIncremental) {
-                read.withDropDelete(!isIncremental);
                 return this;
             }
 

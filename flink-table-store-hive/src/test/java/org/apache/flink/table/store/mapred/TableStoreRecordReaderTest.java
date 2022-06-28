@@ -142,7 +142,8 @@ public class TableStoreRecordReaderTest {
         for (Split split : table.newScan().plan().splits) {
             if (split.partition().equals(partition) && split.bucket() == bucket) {
                 return Tuple2.of(
-                        table.newRead().createReader(partition, bucket, split.files()),
+                        table.newRead()
+                                .createReader(new Split(partition, bucket, split.files(), false)),
                         split.files().stream().mapToLong(DataFileMeta::fileSize).sum());
             }
         }
