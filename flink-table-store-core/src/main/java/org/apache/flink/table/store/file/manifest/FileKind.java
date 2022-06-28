@@ -16,17 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file;
+package org.apache.flink.table.store.file.manifest;
 
-/** Value kind of a record. */
-public enum ValueKind {
+/** Kind of a file. */
+public enum FileKind {
     ADD((byte) 0),
 
     DELETE((byte) 1);
 
     private final byte value;
 
-    ValueKind(byte value) {
+    FileKind(byte value) {
         this.value = value;
     }
 
@@ -34,7 +34,7 @@ public enum ValueKind {
         return value;
     }
 
-    public static ValueKind fromByteValue(byte value) {
+    public static FileKind fromByteValue(byte value) {
         switch (value) {
             case 0:
                 return ADD;

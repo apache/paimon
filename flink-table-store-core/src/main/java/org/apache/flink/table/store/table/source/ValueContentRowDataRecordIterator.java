@@ -20,9 +20,7 @@ package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.types.RowKind;
 
 import java.io.IOException;
 
@@ -41,9 +39,7 @@ public class ValueContentRowDataRecordIterator extends ResetRowKindRecordIterato
         }
 
         RowData rowData = kv.value();
-        if (kv.valueKind() == ValueKind.DELETE) {
-            rowData.setRowKind(RowKind.DELETE);
-        }
+        rowData.setRowKind(kv.valueKind());
         return rowData;
     }
 }

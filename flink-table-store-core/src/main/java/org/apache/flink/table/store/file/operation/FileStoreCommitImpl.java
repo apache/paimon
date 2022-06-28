@@ -23,8 +23,8 @@ import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.manifest.FileKind;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
@@ -166,7 +166,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             LOG.debug("Ready to commit\n" + committable.toString());
         }
 
-        List<ManifestEntry> appendChanges = collectChanges(committable.newFiles(), ValueKind.ADD);
+        List<ManifestEntry> appendChanges = collectChanges(committable.newFiles(), FileKind.ADD);
         if (!appendChanges.isEmpty()) {
             tryCommit(
                     appendChanges,
@@ -177,8 +177,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         List<ManifestEntry> compactChanges = new ArrayList<>();
-        compactChanges.addAll(collectChanges(committable.compactBefore(), ValueKind.DELETE));
-        compactChanges.addAll(collectChanges(committable.compactAfter(), ValueKind.ADD));
+        compactChanges.addAll(collectChanges(committable.compactBefore(), FileKind.DELETE));
+        compactChanges.addAll(collectChanges(committable.compactAfter(), FileKind.ADD));
         if (!compactChanges.isEmpty()) {
             tryCommit(
                     compactChanges,
@@ -202,7 +202,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             + committable.toString());
         }
 
-        List<ManifestEntry> appendChanges = collectChanges(committable.newFiles(), ValueKind.ADD);
+        List<ManifestEntry> appendChanges = collectChanges(committable.newFiles(), FileKind.ADD);
         // sanity check, all changes must be done within the given partition
         Predicate partitionFilter = PredicateConverter.fromMap(partition, partitionType);
         if (partitionFilter != null) {
@@ -222,8 +222,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 partitionFilter, appendChanges, committable.identifier(), committable.logOffsets());
 
         List<ManifestEntry> compactChanges = new ArrayList<>();
-        compactChanges.addAll(collectChanges(committable.compactBefore(), ValueKind.DELETE));
-        compactChanges.addAll(collectChanges(committable.compactAfter(), ValueKind.ADD));
+        compactChanges.addAll(collectChanges(committable.compactBefore(), FileKind.DELETE));
+        compactChanges.addAll(collectChanges(committable.compactAfter(), FileKind.ADD));
         if (!compactChanges.isEmpty()) {
             tryCommit(
                     compactChanges,
@@ -267,7 +267,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 for (ManifestEntry entry : currentEntries) {
                     changesWithOverwrite.add(
                             new ManifestEntry(
-                                    ValueKind.DELETE,
+                                    FileKind.DELETE,
                                     entry.partition(),
                                     entry.bucket(),
                                     entry.totalBuckets(),
@@ -289,7 +289,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private List<ManifestEntry> collectChanges(
-            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> map, ValueKind kind) {
+            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> map, FileKind kind) {
         List<ManifestEntry> changes = new ArrayList<>();
         for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> entryWithPartition :
                 map.entrySet()) {
@@ -466,7 +466,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private void noConflictsOrFail(long snapshotId, List<ManifestEntry> changes) {
         Set<ManifestEntry.Identifier> removedFiles =
                 changes.stream()
-                        .filter(e -> e.kind().equals(ValueKind.DELETE))
+                        .filter(e -> e.kind().equals(FileKind.DELETE))
                         .map(ManifestEntry::identifier)
                         .collect(Collectors.toSet());
         if (removedFiles.isEmpty()) {

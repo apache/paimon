@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.manifest.FileKind;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
@@ -115,7 +115,7 @@ public class FileStoreSourceSplitGeneratorTest {
 
     private ManifestEntry makeEntry(int partition, int bucket, String fileName) {
         return new ManifestEntry(
-                ValueKind.ADD,
+                FileKind.ADD,
                 row(partition), // not used
                 bucket, // not used
                 0, // not used

@@ -23,7 +23,6 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 
@@ -237,10 +236,10 @@ public class AlterTableCompactITCase extends FileStoreTableITCase {
         List<KeyValue> data = new ArrayList<>();
         for (int i = 0; i < numRecords; i++) {
             KeyValue kv = generator.next();
-            if (kv.valueKind() == ValueKind.ADD) {
+            if (kv.valueKind() == RowKind.INSERT) {
                 data.add(kv);
             } else {
-                data.add(kv.replace(kv.key(), ValueKind.ADD, kv.value()));
+                data.add(kv.replace(kv.key(), RowKind.INSERT, kv.value()));
             }
         }
         return data;

@@ -31,6 +31,7 @@ import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
 
@@ -169,12 +170,12 @@ public class TestKeyValueGenerator {
     public KeyValue next() {
         int op = random.nextInt(5);
         Order order = null;
-        ValueKind kind = ValueKind.ADD;
+        RowKind kind = RowKind.INSERT;
         if (op == 0 && addedOrders.size() > 0) {
             // delete order
             order = pick(addedOrders);
             deletedOrders.add(order);
-            kind = ValueKind.DELETE;
+            kind = RowKind.DELETE;
         } else if (op == 1) {
             // update order
             if (random.nextBoolean() && deletedOrders.size() > 0) {
@@ -185,14 +186,14 @@ public class TestKeyValueGenerator {
             if (order != null) {
                 order.update();
                 addedOrders.add(order);
-                kind = ValueKind.ADD;
+                kind = RowKind.INSERT;
             }
         }
         if (order == null) {
             // new order
             order = new Order();
             addedOrders.add(order);
-            kind = ValueKind.ADD;
+            kind = RowKind.INSERT;
         }
         return new KeyValue()
                 .replace(

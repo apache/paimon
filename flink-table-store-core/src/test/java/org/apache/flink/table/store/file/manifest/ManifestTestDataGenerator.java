@@ -21,7 +21,6 @@ package org.apache.flink.table.store.file.manifest;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileTestDataGenerator;
 import org.apache.flink.table.store.file.stats.FieldStatsCollector;
 import org.apache.flink.util.Preconditions;
@@ -72,7 +71,7 @@ public class ManifestTestDataGenerator {
         level.add(file);
         bufferedResults.push(
                 new ManifestEntry(
-                        ValueKind.ADD, file.partition, file.bucket, numBuckets, file.meta));
+                        FileKind.ADD, file.partition, file.bucket, numBuckets, file.meta));
         mergeLevelsIfNeeded(file.partition, file.bucket);
 
         return bufferedResults.poll();
@@ -89,7 +88,7 @@ public class ManifestTestDataGenerator {
         long numDeletedFiles = 0;
         for (ManifestEntry entry : entries) {
             collector.collect(entry.partition());
-            if (entry.kind() == ValueKind.ADD) {
+            if (entry.kind() == FileKind.ADD) {
                 numAddedFiles++;
             } else {
                 numDeletedFiles++;
@@ -121,7 +120,7 @@ public class ManifestTestDataGenerator {
             for (DataFileTestDataGenerator.Data file : currentLevel) {
                 bufferedResults.push(
                         new ManifestEntry(
-                                ValueKind.DELETE, partition, bucket, numBuckets, file.meta));
+                                FileKind.DELETE, partition, bucket, numBuckets, file.meta));
                 kvs.addAll(file.content);
             }
             currentLevel.clear();
@@ -129,7 +128,7 @@ public class ManifestTestDataGenerator {
             for (DataFileTestDataGenerator.Data file : nextLevel) {
                 bufferedResults.push(
                         new ManifestEntry(
-                                ValueKind.DELETE, partition, bucket, numBuckets, file.meta));
+                                FileKind.DELETE, partition, bucket, numBuckets, file.meta));
                 kvs.addAll(file.content);
             }
             nextLevel.clear();
@@ -140,7 +139,7 @@ public class ManifestTestDataGenerator {
             nextLevel.addAll(merged);
             for (DataFileTestDataGenerator.Data file : nextLevel) {
                 bufferedResults.push(
-                        new ManifestEntry(ValueKind.ADD, partition, bucket, numBuckets, file.meta));
+                        new ManifestEntry(FileKind.ADD, partition, bucket, numBuckets, file.meta));
             }
 
             lastModifiedLevel += 1;

@@ -26,7 +26,6 @@ import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.types.RowKind;
@@ -142,15 +141,12 @@ public class FileStoreSourceSplitReaderTest {
                     new KeyValue()
                             .replace(
                                     GenericRowData.of(tuple2.f0),
-                                    ValueKind.ADD,
+                                    RowKind.INSERT,
                                     GenericRowData.of(tuple2.f1)));
         }
         writer.write(
                 new KeyValue()
-                        .replace(
-                                GenericRowData.of(222L),
-                                ValueKind.DELETE,
-                                GenericRowData.of(333L)));
+                        .replace(GenericRowData.of(222L), RowKind.DELETE, GenericRowData.of(333L)));
         List<DataFileMeta> files = writer.prepareCommit().newFiles();
         writer.close();
 

@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.ValueKind;
+import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
@@ -39,10 +39,10 @@ public class ReusingTestData implements Comparable<ReusingTestData> {
 
     public final int key;
     public final long sequenceNumber;
-    public final ValueKind valueKind;
+    public final RowKind valueKind;
     public final long value;
 
-    public ReusingTestData(int key, long sequenceNumber, ValueKind valueKind, long value) {
+    public ReusingTestData(int key, long sequenceNumber, RowKind valueKind, long value) {
         this.key = key;
         this.sequenceNumber = sequenceNumber;
         this.valueKind = valueKind;
@@ -89,7 +89,7 @@ public class ReusingTestData implements Comparable<ReusingTestData> {
                     new ReusingTestData(
                             Integer.parseInt(split[0].trim()),
                             Long.parseLong(split[1].trim()),
-                            split[2].trim().equals("+") ? ValueKind.ADD : ValueKind.DELETE,
+                            split[2].trim().equals("+") ? RowKind.INSERT : RowKind.DELETE,
                             Long.parseLong(split[3].trim())));
         }
         return result;
@@ -104,7 +104,7 @@ public class ReusingTestData implements Comparable<ReusingTestData> {
                     new ReusingTestData(
                             random.nextInt(numRecords),
                             generator.next(),
-                            random.nextBoolean() || onlyAdd ? ValueKind.ADD : ValueKind.DELETE,
+                            random.nextBoolean() || onlyAdd ? RowKind.INSERT : RowKind.DELETE,
                             random.nextInt(10) - 5));
         }
         return result;
@@ -122,7 +122,7 @@ public class ReusingTestData implements Comparable<ReusingTestData> {
                     new ReusingTestData(
                             key,
                             generator.next(),
-                            random.nextBoolean() || onlyAdd ? ValueKind.ADD : ValueKind.DELETE,
+                            random.nextBoolean() || onlyAdd ? RowKind.INSERT : RowKind.DELETE,
                             random.nextInt(10) - 5));
         }
         return new ArrayList<>(result.values());

@@ -23,7 +23,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueFileStore;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
@@ -47,6 +46,7 @@ import org.apache.flink.table.store.table.source.ValueCountRowDataRecordIterator
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.types.RowKind;
 
 /** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode without primary keys. */
 public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
@@ -130,18 +130,19 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                 new SinkRecordConverter(store.options().bucket(), tableSchema);
         return new MemoryTableWrite<KeyValue>(store.newWrite(), recordConverter, store.options()) {
 
+            private final KeyValue kv = new KeyValue();
+
             @Override
             protected void writeSinkRecord(SinkRecord record, RecordWriter<KeyValue> writer)
                     throws Exception {
-                KeyValue kv = new KeyValue();
                 switch (record.row().getRowKind()) {
                     case INSERT:
                     case UPDATE_AFTER:
-                        kv.replace(record.row(), ValueKind.ADD, GenericRowData.of(1L));
+                        kv.replace(record.row(), RowKind.INSERT, GenericRowData.of(1L));
                         break;
                     case UPDATE_BEFORE:
                     case DELETE:
-                        kv.replace(record.row(), ValueKind.ADD, GenericRowData.of(-1L));
+                        kv.replace(record.row(), RowKind.INSERT, GenericRowData.of(-1L));
                         break;
                     default:
                         throw new UnsupportedOperationException(

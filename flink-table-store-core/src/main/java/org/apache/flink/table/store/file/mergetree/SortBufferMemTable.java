@@ -31,11 +31,11 @@ import org.apache.flink.table.runtime.util.MemorySegmentPool;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.types.RowKind;
 import org.apache.flink.util.MutableObjectIterator;
 
 import java.io.IOException;
@@ -83,7 +83,7 @@ public class SortBufferMemTable implements MemTable {
     }
 
     @Override
-    public boolean put(long sequenceNumber, ValueKind valueKind, RowData key, RowData value)
+    public boolean put(long sequenceNumber, RowKind valueKind, RowData key, RowData value)
             throws IOException {
         return buffer.write(serializer.toRow(key, sequenceNumber, valueKind, value));
     }
