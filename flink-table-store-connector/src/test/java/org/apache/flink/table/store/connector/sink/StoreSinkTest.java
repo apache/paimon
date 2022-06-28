@@ -134,7 +134,7 @@ public class StoreSinkTest {
         assertThat(fileStore.committedFiles.get(row(0)).get(0))
                 .isEqualTo(Collections.singletonList("DELETE-key-2-value-0/2/3"));
         assertThat(fileStore.committedFiles.get(row(0)).get(1))
-                .isEqualTo(Arrays.asList("ADD-key-0-value-0/0/1", "ADD-key-7-value-0/7/5"));
+                .isEqualTo(Arrays.asList("INSERT-key-0-value-0/0/1", "INSERT-key-7-value-0/7/5"));
     }
 
     @Test
@@ -149,11 +149,11 @@ public class StoreSinkTest {
                 GenericRowData.ofKind(RowKind.UPDATE_AFTER, 0, 4, 5),
                 GenericRowData.ofKind(RowKind.DELETE, 1, 0, 1));
         assertThat(fileStore.committedFiles.get(row(1)).get(0))
-                .isEqualTo(Collections.singletonList("ADD-key-1/0/1-value--1"));
+                .isEqualTo(Collections.singletonList("INSERT-key-1/0/1-value--1"));
         assertThat(fileStore.committedFiles.get(row(0)).get(0))
-                .isEqualTo(Collections.singletonList("ADD-key-0/4/5-value-1"));
+                .isEqualTo(Collections.singletonList("INSERT-key-0/4/5-value-1"));
         assertThat(fileStore.committedFiles.get(row(0)).get(1))
-                .isEqualTo(Arrays.asList("ADD-key-0/0/1-value-1", "ADD-key-0/2/3-value--1"));
+                .isEqualTo(Arrays.asList("INSERT-key-0/0/1-value-1", "INSERT-key-0/2/3-value--1"));
     }
 
     @Test
@@ -164,9 +164,9 @@ public class StoreSinkTest {
 
         writeAndCommit(sink, GenericRowData.of(0, 8, 9), GenericRowData.of(1, 10, 11));
         assertThat(fileStore.committedFiles.get(row(1)).get(0))
-                .isEqualTo(Collections.singletonList("ADD-key-10-value-1/10/11"));
+                .isEqualTo(Collections.singletonList("INSERT-key-10-value-1/10/11"));
         assertThat(fileStore.committedFiles.get(row(0)).get(0))
-                .isEqualTo(Arrays.asList("ADD-key-2-value-0/2/3", "ADD-key-8-value-0/8/9"));
+                .isEqualTo(Arrays.asList("INSERT-key-2-value-0/2/3", "INSERT-key-8-value-0/8/9"));
     }
 
     @Test
@@ -178,9 +178,9 @@ public class StoreSinkTest {
         writeAndCommit(sink, GenericRowData.of(0, 8, 9), GenericRowData.of(1, 10, 11));
         assertThat(fileStore.committedFiles.get(row(1)).get(1)).isNull();
         assertThat(fileStore.committedFiles.get(row(1)).get(0))
-                .isEqualTo(Collections.singletonList("ADD-key-10-value-1/10/11"));
+                .isEqualTo(Collections.singletonList("INSERT-key-10-value-1/10/11"));
         assertThat(fileStore.committedFiles.get(row(0)).get(0))
-                .isEqualTo(Collections.singletonList("ADD-key-8-value-0/8/9"));
+                .isEqualTo(Collections.singletonList("INSERT-key-8-value-0/8/9"));
     }
 
     @Test
@@ -193,11 +193,11 @@ public class StoreSinkTest {
 
         writeAndCommit(sink, GenericRowData.of(0, 8, 9), GenericRowData.of(1, 10, 11));
         assertThat(fileStore.committedFiles.get(row(1)).get(1))
-                .isEqualTo(Collections.singletonList("ADD-key-0-value-1/0/1"));
+                .isEqualTo(Collections.singletonList("INSERT-key-0-value-1/0/1"));
         assertThat(fileStore.committedFiles.get(row(1)).get(0))
-                .isEqualTo(Collections.singletonList("ADD-key-10-value-1/10/11"));
+                .isEqualTo(Collections.singletonList("INSERT-key-10-value-1/10/11"));
         assertThat(fileStore.committedFiles.get(row(0)).get(0))
-                .isEqualTo(Collections.singletonList("ADD-key-8-value-0/8/9"));
+                .isEqualTo(Collections.singletonList("INSERT-key-8-value-0/8/9"));
     }
 
     private void writeAndAssert(StoreSink<?, ?> sink) throws Exception {
@@ -208,11 +208,11 @@ public class StoreSinkTest {
                 GenericRowData.of(0, 7, 5),
                 GenericRowData.of(1, 0, 1));
         assertThat(fileStore.committedFiles.get(row(1)).get(1))
-                .isEqualTo(Collections.singletonList("ADD-key-0-value-1/0/1"));
+                .isEqualTo(Collections.singletonList("INSERT-key-0-value-1/0/1"));
         assertThat(fileStore.committedFiles.get(row(0)).get(0))
-                .isEqualTo(Collections.singletonList("ADD-key-2-value-0/2/3"));
+                .isEqualTo(Collections.singletonList("INSERT-key-2-value-0/2/3"));
         assertThat(fileStore.committedFiles.get(row(0)).get(1))
-                .isEqualTo(Arrays.asList("ADD-key-0-value-0/0/1", "ADD-key-7-value-0/7/5"));
+                .isEqualTo(Arrays.asList("INSERT-key-0-value-0/0/1", "INSERT-key-7-value-0/7/5"));
     }
 
     private void writeAndCommit(StoreSink<?, ?> sink, RowData... rows) throws Exception {

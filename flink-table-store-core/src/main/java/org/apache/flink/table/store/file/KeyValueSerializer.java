@@ -24,6 +24,7 @@ import org.apache.flink.table.data.utils.JoinedRowData;
 import org.apache.flink.table.store.file.utils.ObjectSerializer;
 import org.apache.flink.table.store.file.utils.OffsetRowData;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.types.RowKind;
 
 /**
  * Serializer for {@link KeyValue}.
@@ -64,7 +65,7 @@ public class KeyValueSerializer extends ObjectSerializer<KeyValue> {
         return toRow(record.key(), record.sequenceNumber(), record.valueKind(), record.value());
     }
 
-    public RowData toRow(RowData key, long sequenceNumber, ValueKind valueKind, RowData value) {
+    public RowData toRow(RowData key, long sequenceNumber, RowKind valueKind, RowData value) {
         reusedMeta.setField(0, sequenceNumber);
         reusedMeta.setField(1, valueKind.toByteValue());
         return reusedRow.replace(reusedKeyWithMeta.replace(key, reusedMeta), value);
@@ -75,7 +76,7 @@ public class KeyValueSerializer extends ObjectSerializer<KeyValue> {
         reusedKey.replace(row);
         reusedValue.replace(row);
         long sequenceNumber = row.getLong(keyArity);
-        ValueKind valueKind = ValueKind.fromByteValue(row.getByte(keyArity + 1));
+        RowKind valueKind = RowKind.fromByteValue(row.getByte(keyArity + 1));
         reusedKv.replace(reusedKey, sequenceNumber, valueKind, reusedValue);
         return reusedKv;
     }

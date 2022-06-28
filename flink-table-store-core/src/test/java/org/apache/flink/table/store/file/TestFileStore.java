@@ -309,9 +309,11 @@ public class TestFileStore extends KeyValueFileStore {
             BinaryRowData key = keySerializer.toBinaryRow(kv.key()).copy();
             BinaryRowData value = valueSerializer.toBinaryRow(kv.value()).copy();
             switch (kv.valueKind()) {
-                case ADD:
+                case INSERT:
+                case UPDATE_AFTER:
                     result.put(key, value);
                     break;
+                case UPDATE_BEFORE:
                 case DELETE:
                     result.remove(key);
                     break;

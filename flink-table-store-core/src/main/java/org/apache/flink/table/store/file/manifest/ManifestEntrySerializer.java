@@ -20,7 +20,6 @@ package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
 
@@ -67,7 +66,7 @@ public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestE
             throw new IllegalArgumentException("Unsupported version: " + version);
         }
         return new ManifestEntry(
-                ValueKind.fromByteValue(row.getByte(0)),
+                FileKind.fromByteValue(row.getByte(0)),
                 deserializeBinaryRow(row.getBinary(1)),
                 row.getInt(2),
                 row.getInt(3),

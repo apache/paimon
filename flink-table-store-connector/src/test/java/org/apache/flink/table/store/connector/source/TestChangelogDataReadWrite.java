@@ -26,7 +26,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
@@ -47,6 +46,7 @@ import org.apache.flink.table.store.table.source.ValueCountRowDataRecordIterator
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
@@ -141,7 +141,7 @@ public class TestChangelogDataReadWrite {
                     new KeyValue()
                             .replace(
                                     GenericRowData.of(tuple2.f0),
-                                    ValueKind.ADD,
+                                    RowKind.INSERT,
                                     GenericRowData.of(tuple2.f1)));
         }
         List<DataFileMeta> files = writer.prepareCommit().newFiles();

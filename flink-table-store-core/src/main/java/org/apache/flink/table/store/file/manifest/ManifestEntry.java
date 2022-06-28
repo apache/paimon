@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -34,7 +33,7 @@ import static org.apache.flink.table.store.file.utils.SerializationUtils.newByte
 /** Entry of a manifest file, representing an addition / deletion of a data file. */
 public class ManifestEntry {
 
-    private final ValueKind kind;
+    private final FileKind kind;
     // for tables without partition this field should be a row with 0 columns (not null)
     private final BinaryRowData partition;
     private final int bucket;
@@ -42,7 +41,7 @@ public class ManifestEntry {
     private final DataFileMeta file;
 
     public ManifestEntry(
-            ValueKind kind,
+            FileKind kind,
             BinaryRowData partition,
             int bucket,
             int totalBuckets,
@@ -54,7 +53,7 @@ public class ManifestEntry {
         this.file = file;
     }
 
-    public ValueKind kind() {
+    public FileKind kind() {
         return kind;
     }
 

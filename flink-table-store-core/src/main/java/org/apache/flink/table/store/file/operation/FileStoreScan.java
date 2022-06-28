@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.manifest.FileKind;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -70,7 +70,7 @@ public interface FileStoreScan {
             List<ManifestEntry> files = files();
             Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupBy = new HashMap<>();
             for (ManifestEntry entry : files) {
-                checkArgument(entry.kind() == ValueKind.ADD);
+                checkArgument(entry.kind() == FileKind.ADD);
                 groupBy.computeIfAbsent(entry.partition(), k -> new HashMap<>())
                         .computeIfAbsent(entry.bucket(), k -> new ArrayList<>())
                         .add(entry.file());
