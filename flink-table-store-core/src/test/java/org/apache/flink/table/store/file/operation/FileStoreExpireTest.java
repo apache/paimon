@@ -25,8 +25,8 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
-import org.apache.flink.table.store.file.ValueKind;
 import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.manifest.FileKind;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.utils.FileUtils;
@@ -105,8 +105,8 @@ public class FileStoreExpireTest {
                         0,
                         0,
                         extraFiles);
-        ManifestEntry add = new ManifestEntry(ValueKind.ADD, partition, 0, 1, dataFile);
-        ManifestEntry delete = new ManifestEntry(ValueKind.DELETE, partition, 0, 1, dataFile);
+        ManifestEntry add = new ManifestEntry(FileKind.ADD, partition, 0, 1, dataFile);
+        ManifestEntry delete = new ManifestEntry(FileKind.DELETE, partition, 0, 1, dataFile);
 
         // expire
         expire.expireDataFiles(Arrays.asList(add, delete));
