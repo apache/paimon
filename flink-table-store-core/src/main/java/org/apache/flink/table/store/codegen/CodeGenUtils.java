@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.codegen;
 
-import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.binary.BinaryRowDataUtil;
@@ -47,29 +46,28 @@ public class CodeGenUtils {
         Projection<RowData, BinaryRowData> projection =
                 CodeGenLoader.getInstance()
                         .discover(CodeGenerator.class)
-                        .generateProjection(new TableConfig(), "Projection", inputType, mapping)
+                        .generateProjection("Projection", inputType, mapping)
                         .newInstance(Thread.currentThread().getContextClassLoader());
         return projection;
     }
 
     public static NormalizedKeyComputer newNormalizedKeyComputer(
-            TableConfig tableConfig, List<LogicalType> fieldTypes, String name) {
+            List<LogicalType> fieldTypes, String name) {
         return CodeGenLoader.getInstance()
                 .discover(CodeGenerator.class)
-                .generateNormalizedKeyComputer(tableConfig, fieldTypes, name)
+                .generateNormalizedKeyComputer(fieldTypes, name)
                 .newInstance(Thread.currentThread().getContextClassLoader());
     }
 
     public static GeneratedRecordComparator generateRecordComparator(
-            TableConfig tableConfig, List<LogicalType> fieldTypes, String name) {
+            List<LogicalType> fieldTypes, String name) {
         return CodeGenLoader.getInstance()
                 .discover(CodeGenerator.class)
-                .generateRecordComparator(tableConfig, fieldTypes, name);
+                .generateRecordComparator(fieldTypes, name);
     }
 
-    public static RecordComparator newRecordComparator(
-            TableConfig tableConfig, List<LogicalType> fieldTypes, String name) {
-        return generateRecordComparator(tableConfig, fieldTypes, name)
+    public static RecordComparator newRecordComparator(List<LogicalType> fieldTypes, String name) {
+        return generateRecordComparator(fieldTypes, name)
                 .newInstance(Thread.currentThread().getContextClassLoader());
     }
 }

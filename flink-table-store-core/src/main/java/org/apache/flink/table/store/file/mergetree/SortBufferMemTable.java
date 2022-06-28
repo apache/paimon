@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.runtime.operators.sort.QuickSort;
-import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.generated.NormalizedKeyComputer;
@@ -63,11 +62,9 @@ public class SortBufferMemTable implements MemTable {
 
         // for sort binary buffer
         NormalizedKeyComputer normalizedKeyComputer =
-                CodeGenUtils.newNormalizedKeyComputer(
-                        new TableConfig(), sortKeyTypes, "MemTableKeyComputer");
+                CodeGenUtils.newNormalizedKeyComputer(sortKeyTypes, "MemTableKeyComputer");
         RecordComparator keyComparator =
-                CodeGenUtils.newRecordComparator(
-                        new TableConfig(), sortKeyTypes, "MemTableComparator");
+                CodeGenUtils.newRecordComparator(sortKeyTypes, "MemTableComparator");
 
         if (memoryPool.freePages() < 3) {
             throw new IllegalArgumentException(

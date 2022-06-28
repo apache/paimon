@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.generated.GeneratedRecordComparator;
 import org.apache.flink.table.runtime.generated.RecordComparator;
@@ -38,8 +37,7 @@ public class KeyComparatorSupplier implements SerializableSupplier<Comparator<Ro
 
     public KeyComparatorSupplier(RowType keyType) {
         genRecordComparator =
-                CodeGenUtils.generateRecordComparator(
-                        new TableConfig(), keyType.getChildren(), "KeyComparator");
+                CodeGenUtils.generateRecordComparator(keyType.getChildren(), "KeyComparator");
     }
 
     @Override
