@@ -43,7 +43,9 @@ import org.apache.flink.table.types.logical.MultisetType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.TimestampType;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /** Utils for {@link RowData} structures. */
@@ -255,5 +257,17 @@ public class RowDataUtils {
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + fieldType);
         }
+    }
+
+    public static ArrayData toStringArrayData(List<String> list) {
+        return new GenericArrayData(list.stream().map(StringData::fromString).toArray());
+    }
+
+    public static List<String> fromStringArrayData(ArrayData arrayData) {
+        List<String> list = new ArrayList<>(arrayData.size());
+        for (int i = 0; i < arrayData.size(); i++) {
+            list.add(arrayData.isNullAt(i) ? null : arrayData.getString(i).toString());
+        }
+        return list;
     }
 }

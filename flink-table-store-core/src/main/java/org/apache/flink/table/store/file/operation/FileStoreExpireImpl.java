@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
@@ -34,10 +34,14 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.stream.Collectors;
 
 /**
  * Default implementation of {@link FileStoreExpire}. It retains a certain number or period of
@@ -158,8 +162,6 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         }
 
         // delete data files
-        FileStorePathFactory.DataFilePathFactoryCache dataFilePathFactoryCache =
-                new FileStorePathFactory.DataFilePathFactoryCache(pathFactory);
         // deleted data files in a snapshot are not used by that snapshot, so the range of id should
         // be (beginInclusiveId, endExclusiveId]
         for (long id = beginInclusiveId + 1; id <= endExclusiveId; id++) {
@@ -167,34 +169,12 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                 LOG.debug("Ready to delete data files in snapshot #" + id);
             }
 
-            Snapshot toExpire = snapshotManager.snapshot(id);
-            List<ManifestFileMeta> deltaManifests = manifestList.read(toExpire.deltaManifestList());
-
-            // we cannot delete a data file directly when we meet a DELETE entry, because that
-            // file might be upgraded
-            Set<Path> dataFileToDelete = new HashSet<>();
-            for (ManifestFileMeta meta : deltaManifests) {
-                for (ManifestEntry entry : manifestFile.read(meta.fileName())) {
-                    DataFilePathFactory dataFilePathFactory =
-                            dataFilePathFactoryCache.getDataFilePathFactory(
-                                    entry.partition(), entry.bucket());
-                    Path dataFilePath = dataFilePathFactory.toPath(entry.file().fileName());
-                    switch (entry.kind()) {
-                        case ADD:
-                            dataFileToDelete.remove(dataFilePath);
-                            break;
-                        case DELETE:
-                            dataFileToDelete.add(dataFilePath);
-                            break;
-                        default:
-                            throw new UnsupportedOperationException(
-                                    "Unknown value kind " + entry.kind().name());
-                    }
-                }
-            }
-            for (Path dataFile : dataFileToDelete) {
-                FileUtils.deleteOrWarn(dataFile);
-            }
+            List<String> manifestFiles =
+                    manifestList.read(snapshotManager.snapshot(id).deltaManifestList()).stream()
+                            .map(ManifestFileMeta::fileName)
+                            .collect(Collectors.toList());
+            Iterable<ManifestEntry> dataFileLog = manifestFile.readManifestFiles(manifestFiles);
+            expireDataFiles(dataFileLog);
         }
 
         // delete manifests
@@ -226,6 +206,37 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         }
 
         writeEarliestHint(endExclusiveId);
+    }
+
+    @VisibleForTesting
+    void expireDataFiles(Iterable<ManifestEntry> dataFileLog) {
+        // we cannot delete a data file directly when we meet a DELETE entry, because that
+        // file might be upgraded
+        Map<Path, List<Path>> dataFileToDelete = new HashMap<>();
+        for (ManifestEntry entry : dataFileLog) {
+            Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
+            Path dataFilePath = new Path(bucketPath, entry.file().fileName());
+            switch (entry.kind()) {
+                case ADD:
+                    dataFileToDelete.remove(dataFilePath);
+                    break;
+                case DELETE:
+                    List<Path> extraFiles = new ArrayList<>(entry.file().extraFiles().size());
+                    for (String file : entry.file().extraFiles()) {
+                        extraFiles.add(new Path(bucketPath, file));
+                    }
+                    dataFileToDelete.put(dataFilePath, extraFiles);
+                    break;
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unknown value kind " + entry.kind().name());
+            }
+        }
+        dataFileToDelete.forEach(
+                (path, extraFiles) -> {
+                    FileUtils.deleteOrWarn(path);
+                    extraFiles.forEach(FileUtils::deleteOrWarn);
+                });
     }
 
     private void writeEarliestHint(long earliest) {

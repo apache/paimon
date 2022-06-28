@@ -38,12 +38,17 @@ import org.apache.flink.table.store.file.writer.MetricFileWriter;
 import org.apache.flink.table.store.file.writer.RollingFileWriter;
 import org.apache.flink.table.types.logical.RowType;
 
+import org.apache.flink.shaded.guava30.com.google.common.collect.Iterables;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Queue;
 import java.util.function.Supplier;
 
 /**
@@ -100,6 +105,24 @@ public class ManifestFile {
         } catch (IOException e) {
             throw new RuntimeException("Failed to read manifest file " + fileName, e);
         }
+    }
+
+    public Iterable<ManifestEntry> readManifestFiles(List<String> manifestFiles) {
+        Queue<String> files = new LinkedList<>(manifestFiles);
+        return Iterables.concat(
+                (Iterable<Iterable<ManifestEntry>>)
+                        () ->
+                                new Iterator<Iterable<ManifestEntry>>() {
+                                    @Override
+                                    public boolean hasNext() {
+                                        return files.size() > 0;
+                                    }
+
+                                    @Override
+                                    public Iterable<ManifestEntry> next() {
+                                        return read(files.poll());
+                                    }
+                                });
     }
 
     /**

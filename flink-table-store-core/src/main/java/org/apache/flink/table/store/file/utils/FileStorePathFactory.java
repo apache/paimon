@@ -33,8 +33,6 @@ import org.apache.flink.util.Preconditions;
 
 import javax.annotation.concurrent.ThreadSafe;
 
-import java.util.HashMap;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -130,28 +128,5 @@ public class FileStorePathFactory {
     @VisibleForTesting
     public String uuid() {
         return uuid;
-    }
-
-    /** Cache for storing {@link DataFilePathFactory}s. */
-    public static class DataFilePathFactoryCache {
-
-        private final FileStorePathFactory pathFactory;
-        private final Map<BinaryRowData, Map<Integer, DataFilePathFactory>> cache;
-
-        public DataFilePathFactoryCache(FileStorePathFactory pathFactory) {
-            this.pathFactory = pathFactory;
-            this.cache = new HashMap<>();
-        }
-
-        public DataFilePathFactory getDataFilePathFactory(BinaryRowData partition, int bucket) {
-            return cache.compute(partition, (p, m) -> m == null ? new HashMap<>() : m)
-                    .compute(
-                            bucket,
-                            (b, f) ->
-                                    f == null
-                                            ? pathFactory.createDataFilePathFactory(
-                                                    partition, bucket)
-                                            : f);
-        }
     }
 }
