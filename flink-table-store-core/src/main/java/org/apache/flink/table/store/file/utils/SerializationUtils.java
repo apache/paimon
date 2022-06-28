@@ -24,6 +24,7 @@ import org.apache.flink.core.memory.MemorySegmentFactory;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.types.logical.VarBinaryType;
+import org.apache.flink.table.types.logical.VarCharType;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -58,9 +59,14 @@ public class SerializationUtils {
         return buf;
     }
 
-    /** Create a bytes type VarBinaryType(Integer.MAX_VALUE). */
+    /** Create a bytes type VarBinaryType(VarBinaryType.MAX_LENGTH). */
     public static VarBinaryType newBytesType(boolean isNullable) {
-        return new VarBinaryType(isNullable, Integer.MAX_VALUE);
+        return new VarBinaryType(isNullable, VarBinaryType.MAX_LENGTH);
+    }
+
+    /** Create a varchar type VarCharType(VarCharType.MAX_LENGTH). */
+    public static VarCharType newStringType(boolean isNullable) {
+        return new VarCharType(isNullable, VarCharType.MAX_LENGTH);
     }
 
     /**

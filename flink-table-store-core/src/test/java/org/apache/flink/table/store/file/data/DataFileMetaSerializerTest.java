@@ -20,6 +20,8 @@ package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.table.store.file.utils.ObjectSerializerTestBase;
 
+import java.util.Arrays;
+
 /** Tests for {@link DataFileMetaSerializer}. */
 public class DataFileMetaSerializerTest extends ObjectSerializerTestBase<DataFileMeta> {
 
@@ -32,6 +34,6 @@ public class DataFileMetaSerializerTest extends ObjectSerializerTestBase<DataFil
 
     @Override
     protected DataFileMeta object() {
-        return gen.next().meta;
+        return gen.next().meta.copy(Arrays.asList("extra1", "extra2"));
     }
 }
