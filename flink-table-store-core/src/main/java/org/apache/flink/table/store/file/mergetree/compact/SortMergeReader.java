@@ -42,7 +42,7 @@ public class SortMergeReader implements RecordReader<KeyValue> {
 
     private final List<RecordReader<KeyValue>> nextBatchReaders;
     private final Comparator<RowData> userKeyComparator;
-    private final MergeFunction mergeFunction;
+    private final MergeFunctionHelper mergeFunctionHelper;
 
     private final PriorityQueue<Element> minHeap;
     private final List<Element> polled;
@@ -53,7 +53,7 @@ public class SortMergeReader implements RecordReader<KeyValue> {
             MergeFunction mergeFunction) {
         this.nextBatchReaders = new ArrayList<>(readers);
         this.userKeyComparator = userKeyComparator;
-        this.mergeFunction = mergeFunction;
+        this.mergeFunctionHelper = new MergeFunctionHelper(mergeFunction);
 
         this.minHeap =
                 new PriorityQueue<>(
@@ -130,7 +130,7 @@ public class SortMergeReader implements RecordReader<KeyValue> {
                 if (!hasMore) {
                     return null;
                 }
-                RowData mergedValue = mergeFunction.getValue();
+                RowData mergedValue = mergeFunctionHelper.getValue();
                 if (mergedValue != null) {
                     return polled.get(polled.size() - 1).kv.setValue(mergedValue);
                 }
@@ -163,7 +163,7 @@ public class SortMergeReader implements RecordReader<KeyValue> {
                 return false;
             }
 
-            mergeFunction.reset();
+            mergeFunctionHelper.reset();
             RowData key =
                     Preconditions.checkNotNull(minHeap.peek(), "Min heap is empty. This is a bug.")
                             .kv
@@ -177,7 +177,7 @@ public class SortMergeReader implements RecordReader<KeyValue> {
                     break;
                 }
                 minHeap.poll();
-                mergeFunction.add(element.kv.value());
+                mergeFunctionHelper.add(element.kv.value());
                 polled.add(element);
             }
             return true;

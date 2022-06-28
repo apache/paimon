@@ -32,6 +32,7 @@ import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionHelper;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -114,7 +115,7 @@ public class SortBufferMemTable implements MemTable {
     private class MemTableIterator implements Iterator<KeyValue> {
         private final MutableObjectIterator<BinaryRowData> kvIter;
         private final Comparator<RowData> keyComparator;
-        private final MergeFunction mergeFunction;
+        private final MergeFunctionHelper mergeFunctionHelper;
 
         // holds the merged value
         private KeyValueSerializer previous;
@@ -130,7 +131,7 @@ public class SortBufferMemTable implements MemTable {
                 MergeFunction mergeFunction) {
             this.kvIter = kvIter;
             this.keyComparator = keyComparator;
-            this.mergeFunction = mergeFunction;
+            this.mergeFunctionHelper = new MergeFunctionHelper(mergeFunction);
 
             int totalFieldCount = keyType.getFieldCount() + 2 + valueType.getFieldCount();
             this.previous = new KeyValueSerializer(keyType, valueType);
@@ -169,8 +170,8 @@ public class SortBufferMemTable implements MemTable {
                 if (previousRow == null) {
                     return;
                 }
-                mergeFunction.reset();
-                mergeFunction.add(previous.getReusedKv().value());
+                mergeFunctionHelper.reset();
+                mergeFunctionHelper.add(previous.getReusedKv().value());
 
                 while (readOnce()) {
                     if (keyComparator.compare(
@@ -178,10 +179,10 @@ public class SortBufferMemTable implements MemTable {
                             != 0) {
                         break;
                     }
-                    mergeFunction.add(current.getReusedKv().value());
+                    mergeFunctionHelper.add(current.getReusedKv().value());
                     swapSerializers();
                 }
-                result = mergeFunction.getValue();
+                result = mergeFunctionHelper.getValue();
             } while (result == null);
             previous.getReusedKv().setValue(result);
         }
