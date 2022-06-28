@@ -38,7 +38,6 @@ public class FileStoreTableFactory {
 
     public static FileStoreTable create(Configuration conf, String user) {
         Path tablePath = FileStoreOptions.path(conf);
-        String name = tablePath.getName();
         SchemaManager schemaManager = new SchemaManager(tablePath);
         TableSchema tableSchema =
                 schemaManager
