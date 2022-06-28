@@ -1,4 +1,4 @@
-name: Java 8 Build
+name: UTCase and ITCase
 
 on: [push, pull_request]
 
