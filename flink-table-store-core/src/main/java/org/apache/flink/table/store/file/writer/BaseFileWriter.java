@@ -25,6 +25,7 @@ import org.apache.flink.util.IOUtils;
 import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 
 /**
  * The abstracted base file writer implementation for {@link FileWriter}.
@@ -34,33 +35,25 @@ import java.io.IOException;
  */
 public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
 
-    private final FileWriter.Factory<T, Metric> writerFactory;
     private final Path path;
 
-    private FileWriter<T, Metric> writer = null;
+    private FileWriter<T, Metric> writer;
+
     private Metric metric = null;
 
     private boolean closed = false;
 
     public BaseFileWriter(FileWriter.Factory<T, Metric> writerFactory, Path path) {
-        this.writerFactory = writerFactory;
         this.path = path;
-    }
-
-    public Path path() {
-        return path;
-    }
-
-    private void openCurrentWriter() throws IOException {
-        this.writer = writerFactory.create(path);
+        try {
+            this.writer = writerFactory.create(path);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     @Override
     public void write(T row) throws IOException {
-        if (writer == null) {
-            openCurrentWriter();
-        }
-
         writer.write(row);
     }
 
