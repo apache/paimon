@@ -48,6 +48,7 @@ public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
         try {
             this.writer = writerFactory.create(path);
         } catch (IOException e) {
+            FileUtils.deleteOrWarn(path);
             throw new UncheckedIOException(e);
         }
     }
