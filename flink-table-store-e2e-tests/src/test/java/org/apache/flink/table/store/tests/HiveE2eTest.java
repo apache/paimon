@@ -35,7 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class HiveE2eTest extends E2eTestBase {
 
     private static final String ADD_JAR_HQL =
-            "ADD JAR " + TEST_DATA_DIR + "/" + TABLE_STORE_HIVE_JAR_NAME + ";";
+            "ADD JAR " + TEST_DATA_DIR + "/" + TABLE_STORE_HIVE_MR_JAR_NAME + ";";
 
     public HiveE2eTest() {
         super(false, true);

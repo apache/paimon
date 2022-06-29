@@ -105,9 +105,9 @@ under the License.
                         </artifactItem>
                         <artifactItem>
                             <groupId>org.apache.flink</groupId>
-                            <artifactId>flink-table-store-hive</artifactId>
+                            <artifactId>flink-table-store-hive-mr</artifactId>
                             <version>${project.version}</version>
-                            <destFileName>flink-table-store-hive.jar</destFileName>
+                            <destFileName>flink-table-store-hive-mr.jar</destFileName>
                             <type>jar</type>
                             <overWrite>true</overWrite>
                             <outputDirectory>${project.build.directory}/dependencies
