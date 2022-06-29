@@ -1,36 +1,36 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
+                                    * Licensed to the Apache Software Foundation (ASF) under one
+                                    * or more contributor license agreements.  See the NOTICE file
+                                    * distributed with this work for additional information
+                                    * regarding copyright ownership.  The ASF licenses this file
+                                    * to you under the Apache License, Version 2.0 (the
+                                    * "License"); you may not use this file except in compliance
+                                    * with the License.  You may obtain a copy of the License at
+                                    *
+                                    *     http://www.apache.org/licenses/LICENSE-2.0
+                                    *
+                                    * Unless required by applicable law or agreed to in writing, software
+                                    * distributed under the License is distributed on an "AS IS" BASIS,
+                                    * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+                                    * See the License for the specific language governing permissions and
+                                    * limitations under the License.
+                                    */
 package org.apache.flink.table.store.codegen
 
 import org.apache.flink.api.common.ExecutionConfig
 import org.apache.flink.api.common.typeinfo.{AtomicType => AtomicTypeInfo}
 import org.apache.flink.core.memory.MemorySegment
-import org.apache.flink.table.data.binary.{BinaryRawValueData, BinaryRowData, BinaryStringData}
 import org.apache.flink.table.data._
+import org.apache.flink.table.data.binary.{BinaryRawValueData, BinaryRowData, BinaryStringData}
 import org.apache.flink.table.data.utils.JoinedRowData
 import org.apache.flink.table.data.writer.BinaryRowWriter
-import org.apache.flink.table.types.logical.LogicalTypeRoot._
 import org.apache.flink.table.types.logical._
+import org.apache.flink.table.types.logical.LogicalTypeRoot._
 import org.apache.flink.table.types.logical.utils.LogicalTypeChecks.{getFieldCount, getFieldTypes, getPrecision, getScale}
 
 import java.lang.{Boolean => JBoolean, Byte => JByte, Double => JDouble, Float => JFloat, Integer => JInt, Long => JLong, Object => JObject, Short => JShort}
 import java.util.concurrent.atomic.AtomicLong
+
 import scala.annotation.tailrec
 import scala.collection.mutable
 
@@ -152,12 +152,8 @@ object GenerateUtils {
       s"$compareFunc($leftTerm, $rightTerm)"
     case ROW | STRUCTURED_TYPE =>
       val fieldCount = getFieldCount(t)
-      val comparisons = generateRowCompare(
-        ctx,
-        t,
-        getAscendingSortSpec((0 until fieldCount).toArray),
-        "a",
-        "b")
+      val comparisons =
+        generateRowCompare(ctx, t, getAscendingSortSpec((0 until fieldCount).toArray), "a", "b")
       val compareFunc = newName("compareRow")
       val funcCode: String =
         s"""
@@ -408,10 +404,10 @@ object GenerateUtils {
    *   internal unboxed field representation
    */
   def generateInputFieldUnboxing(
-                                  ctx: CodeGeneratorContext,
-                                  inputType: LogicalType,
-                                  inputTerm: String,
-                                  inputUnboxingTerm: String): GeneratedExpression = {
+      ctx: CodeGeneratorContext,
+      inputType: LogicalType,
+      inputTerm: String,
+      inputUnboxingTerm: String): GeneratedExpression = {
 
     val resultTypeTerm = primitiveTypeTermForType(inputType)
     val defaultValue = primitiveDefaultValue(inputType)
@@ -450,9 +446,9 @@ object GenerateUtils {
   }
 
   private def deduplicateSortKeys(
-                                   keys: Array[Int],
-                                   orders: Array[Boolean],
-                                   nullsIsLast: Array[Boolean]): SortSpec = {
+      keys: Array[Int],
+      orders: Array[Boolean],
+      nullsIsLast: Array[Boolean]): SortSpec = {
     val builder = SortSpec.builder()
     val keySet = new mutable.HashSet[Int]
     for (i <- keys.indices) {
@@ -469,12 +465,12 @@ object GenerateUtils {
   }
 
   def rowSetField(
-                   ctx: CodeGeneratorContext,
-                   rowClass: Class[_ <: RowData],
-                   rowTerm: String,
-                   indexTerm: String,
-                   fieldExpr: GeneratedExpression,
-                   binaryRowWriterTerm: Option[String]): String = {
+      ctx: CodeGeneratorContext,
+      rowClass: Class[_ <: RowData],
+      rowTerm: String,
+      indexTerm: String,
+      fieldExpr: GeneratedExpression,
+      binaryRowWriterTerm: Option[String]): String = {
 
     val fieldType = fieldExpr.resultType
     val fieldTerm = fieldExpr.resultTerm
@@ -539,11 +535,11 @@ object GenerateUtils {
   }
 
   def binaryWriterWriteField(
-                              ctx: CodeGeneratorContext,
-                              index: Int,
-                              fieldValTerm: String,
-                              writerTerm: String,
-                              fieldType: LogicalType): String =
+      ctx: CodeGeneratorContext,
+      index: Int,
+      fieldValTerm: String,
+      writerTerm: String,
+      fieldType: LogicalType): String =
     binaryWriterWriteField(
       t => ctx.addReusableTypeSerializer(t),
       index.toString,
@@ -552,11 +548,11 @@ object GenerateUtils {
       fieldType)
 
   def binaryWriterWriteField(
-                              ctx: CodeGeneratorContext,
-                              indexTerm: String,
-                              fieldValTerm: String,
-                              writerTerm: String,
-                              t: LogicalType): String =
+      ctx: CodeGeneratorContext,
+      indexTerm: String,
+      fieldValTerm: String,
+      writerTerm: String,
+      t: LogicalType): String =
     binaryWriterWriteField(
       t => ctx.addReusableTypeSerializer(t),
       indexTerm,
@@ -566,11 +562,11 @@ object GenerateUtils {
 
   @tailrec
   def binaryWriterWriteField(
-                              addSerializer: LogicalType => String,
-                              indexTerm: String,
-                              fieldValTerm: String,
-                              writerTerm: String,
-                              t: LogicalType): String = t.getTypeRoot match {
+      addSerializer: LogicalType => String,
+      indexTerm: String,
+      fieldValTerm: String,
+      writerTerm: String,
+      t: LogicalType): String = t.getTypeRoot match {
     // ordered by type root definition
     case CHAR | VARCHAR =>
       s"$writerTerm.writeString($indexTerm, $fieldValTerm)"
@@ -629,7 +625,7 @@ object GenerateUtils {
       case DECIMAL if !DecimalData.isCompact(getPrecision(t)) =>
         s"$writerTerm.writeDecimal($indexTerm, null, ${getPrecision(t)})"
       case TIMESTAMP_WITHOUT_TIME_ZONE | TIMESTAMP_WITH_LOCAL_TIME_ZONE
-        if !TimestampData.isCompact(getPrecision(t)) =>
+          if !TimestampData.isCompact(getPrecision(t)) =>
         s"$writerTerm.writeTimestamp($indexTerm, null, ${getPrecision(t)})"
       case DISTINCT_TYPE =>
         binaryWriterWriteNull(indexTerm, writerTerm, t.asInstanceOf[DistinctType].getSourceType)
@@ -639,10 +635,10 @@ object GenerateUtils {
 
   @tailrec
   def boxedWrapperRowFieldSetAccess(
-                                     rowTerm: String,
-                                     indexTerm: String,
-                                     fieldTerm: String,
-                                     t: LogicalType): String = t.getTypeRoot match {
+      rowTerm: String,
+      indexTerm: String,
+      fieldTerm: String,
+      t: LogicalType): String = t.getTypeRoot match {
     // ordered by type root definition
     case BOOLEAN =>
       s"$rowTerm.setBoolean($indexTerm, $fieldTerm)"
@@ -693,18 +689,18 @@ object GenerateUtils {
     }
 
   def binaryRowFieldSetAccess(
-                               index: Int,
-                               binaryRowTerm: String,
-                               fieldType: LogicalType,
-                               fieldValTerm: String): String =
+      index: Int,
+      binaryRowTerm: String,
+      fieldType: LogicalType,
+      fieldValTerm: String): String =
     binaryRowFieldSetAccess(index.toString, binaryRowTerm, fieldType, fieldValTerm)
 
   @tailrec
   def binaryRowFieldSetAccess(
-                               index: String,
-                               binaryRowTerm: String,
-                               t: LogicalType,
-                               fieldValTerm: String): String = t.getTypeRoot match {
+      index: String,
+      binaryRowTerm: String,
+      t: LogicalType,
+      fieldValTerm: String): String = t.getTypeRoot match {
     // ordered by type root definition
     case BOOLEAN =>
       s"$binaryRowTerm.setBoolean($index, $fieldValTerm)"
@@ -745,7 +741,7 @@ object GenerateUtils {
       case DECIMAL if !DecimalData.isCompact(getPrecision(t)) =>
         s"$rowTerm.setDecimal($indexTerm, null, ${getPrecision(t)})"
       case TIMESTAMP_WITHOUT_TIME_ZONE | TIMESTAMP_WITH_LOCAL_TIME_ZONE
-        if !TimestampData.isCompact(getPrecision(t)) =>
+          if !TimestampData.isCompact(getPrecision(t)) =>
         s"$rowTerm.setTimestamp($indexTerm, null, ${getPrecision(t)})"
       case DISTINCT_TYPE =>
         binaryRowSetNull(indexTerm, rowTerm, t.asInstanceOf[DistinctType].getSourceType)
@@ -772,11 +768,11 @@ object GenerateUtils {
    */
   @tailrec
   def generateRecordStatement(
-                               t: LogicalType,
-                               clazz: Class[_],
-                               recordTerm: String,
-                               recordWriterTerm: Option[String] = None,
-                               ctx: CodeGeneratorContext): String = t.getTypeRoot match {
+      t: LogicalType,
+      clazz: Class[_],
+      recordTerm: String,
+      recordWriterTerm: Option[String] = None,
+      ctx: CodeGeneratorContext): String = t.getTypeRoot match {
     // ordered by type root definition
     case ROW | STRUCTURED_TYPE if clazz == classOf[BinaryRowData] =>
       val writerTerm = recordWriterTerm.getOrElse(
@@ -791,8 +787,8 @@ object GenerateUtils {
          |$writerTerm = new $binaryRowWriter($recordTerm);
          |""".stripMargin.trim
     case ROW | STRUCTURED_TYPE
-      if clazz == classOf[GenericRowData] ||
-        clazz == classOf[BoxedWrapperRowData] =>
+        if clazz == classOf[GenericRowData] ||
+          clazz == classOf[BoxedWrapperRowData] =>
       val typeTerm = clazz.getCanonicalName
       ctx.addReusableMember(s"$typeTerm $recordTerm = new $typeTerm(${getFieldCount(t)});")
       s"$recordTerm = new $typeTerm(${getFieldCount(t)});"

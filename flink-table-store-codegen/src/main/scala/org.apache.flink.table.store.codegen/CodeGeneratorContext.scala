@@ -1,21 +1,20 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
+                                    * Licensed to the Apache Software Foundation (ASF) under one
+                                    * or more contributor license agreements.  See the NOTICE file
+                                    * distributed with this work for additional information
+                                    * regarding copyright ownership.  The ASF licenses this file
+                                    * to you under the Apache License, Version 2.0 (the
+                                    * "License"); you may not use this file except in compliance
+                                    * with the License.  You may obtain a copy of the License at
+                                    *
+                                    *     http://www.apache.org/licenses/LICENSE-2.0
+                                    *
+                                    * Unless required by applicable law or agreed to in writing, software
+                                    * distributed under the License is distributed on an "AS IS" BASIS,
+                                    * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+                                    * See the License for the specific language governing permissions and
+                                    * limitations under the License.
+                                    */
 package org.apache.flink.table.store.codegen
 
 import org.apache.flink.table.runtime.typeutils.InternalSerializers
@@ -39,17 +38,17 @@ class CodeGeneratorContext {
   // set of member statements that will be added only once
   // we use a LinkedHashSet to keep the insertion order
   private val reusableMemberStatements: mutable.LinkedHashSet[String] =
-  mutable.LinkedHashSet[String]()
+    mutable.LinkedHashSet[String]()
 
   // set of constructor statements that will be added only once
   // we use a LinkedHashSet to keep the insertion order
   private val reusableInitStatements: mutable.LinkedHashSet[String] =
-  mutable.LinkedHashSet[String]()
+    mutable.LinkedHashSet[String]()
 
   // map of type serializer that will be added only once
   // LogicalType -> reused_term
   private val reusableTypeSerializers: mutable.Map[LogicalType, String] =
-  mutable.Map[LogicalType, String]()
+    mutable.Map[LogicalType, String]()
 
   // local variable statements.
   private val reusableLocalVariableStatements = mutable.LinkedHashSet[String]()
@@ -94,25 +93,25 @@ class CodeGeneratorContext {
    *   the generated unique field term
    */
   def addReusableObject(
-                         obj: AnyRef,
-                         fieldNamePrefix: String,
-                         fieldTypeTerm: String = null): String = {
+      obj: AnyRef,
+      fieldNamePrefix: String,
+      fieldTypeTerm: String = null): String = {
     addReusableObjectWithName(obj, newName(fieldNamePrefix), fieldTypeTerm)
   }
 
   def addReusableObjectWithName(
-                                 obj: AnyRef,
-                                 fieldTerm: String,
-                                 fieldTypeTerm: String = null): String = {
+      obj: AnyRef,
+      fieldTerm: String,
+      fieldTypeTerm: String = null): String = {
     val clsName = Option(fieldTypeTerm).getOrElse(obj.getClass.getCanonicalName)
     addReusableObjectInternal(obj, fieldTerm, clsName)
     fieldTerm
   }
 
   private def addReusableObjectInternal(
-                                         obj: AnyRef,
-                                         fieldTerm: String,
-                                         fieldTypeTerm: String): Unit = {
+      obj: AnyRef,
+      fieldTerm: String,
+      fieldTypeTerm: String): Unit = {
     val idx = references.length
     // make a deep copy of the object
     val byteArray = InstantiationUtil.serializeObject(obj)
