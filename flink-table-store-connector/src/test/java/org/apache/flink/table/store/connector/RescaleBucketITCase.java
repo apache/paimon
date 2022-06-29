@@ -54,7 +54,8 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
         return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS `default_catalog`.`default_database`.`T0` (f0 INT) WITH ('bucket' = '2')",
                 String.format(
-                        "CREATE CATALOG `fs_catalog` WITH ('type' = 'table-store', 'warehouse' = '%s')",
+                        "CREATE CATALOG `fs_catalog` WITH ("
+                                + "'type' = 'table-store', 'catalog-type' = 'filesystem', 'warehouse' = '%s')",
                         path),
                 "CREATE TABLE IF NOT EXISTS `fs_catalog`.`default`.`T1` (f0 INT) WITH ('bucket' = '2')");
     }
