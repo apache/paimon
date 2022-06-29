@@ -52,7 +52,7 @@ import java.util.stream.Collectors;
 /** A catalog implementation for Hive. */
 public class HiveCatalog implements Catalog {
 
-    // we don't include flink-table-store-hive as dependencies because it depends on hive-exec
+    // we don't include flink-table-store-hive-mr as dependencies because it depends on hive-exec
     private static final String INPUT_FORMAT_CLASS_NAME =
             "org.apache.flink.table.store.mapred.TableStoreInputFormat";
     private static final String OUTPUT_FORMAT_CLASS_NAME =

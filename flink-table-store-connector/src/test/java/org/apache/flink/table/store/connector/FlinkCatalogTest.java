@@ -73,7 +73,7 @@ public class FlinkCatalogTest {
     public void beforeEach() throws IOException {
         String path = TEMPORARY_FOLDER.newFolder().toURI().toString();
         Configuration conf = new Configuration();
-        conf.setString("type", "filesystem");
+        conf.setString("catalog-type", "filesystem");
         conf.setString("warehouse", path);
         catalog = FlinkCatalogFactory.createCatalog("test-catalog", conf);
     }
