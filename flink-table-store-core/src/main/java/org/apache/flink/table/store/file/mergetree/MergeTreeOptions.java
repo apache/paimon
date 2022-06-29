@@ -120,7 +120,7 @@ public class MergeTreeOptions {
 
     public final int sizeRatio;
 
-    public final boolean changelogFile;
+    public final boolean enableChangelogFile;
 
     public MergeTreeOptions(
             long writeBufferSize,
@@ -132,7 +132,7 @@ public class MergeTreeOptions {
             boolean commitForceCompact,
             int maxSizeAmplificationPercent,
             int sizeRatio,
-            boolean changelogFile) {
+            boolean enableChangelogFile) {
         this.writeBufferSize = writeBufferSize;
         this.pageSize = pageSize;
         this.targetFileSize = targetFileSize;
@@ -145,7 +145,7 @@ public class MergeTreeOptions {
         this.commitForceCompact = commitForceCompact;
         this.maxSizeAmplificationPercent = maxSizeAmplificationPercent;
         this.sizeRatio = sizeRatio;
-        this.changelogFile = changelogFile;
+        this.enableChangelogFile = enableChangelogFile;
     }
 
     public MergeTreeOptions(ReadableConfig config) {

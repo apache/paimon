@@ -48,9 +48,9 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /** Writes {@link KeyValue}s into data files. */
@@ -106,15 +106,6 @@ public class DataFileWriter {
         return pathFactory;
     }
 
-    /**
-     * Write several {@link KeyValue}s into a data file of level 0.
-     *
-     * <p>NOTE: This method is atomic.
-     */
-    public DataFileMeta writeLevel0(Iterator<KeyValue> iterator) throws Exception {
-        return doWrite(createWriterFactory(0).get(), iterator);
-    }
-
     /** Write raw {@link KeyValue} iterator into a changelog file. */
     public Path writeLevel0Changelog(Iterator<KeyValue> iterator) throws Exception {
         FileWriter.Factory<KeyValue, Metric> writerFactory = createFileWriterFactory();
@@ -124,14 +115,27 @@ public class DataFileWriter {
     }
 
     /**
+     * Write several {@link KeyValue}s into a data file of level 0.
+     *
+     * @return empty if iterator is empty
+     */
+    public Optional<DataFileMeta> writeLevel0(Iterator<KeyValue> iterator) throws Exception {
+        List<DataFileMeta> files = write(iterator, 0);
+        if (files.size() > 1) {
+            throw new RuntimeException("Produce illegal multiple Level 0 files: " + files);
+        }
+        return files.size() == 0 ? Optional.empty() : Optional.of(files.get(0));
+    }
+
+    /**
      * Write several {@link KeyValue}s into data files of a given level.
      *
      * <p>NOTE: This method is atomic.
      */
     public List<DataFileMeta> write(Iterator<KeyValue> iterator, int level) throws Exception {
-        return level == 0
-                ? Collections.singletonList(writeLevel0(iterator))
-                : doWrite(createRollingKvWriter(level, suggestedFileSize), iterator);
+        // Don't roll file for level 0
+        long suggestedFileSize = level == 0 ? Long.MAX_VALUE : this.suggestedFileSize;
+        return doWrite(createRollingKvWriter(level, suggestedFileSize), iterator);
     }
 
     private <R> R doWrite(FileWriter<KeyValue, R> fileWriter, Iterator<KeyValue> iterator)
@@ -151,7 +155,11 @@ public class DataFileWriter {
     }
 
     public void delete(DataFileMeta file) {
-        FileUtils.deleteOrWarn(pathFactory.toPath(file.fileName()));
+        delete(file.fileName());
+    }
+
+    public void delete(String file) {
+        FileUtils.deleteOrWarn(pathFactory.toPath(file));
     }
 
     private class KvFileWriter extends BaseFileWriter<KeyValue, DataFileMeta> {

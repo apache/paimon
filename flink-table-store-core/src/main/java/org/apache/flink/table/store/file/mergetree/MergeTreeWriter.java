@@ -39,6 +39,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 /** A {@link RecordWriter} to write records and generate {@link Increment}. */
@@ -62,7 +63,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private final int numSortedRunStopTrigger;
 
-    private final boolean changelogFile;
+    private final boolean enableChangelogFile;
 
     private final LinkedHashSet<DataFileMeta> newFiles;
 
@@ -85,7 +86,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             DataFileWriter dataFileWriter,
             boolean commitForceCompact,
             int numSortedRunStopTrigger,
-            boolean changelogFile) {
+            boolean enableChangelogFile) {
         this.keyType = keyType;
         this.valueType = valueType;
         this.compactManager = compactManager;
@@ -96,7 +97,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.dataFileWriter = dataFileWriter;
         this.commitForceCompact = commitForceCompact;
         this.numSortedRunStopTrigger = numSortedRunStopTrigger;
-        this.changelogFile = changelogFile;
+        this.enableChangelogFile = enableChangelogFile;
         this.newFiles = new LinkedHashSet<>();
         this.compactBefore = new LinkedHashMap<>();
         this.compactAfter = new LinkedHashSet<>();
@@ -142,14 +143,27 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 finishCompaction(true);
             }
             List<String> extraFiles = new ArrayList<>();
-            if (changelogFile) {
+            if (enableChangelogFile) {
                 extraFiles.add(
                         dataFileWriter.writeLevel0Changelog(memTable.rawIterator()).getName());
             }
-            Iterator<KeyValue> iterator = memTable.mergeIterator(keyComparator, mergeFunction);
-            DataFileMeta file = dataFileWriter.writeLevel0(iterator).copy(extraFiles);
-            newFiles.add(file);
-            levels.addLevel0File(file);
+            AtomicBoolean success = new AtomicBoolean(false);
+            try {
+                Iterator<KeyValue> iterator = memTable.mergeIterator(keyComparator, mergeFunction);
+                dataFileWriter
+                        .writeLevel0(iterator)
+                        .ifPresent(
+                                file -> {
+                                    DataFileMeta fileMeta = file.copy(extraFiles);
+                                    newFiles.add(fileMeta);
+                                    levels.addLevel0File(fileMeta);
+                                    success.set(true);
+                                });
+            } finally {
+                if (!success.get()) {
+                    extraFiles.forEach(dataFileWriter::delete);
+                }
+            }
             memTable.clear();
             submitCompaction();
         }
