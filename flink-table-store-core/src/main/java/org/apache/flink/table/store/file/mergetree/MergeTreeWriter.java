@@ -147,20 +147,22 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 extraFiles.add(
                         dataFileWriter.writeLevel0Changelog(memTable.rawIterator()).getName());
             }
-            AtomicBoolean success = new AtomicBoolean(false);
+            boolean success = false;
             try {
                 Iterator<KeyValue> iterator = memTable.mergeIterator(keyComparator, mergeFunction);
-                dataFileWriter
-                        .writeLevel0(iterator)
-                        .ifPresent(
-                                file -> {
-                                    DataFileMeta fileMeta = file.copy(extraFiles);
-                                    newFiles.add(fileMeta);
-                                    levels.addLevel0File(fileMeta);
-                                    success.set(true);
-                                });
+                success =
+                        dataFileWriter
+                                .writeLevel0(iterator)
+                                .map(
+                                        file -> {
+                                            DataFileMeta fileMeta = file.copy(extraFiles);
+                                            newFiles.add(fileMeta);
+                                            levels.addLevel0File(fileMeta);
+                                            return true;
+                                        })
+                                .orElse(false);
             } finally {
-                if (!success.get()) {
+                if (!success) {
                     extraFiles.forEach(dataFileWriter::delete);
                 }
             }
