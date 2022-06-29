@@ -43,7 +43,6 @@ public class HiveE2eTest extends E2eTestBase {
 
     @Test
     public void testReadExternalTable() throws Exception {
-        // TODO write data directly to HDFS after FLINK-27562 is solved
         String tableStorePkDdl =
                 "CREATE TABLE IF NOT EXISTS table_store_pk (\n"
                         + "  a int,\n"
@@ -54,7 +53,7 @@ public class HiveE2eTest extends E2eTestBase {
                         + "  'bucket' = '2',\n"
                         + "  'root-path' = '%s'\n"
                         + ");";
-        String tableStorePkPath = TEST_DATA_DIR + "/" + UUID.randomUUID().toString() + ".store";
+        String tableStorePkPath = HDFS_ROOT + "/" + UUID.randomUUID().toString() + ".store";
         tableStorePkDdl = String.format(tableStorePkDdl, tableStorePkPath);
         runSql(
                 "INSERT INTO table_store_pk VALUES "
@@ -68,8 +67,6 @@ public class HiveE2eTest extends E2eTestBase {
                 "CREATE EXTERNAL TABLE IF NOT EXISTS table_store_pk\n"
                         + "STORED BY 'org.apache.flink.table.store.hive.TableStoreHiveStorageHandler'\n"
                         + "LOCATION '"
-                        // hive cannot read from local path
-                        + HDFS_ROOT
                         + tableStorePkPath
                         + "/default_catalog.catalog/default_database.db/table_store_pk';";
         writeSharedFile(
@@ -78,13 +75,9 @@ public class HiveE2eTest extends E2eTestBase {
                 ADD_JAR_HQL
                         + "\n"
                         + externalTablePkDdl
-                        + "\n"
-                        + "SELECT b, a, c FROM table_store_pk ORDER BY b;");
+                        + "\nSELECT b, a, c FROM table_store_pk ORDER BY b;");
 
         ContainerState hive = getHive();
-        hive.execInContainer("hdfs", "dfs", "-mkdir", "-p", HDFS_ROOT + TEST_DATA_DIR);
-        hive.execInContainer(
-                "hdfs", "dfs", "-copyFromLocal", tableStorePkPath, HDFS_ROOT + tableStorePkPath);
         Container.ExecResult execResult =
                 hive.execInContainer(
                         "/opt/hive/bin/hive",
@@ -94,6 +87,54 @@ public class HiveE2eTest extends E2eTestBase {
                         TEST_DATA_DIR + "/pk.hql");
         assertThat(execResult.getStdout())
                 .isEqualTo("10\t1\tHi\n" + "20\t2\tHello\n" + "30\t3\tTable\n" + "40\t4\tStore\n");
+        if (execResult.getExitCode() != 0) {
+            throw new AssertionError("Failed when running hive sql.");
+        }
+    }
+
+    @Test
+    public void testFlinkWriteAndHiveRead() throws Exception {
+        String sql =
+                String.join(
+                        "\n",
+                        "CREATE CATALOG my_hive WITH (",
+                        "  'type' = 'table-store',",
+                        "  'catalog-type' = 'hive',",
+                        "  'uri' = 'thrift://hive-metastore:9083',",
+                        "'warehouse' = '"
+                                + HDFS_ROOT
+                                + "/"
+                                + UUID.randomUUID().toString()
+                                + ".warehouse'",
+                        ");",
+                        "",
+                        "USE CATALOG my_hive;",
+                        "",
+                        "CREATE TABLE T (",
+                        "  a int,",
+                        "  b bigint,",
+                        "  c string",
+                        ") WITH (",
+                        "  'bucket' = '2'",
+                        ");",
+                        "",
+                        "INSERT INTO T VALUES (1, 10, 'Hi'), (2, 20, 'Hello');");
+        runSql(sql);
+
+        writeSharedFile(
+                "query.hql",
+                // same default database name as Flink
+                ADD_JAR_HQL + "\nSELECT b, a, c FROM t ORDER BY b;");
+
+        ContainerState hive = getHive();
+        Container.ExecResult execResult =
+                hive.execInContainer(
+                        "/opt/hive/bin/hive",
+                        "--hiveconf",
+                        "hive.root.logger=INFO,console",
+                        "-f",
+                        TEST_DATA_DIR + "/query.hql");
+        assertThat(execResult.getStdout()).isEqualTo("10\t1\tHi\n" + "20\t2\tHello\n");
         if (execResult.getExitCode() != 0) {
             throw new AssertionError("Failed when running hive sql.");
         }

@@ -220,13 +220,19 @@ public class FlinkCatalog extends AbstractCatalog {
         return UpdateSchema.fromCatalogTable(table);
     }
 
-    // --------------------- unsupported methods ----------------------------
-
     @Override
     public final void open() throws CatalogException {}
 
     @Override
-    public final void close() throws CatalogException {}
+    public final void close() throws CatalogException {
+        try {
+            catalog.close();
+        } catch (Exception e) {
+            throw new CatalogException("Failed to close catalog " + catalog.toString(), e);
+        }
+    }
+
+    // --------------------- unsupported methods ----------------------------
 
     @Override
     public CatalogDatabase getDatabase(String databaseName) throws CatalogException {

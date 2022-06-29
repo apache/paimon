@@ -241,9 +241,4 @@ public interface Catalog extends AutoCloseable {
             return tablePath;
         }
     }
-
-    /** Create a {@link Catalog} from warehouse path. */
-    static Catalog create(Path warehouse) {
-        return new FileSystemCatalog(warehouse);
-    }
 }

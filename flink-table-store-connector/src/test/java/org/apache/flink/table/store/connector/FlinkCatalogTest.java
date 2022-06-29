@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.Schema;
@@ -71,7 +72,10 @@ public class FlinkCatalogTest {
     @Before
     public void beforeEach() throws IOException {
         String path = TEMPORARY_FOLDER.newFolder().toURI().toString();
-        catalog = FlinkCatalogFactory.createCatalog(new Path(path), "test-catalog");
+        Configuration conf = new Configuration();
+        conf.setString("type", "filesystem");
+        conf.setString("warehouse", path);
+        catalog = FlinkCatalogFactory.createCatalog("test-catalog", conf);
     }
 
     private ResolvedSchema createSchema() {
