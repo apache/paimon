@@ -19,7 +19,7 @@
 
 package org.apache.flink.table.store.file.writer;
 
-import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.format.FieldStats;
 
 /** Metric information to describe the column's max-min values, record count etc. */
 public class Metric {

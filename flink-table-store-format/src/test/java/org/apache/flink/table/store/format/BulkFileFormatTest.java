@@ -28,8 +28,6 @@ import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.FileStoreOptions;
-import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -55,22 +53,10 @@ public class BulkFileFormatTest {
         testFormatWriteRead(tempDir, "orc", "snappy");
     }
 
-    @Test
-    public void testParquet(@TempDir java.nio.file.Path tempDir) throws IOException {
-        testFormatWriteRead(tempDir, "parquet", "snappy");
-    }
-
-    @Test
-    public void testCsv(@TempDir java.nio.file.Path tempDir) throws IOException {
-        testFormatWriteRead(tempDir, "csv", "snappy");
-    }
-
     public FileFormat createFileFormat(String format, String codec) {
         Configuration tableOptions = new Configuration();
-        tableOptions.set(FileStoreOptions.FILE_FORMAT, format);
         tableOptions.setString(format + ".codec", codec);
-        return FileFormat.fromTableOptions(
-                this.getClass().getClassLoader(), tableOptions, FileStoreOptions.FILE_FORMAT);
+        return FileFormat.fromIdentifier(format, tableOptions);
     }
 
     public void testFormatWriteRead(

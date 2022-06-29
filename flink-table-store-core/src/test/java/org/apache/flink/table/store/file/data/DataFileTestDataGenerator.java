@@ -21,7 +21,8 @@ package org.apache.flink.table.store.file.data;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
-import org.apache.flink.table.store.file.stats.FieldStatsCollector;
+import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
+import org.apache.flink.table.store.format.FieldStatsCollector;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -103,6 +104,11 @@ public class DataFileTestDataGenerator {
                 new FieldStatsCollector(TestKeyValueGenerator.KEY_TYPE);
         FieldStatsCollector valueStatsCollector =
                 new FieldStatsCollector(TestKeyValueGenerator.DEFAULT_ROW_TYPE);
+        FieldStatsArraySerializer keyStatsSerializer =
+                new FieldStatsArraySerializer(TestKeyValueGenerator.KEY_TYPE);
+        FieldStatsArraySerializer valueStatsSerializer =
+                new FieldStatsArraySerializer(TestKeyValueGenerator.DEFAULT_ROW_TYPE);
+
         long totalSize = 0;
         BinaryRowData minKey = null;
         BinaryRowData maxKey = null;
@@ -133,8 +139,8 @@ public class DataFileTestDataGenerator {
                         kvs.size(),
                         minKey,
                         maxKey,
-                        keyStatsCollector.extract(),
-                        valueStatsCollector.extract(),
+                        keyStatsSerializer.toBinary(keyStatsCollector.extract()),
+                        valueStatsSerializer.toBinary(valueStatsCollector.extract()),
                         minSequenceNumber,
                         maxSequenceNumber,
                         0,

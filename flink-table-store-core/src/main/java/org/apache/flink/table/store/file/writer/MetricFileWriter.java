@@ -24,10 +24,10 @@ import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.stats.FieldStats;
-import org.apache.flink.table.store.file.stats.FieldStatsCollector;
-import org.apache.flink.table.store.file.stats.FileStatsExtractor;
 import org.apache.flink.table.store.file.utils.FileUtils;
+import org.apache.flink.table.store.format.FieldStats;
+import org.apache.flink.table.store.format.FieldStatsCollector;
+import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.IOUtils;
 import org.apache.flink.util.Preconditions;
@@ -127,7 +127,7 @@ public class MetricFileWriter<T> implements FileWriter<T, Metric> {
         if (fileStatsExtractor != null) {
             stats = fileStatsExtractor.extract(path);
         } else {
-            stats = fieldStatsCollector.extractFieldStats();
+            stats = fieldStatsCollector.extract();
         }
 
         return new Metric(stats, recordCount, length);

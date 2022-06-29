@@ -21,24 +21,43 @@ package org.apache.flink.table.store.format.orc;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.connector.file.table.format.BulkDecodingFormat;
-import org.apache.flink.table.connector.format.EncodingFormat;
+import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.connector.file.src.FileSourceSplit;
+import org.apache.flink.connector.file.src.reader.BulkFormat;
+import org.apache.flink.orc.OrcColumnarRowInputFormat;
+import org.apache.flink.orc.OrcFilters;
+import org.apache.flink.orc.OrcSplitReaderUtil;
+import org.apache.flink.orc.shim.OrcShim;
+import org.apache.flink.orc.vector.RowDataVectorizer;
+import org.apache.flink.orc.writer.OrcBulkWriterFactory;
+import org.apache.flink.table.connector.Projection;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.format.FileFormat;
-import org.apache.flink.table.store.file.stats.FileStatsExtractor;
+import org.apache.flink.table.data.columnar.vector.VectorizedColumnBatch;
+import org.apache.flink.table.expressions.Expression;
+import org.apache.flink.table.expressions.ResolvedExpression;
+import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
+import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.format.FileStatsExtractor;
+import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
+import org.apache.orc.TypeDescription;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
+import java.util.Properties;
+
+import static org.apache.flink.table.store.format.orc.OrcFileFormatFactory.IDENTIFIER;
 
 /** Orc {@link FileFormat}. */
 public class OrcFileFormat extends FileFormat {
 
-    private final org.apache.flink.orc.OrcFileFormatFactory factory;
     private final Configuration formatOptions;
 
     public OrcFileFormat(Configuration formatOptions) {
         super(org.apache.flink.orc.OrcFileFormatFactory.IDENTIFIER);
-        this.factory = new org.apache.flink.orc.OrcFileFormatFactory();
         this.formatOptions = formatOptions;
     }
 
@@ -48,17 +67,57 @@ public class OrcFileFormat extends FileFormat {
     }
 
     @Override
-    protected BulkDecodingFormat<RowData> getDecodingFormat() {
-        return factory.createDecodingFormat(null, formatOptions); // context is useless
-    }
-
-    @Override
-    protected EncodingFormat<BulkWriter.Factory<RowData>> getEncodingFormat() {
-        return factory.createEncodingFormat(null, formatOptions); // context is useless
-    }
-
-    @Override
     public Optional<FileStatsExtractor> createStatsExtractor(RowType type) {
         return Optional.of(new OrcFileStatsExtractor(type));
+    }
+
+    @Override
+    public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
+            RowType type, int[][] projection, List<ResolvedExpression> filters) {
+        List<OrcFilters.Predicate> orcPredicates = new ArrayList<>();
+
+        if (filters != null) {
+            for (Expression pred : filters) {
+                OrcFilters.Predicate orcPred = OrcFilters.toOrcPredicate(pred);
+                if (orcPred != null) {
+                    orcPredicates.add(orcPred);
+                }
+            }
+        }
+
+        Properties properties = getOrcProperties(formatOptions);
+        org.apache.hadoop.conf.Configuration conf = new org.apache.hadoop.conf.Configuration();
+        properties.forEach((k, v) -> conf.set(k.toString(), v.toString()));
+
+        return OrcColumnarRowInputFormat.createPartitionedFormat(
+                OrcShim.defaultShim(),
+                conf,
+                type,
+                Collections.emptyList(),
+                null,
+                Projection.of(projection).toTopLevelIndexes(),
+                orcPredicates,
+                VectorizedColumnBatch.DEFAULT_SIZE,
+                InternalTypeInfo::of);
+    }
+
+    @Override
+    public BulkWriter.Factory<RowData> createWriterFactory(RowType type) {
+        LogicalType[] orcTypes = type.getChildren().toArray(new LogicalType[0]);
+
+        TypeDescription typeDescription = OrcSplitReaderUtil.logicalTypeToOrcType(type);
+
+        return new OrcBulkWriterFactory<>(
+                new RowDataVectorizer(typeDescription.toString(), orcTypes),
+                getOrcProperties(formatOptions),
+                new org.apache.hadoop.conf.Configuration());
+    }
+
+    private static Properties getOrcProperties(ReadableConfig options) {
+        Properties orcProperties = new Properties();
+        Properties properties = new Properties();
+        ((org.apache.flink.configuration.Configuration) options).addAllToProperties(properties);
+        properties.forEach((k, v) -> orcProperties.put(IDENTIFIER + "." + k, v));
+        return orcProperties;
     }
 }

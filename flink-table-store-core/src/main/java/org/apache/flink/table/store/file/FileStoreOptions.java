@@ -27,8 +27,8 @@ import org.apache.flink.configuration.description.Description;
 import org.apache.flink.configuration.description.InlineElement;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectIdentifier;
-import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
+import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.util.Preconditions;
 
 import java.io.Serializable;
@@ -219,13 +219,11 @@ public class FileStoreOptions implements Serializable {
     }
 
     public FileFormat fileFormat() {
-        return FileFormat.fromTableOptions(
-                Thread.currentThread().getContextClassLoader(), options, FILE_FORMAT);
+        return FileFormat.fromTableOptions(options, FILE_FORMAT);
     }
 
     public FileFormat manifestFormat() {
-        return FileFormat.fromTableOptions(
-                Thread.currentThread().getContextClassLoader(), options, MANIFEST_FORMAT);
+        return FileFormat.fromTableOptions(options, MANIFEST_FORMAT);
     }
 
     public MemorySize manifestTargetSize() {

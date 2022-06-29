@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.stats;
+package org.apache.flink.table.store.format;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.core.fs.FSDataOutputStream;
@@ -29,7 +29,6 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.data.binary.BinaryStringData;
-import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.CharType;
 import org.apache.flink.table.types.logical.DecimalType;
@@ -50,7 +49,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link FileStatsExtractor}. */
+/** Tests for {@link org.apache.flink.table.store.format.FileStatsExtractor}. */
 public abstract class FileStatsExtractorTestBase {
 
     @TempDir java.nio.file.Path tempDir;
@@ -76,7 +75,7 @@ public abstract class FileStatsExtractorTestBase {
         for (GenericRowData row : data) {
             collector.collect(row);
         }
-        FieldStats[] expected = collector.extractFieldStats();
+        FieldStats[] expected = collector.extract();
 
         FileStatsExtractor extractor = format.createStatsExtractor(rowType).get();
         assertThat(extractor).isNotNull();

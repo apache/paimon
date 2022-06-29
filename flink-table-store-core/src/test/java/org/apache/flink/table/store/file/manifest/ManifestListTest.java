@@ -23,9 +23,9 @@ import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
-import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.format.FileFormat;
 
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.io.TempDir;
@@ -41,9 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ManifestListTest {
 
     private final ManifestTestDataGenerator gen = ManifestTestDataGenerator.builder().build();
-    private final FileFormat avro =
-            FileFormat.fromIdentifier(
-                    ManifestListTest.class.getClassLoader(), "avro", new Configuration());
+    private final FileFormat avro = FileFormat.fromIdentifier("avro", new Configuration());
 
     @TempDir java.nio.file.Path tempDir;
 

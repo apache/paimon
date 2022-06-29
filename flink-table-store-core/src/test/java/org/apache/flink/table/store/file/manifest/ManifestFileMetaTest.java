@@ -25,11 +25,11 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -61,9 +61,7 @@ public class ManifestFileMetaTest {
     private ManifestFile manifestFile;
 
     public ManifestFileMetaTest() {
-        this.avro =
-                FileFormat.fromIdentifier(
-                        ManifestFileMetaTest.class.getClassLoader(), "avro", new Configuration());
+        this.avro = FileFormat.fromIdentifier("avro", new Configuration());
     }
 
     @BeforeEach
