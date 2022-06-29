@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 
 import static org.apache.flink.table.store.file.manifest.ManifestCommittableSerializerTest.randomIncrement;
-import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
+import static org.apache.flink.table.store.file.mergetree.compact.KeyValueCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link CommittableSerializer}. */

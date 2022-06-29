@@ -19,42 +19,37 @@
 package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.compact.CompactResult;
+import org.apache.flink.table.store.file.compact.CompactRewriter;
+import org.apache.flink.table.store.file.compact.CompactTask;
+import org.apache.flink.table.store.file.compact.CompactUnit;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.Callable;
 
 import static java.util.Collections.singletonList;
 
-/** Compaction task. */
-public class CompactTask implements Callable<CompactResult> {
-
-    private static final Logger LOG = LoggerFactory.getLogger(CompactTask.class);
+/** Compact task for merge tree compaction. */
+public class KeyValueCompactTask extends CompactTask {
 
     private final long minFileSize;
-    private final CompactRewriter rewriter;
+    private final CompactRewriter<SortedRun> rewriter;
     private final int outputLevel;
 
     private final List<List<SortedRun>> partitioned;
 
     private final boolean dropDelete;
 
-    // metrics
-    private long rewriteInputSize;
-    private long rewriteOutputSize;
-    private int rewriteFilesNum;
+    // metric
     private int upgradeFilesNum;
 
-    public CompactTask(
+    public KeyValueCompactTask(
             Comparator<RowData> keyComparator,
             long minFileSize,
-            CompactRewriter rewriter,
+            CompactRewriter<SortedRun> rewriter,
             CompactUnit unit,
             boolean dropDelete) {
         this.minFileSize = minFileSize;
@@ -63,20 +58,11 @@ public class CompactTask implements Callable<CompactResult> {
         this.partitioned = new IntervalPartition(unit.files(), keyComparator).partition();
         this.dropDelete = dropDelete;
 
-        this.rewriteInputSize = 0;
-        this.rewriteOutputSize = 0;
-        this.rewriteFilesNum = 0;
         this.upgradeFilesNum = 0;
     }
 
     @Override
-    public CompactResult call() throws Exception {
-        return compact();
-    }
-
-    private CompactResult compact() throws Exception {
-        long startMillis = System.currentTimeMillis();
-
+    protected CompactResult compact() throws Exception {
         List<List<SortedRun>> candidate = new ArrayList<>();
         List<DataFileMeta> before = new ArrayList<>();
         List<DataFileMeta> after = new ArrayList<>();
@@ -107,20 +93,13 @@ public class CompactTask implements Callable<CompactResult> {
         }
         rewrite(candidate, before, after);
 
-        if (LOG.isDebugEnabled()) {
-            LOG.debug(
-                    "Done compacting {} files to {} files in {}ms. "
-                            + "Rewrite input size = {}, output size = {}, rewrite file num = {}, upgrade file num = {}",
-                    before.size(),
-                    after.size(),
-                    System.currentTimeMillis() - startMillis,
-                    rewriteInputSize,
-                    rewriteOutputSize,
-                    rewriteFilesNum,
-                    upgradeFilesNum);
-        }
-
         return result(before, after);
+    }
+
+    @Override
+    protected String logMetric(long startMillis, CompactResult result) {
+        return String.format(
+                "%s, upgrade file num = %d", super.logMetric(startMillis, result), upgradeFilesNum);
     }
 
     private void upgrade(DataFileMeta file, List<DataFileMeta> before, List<DataFileMeta> after) {
@@ -154,29 +133,11 @@ public class CompactTask implements Callable<CompactResult> {
                         runs.forEach(
                                 run -> {
                                     before.addAll(run.files());
-                                    rewriteInputSize +=
-                                            run.files().stream()
-                                                    .mapToLong(DataFileMeta::fileSize)
-                                                    .sum();
-                                    rewriteFilesNum += run.files().size();
+                                    collectBeforeStats(before);
                                 }));
         List<DataFileMeta> result = rewriter.rewrite(outputLevel, dropDelete, candidate);
         after.addAll(result);
-        rewriteOutputSize += result.stream().mapToLong(DataFileMeta::fileSize).sum();
+        collectAfterStats(after);
         candidate.clear();
-    }
-
-    private CompactResult result(List<DataFileMeta> before, List<DataFileMeta> after) {
-        return new CompactResult() {
-            @Override
-            public List<DataFileMeta> before() {
-                return before;
-            }
-
-            @Override
-            public List<DataFileMeta> after() {
-                return after;
-            }
-        };
     }
 }

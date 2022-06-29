@@ -22,18 +22,19 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.compact.CompactResult;
+import org.apache.flink.table.store.file.compact.CompactRewriter;
+import org.apache.flink.table.store.file.compact.CompactUnit;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileReader;
 import org.apache.flink.table.store.file.data.DataFileWriter;
 import org.apache.flink.table.store.file.mergetree.Levels;
 import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
-import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
-import org.apache.flink.table.store.file.mergetree.compact.CompactResult;
-import org.apache.flink.table.store.file.mergetree.compact.CompactRewriter;
-import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
-import org.apache.flink.table.store.file.mergetree.compact.CompactTask;
-import org.apache.flink.table.store.file.mergetree.compact.CompactUnit;
+import org.apache.flink.table.store.file.mergetree.SortedRun;
+import org.apache.flink.table.store.file.mergetree.compact.KeyValueCompactManager;
+import org.apache.flink.table.store.file.mergetree.compact.KeyValueCompactStrategy;
+import org.apache.flink.table.store.file.mergetree.compact.KeyValueCompactTask;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -41,7 +42,6 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.writer.RecordWriter;
-import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
@@ -69,7 +69,6 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
             RowType valueType,
             Supplier<Comparator<RowData>> keyComparatorSupplier,
             MergeFunction mergeFunction,
-            FileFormat fileFormat,
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
@@ -77,13 +76,18 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
         super(snapshotManager, scan);
         this.dataFileReaderFactory =
                 new DataFileReader.Factory(
-                        schemaManager, schemaId, keyType, valueType, fileFormat, pathFactory);
+                        schemaManager,
+                        schemaId,
+                        keyType,
+                        valueType,
+                        options.fileFormat(),
+                        pathFactory);
         this.dataFileWriterFactory =
                 new DataFileWriter.Factory(
                         schemaId,
                         keyType,
                         valueType,
-                        fileFormat,
+                        options.fileFormat(),
                         pathFactory,
                         options.targetFileSize());
         this.keyComparatorSupplier = keyComparatorSupplier;
@@ -111,11 +115,12 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
             compactFiles = scanExistingFileMetas(partition, bucket);
         }
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
-        CompactRewriter rewriter = compactRewriter(partition, bucket, keyComparator);
+        CompactRewriter<SortedRun> rewriter = compactRewriter(partition, bucket, keyComparator);
         Levels levels = new Levels(keyComparator, compactFiles, options.numLevels());
         CompactUnit unit =
                 CompactUnit.fromLevelRuns(levels.numberOfLevels() - 1, levels.levelSortedRuns());
-        return new CompactTask(keyComparator, options.targetFileSize(), rewriter, unit, true);
+        return new KeyValueCompactTask(
+                keyComparator, options.targetFileSize(), rewriter, unit, true);
     }
 
     private MergeTreeWriter createMergeTreeWriter(
@@ -146,22 +151,22 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
                 options.enableChangelogFile());
     }
 
-    private CompactManager createCompactManager(
+    private KeyValueCompactManager createCompactManager(
             BinaryRowData partition,
             int bucket,
-            CompactStrategy compactStrategy,
+            KeyValueCompactStrategy keyValueCompactStrategy,
             ExecutorService compactExecutor) {
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
-        CompactRewriter rewriter = compactRewriter(partition, bucket, keyComparator);
-        return new CompactManager(
+        CompactRewriter<SortedRun> rewriter = compactRewriter(partition, bucket, keyComparator);
+        return new KeyValueCompactManager(
                 compactExecutor,
-                compactStrategy,
+                keyValueCompactStrategy,
                 keyComparator,
                 options.targetFileSize(),
                 rewriter);
     }
 
-    private CompactRewriter compactRewriter(
+    private CompactRewriter<SortedRun> compactRewriter(
             BinaryRowData partition, int bucket, Comparator<RowData> keyComparator) {
         DataFileWriter dataFileWriter = dataFileWriterFactory.create(partition, bucket);
         return (outputLevel, dropDelete, sections) ->

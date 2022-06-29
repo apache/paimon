@@ -32,6 +32,21 @@ public class DataFileTestUtils {
         return newFile("", level, minKey, maxKey, maxSequence);
     }
 
+    public static DataFileMeta newFile(long minSeq, long maxSeq) {
+        return new DataFileMeta(
+                "",
+                maxSeq - minSeq + 1,
+                maxSeq - minSeq + 1,
+                DataFileMeta.EMPTY_MIN_KEY,
+                DataFileMeta.EMPTY_MAX_KEY,
+                DataFileMeta.EMPTY_KEY_STATS,
+                null,
+                minSeq,
+                maxSeq,
+                0L,
+                DataFileMeta.DUMMY_LEVEL);
+    }
+
     public static DataFileMeta newFile(
             String name, int level, int minKey, int maxKey, long maxSequence) {
         return new DataFileMeta(

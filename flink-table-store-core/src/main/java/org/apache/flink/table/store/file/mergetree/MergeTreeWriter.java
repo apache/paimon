@@ -22,11 +22,11 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.util.MemorySegmentPool;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileWriter;
 import org.apache.flink.table.store.file.memory.MemoryOwner;
-import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
-import org.apache.flink.table.store.file.mergetree.compact.CompactResult;
+import org.apache.flink.table.store.file.mergetree.compact.KeyValueCompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
@@ -49,7 +49,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private final RowType valueType;
 
-    private final CompactManager compactManager;
+    private final KeyValueCompactManager compactManager;
 
     private final Levels levels;
 
@@ -78,7 +78,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     public MergeTreeWriter(
             RowType keyType,
             RowType valueType,
-            CompactManager compactManager,
+            KeyValueCompactManager compactManager,
             Levels levels,
             long maxSequenceNumber,
             Comparator<RowData> keyComparator,

@@ -16,16 +16,20 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.mergetree.compact;
+package org.apache.flink.table.store.file.compact;
 
 import org.apache.flink.table.store.file.data.DataFileMeta;
 
 import java.util.List;
 
-/** Result of compaction. */
-public interface CompactResult {
+/**
+ * Rewrite sections to the files.
+ *
+ * @param <T> The type of sections.
+ */
+@FunctionalInterface
+public interface CompactRewriter<T> {
 
-    List<DataFileMeta> before();
-
-    List<DataFileMeta> after();
+    List<DataFileMeta> rewrite(int outputLevel, boolean dropDelete, List<List<T>> sections)
+            throws Exception;
 }

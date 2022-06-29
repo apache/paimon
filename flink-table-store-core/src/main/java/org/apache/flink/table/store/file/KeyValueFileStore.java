@@ -86,11 +86,10 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 valueType,
                 keyComparatorSupplier,
                 mergeFunction,
-                options.fileFormat(),
+                options,
                 pathFactory(),
                 snapshotManager(),
-                newScan(true),
-                options);
+                newScan(true));
     }
 
     private KeyValueFileStoreScan newScan(boolean checkNumOfBuckets) {

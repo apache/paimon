@@ -22,11 +22,14 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.file.data.AppendOnlyCompactManager;
 import org.apache.flink.table.store.file.data.AppendOnlyWriter;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.store.file.data.DataFileTest;
 import org.apache.flink.table.store.file.data.DataFileWriter;
+import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
+import org.apache.flink.table.store.file.writer.MetricFileWriter;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -37,7 +40,9 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.function.Function;
 
 /** test file format suffix. */
 public class FileFormatSuffixTest extends DataFileTest {
@@ -58,7 +63,20 @@ public class FileFormatSuffixTest extends DataFileTest {
                 new DataFilePathFactory(new Path(tempDir.toString()), "dt=1", 1, format);
         FileFormat fileFormat = FileFormat.fromIdentifier(format, new Configuration());
         AppendOnlyWriter appendOnlyWriter =
-                new AppendOnlyWriter(0, fileFormat, 10, SCHEMA, 10, dataFilePathFactory);
+                new AppendOnlyWriter(
+                        0,
+                        10,
+                        MetricFileWriter.createFactory(
+                                fileFormat.createWriterFactory(SCHEMA),
+                                Function.identity(),
+                                SCHEMA,
+                                fileFormat.createStatsExtractor(SCHEMA).orElse(null)),
+                        new FieldStatsArraySerializer(SCHEMA),
+                        new AppendOnlyCompactManager(null, null, null), // not used
+                        false,
+                        Collections.emptyList(),
+                        0,
+                        dataFilePathFactory);
         appendOnlyWriter.write(
                 GenericRowData.of(1, StringData.fromString("aaa"), StringData.fromString("1")));
         List<DataFileMeta> result = appendOnlyWriter.close();

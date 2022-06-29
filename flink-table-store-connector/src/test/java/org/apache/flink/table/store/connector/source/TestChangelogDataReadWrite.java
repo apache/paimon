@@ -148,11 +148,11 @@ public class TestChangelogDataReadWrite {
                                 VALUE_TYPE,
                                 () -> COMPARATOR,
                                 new DeduplicateMergeFunction(),
-                                avro,
+                                options,
                                 pathFactory,
                                 snapshotManager,
-                                null, // not used, we only create an empty writer
-                                options)
+                                null // not used, we only create an empty writer
+                                )
                         .createEmptyWriter(partition, bucket, service);
         ((MemoryOwner) writer)
                 .setMemoryPool(

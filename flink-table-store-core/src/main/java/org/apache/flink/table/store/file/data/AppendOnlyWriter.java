@@ -28,7 +28,6 @@ import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.writer.BaseFileWriter;
 import org.apache.flink.table.store.file.writer.FileWriter;
 import org.apache.flink.table.store.file.writer.Metric;
-import org.apache.flink.table.store.file.writer.MetricFileWriter;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.store.file.writer.RollingFileWriter;
 import org.apache.flink.table.store.format.FileFormat;
@@ -39,7 +38,7 @@ import org.apache.flink.util.Preconditions;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Function;
+import java.util.concurrent.ExecutionException;
 import java.util.function.Supplier;
 
 /**
@@ -47,35 +46,41 @@ import java.util.function.Supplier;
  * operations and don't have any unique keys or sort keys.
  */
 public class AppendOnlyWriter implements RecordWriter<RowData> {
+
     private final long schemaId;
     private final long targetFileSize;
     private final DataFilePathFactory pathFactory;
-    private final FieldStatsArraySerializer statsArraySerializer;
-
     private final FileWriter.Factory<RowData, Metric> fileWriterFactory;
-    private long nextSeqNum;
+    private final FieldStatsArraySerializer statsArraySerializer;
+    private final AppendOnlyCompactManager compactManager;
+    private final boolean forceCompact;
+    private final List<DataFileMeta> toCompact;
+    private final List<DataFileMeta> compactBefore;
+    private final List<DataFileMeta> compactAfter;
 
+    private long nextSeqNum;
     private RowRollingWriter writer;
 
     public AppendOnlyWriter(
             long schemaId,
-            FileFormat fileFormat,
             long targetFileSize,
-            RowType writeSchema,
+            FileWriter.Factory<RowData, Metric> fileWriterFactory,
+            FieldStatsArraySerializer statsArraySerializer,
+            AppendOnlyCompactManager compactManager,
+            boolean forceCompact,
+            List<DataFileMeta> restoredFiles,
             long maxWroteSeqNumber,
             DataFilePathFactory pathFactory) {
         this.schemaId = schemaId;
         this.targetFileSize = targetFileSize;
         this.pathFactory = pathFactory;
-        this.statsArraySerializer = new FieldStatsArraySerializer(writeSchema);
-
-        // Initialize the file writer factory to write records and generic metric.
-        this.fileWriterFactory =
-                MetricFileWriter.createFactory(
-                        fileFormat.createWriterFactory(writeSchema),
-                        Function.identity(),
-                        writeSchema,
-                        fileFormat.createStatsExtractor(writeSchema).orElse(null));
+        this.fileWriterFactory = fileWriterFactory;
+        this.statsArraySerializer = statsArraySerializer;
+        this.compactManager = compactManager;
+        this.forceCompact = forceCompact;
+        this.toCompact = new ArrayList<>(restoredFiles);
+        this.compactBefore = new ArrayList<>();
+        this.compactAfter = new ArrayList<>();
 
         this.nextSeqNum = maxWroteSeqNumber + 1;
         this.writer = createRollingRowWriter();
@@ -88,6 +93,9 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
                 "Append-only writer can only accept insert row kind, but current row kind is: %s",
                 rowData.getRowKind());
         writer.write(rowData);
+        if (compactManager.isCompactionFinished() && !toCompact.isEmpty()) {
+            submitCompaction();
+        }
     }
 
     @Override
@@ -101,13 +109,13 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
             // Reopen the writer to accept further records.
             writer = createRollingRowWriter();
         }
-
-        return Increment.forAppend(newFiles);
+        finishCompaction(forceCompact);
+        return drainIncrement(newFiles);
     }
 
     @Override
     public void sync() throws Exception {
-        // Do nothing here, as this writer don't introduce any async compaction thread currently.
+        finishCompaction(true);
     }
 
     @Override
@@ -124,6 +132,36 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
         }
 
         return result;
+    }
+
+    private void submitCompaction() {
+        if (compactManager.isCompactionFinished()) {
+            compactManager.submitCompaction(toCompact);
+        }
+    }
+
+    private void finishCompaction(boolean blocking)
+            throws ExecutionException, InterruptedException {
+        compactManager
+                .finishCompaction(blocking)
+                .ifPresent(
+                        result -> {
+                            compactBefore.addAll(result.before());
+                            compactAfter.addAll(result.after());
+                        });
+        if (blocking && !compactAfter.isEmpty()) {
+            toCompact.clear();
+        }
+    }
+
+    private Increment drainIncrement(List<DataFileMeta> newFiles) {
+        Increment increment =
+                new Increment(
+                        newFiles, new ArrayList<>(compactBefore), new ArrayList<>(compactAfter));
+        compactBefore.clear();
+        compactAfter.clear();
+        toCompact.addAll(newFiles);
+        return increment;
     }
 
     private RowRollingWriter createRollingRowWriter() {
@@ -164,6 +202,45 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
                     stats,
                     minSeqNum,
                     Math.max(minSeqNum, nextSeqNum - 1),
+                    schemaId);
+        }
+    }
+
+    /**
+     * A {@link BaseFileWriter} implementation to write a single file with a fixed range of sequence
+     * number.
+     */
+    public static class SingleFileWriter extends BaseFileWriter<RowData, DataFileMeta> {
+        private final FieldStatsArraySerializer statsArraySerializer;
+        private final long schemaId;
+        private final long minSeqNum;
+        private final long maxSeqNum;
+
+        public SingleFileWriter(
+                FileWriter.Factory<RowData, Metric> writerFactory,
+                Path path,
+                FieldStatsArraySerializer statsArraySerializer,
+                long minSeqNum,
+                long maxSeqNum,
+                long schemaId) {
+            super(writerFactory, path);
+            this.statsArraySerializer = statsArraySerializer;
+            this.schemaId = schemaId;
+            this.minSeqNum = minSeqNum;
+            this.maxSeqNum = maxSeqNum;
+        }
+
+        @Override
+        protected DataFileMeta createResult(Path path, Metric metric) throws IOException {
+            BinaryTableStats stats = statsArraySerializer.toBinary(metric.fieldStats());
+
+            return DataFileMeta.forAppend(
+                    path.getName(),
+                    FileUtils.getFileSize(path),
+                    recordCount(),
+                    stats,
+                    minSeqNum,
+                    maxSeqNum,
                     schemaId);
         }
     }

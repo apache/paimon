@@ -16,17 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.mergetree.compact;
+package org.apache.flink.table.store.file.compact;
 
 import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.mergetree.SortedRun;
 
 import java.util.List;
 
-/** Rewrite sections to the files. */
-@FunctionalInterface
-public interface CompactRewriter {
+/** Result of compaction. */
+public interface CompactResult {
 
-    List<DataFileMeta> rewrite(int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
-            throws Exception;
+    List<DataFileMeta> before();
+
+    List<DataFileMeta> after();
 }

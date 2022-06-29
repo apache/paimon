@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.table.store.file.compact.CompactUnit;
 import org.apache.flink.table.store.file.mergetree.LevelSortedRun;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 
@@ -35,7 +36,7 @@ import java.util.Optional;
  * <p>See RocksDb Universal-Compaction:
  * https://github.com/facebook/rocksdb/wiki/Universal-Compaction.
  */
-public class UniversalCompaction implements CompactStrategy {
+public class UniversalCompaction implements KeyValueCompactStrategy {
 
     private static final Logger LOG = LoggerFactory.getLogger(UniversalCompaction.class);
 
