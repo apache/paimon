@@ -40,6 +40,7 @@ import org.apache.flink.table.store.table.AppendOnlyFileStoreTable;
 import org.apache.flink.table.store.table.ChangelogValueCountFileStoreTable;
 import org.apache.flink.table.store.table.ChangelogWithKeyFileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.sink.LogSinkFunction;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.types.RowKind;
@@ -144,10 +145,10 @@ public class TableStoreSink
 
         Configuration conf = Configuration.fromMap(table.schema().options());
         // Do not sink to log store when overwrite mode
-        final LogSinkProvider finalLogSinkProvider =
+        final LogSinkFunction logSinkFunction =
                 overwrite || conf.get(TableStoreFactoryOptions.COMPACTION_MANUAL_TRIGGERED)
                         ? null
-                        : logSinkProvider;
+                        : (logSinkProvider == null ? null : logSinkProvider.createSink());
         return (DataStreamSinkProvider)
                 (providerContext, dataStream) ->
                         new FlinkSinkBuilder(tableIdentifier, table)
@@ -156,7 +157,7 @@ public class TableStoreSink
                                                 dataStream.getExecutionEnvironment(),
                                                 dataStream.getTransformation()))
                                 .withLockFactory(lockFactory)
-                                .withLogSinkProvider(finalLogSinkProvider)
+                                .withLogSinkFunction(logSinkFunction)
                                 .withOverwritePartition(overwrite ? staticPartitions : null)
                                 .withParallelism(
                                         conf.get(TableStoreFactoryOptions.SINK_PARALLELISM))

@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.connector.sink;
 
-/** Committable produced by {@link StoreSinkWriter}. */
+/** Committable produced by {@link PrepareCommitOperator}. */
 public class Committable {
 
     private final Kind kind;
@@ -41,9 +41,7 @@ public class Committable {
     enum Kind {
         FILE((byte) 0),
 
-        LOG((byte) 1),
-
-        LOG_OFFSET((byte) 2);
+        LOG_OFFSET((byte) 1);
 
         private final byte value;
 
@@ -60,8 +58,6 @@ public class Committable {
                 case 0:
                     return FILE;
                 case 1:
-                    return LOG;
-                case 2:
                     return LOG_OFFSET;
                 default:
                     throw new UnsupportedOperationException(

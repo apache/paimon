@@ -19,34 +19,13 @@
 package org.apache.flink.table.store.log;
 
 import org.apache.flink.api.connector.sink2.Sink;
-import org.apache.flink.table.store.table.sink.SinkRecord;
+import org.apache.flink.table.store.table.sink.LogSinkFunction;
 
 import java.io.Serializable;
-import java.util.function.Consumer;
 
 /** A {@link Serializable} sink provider for log store. */
 public interface LogSinkProvider extends Serializable {
 
     /** Creates a {@link Sink} instance. */
-    Sink<SinkRecord> createSink();
-
-    /**
-     * Create a metadata consumer for {@link Sink.InitContext#metadataConsumer()} from {@link
-     * WriteCallback}.
-     */
-    Consumer<?> createMetadataConsumer(WriteCallback callback);
-
-    /**
-     * A callback interface that the user can implement to know the offset of the bucket when the
-     * request is complete.
-     */
-    interface WriteCallback {
-
-        /**
-         * A callback method the user can implement to provide asynchronous handling of request
-         * completion. This method will be called when the record sent to the server has been
-         * acknowledged.
-         */
-        void onCompletion(int bucket, long offset);
-    }
+    LogSinkFunction createSink();
 }

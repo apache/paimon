@@ -45,7 +45,6 @@ import static org.apache.flink.table.store.connector.FileStoreITCase.TABLE_TYPE;
 import static org.apache.flink.table.store.connector.FileStoreITCase.buildBatchEnv;
 import static org.apache.flink.table.store.connector.FileStoreITCase.buildFileStoreTable;
 import static org.apache.flink.table.store.connector.FileStoreITCase.buildStreamEnv;
-import static org.apache.flink.table.store.connector.FileStoreITCase.buildTestSource;
 import static org.apache.flink.table.store.connector.FileStoreITCase.executeAndCollect;
 import static org.apache.flink.table.store.kafka.KafkaLogTestUtils.SINK_CONTEXT;
 import static org.apache.flink.table.store.kafka.KafkaLogTestUtils.SOURCE_CONTEXT;
@@ -120,10 +119,10 @@ public class LogStoreSinkITCase extends KafkaTableTestBase {
 
         try {
             // write
-            new FlinkSinkBuilder(IDENTIFIER, table)
-                    .withInput(buildTestSource(env, isBatch))
-                    .withLogSinkProvider(sinkProvider)
-                    .build();
+            //            new FlinkSinkBuilder(IDENTIFIER, table)
+            //                    .withInput(buildTestSource(env, isBatch))
+            //                    .withLogSinkProvider(sinkProvider)
+            //                    .build();
             env.execute();
 
             // read

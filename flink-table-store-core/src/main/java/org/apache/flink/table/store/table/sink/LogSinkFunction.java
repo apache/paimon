@@ -16,18 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.connector;
+package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.api.connector.sink2.StatefulSink;
-import org.apache.flink.api.connector.sink2.TwoPhaseCommittingSink;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.connector.sink.Committable;
+import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 
-/**
- * The base interface for file store sink writers.
- *
- * @param <WriterStateT> The type of the writer's state.
- */
-public interface StatefulPrecommittingSinkWriter<WriterStateT>
-        extends StatefulSink.StatefulSinkWriter<RowData, WriterStateT>,
-                TwoPhaseCommittingSink.PrecommittingSinkWriter<RowData, Committable> {}
+/** Log {@link SinkFunction} with {@link WriteCallback}. */
+public interface LogSinkFunction extends SinkFunction<SinkRecord> {
+
+    void setWriteCallback(WriteCallback writeCallback);
+
+    /**
+     * A callback interface that the user can implement to know the offset of the bucket when the
+     * request is complete.
+     */
+    interface WriteCallback {
+
+        /**
+         * A callback method the user can implement to provide asynchronous handling of request
+         * completion. This method will be called when the record sent to the server has been
+         * acknowledged.
+         */
+        void onCompletion(int bucket, long offset);
+    }
+}

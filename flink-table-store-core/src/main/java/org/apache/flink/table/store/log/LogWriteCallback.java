@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.log;
 
-import org.apache.flink.table.store.log.LogSinkProvider.WriteCallback;
+import org.apache.flink.table.store.table.sink.LogSinkFunction.WriteCallback;
 
 import java.util.HashMap;
 import java.util.Map;

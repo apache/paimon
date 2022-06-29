@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.table.catalog.CatalogLock;
-import org.apache.flink.table.store.connector.sink.global.GlobalCommitter;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.TableCommit;
@@ -29,14 +28,14 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.List;
 
-/** {@link GlobalCommitter} for dynamic store. */
-public class StoreGlobalCommitter implements GlobalCommitter<Committable, ManifestCommittable> {
+/** {@link Committer} for dynamic store. */
+public class StoreCommitter implements Committer {
 
     private final TableCommit commit;
 
     @Nullable private final CatalogLock lock;
 
-    public StoreGlobalCommitter(TableCommit commit, @Nullable CatalogLock lock) {
+    public StoreCommitter(TableCommit commit, @Nullable CatalogLock lock) {
         this.commit = commit;
         this.lock = lock;
     }
@@ -55,8 +54,7 @@ public class StoreGlobalCommitter implements GlobalCommitter<Committable, Manife
     }
 
     @Override
-    public ManifestCommittable combine(long checkpointId, List<Committable> committables)
-            throws IOException {
+    public ManifestCommittable combine(long checkpointId, List<Committable> committables) {
         ManifestCommittable fileCommittable = new ManifestCommittable(String.valueOf(checkpointId));
         for (Committable committable : committables) {
             switch (committable.kind()) {
@@ -69,9 +67,6 @@ public class StoreGlobalCommitter implements GlobalCommitter<Committable, Manife
                     LogOffsetCommittable offset =
                             (LogOffsetCommittable) committable.wrappedCommittable();
                     fileCommittable.addLogOffset(offset.bucket(), offset.offset());
-                    break;
-                case LOG:
-                    // log should be committed in local committer
                     break;
             }
         }
