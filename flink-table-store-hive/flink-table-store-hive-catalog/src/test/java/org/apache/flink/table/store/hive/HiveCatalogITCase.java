@@ -68,7 +68,7 @@ public class HiveCatalogITCase {
                                 "\n",
                                 "CREATE CATALOG my_hive WITH (",
                                 "  'type' = 'table-store',",
-                                "  'catalog-type' = 'hive',",
+                                "  'metastore' = 'hive',",
                                 "  'uri' = '',",
                                 "  'warehouse' = '" + path + "'",
                                 ")"))

@@ -28,8 +28,8 @@ under the License.
         <version>0.2-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-hive-mr</artifactId>
-    <name>Flink Table Store : Hive MR</name>
+    <artifactId>flink-table-store-hive-connector</artifactId>
+    <name>Flink Table Store : Hive Connector</name>
 
     <packaging>jar</packaging>
 

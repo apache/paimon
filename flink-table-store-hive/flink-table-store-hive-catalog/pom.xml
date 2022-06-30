@@ -97,7 +97,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-hive-mr</artifactId>
+            <artifactId>flink-table-store-hive-connector</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>

@@ -20,7 +20,7 @@ package org.apache.flink.table.store.hive;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectPath;
-import org.apache.flink.table.store.file.catalog.Catalog;
+import org.apache.flink.table.store.file.catalog.AbstractCatalog;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -50,9 +50,10 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /** A catalog implementation for Hive. */
-public class HiveCatalog implements Catalog {
+public class HiveCatalog extends AbstractCatalog {
 
-    // we don't include flink-table-store-hive-mr as dependencies because it depends on hive-exec
+    // we don't include flink-table-store-hive-connector as dependencies because it depends on
+    // hive-exec
     private static final String INPUT_FORMAT_CLASS_NAME =
             "org.apache.flink.table.store.mapred.TableStoreInputFormat";
     private static final String OUTPUT_FORMAT_CLASS_NAME =
@@ -145,12 +146,6 @@ public class HiveCatalog implements Catalog {
         } catch (TException e) {
             throw new RuntimeException("Failed to list all tables in database " + databaseName, e);
         }
-    }
-
-    @Override
-    public Path getTableLocation(ObjectPath tablePath) {
-        return new Path(
-                getDatabaseLocation(tablePath.getDatabaseName()), tablePath.getObjectName());
     }
 
     @Override
@@ -253,18 +248,15 @@ public class HiveCatalog implements Catalog {
         client.close();
     }
 
-    private String getWarehouseRoot() {
+    @Override
+    protected String warehouse() {
         return hiveConf.get(HiveConf.ConfVars.METASTOREWAREHOUSE.varname);
-    }
-
-    private Path getDatabaseLocation(String name) {
-        return new Path(getWarehouseRoot(), name + ".db");
     }
 
     private Database convertToDatabase(String name) {
         Database database = new Database();
         database.setName(name);
-        database.setLocationUri(getDatabaseLocation(name).toString());
+        database.setLocationUri(databasePath(name).toString());
         return database;
     }
 

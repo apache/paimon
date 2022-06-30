@@ -35,7 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class HiveE2eTest extends E2eTestBase {
 
     private static final String ADD_JAR_HQL =
-            "ADD JAR " + TEST_DATA_DIR + "/" + TABLE_STORE_HIVE_MR_JAR_NAME + ";";
+            "ADD JAR " + TEST_DATA_DIR + "/" + TABLE_STORE_HIVE_CONNECTOR_JAR_NAME + ";";
 
     public HiveE2eTest() {
         super(false, true);
@@ -99,9 +99,9 @@ public class HiveE2eTest extends E2eTestBase {
                         "\n",
                         "CREATE CATALOG my_hive WITH (",
                         "  'type' = 'table-store',",
-                        "  'catalog-type' = 'hive',",
+                        "  'metastore' = 'hive',",
                         "  'uri' = 'thrift://hive-metastore:9083',",
-                        "'warehouse' = '"
+                        "  'warehouse' = '"
                                 + HDFS_ROOT
                                 + "/"
                                 + UUID.randomUUID().toString()

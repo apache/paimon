@@ -25,5 +25,5 @@ public interface CatalogFactory {
 
     String identifier();
 
-    Catalog create(ReadableConfig options);
+    Catalog create(String warehouse, ReadableConfig options);
 }

@@ -18,22 +18,13 @@
 
 package org.apache.flink.table.store.file.catalog;
 
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.util.Preconditions;
 
 /** Factory to create {@link FileSystemCatalog}. */
 public class FileSystemCatalogFactory implements CatalogFactory {
 
-    private static final String IDENTIFIER = "filesystem";
-
-    private static final ConfigOption<String> WAREHOUSE =
-            ConfigOptions.key("warehouse")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("The warehouse root path of catalog.");
+    public static final String IDENTIFIER = "filesystem";
 
     @Override
     public String identifier() {
@@ -41,14 +32,7 @@ public class FileSystemCatalogFactory implements CatalogFactory {
     }
 
     @Override
-    public Catalog create(ReadableConfig options) {
-        String warehouse =
-                Preconditions.checkNotNull(
-                        options.get(WAREHOUSE),
-                        WAREHOUSE.key()
-                                + " must be set for table store "
-                                + IDENTIFIER
-                                + " catalog");
+    public Catalog create(String warehouse, ReadableConfig options) {
         return new FileSystemCatalog(new Path(warehouse));
     }
 }

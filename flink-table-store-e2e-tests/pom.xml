@@ -40,7 +40,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-hive-mr</artifactId>
+            <artifactId>flink-table-store-hive-connector</artifactId>
             <version>${project.version}</version>
         </dependency>
 
@@ -105,9 +105,9 @@ under the License.
                         </artifactItem>
                         <artifactItem>
                             <groupId>org.apache.flink</groupId>
-                            <artifactId>flink-table-store-hive-mr</artifactId>
+                            <artifactId>flink-table-store-hive-connector</artifactId>
                             <version>${project.version}</version>
-                            <destFileName>flink-table-store-hive-mr.jar</destFileName>
+                            <destFileName>flink-table-store-hive-connector.jar</destFileName>
                             <type>jar</type>
                             <overWrite>true</overWrite>
                             <outputDirectory>${project.build.directory}/dependencies

@@ -36,27 +36,17 @@ public class HiveCatalogFactory implements CatalogFactory {
                     .noDefaultValue()
                     .withDescription("Uri of Hive metastore's thrift server.");
 
-    private static final ConfigOption<String> WAREHOUSE =
-            ConfigOptions.key("warehouse")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("The warehouse root path of catalog.");
-
     @Override
     public String identifier() {
         return IDENTIFIER;
     }
 
     @Override
-    public Catalog create(ReadableConfig options) {
-        String uri = checkNotNull(options, URI);
-        String warehouse = checkNotNull(options, WAREHOUSE);
+    public Catalog create(String warehouse, ReadableConfig options) {
+        String uri =
+                Preconditions.checkNotNull(
+                        options.get(URI),
+                        URI.key() + " must be set for table store " + IDENTIFIER + " catalog");
         return new HiveCatalog(uri, warehouse);
-    }
-
-    private <T> T checkNotNull(ReadableConfig conf, ConfigOption<T> option) {
-        return Preconditions.checkNotNull(
-                conf.get(option),
-                option.key() + " must be set for table store " + IDENTIFIER + " catalog");
     }
 }

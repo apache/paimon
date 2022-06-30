@@ -65,7 +65,8 @@ public abstract class E2eTestBase {
     }
 
     private static final String TABLE_STORE_JAR_NAME = "flink-table-store.jar";
-    protected static final String TABLE_STORE_HIVE_MR_JAR_NAME = "flink-table-store-hive-mr.jar";
+    protected static final String TABLE_STORE_HIVE_CONNECTOR_JAR_NAME =
+            "flink-table-store-hive-connector.jar";
     private static final String BUNDLED_HADOOP_JAR_NAME = "bundled-hadoop.jar";
 
     protected static final String TEST_DATA_DIR = "/test-data";
@@ -122,7 +123,7 @@ public abstract class E2eTestBase {
         jobManager.execInContainer("chown", "-R", "flink:flink", TEST_DATA_DIR);
 
         copyResource(TABLE_STORE_JAR_NAME);
-        copyResource(TABLE_STORE_HIVE_MR_JAR_NAME);
+        copyResource(TABLE_STORE_HIVE_CONNECTOR_JAR_NAME);
         copyResource(BUNDLED_HADOOP_JAR_NAME);
     }
 
