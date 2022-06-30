@@ -23,6 +23,7 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
+import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -137,6 +138,30 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 "-2|20|200", "+2|21|20001", "+2|22|202"));
     }
 
+    @Test
+    public void testStreamingChangelog() throws Exception {
+        FileStoreTable table = createFileStoreTable(true);
+        TableWrite write = table.newWrite();
+        write.write(GenericRowData.of(1, 10, 100L));
+        write.write(GenericRowData.ofKind(RowKind.DELETE, 1, 10, 100L));
+        write.write(GenericRowData.of(1, 10, 101L));
+        write.write(GenericRowData.ofKind(RowKind.UPDATE_BEFORE, 1, 10, 101L));
+        write.write(GenericRowData.ofKind(RowKind.UPDATE_AFTER, 1, 10, 102L));
+        table.newCommit().commit("0", write.prepareCommit());
+        write.close();
+
+        List<Split> splits = table.newScan().withIncremental(true).plan().splits;
+        TableRead read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
+                .isEqualTo(
+                        Arrays.asList(
+                                "+I 1|10|100",
+                                "-D 1|10|100",
+                                "+I 1|10|101",
+                                "-U 1|10|101",
+                                "+U 1|10|102"));
+    }
+
     private void writeData() throws Exception {
         FileStoreTable table = createFileStoreTable();
         TableWrite write = table.newWrite();
@@ -163,11 +188,16 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     @Override
     protected FileStoreTable createFileStoreTable() throws Exception {
+        return createFileStoreTable(false);
+    }
+
+    protected FileStoreTable createFileStoreTable(boolean changelogFile) throws Exception {
         Path tablePath = new Path(tempDir.toString());
         Configuration conf = new Configuration();
         conf.set(FileStoreOptions.PATH, tablePath.toString());
         conf.set(FileStoreOptions.FILE_FORMAT, "avro");
         conf.set(FileStoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
+        conf.set(MergeTreeOptions.CHANGELOG_FILE, changelogFile);
         SchemaManager schemaManager = new SchemaManager(tablePath);
         TableSchema tableSchema =
                 schemaManager.commitNewVersion(

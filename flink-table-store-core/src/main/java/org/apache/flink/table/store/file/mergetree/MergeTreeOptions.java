@@ -93,6 +93,15 @@ public class MergeTreeOptions {
                                     + "size is 1% smaller than the next sorted run's size, then include next sorted run "
                                     + "into this candidate set.");
 
+    public static final ConfigOption<Boolean> CHANGELOG_FILE =
+            ConfigOptions.key("changelog-file")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to double write to a changelog file when flushing memory table. "
+                                    + "This changelog file keeps the order of data input and the details of data changes, "
+                                    + "it can be read directly during stream reads.");
+
     public final long writeBufferSize;
 
     public final int pageSize;
@@ -111,6 +120,8 @@ public class MergeTreeOptions {
 
     public final int sizeRatio;
 
+    public final boolean enableChangelogFile;
+
     public MergeTreeOptions(
             long writeBufferSize,
             int pageSize,
@@ -120,7 +131,8 @@ public class MergeTreeOptions {
             Integer numLevels,
             boolean commitForceCompact,
             int maxSizeAmplificationPercent,
-            int sizeRatio) {
+            int sizeRatio,
+            boolean enableChangelogFile) {
         this.writeBufferSize = writeBufferSize;
         this.pageSize = pageSize;
         this.targetFileSize = targetFileSize;
@@ -133,6 +145,7 @@ public class MergeTreeOptions {
         this.commitForceCompact = commitForceCompact;
         this.maxSizeAmplificationPercent = maxSizeAmplificationPercent;
         this.sizeRatio = sizeRatio;
+        this.enableChangelogFile = enableChangelogFile;
     }
 
     public MergeTreeOptions(ReadableConfig config) {
@@ -145,7 +158,8 @@ public class MergeTreeOptions {
                 config.get(NUM_LEVELS),
                 config.get(COMMIT_FORCE_COMPACT),
                 config.get(COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT),
-                config.get(COMPACTION_SIZE_RATIO));
+                config.get(COMPACTION_SIZE_RATIO),
+                config.get(CHANGELOG_FILE));
     }
 
     public static Set<ConfigOption<?>> allOptions() {

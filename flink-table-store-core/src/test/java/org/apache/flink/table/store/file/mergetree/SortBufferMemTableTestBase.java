@@ -95,7 +95,7 @@ public abstract class SortBufferMemTableTestBase {
     protected void runTest(List<ReusingTestData> input) throws IOException {
         List<ReusingTestData> expected = getExpected(input);
         prepareTable(input);
-        Iterator<KeyValue> actual = table.iterator(KEY_COMPARATOR, createMergeFunction());
+        Iterator<KeyValue> actual = table.mergeIterator(KEY_COMPARATOR, createMergeFunction());
 
         Random rnd = new Random();
         for (ReusingTestData data : expected) {

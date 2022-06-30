@@ -96,11 +96,15 @@ public class SortBufferMemTable implements MemTable {
     }
 
     @Override
-    public Iterator<KeyValue> iterator(
+    public Iterator<KeyValue> rawIterator() {
+        return new RawIterator(buffer.getIterator());
+    }
+
+    @Override
+    public Iterator<KeyValue> mergeIterator(
             Comparator<RowData> keyComparator, MergeFunction mergeFunction) {
         new QuickSort().sort(buffer);
-        MutableObjectIterator<BinaryRowData> kvIter = buffer.getIterator();
-        return new MemTableIterator(kvIter, keyComparator, mergeFunction);
+        return new MergeIterator(buffer.getIterator(), keyComparator, mergeFunction);
     }
 
     @Override
@@ -108,7 +112,7 @@ public class SortBufferMemTable implements MemTable {
         buffer.reset();
     }
 
-    private class MemTableIterator implements Iterator<KeyValue> {
+    private class MergeIterator implements Iterator<KeyValue> {
         private final MutableObjectIterator<BinaryRowData> kvIter;
         private final Comparator<RowData> keyComparator;
         private final MergeFunction mergeFunction;
@@ -121,7 +125,7 @@ public class SortBufferMemTable implements MemTable {
         private BinaryRowData currentRow;
         private boolean advanced;
 
-        private MemTableIterator(
+        private MergeIterator(
                 MutableObjectIterator<BinaryRowData> kvIter,
                 Comparator<RowData> keyComparator,
                 MergeFunction mergeFunction) {
@@ -202,6 +206,51 @@ public class SortBufferMemTable implements MemTable {
             previousRow = currentRow;
             current = tmp;
             currentRow = tmpRow;
+        }
+    }
+
+    private class RawIterator implements Iterator<KeyValue> {
+        private final MutableObjectIterator<BinaryRowData> kvIter;
+        private final KeyValueSerializer current;
+
+        private BinaryRowData currentRow;
+        private boolean advanced;
+
+        private RawIterator(MutableObjectIterator<BinaryRowData> kvIter) {
+            this.kvIter = kvIter;
+            this.current = new KeyValueSerializer(keyType, valueType);
+            this.currentRow =
+                    new BinaryRowData(keyType.getFieldCount() + 2 + valueType.getFieldCount());
+            this.advanced = false;
+        }
+
+        @Override
+        public boolean hasNext() {
+            if (!advanced) {
+                advanceNext();
+            }
+            return currentRow != null;
+        }
+
+        @Override
+        public KeyValue next() {
+            if (!hasNext()) {
+                return null;
+            }
+            advanced = false;
+            return current.getReusedKv();
+        }
+
+        private void advanceNext() {
+            try {
+                currentRow = kvIter.next(currentRow);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            if (currentRow != null) {
+                current.fromRow(currentRow);
+            }
+            advanced = true;
         }
     }
 }

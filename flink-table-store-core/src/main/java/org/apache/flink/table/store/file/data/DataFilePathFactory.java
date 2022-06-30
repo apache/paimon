@@ -30,6 +30,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 @ThreadSafe
 public class DataFilePathFactory {
 
+    public static final String DATA_FILE_PREFIX = "data-";
+
+    public static final String CHANGELOG_FILE_PREFIX = "changelog-";
+
     private final Path bucketDir;
     private final String uuid;
 
@@ -44,20 +48,17 @@ public class DataFilePathFactory {
         this.formatIdentifier = formatIdentifier;
     }
 
-    public Path bucketPath() {
-        return bucketDir;
+    public Path newPath() {
+        return newPath(DATA_FILE_PREFIX);
     }
 
-    public Path newPath() {
-        String path =
-                bucketDir
-                        + "/data-"
-                        + uuid
-                        + "-"
-                        + pathCount.getAndIncrement()
-                        + "."
-                        + formatIdentifier;
-        return new Path(path);
+    public Path newChangelogPath() {
+        return newPath(CHANGELOG_FILE_PREFIX);
+    }
+
+    private Path newPath(String prefix) {
+        String name = prefix + uuid + "-" + pathCount.getAndIncrement() + "." + formatIdentifier;
+        return new Path(bucketDir, name);
     }
 
     public Path toPath(String fileName) {

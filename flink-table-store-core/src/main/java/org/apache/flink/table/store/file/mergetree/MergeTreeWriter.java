@@ -63,6 +63,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private final int numSortedRunStopTrigger;
 
+    private final boolean enableChangelogFile;
+
     private final LinkedHashSet<DataFileMeta> newFiles;
 
     private final LinkedHashMap<String, DataFileMeta> compactBefore;
@@ -83,7 +85,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             MergeFunction mergeFunction,
             DataFileWriter dataFileWriter,
             boolean commitForceCompact,
-            int numSortedRunStopTrigger) {
+            int numSortedRunStopTrigger,
+            boolean enableChangelogFile) {
         this.keyType = keyType;
         this.valueType = valueType;
         this.compactManager = compactManager;
@@ -94,6 +97,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.dataFileWriter = dataFileWriter;
         this.commitForceCompact = commitForceCompact;
         this.numSortedRunStopTrigger = numSortedRunStopTrigger;
+        this.enableChangelogFile = enableChangelogFile;
         this.newFiles = new LinkedHashSet<>();
         this.compactBefore = new LinkedHashMap<>();
         this.compactAfter = new LinkedHashSet<>();
@@ -138,11 +142,34 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 // stop writing, wait for compaction finished
                 finishCompaction(true);
             }
-            Iterator<KeyValue> iterator = memTable.iterator(keyComparator, mergeFunction);
-            List<DataFileMeta> files =
-                    dataFileWriter.write(CloseableIterator.adapterForIterator(iterator), 0);
-            newFiles.addAll(files);
-            files.forEach(levels::addLevel0File);
+            List<String> extraFiles = new ArrayList<>();
+            if (enableChangelogFile) {
+                extraFiles.add(
+                        dataFileWriter
+                                .writeLevel0Changelog(
+                                        CloseableIterator.adapterForIterator(
+                                                memTable.rawIterator()))
+                                .getName());
+            }
+            boolean success = false;
+            try {
+                Iterator<KeyValue> iterator = memTable.mergeIterator(keyComparator, mergeFunction);
+                success =
+                        dataFileWriter
+                                .writeLevel0(CloseableIterator.adapterForIterator(iterator))
+                                .map(
+                                        file -> {
+                                            DataFileMeta fileMeta = file.copy(extraFiles);
+                                            newFiles.add(fileMeta);
+                                            levels.addLevel0File(fileMeta);
+                                            return true;
+                                        })
+                                .orElse(false);
+            } finally {
+                if (!success) {
+                    extraFiles.forEach(dataFileWriter::delete);
+                }
+            }
             memTable.clear();
             submitCompaction();
         }
