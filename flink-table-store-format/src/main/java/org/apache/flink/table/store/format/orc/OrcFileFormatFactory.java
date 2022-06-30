@@ -19,16 +19,18 @@
 package org.apache.flink.table.store.format.orc;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.store.file.format.FileFormatFactory;
+import org.apache.flink.table.store.format.FileFormatFactory;
 
 import java.util.Properties;
 
 /** Factory to create {@link OrcFileFormat}. */
 public class OrcFileFormatFactory implements FileFormatFactory {
 
+    public static final String IDENTIFIER = "orc";
+
     @Override
     public String identifier() {
-        return "orc";
+        return IDENTIFIER;
     }
 
     @Override

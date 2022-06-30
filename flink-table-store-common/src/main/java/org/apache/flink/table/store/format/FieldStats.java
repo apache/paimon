@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.stats;
+package org.apache.flink.table.store.format;
 
 import javax.annotation.Nullable;
 

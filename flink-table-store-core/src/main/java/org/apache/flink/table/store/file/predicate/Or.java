@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.format.FieldStats;
 
 import java.util.ArrayList;
 import java.util.List;

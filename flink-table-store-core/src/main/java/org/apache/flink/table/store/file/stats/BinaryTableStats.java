@@ -23,6 +23,7 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.format.FieldStats;
 
 import javax.annotation.Nullable;
 

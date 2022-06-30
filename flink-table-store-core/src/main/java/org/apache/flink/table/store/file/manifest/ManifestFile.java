@@ -24,10 +24,8 @@ import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.stats.FieldStatsCollector;
-import org.apache.flink.table.store.file.stats.FileStatsExtractor;
+import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
@@ -36,6 +34,9 @@ import org.apache.flink.table.store.file.writer.FileWriter;
 import org.apache.flink.table.store.file.writer.Metric;
 import org.apache.flink.table.store.file.writer.MetricFileWriter;
 import org.apache.flink.table.store.file.writer.RollingFileWriter;
+import org.apache.flink.table.store.format.FieldStatsCollector;
+import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterables;
@@ -153,6 +154,7 @@ public class ManifestFile {
     private class ManifestEntryWriter extends BaseFileWriter<ManifestEntry, ManifestFileMeta> {
 
         private final FieldStatsCollector partitionStatsCollector;
+        private final FieldStatsArraySerializer partitionStatsSerializer;
         private long numAddedFiles = 0;
         private long numDeletedFiles = 0;
 
@@ -161,6 +163,7 @@ public class ManifestFile {
             super(writerFactory, path);
 
             this.partitionStatsCollector = new FieldStatsCollector(partitionType);
+            this.partitionStatsSerializer = new FieldStatsArraySerializer(partitionType);
         }
 
         @Override
@@ -190,7 +193,7 @@ public class ManifestFile {
                     path.getFileSystem().getFileStatus(path).getLen(),
                     numAddedFiles,
                     numDeletedFiles,
-                    partitionStatsCollector.extract(),
+                    partitionStatsSerializer.toBinary(partitionStatsCollector.extract()),
                     schemaId);
         }
     }

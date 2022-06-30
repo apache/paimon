@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.data.binary.BinaryStringData;
-import org.apache.flink.table.store.file.stats.FieldStats;
+import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.types.logical.LogicalType;
 
 import java.util.Optional;

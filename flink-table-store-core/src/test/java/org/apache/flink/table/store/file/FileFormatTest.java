@@ -28,12 +28,10 @@ import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.format.FileFormat;
-import org.apache.flink.table.store.file.format.FileFormatImpl;
+import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 
-import org.apache.avro.AvroRuntimeException;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -44,7 +42,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link FileFormatImpl}. */
+/** Test for {@link FileFormat}. */
 public class FileFormatTest {
 
     @Test
@@ -89,7 +87,7 @@ public class FileFormatTest {
                 createFileFormat("_unsupported").createWriterFactory(RowType.of(new IntType()));
         Path path = new Path(tempDir.toUri().toString(), "1.avro");
         Assertions.assertThrows(
-                AvroRuntimeException.class,
+                RuntimeException.class,
                 () ->
                         writerFactory.create(
                                 path.getFileSystem()
@@ -101,7 +99,6 @@ public class FileFormatTest {
         Configuration tableOptions = new Configuration();
         tableOptions.set(FileStoreOptions.FILE_FORMAT, "avro");
         tableOptions.setString("avro.codec", codec);
-        return FileFormat.fromTableOptions(
-                this.getClass().getClassLoader(), tableOptions, FileStoreOptions.FILE_FORMAT);
+        return FileFormat.fromTableOptions(tableOptions, FileStoreOptions.FILE_FORMAT);
     }
 }

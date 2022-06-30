@@ -21,6 +21,8 @@ package org.apache.flink.table.store.file.stats;
 import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.format.FieldStats;
+import org.apache.flink.table.store.format.FieldStatsCollector;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -44,7 +46,7 @@ public class FieldStatsCollectorTest {
                         1,
                         StringData.fromString("Flink"),
                         new GenericArrayData(new int[] {1, 10})));
-        assertThat(collector.extractFieldStats())
+        assertThat(collector.extract())
                 .isEqualTo(
                         new FieldStats[] {
                             new FieldStats(1, 1, 0),
@@ -56,7 +58,7 @@ public class FieldStatsCollectorTest {
                         });
 
         collector.collect(GenericRowData.of(3, null, new GenericArrayData(new int[] {3, 30})));
-        assertThat(collector.extractFieldStats())
+        assertThat(collector.extract())
                 .isEqualTo(
                         new FieldStats[] {
                             new FieldStats(1, 3, 0),
@@ -72,7 +74,7 @@ public class FieldStatsCollectorTest {
                         null,
                         StringData.fromString("Apache"),
                         new GenericArrayData(new int[] {2, 20})));
-        assertThat(collector.extractFieldStats())
+        assertThat(collector.extract())
                 .isEqualTo(
                         new FieldStats[] {
                             new FieldStats(1, 3, 1),
@@ -84,7 +86,7 @@ public class FieldStatsCollectorTest {
                         });
 
         collector.collect(GenericRowData.of(2, StringData.fromString("Batch"), null));
-        assertThat(collector.extractFieldStats())
+        assertThat(collector.extract())
                 .isEqualTo(
                         new FieldStats[] {
                             new FieldStats(1, 3, 1),
