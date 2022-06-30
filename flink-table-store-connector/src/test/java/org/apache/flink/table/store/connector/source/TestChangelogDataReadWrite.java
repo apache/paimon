@@ -27,7 +27,6 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
@@ -39,6 +38,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
@@ -74,11 +74,7 @@ public class TestChangelogDataReadWrite {
     private final ExecutorService service;
 
     public TestChangelogDataReadWrite(String root, ExecutorService service) {
-        this.avro =
-                FileFormat.fromIdentifier(
-                        Thread.currentThread().getContextClassLoader(),
-                        "avro",
-                        new Configuration());
+        this.avro = FileFormat.fromIdentifier("avro", new Configuration());
         this.tablePath = new Path(root);
         this.pathFactory =
                 new FileStorePathFactory(

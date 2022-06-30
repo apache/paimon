@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,14 +16,14 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.format;
+package org.apache.flink.table.store.format;
 
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.Path;
 
-/** Factory to create {@link FileFormat}. */
-public interface FileFormatFactory {
+import java.io.IOException;
 
-    String identifier();
+/** Extracts statistics directly from file. */
+public interface FileStatsExtractor {
 
-    FileFormat create(Configuration formatOptions);
+    FieldStats[] extract(Path path) throws IOException;
 }

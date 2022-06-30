@@ -22,9 +22,12 @@ import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.ObjectSerializer;
+import org.apache.flink.table.store.format.FieldStats;
+import org.apache.flink.table.store.format.FieldStatsCollector;
+import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.io.IOException;
@@ -53,7 +56,7 @@ public class TestFileStatsExtractor implements FileStatsExtractor {
         for (RowData record : records) {
             statsCollector.collect(record);
         }
-        return statsCollector.extractFieldStats();
+        return statsCollector.extract();
     }
 
     private static class IdentityObjectSerializer extends ObjectSerializer<RowData> {

@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.stats;
 
+import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 

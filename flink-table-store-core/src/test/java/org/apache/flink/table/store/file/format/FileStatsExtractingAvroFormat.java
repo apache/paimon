@@ -18,18 +18,39 @@
 
 package org.apache.flink.table.store.file.format;
 
+import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.store.file.stats.FileStatsExtractor;
+import org.apache.flink.connector.file.src.FileSourceSplit;
+import org.apache.flink.connector.file.src.reader.BulkFormat;
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.store.file.stats.TestFileStatsExtractor;
+import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.types.logical.RowType;
 
+import java.util.List;
 import java.util.Optional;
 
 /** An avro {@link FileFormat} for test. It provides a {@link FileStatsExtractor}. */
-public class FileStatsExtractingAvroFormat extends FileFormatImpl {
+public class FileStatsExtractingAvroFormat extends FileFormat {
+
+    private final FileFormat avro;
 
     public FileStatsExtractingAvroFormat() {
-        super(FileStatsExtractingAvroFormat.class.getClassLoader(), "avro", new Configuration());
+        super("avro");
+        avro = FileFormat.fromIdentifier("avro", new Configuration());
+    }
+
+    @Override
+    public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
+            RowType type, int[][] projection, List<ResolvedExpression> filters) {
+        return avro.createReaderFactory(type, projection, filters);
+    }
+
+    @Override
+    public BulkWriter.Factory<RowData> createWriterFactory(RowType type) {
+        return avro.createWriterFactory(type);
     }
 
     @Override

@@ -22,7 +22,8 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.data.DataFileTestDataGenerator;
-import org.apache.flink.table.store.file.stats.FieldStatsCollector;
+import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
+import org.apache.flink.table.store.format.FieldStatsCollector;
 import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
@@ -83,6 +84,8 @@ public class ManifestTestDataGenerator {
 
         FieldStatsCollector collector =
                 new FieldStatsCollector(TestKeyValueGenerator.DEFAULT_PART_TYPE);
+        FieldStatsArraySerializer serializer =
+                new FieldStatsArraySerializer(TestKeyValueGenerator.DEFAULT_PART_TYPE);
 
         long numAddedFiles = 0;
         long numDeletedFiles = 0;
@@ -100,7 +103,7 @@ public class ManifestTestDataGenerator {
                 entries.size() * 100L,
                 numAddedFiles,
                 numDeletedFiles,
-                collector.extract(),
+                serializer.toBinary(collector.extract()),
                 0);
     }
 

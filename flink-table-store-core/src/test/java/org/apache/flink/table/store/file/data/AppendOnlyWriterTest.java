@@ -26,11 +26,11 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.file.FileStoreOptions;
-import org.apache.flink.table.store.file.format.FileFormat;
 import org.apache.flink.table.store.file.mergetree.Increment;
-import org.apache.flink.table.store.file.stats.FieldStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.format.FieldStats;
+import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -220,9 +220,7 @@ public class AppendOnlyWriterTest {
 
     private RecordWriter<RowData> createWriter(
             long targetFileSize, RowType writeSchema, long maxSeqNum) {
-        FileFormat fileFormat =
-                FileFormat.fromIdentifier(
-                        Thread.currentThread().getContextClassLoader(), AVRO, new Configuration());
+        FileFormat fileFormat = FileFormat.fromIdentifier(AVRO, new Configuration());
 
         return new AppendOnlyWriter(
                 0, fileFormat, targetFileSize, writeSchema, maxSeqNum, pathFactory);

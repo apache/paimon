@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.format;
+package org.apache.flink.table.store.file.format;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
@@ -27,16 +27,15 @@ import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.store.file.data.DataFileTest;
 import org.apache.flink.table.store.file.data.DataFileWriter;
-import org.apache.flink.table.store.file.format.FileFormat;
+import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
 
@@ -48,21 +47,16 @@ public class FileFormatSuffixTest extends DataFileTest {
                     new LogicalType[] {new IntType(), new VarCharType(), new VarCharType()},
                     new String[] {"id", "name", "dt"});
 
-    @ParameterizedTest
-    @ValueSource(strings = {"avro", "parquet", "orc"})
-    public void testFileSuffix(String format, @TempDir java.nio.file.Path tempDir)
-            throws Exception {
+    @Test
+    public void testFileSuffix(@TempDir java.nio.file.Path tempDir) throws Exception {
+        String format = "avro";
         DataFileWriter dataFileWriter = createDataFileWriter(tempDir.toString(), format);
         Path path = dataFileWriter.pathFactory().newPath();
         Assertions.assertTrue(path.getPath().endsWith(format));
 
         DataFilePathFactory dataFilePathFactory =
                 new DataFilePathFactory(new Path(tempDir.toString()), "dt=1", 1, format);
-        FileFormat fileFormat =
-                FileFormat.fromIdentifier(
-                        Thread.currentThread().getContextClassLoader(),
-                        format,
-                        new Configuration());
+        FileFormat fileFormat = FileFormat.fromIdentifier(format, new Configuration());
         AppendOnlyWriter appendOnlyWriter =
                 new AppendOnlyWriter(0, fileFormat, 10, SCHEMA, 10, dataFilePathFactory);
         appendOnlyWriter.write(
