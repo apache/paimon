@@ -206,7 +206,7 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                     <include>org.apache.flink:flink-sql-avro</include>
-                                    <include>org.apache.flink:flink-sql-orc</include>
+                                    <include>org.apache.flink:${flink.sql.orc}</include>
                                 </includes>
                             </artifactSet>
                             <filters>
@@ -222,7 +222,7 @@ under the License.
                                     </excludes>
                                 </filter>
                                 <filter>
-                                    <artifact>org.apache.flink:flink-sql-orc</artifact>
+                                    <artifact>org.apache.flink:${flink.sql.orc}</artifact>
                                     <excludes>
                                         <exclude>META-INF/services/**</exclude>
                                     </excludes>
