@@ -50,6 +50,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /** Writes {@link KeyValue}s into data files. */
@@ -105,32 +106,60 @@ public class DataFileWriter {
         return pathFactory;
     }
 
+    /** Write raw {@link KeyValue} iterator into a changelog file. */
+    public Path writeLevel0Changelog(CloseableIterator<KeyValue> iterator) throws Exception {
+        FileWriter.Factory<KeyValue, Metric> writerFactory = createFileWriterFactory();
+        Path changelogPath = pathFactory.newChangelogPath();
+        doWrite(writerFactory.create(changelogPath), iterator);
+        return changelogPath;
+    }
+
     /**
-     * Write several {@link KeyValue}s into a data file of a given level.
+     * Write several {@link KeyValue}s into a data file of level 0.
+     *
+     * @return empty if iterator is empty
+     */
+    public Optional<DataFileMeta> writeLevel0(CloseableIterator<KeyValue> iterator)
+            throws Exception {
+        List<DataFileMeta> files = write(iterator, 0);
+        if (files.size() > 1) {
+            throw new RuntimeException("Produce illegal multiple Level 0 files: " + files);
+        }
+        return files.size() == 0 ? Optional.empty() : Optional.of(files.get(0));
+    }
+
+    /**
+     * Write several {@link KeyValue}s into data files of a given level.
      *
      * <p>NOTE: This method is atomic.
      */
     public List<DataFileMeta> write(CloseableIterator<KeyValue> iterator, int level)
             throws Exception {
+        // Don't roll file for level 0
+        long suggestedFileSize = level == 0 ? Long.MAX_VALUE : this.suggestedFileSize;
+        return doWrite(createRollingKvWriter(level, suggestedFileSize), iterator);
+    }
 
-        RollingKvWriter rollingKvWriter = createRollingKvWriter(level, suggestedFileSize);
-        try (RollingKvWriter writer = rollingKvWriter) {
+    private <R> R doWrite(FileWriter<KeyValue, R> fileWriter, CloseableIterator<KeyValue> iterator)
+            throws Exception {
+        try (FileWriter<KeyValue, R> writer = fileWriter) {
             writer.write(iterator);
-
         } catch (Throwable e) {
             LOG.warn("Exception occurs when writing data files. Cleaning up.", e);
-
-            rollingKvWriter.abort();
+            fileWriter.abort();
             throw e;
         } finally {
             iterator.close();
         }
-
-        return rollingKvWriter.result();
+        return fileWriter.result();
     }
 
     public void delete(DataFileMeta file) {
-        FileUtils.deleteOrWarn(pathFactory.toPath(file.fileName()));
+        delete(file.fileName());
+    }
+
+    public void delete(String file) {
+        FileUtils.deleteOrWarn(pathFactory.toPath(file));
     }
 
     private class KvFileWriter extends BaseFileWriter<KeyValue, DataFileMeta> {
@@ -217,19 +246,20 @@ public class DataFileWriter {
     private Supplier<KvFileWriter> createWriterFactory(int level) {
         return () -> {
             try {
-                KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
-                FileWriter.Factory<KeyValue, Metric> fileWriterFactory =
-                        MetricFileWriter.createFactory(
-                                writerFactory,
-                                kvSerializer::toRow,
-                                KeyValue.schema(keyType, valueType),
-                                fileStatsExtractor);
-
-                return new KvFileWriter(fileWriterFactory, pathFactory.newPath(), level);
+                return new KvFileWriter(createFileWriterFactory(), pathFactory.newPath(), level);
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
         };
+    }
+
+    private FileWriter.Factory<KeyValue, Metric> createFileWriterFactory() {
+        KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
+        return MetricFileWriter.createFactory(
+                writerFactory,
+                kvSerializer::toRow,
+                KeyValue.schema(keyType, valueType),
+                fileStatsExtractor);
     }
 
     private RollingKvWriter createRollingKvWriter(int level, long targetFileSize) {

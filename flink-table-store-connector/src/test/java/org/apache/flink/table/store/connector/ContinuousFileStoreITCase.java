@@ -22,8 +22,11 @@ import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.types.Row;
 
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
 
@@ -31,13 +34,27 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** SQL ITCase for continuous file store. */
+@RunWith(Parameterized.class)
 public class ContinuousFileStoreITCase extends FileStoreTableITCase {
+
+    private final boolean changelogFile;
+
+    public ContinuousFileStoreITCase(boolean changelogFile) {
+        this.changelogFile = changelogFile;
+    }
+
+    @Parameterized.Parameters(name = "changelogFile-{0}")
+    public static Collection<Boolean> parameters() {
+        return Arrays.asList(true, false);
+    }
 
     @Override
     protected List<String> ddl() {
+        String options = changelogFile ? " WITH('changelog-file'='true')" : "";
         return Arrays.asList(
-                "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING)",
-                "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)");
+                "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING)" + options,
+                "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
+                        + options);
     }
 
     @Test
