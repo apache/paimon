@@ -51,7 +51,7 @@ import java.util.Properties;
 
 import static org.apache.flink.table.store.format.orc.OrcFileFormatFactory.IDENTIFIER;
 
-/** Orc {@link FileFormat}. */
+/** Orc {@link FileFormat}. The main code is copied from Flink {@code OrcFileFormatFactory}. */
 public class OrcFileFormat extends FileFormat {
 
     private final Configuration formatOptions;

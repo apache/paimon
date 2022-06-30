@@ -54,7 +54,7 @@ import java.util.function.Function;
 
 import static org.apache.flink.formats.avro.AvroFormatOptions.AVRO_OUTPUT_CODEC;
 
-/** Avro {@link FileFormat}. */
+/** Avro {@link FileFormat}. The main code is copied from Flink {@code AvroFileFormatFactory}. */
 public class AvroFileFormat extends FileFormat {
 
     private final ReadableConfig formatOptions;
