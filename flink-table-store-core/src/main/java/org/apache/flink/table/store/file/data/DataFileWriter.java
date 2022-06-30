@@ -39,6 +39,7 @@ import org.apache.flink.table.store.file.writer.Metric;
 import org.apache.flink.table.store.file.writer.MetricFileWriter;
 import org.apache.flink.table.store.file.writer.RollingFileWriter;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.CloseableIterator;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,7 +49,6 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Arrays;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -107,7 +107,7 @@ public class DataFileWriter {
     }
 
     /** Write raw {@link KeyValue} iterator into a changelog file. */
-    public Path writeLevel0Changelog(Iterator<KeyValue> iterator) throws Exception {
+    public Path writeLevel0Changelog(CloseableIterator<KeyValue> iterator) throws Exception {
         FileWriter.Factory<KeyValue, Metric> writerFactory = createFileWriterFactory();
         Path changelogPath = pathFactory.newChangelogPath();
         doWrite(writerFactory.create(changelogPath), iterator);
@@ -119,7 +119,8 @@ public class DataFileWriter {
      *
      * @return empty if iterator is empty
      */
-    public Optional<DataFileMeta> writeLevel0(Iterator<KeyValue> iterator) throws Exception {
+    public Optional<DataFileMeta> writeLevel0(CloseableIterator<KeyValue> iterator)
+            throws Exception {
         List<DataFileMeta> files = write(iterator, 0);
         if (files.size() > 1) {
             throw new RuntimeException("Produce illegal multiple Level 0 files: " + files);
@@ -132,13 +133,14 @@ public class DataFileWriter {
      *
      * <p>NOTE: This method is atomic.
      */
-    public List<DataFileMeta> write(Iterator<KeyValue> iterator, int level) throws Exception {
+    public List<DataFileMeta> write(CloseableIterator<KeyValue> iterator, int level)
+            throws Exception {
         // Don't roll file for level 0
         long suggestedFileSize = level == 0 ? Long.MAX_VALUE : this.suggestedFileSize;
         return doWrite(createRollingKvWriter(level, suggestedFileSize), iterator);
     }
 
-    private <R> R doWrite(FileWriter<KeyValue, R> fileWriter, Iterator<KeyValue> iterator)
+    private <R> R doWrite(FileWriter<KeyValue, R> fileWriter, CloseableIterator<KeyValue> iterator)
             throws Exception {
         try (FileWriter<KeyValue, R> writer = fileWriter) {
             writer.write(iterator);
@@ -147,9 +149,7 @@ public class DataFileWriter {
             fileWriter.abort();
             throw e;
         } finally {
-            if (iterator instanceof AutoCloseable) {
-                ((AutoCloseable) iterator).close();
-            }
+            iterator.close();
         }
         return fileWriter.result();
     }

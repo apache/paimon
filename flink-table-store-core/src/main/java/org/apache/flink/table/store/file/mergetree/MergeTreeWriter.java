@@ -30,6 +30,7 @@ import org.apache.flink.table.store.file.mergetree.compact.CompactResult;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.CloseableIterator;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -144,14 +145,18 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             List<String> extraFiles = new ArrayList<>();
             if (enableChangelogFile) {
                 extraFiles.add(
-                        dataFileWriter.writeLevel0Changelog(memTable.rawIterator()).getName());
+                        dataFileWriter
+                                .writeLevel0Changelog(
+                                        CloseableIterator.adapterForIterator(
+                                                memTable.rawIterator()))
+                                .getName());
             }
             boolean success = false;
             try {
                 Iterator<KeyValue> iterator = memTable.mergeIterator(keyComparator, mergeFunction);
                 success =
                         dataFileWriter
-                                .writeLevel0(iterator)
+                                .writeLevel0(CloseableIterator.adapterForIterator(iterator))
                                 .map(
                                         file -> {
                                             DataFileMeta fileMeta = file.copy(extraFiles);
