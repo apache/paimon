@@ -69,7 +69,7 @@ public class BlockingIterator<IN, OUT> implements AutoCloseable {
     }
 
     public List<OUT> collect(int limit) throws TimeoutException {
-        return collect(limit, 1, TimeUnit.MINUTES);
+        return collect(limit, 3, TimeUnit.MINUTES);
     }
 
     public List<OUT> collect(int limit, long timeout, TimeUnit unit) throws TimeoutException {
