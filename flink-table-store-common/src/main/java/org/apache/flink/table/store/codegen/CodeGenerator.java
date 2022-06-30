@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.codegen;
 
-import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.runtime.generated.GeneratedClass;
 import org.apache.flink.table.runtime.generated.GeneratedNormalizedKeyComputer;
 import org.apache.flink.table.runtime.generated.GeneratedProjection;
@@ -31,8 +30,7 @@ import java.util.List;
 /** {@link GeneratedClass} generator. */
 public interface CodeGenerator {
 
-    GeneratedProjection generateProjection(
-            TableConfig tableConfig, String name, RowType inputType, int[] inputMapping);
+    GeneratedProjection generateProjection(String name, RowType inputType, int[] inputMapping);
 
     /**
      * Generate a {@link GeneratedNormalizedKeyComputer}.
@@ -42,7 +40,7 @@ public interface CodeGenerator {
      *     fields are compared in ascending order.
      */
     GeneratedNormalizedKeyComputer generateNormalizedKeyComputer(
-            TableConfig tableConfig, List<LogicalType> fieldTypes, String name);
+            List<LogicalType> fieldTypes, String name);
 
     /**
      * Generate a {@link GeneratedRecordComparator}.
@@ -51,6 +49,5 @@ public interface CodeGenerator {
      *     compared by the first field, then the second field, then the third field and so on. All *
      *     fields are compared in ascending order.
      */
-    GeneratedRecordComparator generateRecordComparator(
-            TableConfig tableConfig, List<LogicalType> fieldTypes, String name);
+    GeneratedRecordComparator generateRecordComparator(List<LogicalType> fieldTypes, String name);
 }

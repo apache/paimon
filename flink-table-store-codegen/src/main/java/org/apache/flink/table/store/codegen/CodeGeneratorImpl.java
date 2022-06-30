@@ -18,12 +18,6 @@
 
 package org.apache.flink.table.store.codegen;
 
-import org.apache.flink.table.api.TableConfig;
-import org.apache.flink.table.planner.codegen.CodeGeneratorContext;
-import org.apache.flink.table.planner.codegen.ProjectionCodeGenerator;
-import org.apache.flink.table.planner.codegen.sort.ComparatorCodeGenerator;
-import org.apache.flink.table.planner.codegen.sort.SortCodeGenerator;
-import org.apache.flink.table.planner.plan.nodes.exec.spec.SortSpec;
 import org.apache.flink.table.runtime.generated.GeneratedNormalizedKeyComputer;
 import org.apache.flink.table.runtime.generated.GeneratedProjection;
 import org.apache.flink.table.runtime.generated.GeneratedRecordComparator;
@@ -38,17 +32,16 @@ public class CodeGeneratorImpl implements CodeGenerator {
 
     @Override
     public GeneratedProjection generateProjection(
-            TableConfig tableConfig, String name, RowType inputType, int[] inputMapping) {
+            String name, RowType inputType, int[] inputMapping) {
         RowType outputType = TypeUtils.project(inputType, inputMapping);
         return ProjectionCodeGenerator.generateProjection(
-                CodeGeneratorContext.apply(tableConfig), name, inputType, outputType, inputMapping);
+                new CodeGeneratorContext(), name, inputType, outputType, inputMapping);
     }
 
     @Override
     public GeneratedNormalizedKeyComputer generateNormalizedKeyComputer(
-            TableConfig tableConfig, List<LogicalType> fieldTypes, String name) {
+            List<LogicalType> fieldTypes, String name) {
         return new SortCodeGenerator(
-                        tableConfig,
                         RowType.of(fieldTypes.toArray(new LogicalType[0])),
                         getAscendingSortSpec(fieldTypes.size()))
                 .generateNormalizedKeyComputer(name);
@@ -56,9 +49,8 @@ public class CodeGeneratorImpl implements CodeGenerator {
 
     @Override
     public GeneratedRecordComparator generateRecordComparator(
-            TableConfig tableConfig, List<LogicalType> fieldTypes, String name) {
+            List<LogicalType> fieldTypes, String name) {
         return ComparatorCodeGenerator.gen(
-                tableConfig,
                 name,
                 RowType.of(fieldTypes.toArray(new LogicalType[0])),
                 getAscendingSortSpec(fieldTypes.size()));

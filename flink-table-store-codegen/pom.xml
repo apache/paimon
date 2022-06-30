@@ -40,25 +40,61 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-planner_${scala.binary.version}</artifactId>
+            <artifactId>flink-table-common</artifactId>
             <version>${flink.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-table-runtime</artifactId>
+            <version>${flink.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.scala-lang</groupId>
+            <artifactId>scala-library</artifactId>
+            <version>${scala.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.scala-lang</groupId>
+            <artifactId>scala-reflect</artifactId>
+            <version>${scala.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.scala-lang</groupId>
+            <artifactId>scala-compiler</artifactId>
+            <version>${scala.version}</version>
         </dependency>
     </dependencies>
 
     <build>
         <plugins>
+            <!-- Scala Compiler -->
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-enforcer-plugin</artifactId>
+                <groupId>net.alchim31.maven</groupId>
+                <artifactId>scala-maven-plugin</artifactId>
                 <executions>
+                    <!-- Run scala compiler in the process-resources phase, so that dependencies on
+                        scala classes can be resolved later in the (Java) compile phase -->
                     <execution>
-                        <id>forbid-direct-table-planner-dependencies</id>
+                        <id>scala-compile-first</id>
+                        <phase>process-resources</phase>
                         <goals>
-                            <goal>enforce</goal>
+                            <goal>add-source</goal>
+                            <goal>compile</goal>
                         </goals>
-                        <configuration>
-                            <skip>true</skip>
-                        </configuration>
+                    </execution>
+
+                    <!-- Run scala compiler in the process-test-resources phase, so that dependencies on
+                         scala classes can be resolved later in the (Java) test-compile phase -->
+                    <execution>
+                        <id>scala-test-compile</id>
+                        <phase>process-test-resources</phase>
+                        <goals>
+                            <goal>testCompile</goal>
+                        </goals>
                     </execution>
                 </executions>
             </plugin>
@@ -77,20 +113,9 @@ under the License.
                             <minimizeJar>true</minimizeJar>
                             <artifactSet>
                                 <includes combine.children="append">
-                                    <include>org.apache.flink:flink-table-planner_${scala.binary.version}</include>
                                     <include>org.scala-lang:*</include>
                                 </includes>
                             </artifactSet>
-                            <filters>
-                                <filter>
-                                    <artifact>org.apache.flink:flink-table-planner_${scala.binary.version}</artifact>
-                                    <includes>
-                                        <include>org/apache/flink/table/planner/**</include>
-                                        <include>org/apache/calcite/**</include>
-                                        <include>scala/**</include>
-                                    </includes>
-                                </filter>
-                            </filters>
                         </configuration>
                     </execution>
                 </executions>
