@@ -107,7 +107,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-runtime</artifactId>
+            <artifactId>${flink.table.runtime}</artifactId>
             <version>${flink.version}</version>
             <exclusions>
                 <exclusion>
@@ -127,7 +127,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-streaming-java</artifactId>
+            <artifactId>${flink.streaming.java}</artifactId>
             <version>${flink.version}</version>
             <exclusions>
                 <exclusion>

@@ -28,7 +28,6 @@ import org.apache.flink.table.expressions.TypeLiteralExpression;
 import org.apache.flink.table.expressions.ValueLiteralExpression;
 import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
 import org.apache.flink.table.functions.FunctionDefinition;
-import org.apache.flink.table.functions.SqlLikeUtils;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -100,7 +99,9 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             if (fieldRefExpr
                     .getOutputDataType()
                     .getLogicalType()
-                    .is(LogicalTypeFamily.CHARACTER_STRING)) {
+                    .getTypeRoot()
+                    .getFamilies()
+                    .contains(LogicalTypeFamily.CHARACTER_STRING)) {
                 String sqlPattern =
                         extractLiteral(fieldRefExpr.getOutputDataType(), children.get(1))
                                 .orElseThrow(UnsupportedExpression::new)

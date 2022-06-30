@@ -50,7 +50,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-runtime</artifactId>
+            <artifactId>${flink.table.runtime}</artifactId>
             <version>${flink.version}</version>
             <scope>provided</scope>
         </dependency>
@@ -85,13 +85,13 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-orc</artifactId>
+            <artifactId>${flink.orc}</artifactId>
             <version>${flink.version}</version>
         </dependency>
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-sql-orc</artifactId>
+            <artifactId>${flink.sql.orc}</artifactId>
             <version>${flink.version}</version>
             <scope>runtime</scope>
             <optional>true</optional>
@@ -155,7 +155,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-sql-parquet</artifactId>
+            <artifactId>${flink.sql.parquet}</artifactId>
             <version>${flink.version}</version>
             <scope>test</scope>
         </dependency>

@@ -24,9 +24,9 @@ import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.format.FileStatsExtractor;
+import org.apache.flink.table.store.utils.DateTimeUtils;
 import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.utils.DateTimeUtils;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.hadoop.conf.Configuration;

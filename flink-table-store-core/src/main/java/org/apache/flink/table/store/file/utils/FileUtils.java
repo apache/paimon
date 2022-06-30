@@ -83,7 +83,7 @@ public class FileUtils {
             throws IOException {
         List<T> result = new ArrayList<>();
         long fileSize = FileUtils.getFileSize(path);
-        FileSourceSplit split = new FileSourceSplit("ignore", path, 0, fileSize, 0, fileSize);
+        FileSourceSplit split = new FileSourceSplit("ignore", path, 0, fileSize);
         BulkFormat.Reader<RowData> reader =
                 readerFactory.createReader(DEFAULT_READER_CONFIG, split);
         Utils.forEachRemaining(reader, row -> result.add(serializer.fromRow(row)));

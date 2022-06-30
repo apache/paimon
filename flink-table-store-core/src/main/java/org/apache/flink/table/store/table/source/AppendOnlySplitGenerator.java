@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.connector.file.table.BinPacking;
 import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.utils.BinPacking;
 
 import java.util.List;
 import java.util.function.Function;

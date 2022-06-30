@@ -24,7 +24,6 @@ import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.factories.ManagedTableFactory;
-import org.apache.flink.table.store.connector.utils.TableConfigUtils;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;

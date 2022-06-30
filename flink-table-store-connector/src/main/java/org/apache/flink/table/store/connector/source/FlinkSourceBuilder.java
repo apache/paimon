@@ -28,7 +28,6 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.ObjectIdentifier;
-import org.apache.flink.table.connector.Projection;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.connector.TableStoreFactoryOptions;
@@ -37,6 +36,7 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.utils.Projection;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 

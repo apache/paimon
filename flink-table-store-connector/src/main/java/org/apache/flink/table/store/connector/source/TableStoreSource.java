@@ -20,19 +20,15 @@ package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.DelegatingConfiguration;
-import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
-import org.apache.flink.table.connector.ProviderContext;
-import org.apache.flink.table.connector.source.DataStreamScanProvider;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
 import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.table.store.connector.TableStoreDataStreamScanProvider;
 import org.apache.flink.table.store.connector.TableStoreFactoryOptions;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
@@ -44,7 +40,6 @@ import org.apache.flink.table.store.table.AppendOnlyFileStoreTable;
 import org.apache.flink.table.store.table.ChangelogValueCountFileStoreTable;
 import org.apache.flink.table.store.table.ChangelogWithKeyFileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
@@ -130,18 +125,8 @@ public class TableStoreSource
                                 Configuration.fromMap(table.schema().options())
                                         .get(TableStoreFactoryOptions.SCAN_PARALLELISM));
 
-        return new DataStreamScanProvider() {
-            @Override
-            public DataStream<RowData> produceDataStream(
-                    ProviderContext providerContext, StreamExecutionEnvironment env) {
-                return sourceBuilder.withEnv(env).build();
-            }
-
-            @Override
-            public boolean isBounded() {
-                return !streaming;
-            }
-        };
+        return new TableStoreDataStreamScanProvider(
+                !streaming, env -> sourceBuilder.withEnv(env).build());
     }
 
     @Override
@@ -176,7 +161,7 @@ public class TableStoreSource
     }
 
     @Override
-    public void applyProjection(int[][] projectedFields, DataType producedDataType) {
+    public void applyProjection(int[][] projectedFields) {
         this.projectFields = projectedFields;
     }
 }

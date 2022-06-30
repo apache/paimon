@@ -19,15 +19,12 @@
 package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.connector.file.table.FileSystemConnectorOptions;
-import org.apache.flink.connector.file.table.RowDataPartitionComputer;
+import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
-import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.utils.LogicalTypeDataTypeConverter;
 import org.apache.flink.table.utils.PartitionPathUtils;
 import org.apache.flink.util.Preconditions;
 
@@ -36,9 +33,19 @@ import javax.annotation.concurrent.ThreadSafe;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.apache.flink.configuration.ConfigOptions.key;
+
 /** Factory which produces {@link Path}s for manifest files. */
 @ThreadSafe
 public class FileStorePathFactory {
+
+    public static final ConfigOption<String> PARTITION_DEFAULT_NAME =
+            key("partition.default-name")
+                    .stringType()
+                    .defaultValue("__DEFAULT_PARTITION__")
+                    .withDescription(
+                            "The default partition name in case the dynamic partition"
+                                    + " column value is null/empty string.");
 
     private final Path root;
     private final String uuid;
@@ -52,7 +59,7 @@ public class FileStorePathFactory {
         this(
                 root,
                 RowType.of(),
-                FileSystemConnectorOptions.PARTITION_DEFAULT_NAME.defaultValue(),
+                PARTITION_DEFAULT_NAME.defaultValue(),
                 FileStoreOptions.FILE_FORMAT.defaultValue());
     }
 
@@ -77,13 +84,7 @@ public class FileStorePathFactory {
     public static RowDataPartitionComputer getPartitionComputer(
             RowType partitionType, String defaultPartValue) {
         String[] partitionColumns = partitionType.getFieldNames().toArray(new String[0]);
-        return new RowDataPartitionComputer(
-                defaultPartValue,
-                partitionColumns,
-                partitionType.getFields().stream()
-                        .map(f -> LogicalTypeDataTypeConverter.toDataType(f.getType()))
-                        .toArray(DataType[]::new),
-                partitionColumns);
+        return new RowDataPartitionComputer(defaultPartValue, partitionType, partitionColumns);
     }
 
     public Path newManifestFile() {
