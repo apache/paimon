@@ -25,6 +25,8 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.ResolvedSchema;
+import org.apache.flink.table.connector.sink.DynamicTableSink;
+import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
@@ -182,7 +184,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
     @Override
     public KafkaLogSourceProvider createSourceProvider(
             DynamicTableFactory.Context context,
-            SourceContext sourceContext,
+            DynamicTableSource.Context sourceContext,
             @Nullable int[][] projectFields) {
         FactoryUtil.TableFactoryHelper helper = createTableFactoryHelper(this, context);
         ResolvedSchema schema = context.getCatalogTable().getResolvedSchema();
@@ -213,7 +215,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
 
     @Override
     public KafkaLogSinkProvider createSinkProvider(
-            DynamicTableFactory.Context context, SinkContext sinkContext) {
+            DynamicTableFactory.Context context, DynamicTableSink.Context sinkContext) {
         FactoryUtil.TableFactoryHelper helper = createTableFactoryHelper(this, context);
         ResolvedSchema schema = context.getCatalogTable().getResolvedSchema();
         DataType physicalType = schema.toPhysicalRowDataType();

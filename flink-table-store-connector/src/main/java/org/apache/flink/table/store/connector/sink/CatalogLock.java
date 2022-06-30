@@ -16,15 +16,25 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.log;
+package org.apache.flink.table.store.connector.sink;
 
-import org.apache.flink.table.store.table.sink.LogSinkFunction;
+import org.apache.flink.annotation.Internal;
 
+import java.io.Closeable;
 import java.io.Serializable;
+import java.util.concurrent.Callable;
 
-/** A {@link Serializable} sink provider for log store. */
-public interface LogSinkProvider extends Serializable {
+/**
+ * An interface that allows source and sink to use global lock to some transaction-related things.
+ */
+@Internal
+public interface CatalogLock extends Closeable {
 
-    /** Creates a {@link LogSinkFunction} instance. */
-    LogSinkFunction createSink();
+    /** Run with catalog lock. The caller should tell catalog the database and table name. */
+    <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception;
+
+    /** Factory to create {@link CatalogLock}. */
+    interface Factory extends Serializable {
+        CatalogLock create();
+    }
 }

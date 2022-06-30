@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.connector.sink;
 
-import org.apache.flink.table.catalog.CatalogLock;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.TableCommit;

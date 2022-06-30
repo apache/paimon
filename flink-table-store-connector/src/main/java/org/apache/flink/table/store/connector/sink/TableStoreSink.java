@@ -18,15 +18,12 @@
 
 package org.apache.flink.table.store.connector.sink;
 
-import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.DelegatingConfiguration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.api.ValidationException;
-import org.apache.flink.table.catalog.CatalogLock;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
-import org.apache.flink.table.connector.RequireCatalogLock;
 import org.apache.flink.table.connector.sink.DataStreamSinkProvider;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
@@ -41,8 +38,6 @@ import org.apache.flink.table.store.table.ChangelogValueCountFileStoreTable;
 import org.apache.flink.table.store.table.ChangelogWithKeyFileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.LogSinkFunction;
-import org.apache.flink.table.types.DataType;
-import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
@@ -51,8 +46,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /** Table sink to create {@link StoreSink}. */
-public class TableStoreSink
-        implements DynamicTableSink, SupportsOverwrite, SupportsPartitioning, RequireCatalogLock {
+public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, SupportsPartitioning {
 
     private final ObjectIdentifier tableIdentifier;
     private final FileStoreTable table;
@@ -114,33 +108,7 @@ public class TableStoreSink
     public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
         LogSinkProvider logSinkProvider = null;
         if (logStoreTableFactory != null) {
-            logSinkProvider =
-                    logStoreTableFactory.createSinkProvider(
-                            logStoreContext,
-                            new LogStoreTableFactory.SinkContext() {
-                                @Override
-                                public boolean isBounded() {
-                                    return context.isBounded();
-                                }
-
-                                @Override
-                                public <T> TypeInformation<T> createTypeInformation(
-                                        DataType consumedDataType) {
-                                    return context.createTypeInformation(consumedDataType);
-                                }
-
-                                @Override
-                                public <T> TypeInformation<T> createTypeInformation(
-                                        LogicalType consumedLogicalType) {
-                                    return context.createTypeInformation(consumedLogicalType);
-                                }
-
-                                @Override
-                                public DynamicTableSink.DataStructureConverter
-                                        createDataStructureConverter(DataType consumedDataType) {
-                                    return context.createDataStructureConverter(consumedDataType);
-                                }
-                            });
+            logSinkProvider = logStoreTableFactory.createSinkProvider(logStoreContext, context);
         }
 
         Configuration conf = Configuration.fromMap(table.schema().options());
@@ -197,7 +165,6 @@ public class TableStoreSink
         this.overwrite = overwrite;
     }
 
-    @Override
     public void setLockFactory(@Nullable CatalogLock.Factory lockFactory) {
         this.lockFactory = lockFactory;
     }

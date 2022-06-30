@@ -65,8 +65,8 @@ import static org.apache.flink.table.store.log.LogOptions.LogConsistency;
 /** Utils for the test of {@link KafkaLogStoreFactory}. */
 public class KafkaLogTestUtils {
 
-    public static final LogStoreTableFactory.SourceContext SOURCE_CONTEXT =
-            new LogStoreTableFactory.SourceContext() {
+    public static final DynamicTableSource.Context SOURCE_CONTEXT =
+            new DynamicTableSource.Context() {
                 @Override
                 public <T> TypeInformation<T> createTypeInformation(DataType producedDataType) {
                     return createTypeInformation(
@@ -87,8 +87,8 @@ public class KafkaLogTestUtils {
                 }
             };
 
-    public static final LogStoreTableFactory.SinkContext SINK_CONTEXT =
-            new LogStoreTableFactory.SinkContext() {
+    public static final DynamicTableSink.Context SINK_CONTEXT =
+            new DynamicTableSink.Context() {
 
                 @Override
                 public boolean isBounded() {
