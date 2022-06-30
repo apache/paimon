@@ -207,7 +207,7 @@ public class StoreWriteOperator extends PrepareCommitOperator {
 
     private class SimpleContext implements SinkFunction.Context {
 
-        private Long timestamp;
+        @Nullable private Long timestamp;
 
         private final ProcessingTimeService processingTimeService;
 
@@ -227,10 +227,7 @@ public class StoreWriteOperator extends PrepareCommitOperator {
 
         @Override
         public Long timestamp() {
-            if (timestamp != null) {
-                return timestamp;
-            }
-            return null;
+            return timestamp;
         }
     }
 }
