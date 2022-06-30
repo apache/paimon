@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.catalog;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
@@ -34,9 +33,7 @@ import java.util.concurrent.Callable;
 import static org.apache.flink.table.store.file.utils.FileUtils.safelyListFileStatus;
 
 /** A catalog implementation for {@link FileSystem}. */
-public class FileSystemCatalog implements Catalog {
-
-    public static final String DB_SUFFIX = ".db";
+public class FileSystemCatalog extends AbstractCatalog {
 
     private final FileSystem fs;
     private final Path warehouse;
@@ -109,13 +106,8 @@ public class FileSystemCatalog implements Catalog {
     }
 
     @Override
-    public Path getTableLocation(ObjectPath tablePath) {
-        return tablePath(tablePath);
-    }
-
-    @Override
     public TableSchema getTable(ObjectPath tablePath) throws TableNotExistException {
-        Path path = tablePath(tablePath);
+        Path path = getTableLocation(tablePath);
         return new SchemaManager(path)
                 .latest()
                 .orElseThrow(() -> new TableNotExistException(tablePath));
@@ -123,7 +115,7 @@ public class FileSystemCatalog implements Catalog {
 
     @Override
     public boolean tableExists(ObjectPath tablePath) {
-        return tableExists(tablePath(tablePath));
+        return tableExists(getTableLocation(tablePath));
     }
 
     private boolean tableExists(Path tablePath) {
@@ -133,7 +125,7 @@ public class FileSystemCatalog implements Catalog {
     @Override
     public void dropTable(ObjectPath tablePath, boolean ignoreIfNotExists)
             throws TableNotExistException {
-        Path path = tablePath(tablePath);
+        Path path = getTableLocation(tablePath);
         if (!tableExists(path)) {
             if (ignoreIfNotExists) {
                 return;
@@ -152,7 +144,7 @@ public class FileSystemCatalog implements Catalog {
             throw new DatabaseNotExistException(tablePath.getDatabaseName());
         }
 
-        Path path = tablePath(tablePath);
+        Path path = getTableLocation(tablePath);
         if (tableExists(path)) {
             if (ignoreIfExists) {
                 return;
@@ -167,7 +159,7 @@ public class FileSystemCatalog implements Catalog {
     @Override
     public void alterTable(ObjectPath tablePath, UpdateSchema newTable, boolean ignoreIfNotExists)
             throws TableNotExistException {
-        Path path = tablePath(tablePath);
+        Path path = getTableLocation(tablePath);
         if (!tableExists(path)) {
             if (ignoreIfNotExists) {
                 return;
@@ -196,19 +188,15 @@ public class FileSystemCatalog implements Catalog {
         return name.substring(0, name.length() - DB_SUFFIX.length());
     }
 
-    private Path databasePath(String database) {
-        return new Path(warehouse, database + DB_SUFFIX);
-    }
-
-    @VisibleForTesting
-    Path tablePath(ObjectPath objectPath) {
-        return new Path(databasePath(objectPath.getDatabaseName()), objectPath.getObjectName());
-    }
-
     private void commitTableChange(Path tablePath, UpdateSchema table) {
         uncheck(() -> new SchemaManager(tablePath).commitNewVersion(table));
     }
 
     @Override
     public void close() throws Exception {}
+
+    @Override
+    protected String warehouse() {
+        return warehouse.toString();
+    }
 }

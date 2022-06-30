@@ -25,10 +25,10 @@ services:
   # ----------------------------------------
 
   jobmanager:
-    image: apache/flink:${flink.version}
+    image: apache/flink:${flink.version}-java8
     volumes:
       - testdata:/test-data
-    command: jobmanager
+    entrypoint: /bin/bash -c "wget -P /opt/flink/lib/ https://repo.maven.apache.org/maven2/org/apache/flink/flink-shaded-hadoop-2-uber/2.8.3-10.0/flink-shaded-hadoop-2-uber-2.8.3-10.0.jar && /docker-entrypoint.sh jobmanager"
     env_file:
       - ./flink.env
     networks:
@@ -39,10 +39,10 @@ services:
       - "8081"
 
   taskmanager:
-    image: apache/flink:${flink.version}
+    image: apache/flink:${flink.version}-java8
     volumes:
       - testdata:/test-data
-    command: taskmanager
+    entrypoint: /bin/bash -c "wget -P /opt/flink/lib/ https://repo.maven.apache.org/maven2/org/apache/flink/flink-shaded-hadoop-2-uber/2.8.3-10.0/flink-shaded-hadoop-2-uber-2.8.3-10.0.jar && /docker-entrypoint.sh taskmanager"
     env_file:
       - ./flink.env
     networks:

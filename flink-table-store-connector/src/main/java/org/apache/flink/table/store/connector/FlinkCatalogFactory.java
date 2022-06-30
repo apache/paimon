@@ -21,29 +21,34 @@ package org.apache.flink.table.store.connector;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.factories.CatalogFactory;
 import org.apache.flink.table.factories.FactoryUtil;
-import org.apache.flink.table.store.file.catalog.Catalog;
+import org.apache.flink.table.store.file.catalog.CatalogFactory;
+import org.apache.flink.table.store.file.catalog.FileSystemCatalogFactory;
+import org.apache.flink.util.Preconditions;
 
-import java.util.HashSet;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.ServiceLoader;
 import java.util.Set;
-
-import static org.apache.flink.table.factories.FactoryUtil.PROPERTY_VERSION;
+import java.util.stream.Collectors;
 
 /** Factory for {@link FlinkCatalog}. */
-public class FlinkCatalogFactory implements CatalogFactory {
+public class FlinkCatalogFactory implements org.apache.flink.table.factories.CatalogFactory {
 
     public static final String IDENTIFIER = "table-store";
 
-    public static final ConfigOption<String> DEFAULT_DATABASE =
-            ConfigOptions.key("default-database").stringType().defaultValue("default");
-
-    public static final ConfigOption<String> WAREHOUSE =
+    public static final ConfigOption<String> METASTORE =
+            ConfigOptions.key("metastore")
+                    .stringType()
+                    .defaultValue(FileSystemCatalogFactory.IDENTIFIER);
+    private static final ConfigOption<String> WAREHOUSE =
             ConfigOptions.key("warehouse")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("The warehouse root path of catalog.");
+    public static final ConfigOption<String> DEFAULT_DATABASE =
+            ConfigOptions.key("default-database").stringType().defaultValue("default");
 
     @Override
     public String factoryIdentifier() {
@@ -52,35 +57,58 @@ public class FlinkCatalogFactory implements CatalogFactory {
 
     @Override
     public Set<ConfigOption<?>> requiredOptions() {
-        Set<ConfigOption<?>> options = new HashSet<>();
-        options.add(WAREHOUSE);
-        return options;
+        return Collections.emptySet();
     }
 
     @Override
     public Set<ConfigOption<?>> optionalOptions() {
-        Set<ConfigOption<?>> options = new HashSet<>();
-        options.add(DEFAULT_DATABASE);
-        options.add(PROPERTY_VERSION);
-        return options;
+        return Collections.emptySet();
     }
 
     @Override
     public FlinkCatalog createCatalog(Context context) {
         FactoryUtil.CatalogFactoryHelper helper =
                 FactoryUtil.createCatalogFactoryHelper(this, context);
-        helper.validate();
         ReadableConfig options = helper.getOptions();
-        return createCatalog(
-                new Path(options.get(WAREHOUSE)), context.getName(), options.get(DEFAULT_DATABASE));
+        return createCatalog(context.getName(), options);
     }
 
-    public static FlinkCatalog createCatalog(Path warehouse, String catalogName) {
-        return createCatalog(warehouse, catalogName, DEFAULT_DATABASE.defaultValue());
-    }
+    public static FlinkCatalog createCatalog(String catalogName, ReadableConfig options) {
+        // manual validation
+        // because different catalog types may have different options
+        // we can't list them all in the optionalOptions() method
+        String warehouse =
+                Preconditions.checkNotNull(
+                        options.get(WAREHOUSE),
+                        "Table store '" + WAREHOUSE.key() + "' path must be set");
 
-    public static FlinkCatalog createCatalog(
-            Path warehouse, String catalogName, String defaultDatabase) {
-        return new FlinkCatalog(Catalog.create(warehouse), catalogName, defaultDatabase);
+        String metastore = options.get(METASTORE);
+        List<CatalogFactory> factories = new ArrayList<>();
+        ServiceLoader.load(CatalogFactory.class, Thread.currentThread().getContextClassLoader())
+                .iterator()
+                .forEachRemaining(
+                        f -> {
+                            if (f.identifier().equals(metastore)) {
+                                factories.add(f);
+                            }
+                        });
+        if (factories.size() != 1) {
+            throw new RuntimeException(
+                    "Found "
+                            + factories.size()
+                            + " classes implementing "
+                            + CatalogFactory.class.getName()
+                            + " with metastore "
+                            + metastore
+                            + ". They are:\n"
+                            + factories.stream()
+                                    .map(t -> t.getClass().getName())
+                                    .collect(Collectors.joining("\n")));
+        }
+
+        return new FlinkCatalog(
+                factories.get(0).create(warehouse, options),
+                catalogName,
+                options.get(DEFAULT_DATABASE));
     }
 }

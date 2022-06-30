@@ -64,6 +64,12 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
+            <artifactId>flink-table-store-hive-catalog</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
             <artifactId>flink-table-store-kafka</artifactId>
             <version>${project.version}</version>
         </dependency>
@@ -97,6 +103,7 @@ under the License.
                                     <include>org.apache.flink:flink-table-store-connector</include>
                                     <include>org.apache.flink:flink-table-store-core</include>
                                     <include>org.apache.flink:flink-table-store-format</include>
+                                    <include>org.apache.flink:flink-table-store-hive-catalog</include>
                                     <include>org.apache.flink:flink-table-store-kafka</include>
                                     <include>org.apache.flink:flink-sql-connector-kafka</include>
                                 </includes>
