@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.catalog;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
