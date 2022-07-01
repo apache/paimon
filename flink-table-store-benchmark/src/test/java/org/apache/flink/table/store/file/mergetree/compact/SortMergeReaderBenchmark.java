@@ -56,10 +56,10 @@ public class SortMergeReaderBenchmark {
     /** Benchmark test scenarios for {@link SortMergeReader}. */
     @State(Scope.Benchmark)
     public static class StateBaseline {
-        @Param({"20", "50", "100", "200"})
+        @Param({"20", "50", "100"})
         int maxNumReaders;
 
-        @Param({"5", "10", "50", "100", "200"})
+        @Param({ "10", "50", "100"})
         int maxNumKeys;
 
         List<List<ReusingTestData>> benchmarkData = new ArrayList<>();
@@ -67,7 +67,7 @@ public class SortMergeReaderBenchmark {
 
     /** Tests for {@link SortMergeReader}. */
     @BenchmarkMode(Mode.AverageTime)
-    @Fork(1)
+    @Fork(10)
     @OutputTimeUnit(TimeUnit.SECONDS)
     public abstract static class AbstractSortMergeReaderBenchmark {
 
@@ -87,7 +87,7 @@ public class SortMergeReaderBenchmark {
 
         @Benchmark
         @Group("SortMergeReaderBenchmark")
-        @Warmup(iterations = 5, time = 100, timeUnit = TimeUnit.MILLISECONDS)
+        @Warmup(iterations = 3, time = 100, timeUnit = TimeUnit.MILLISECONDS)
         @Measurement(iterations = 10, time = 100, timeUnit = TimeUnit.MILLISECONDS)
         public void sortMergeReaderAfter(StateBaseline stateBaseline, Blackhole blackhole)
                 throws IOException {
