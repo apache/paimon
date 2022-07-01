@@ -25,8 +25,6 @@ import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 
-import java.util.HashMap;
-import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
@@ -46,9 +44,8 @@ public class FileStoreTableFactory {
 
     public static FileStoreTable create(Configuration conf, String user) {
         Path tablePath = FileStoreOptions.path(conf);
-        SchemaManager schemaManager = new SchemaManager(tablePath);
         TableSchema tableSchema =
-                schemaManager
+                new SchemaManager(tablePath)
                         .latest()
                         .orElseThrow(
                                 () ->
@@ -56,13 +53,23 @@ public class FileStoreTableFactory {
                                                 "Schema file not found in location "
                                                         + tablePath
                                                         + ". Please create table first."));
+        return create(tablePath, tableSchema, conf, user);
+    }
 
+    public static FileStoreTable create(Path tablePath, TableSchema tableSchema) {
+        return create(tablePath, tableSchema, new Configuration(), UUID.randomUUID().toString());
+    }
+
+    public static FileStoreTable create(
+            Path tablePath, TableSchema tableSchema, Configuration dynamicOptions, String user) {
         // merge dynamic options into schema.options
-        Map<String, String> newOptions = new HashMap<>(tableSchema.options());
-        newOptions.putAll(conf.toMap());
-        tableSchema = tableSchema.copy(newOptions);
+        Configuration newOptions = Configuration.fromMap(tableSchema.options());
+        dynamicOptions.toMap().forEach(newOptions::setString);
+        newOptions.set(PATH, tablePath.toString());
+        tableSchema = tableSchema.copy(newOptions.toMap());
 
-        if (conf.get(FileStoreOptions.WRITE_MODE) == WriteMode.APPEND_ONLY) {
+        SchemaManager schemaManager = new SchemaManager(tablePath);
+        if (newOptions.get(FileStoreOptions.WRITE_MODE) == WriteMode.APPEND_ONLY) {
             return new AppendOnlyFileStoreTable(tablePath, schemaManager, tableSchema, user);
         } else {
             if (tableSchema.primaryKeys().isEmpty()) {
