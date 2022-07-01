@@ -27,15 +27,16 @@ import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.types.RowKind;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 
@@ -44,48 +45,84 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** ITCase for spark reader. */
 public class SparkReadITCase {
 
+    private static File warehouse = null;
+
     private static SparkSession spark = null;
 
-    @TempDir java.nio.file.Path tempDir;
+    private static Path tablePath1;
 
-    private Path path;
+    private static Path tablePath2;
 
-    private SimpleTableTestHelper testHelper;
+    @BeforeAll
+    public static void startMetastoreAndSpark() throws Exception {
+        warehouse = File.createTempFile("warehouse", null);
+        assertThat(warehouse.delete()).isTrue();
+        Path warehousePath = new Path("file:" + warehouse);
+        spark = SparkSession.builder().master("local[2]").getOrCreate();
+        spark.conf().set("spark.sql.catalog.table_store", SparkCatalog.class.getName());
+        spark.conf().set("spark.sql.catalog.table_store.warehouse", warehousePath.toString());
 
-    @BeforeEach
-    public void beforeEach() throws Exception {
-        this.path = new Path(tempDir.toUri().toString(), "my_table");
+        // flink sink
+        tablePath1 = new Path(warehousePath, "default.db/t1");
+        SimpleTableTestHelper testHelper1 = createTestHelper(tablePath1);
+        testHelper1.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
+        testHelper1.write(GenericRowData.of(3, 4L, StringData.fromString("2")));
+        testHelper1.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
+        testHelper1.write(GenericRowData.ofKind(RowKind.DELETE, 3, 4L, StringData.fromString("2")));
+        testHelper1.commit();
+
+        tablePath2 = new Path(warehousePath, "default.db/t2");
+        SimpleTableTestHelper testHelper2 = createTestHelper(tablePath2);
+        testHelper2.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
+        testHelper2.write(GenericRowData.of(3, 4L, StringData.fromString("2")));
+        testHelper2.commit();
+        testHelper2.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
+        testHelper2.write(GenericRowData.of(7, 8L, StringData.fromString("4")));
+        testHelper2.commit();
+    }
+
+    private static SimpleTableTestHelper createTestHelper(Path tablePath) throws Exception {
         RowType rowType =
                 new RowType(
                         Arrays.asList(
                                 new RowType.RowField("a", new IntType()),
                                 new RowType.RowField("b", new BigIntType()),
                                 new RowType.RowField("c", new VarCharType())));
-        testHelper = new SimpleTableTestHelper(path, rowType);
-    }
-
-    @BeforeAll
-    public static void startMetastoreAndSpark() {
-        spark = SparkSession.builder().master("local[2]").getOrCreate();
+        return new SimpleTableTestHelper(tablePath, rowType);
     }
 
     @AfterAll
-    public static void stopMetastoreAndSpark() {
+    public static void stopMetastoreAndSpark() throws IOException {
+        if (warehouse != null && warehouse.exists()) {
+            FileUtils.deleteDirectory(warehouse);
+        }
         spark.stop();
         spark = null;
     }
 
     @Test
-    public void testNormal() throws Exception {
-        testHelper.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
-        testHelper.write(GenericRowData.of(3, 4L, StringData.fromString("2")));
-        testHelper.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
-        testHelper.write(GenericRowData.ofKind(RowKind.DELETE, 3, 4L, StringData.fromString("2")));
-        testHelper.commit();
+    public void testNormal() {
+        innerTestNormal(
+                spark.read().format("tablestore").option("path", tablePath1.toString()).load());
+    }
 
-        Dataset<Row> dataset =
-                spark.read().format("tablestore").option("path", path.toString()).load();
+    @Test
+    public void testFilterPushDown() {
+        innerTestFilterPushDown(
+                spark.read().format("tablestore").option("path", tablePath2.toString()).load());
+    }
 
+    @Test
+    public void testCatalogNormal() {
+        innerTestNormal(spark.table("table_store.default.t1"));
+    }
+
+    @Test
+    public void testCatalogFilterPushDown() {
+        innerTestFilterPushDown(spark.table("table_store.default.t2"));
+    }
+
+    private void innerTestNormal(Dataset<Row> dataset) {
         List<Row> results = dataset.collectAsList();
         assertThat(results.toString()).isEqualTo("[[1,2,1], [5,6,3]]");
 
@@ -96,19 +133,7 @@ public class SparkReadITCase {
         assertThat(results.toString()).isEqualTo("[[8]]");
     }
 
-    @Test
-    public void testFilterPushDown() throws Exception {
-        testHelper.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
-        testHelper.write(GenericRowData.of(3, 4L, StringData.fromString("2")));
-        testHelper.commit();
-
-        testHelper.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
-        testHelper.write(GenericRowData.of(7, 8L, StringData.fromString("4")));
-        testHelper.commit();
-
-        Dataset<Row> dataset =
-                spark.read().format("tablestore").option("path", path.toString()).load();
-
+    private void innerTestFilterPushDown(Dataset<Row> dataset) {
         List<Row> results = dataset.filter("a < 4").select("a", "c").collectAsList();
         assertThat(results.toString()).isEqualTo("[[1,1], [3,2]]");
     }
