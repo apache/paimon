@@ -20,29 +20,82 @@ package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
-import org.apache.flink.table.store.file.compact.CompactRewriter;
-import org.apache.flink.table.store.file.compact.CompactStrategy;
-import org.apache.flink.table.store.file.compact.CompactUnit;
+import org.apache.flink.table.store.file.compact.CompactTask;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 
 /** Compact manager for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
-public class AppendOnlyCompactManager
-        extends CompactManager<List<DataFileMeta>, DataFileMeta, List<CompactUnit>> {
+public class AppendOnlyCompactManager extends CompactManager {
+
+    private final int smallFileNumTrigger;
+    private final long targetFileSize;
+    private final CompactRewriter rewriter;
+
+    private List<DataFileMeta> compactBefore;
 
     public AppendOnlyCompactManager(
             ExecutorService executor,
-            CompactStrategy<List<DataFileMeta>, List<CompactUnit>> strategy,
-            CompactRewriter<DataFileMeta> rewriter) {
-        super(executor, strategy, rewriter);
+            int smallFileNumTrigger,
+            long targetFileSize,
+            CompactRewriter rewriter) {
+        super(executor);
+        this.smallFileNumTrigger = smallFileNumTrigger;
+        this.targetFileSize = targetFileSize;
+        this.compactBefore = new ArrayList<>();
+        this.rewriter = rewriter;
     }
 
     @Override
-    protected Optional<Callable<CompactResult>> createCompactTask(
-            List<DataFileMeta> input, List<CompactUnit> output) {
-        return Optional.of(new AppendOnlyCompactTask(rewriter, output));
+    public void submitCompaction() {
+        if (taskFuture != null) {
+            throw new IllegalStateException(
+                    "Please finish the previous compaction before submitting new one.");
+        }
+        if (compactBefore == null) {
+            throw new IllegalStateException(
+                    "Please update compactBefore before submitting a compaction");
+        }
+        if (triggerCompaction()) {
+            taskFuture =
+                    executor.submit(
+                            new CompactTask() {
+                                @Override
+                                protected CompactResult compact() throws Exception {
+                                    collectBeforeStats(compactBefore);
+                                    List<DataFileMeta> compactAfter =
+                                            rewriter.rewrite(compactBefore);
+                                    collectAfterStats(compactAfter);
+                                    return result(compactBefore, compactAfter);
+                                }
+                            });
+        }
+    }
+
+    public void updateCompactBefore(List<DataFileMeta> files) {
+        this.compactBefore = files;
+    }
+
+    private boolean triggerCompaction() {
+        if (compactBefore.size() < smallFileNumTrigger) {
+            return false;
+        }
+        int adjacentSmallFileCtr = 0;
+        for (DataFileMeta file : compactBefore) {
+            if (file.fileSize() < targetFileSize) {
+                adjacentSmallFileCtr += 1;
+            } else if (adjacentSmallFileCtr >= smallFileNumTrigger) {
+                return true;
+            } else {
+                adjacentSmallFileCtr = 0;
+            }
+        }
+        return adjacentSmallFileCtr > smallFileNumTrigger;
+    }
+
+    /** Compact rewriter for append-only table. */
+    public interface CompactRewriter {
+        List<DataFileMeta> rewrite(List<DataFileMeta> toCompact) throws Exception;
     }
 }

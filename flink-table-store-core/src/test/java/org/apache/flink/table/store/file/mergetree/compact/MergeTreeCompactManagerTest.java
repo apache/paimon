@@ -20,7 +20,6 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.compact.CompactRewriter;
 import org.apache.flink.table.store.file.compact.CompactUnit;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileTestUtils;
@@ -46,8 +45,8 @@ import java.util.stream.Collectors;
 import static org.apache.flink.table.store.file.data.DataFileTestUtils.newFile;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link KeyValueCompactManager}. */
-public class KeyValueCompactManagerTest {
+/** Test for {@link MergeTreeCompactManager}. */
+public class MergeTreeCompactManagerTest {
 
     private final Comparator<RowData> comparator = Comparator.comparingInt(o -> o.getInt(0));
 
@@ -187,7 +186,7 @@ public class KeyValueCompactManagerTest {
     private void innerTest(
             List<LevelMinMax> inputs,
             List<LevelMinMax> expected,
-            KeyValueCompactStrategy strategy,
+            CompactStrategy strategy,
             boolean expectedDropDelete)
             throws ExecutionException, InterruptedException {
         List<DataFileMeta> files = new ArrayList<>();
@@ -196,11 +195,11 @@ public class KeyValueCompactManagerTest {
             files.add(minMax.toFile(i));
         }
         Levels levels = new Levels(comparator, files, 3);
-        KeyValueCompactManager manager =
-                new KeyValueCompactManager(
-                        service, strategy, comparator, 2, testRewriter(expectedDropDelete));
-        manager.submitCompaction(levels);
-        manager.finishCompaction(levels, true);
+        MergeTreeCompactManager manager =
+                new MergeTreeCompactManager(
+                        service, levels, strategy, comparator, 2, testRewriter(expectedDropDelete));
+        manager.submitCompaction();
+        manager.finishCompaction(true);
         List<LevelMinMax> outputs =
                 levels.allFiles().stream().map(LevelMinMax::new).collect(Collectors.toList());
         assertThat(outputs).isEqualTo(expected);
@@ -210,11 +209,11 @@ public class KeyValueCompactManagerTest {
         return DataFileTestUtils.row(i);
     }
 
-    private KeyValueCompactStrategy testStrategy() {
+    private CompactStrategy testStrategy() {
         return (numLevels, runs) -> Optional.of(CompactUnit.fromLevelRuns(numLevels - 1, runs));
     }
 
-    private CompactRewriter<SortedRun> testRewriter(boolean expectedDropDelete) {
+    private CompactRewriter testRewriter(boolean expectedDropDelete) {
         return (outputLevel, dropDelete, sections) -> {
             assertThat(dropDelete).isEqualTo(expectedDropDelete);
             int minKey = Integer.MAX_VALUE;

@@ -16,20 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.compact;
+package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.mergetree.SortedRun;
 
 import java.util.List;
 
-/**
- * Rewrite sections to the files.
- *
- * @param <T> The type of sections.
- */
+/** Rewrite sections to the files. */
 @FunctionalInterface
-public interface CompactRewriter<T> {
+public interface CompactRewriter {
 
-    List<DataFileMeta> rewrite(int outputLevel, boolean dropDelete, List<List<T>> sections)
+    List<DataFileMeta> rewrite(int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
             throws Exception;
 }

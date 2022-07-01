@@ -27,16 +27,16 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.compact.CompactRewriter;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileReader;
 import org.apache.flink.table.store.file.data.DataFileWriter;
 import org.apache.flink.table.store.file.format.FlushingFileFormat;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
+import org.apache.flink.table.store.file.mergetree.compact.CompactRewriter;
+import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
-import org.apache.flink.table.store.file.mergetree.compact.KeyValueCompactManager;
-import org.apache.flink.table.store.file.mergetree.compact.KeyValueCompactStrategy;
+import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -270,7 +270,7 @@ public class MergeTreeTest {
                 new MergeTreeWriter(
                         dataFileWriter.keyType(),
                         dataFileWriter.valueType(),
-                        createCompactManager(dataFileWriter, service),
+                        createCompactManager(dataFileWriter, service, files),
                         new Levels(comparator, files, options.numLevels()),
                         maxSequenceNumber,
                         comparator,
@@ -284,9 +284,11 @@ public class MergeTreeTest {
         return writer;
     }
 
-    private KeyValueCompactManager createCompactManager(
-            DataFileWriter dataFileWriter, ExecutorService compactExecutor) {
-        KeyValueCompactStrategy keyValueCompactStrategy =
+    private MergeTreeCompactManager createCompactManager(
+            DataFileWriter dataFileWriter,
+            ExecutorService compactExecutor,
+            List<DataFileMeta> files) {
+        CompactStrategy strategy =
                 new UniversalCompaction(
                         options.maxSizeAmplificationPercent(),
                         options.sizeRatio(),
@@ -302,9 +304,10 @@ public class MergeTreeTest {
                                                 comparator,
                                                 new DeduplicateMergeFunction())),
                                 outputLevel);
-        return new KeyValueCompactManager(
+        return new MergeTreeCompactManager(
                 compactExecutor,
-                keyValueCompactStrategy,
+                new Levels(comparator, files, options.numLevels()),
+                strategy,
                 comparator,
                 options.targetFileSize(),
                 rewriter);

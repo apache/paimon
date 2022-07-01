@@ -20,7 +20,6 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.compact.CompactResult;
-import org.apache.flink.table.store.file.compact.CompactRewriter;
 import org.apache.flink.table.store.file.compact.CompactTask;
 import org.apache.flink.table.store.file.compact.CompactUnit;
 import org.apache.flink.table.store.file.data.DataFileMeta;
@@ -33,10 +32,10 @@ import java.util.List;
 import static java.util.Collections.singletonList;
 
 /** Compact task for merge tree compaction. */
-public class KeyValueCompactTask extends CompactTask {
+public class MergeTreeCompactTask extends CompactTask {
 
     private final long minFileSize;
-    private final CompactRewriter<SortedRun> rewriter;
+    private final CompactRewriter rewriter;
     private final int outputLevel;
 
     private final List<List<SortedRun>> partitioned;
@@ -46,10 +45,10 @@ public class KeyValueCompactTask extends CompactTask {
     // metric
     private int upgradeFilesNum;
 
-    public KeyValueCompactTask(
+    public MergeTreeCompactTask(
             Comparator<RowData> keyComparator,
             long minFileSize,
-            CompactRewriter<SortedRun> rewriter,
+            CompactRewriter rewriter,
             CompactUnit unit,
             boolean dropDelete) {
         this.minFileSize = minFileSize;

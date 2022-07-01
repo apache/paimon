@@ -28,8 +28,6 @@ import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.store.file.data.DataFileTest;
 import org.apache.flink.table.store.file.data.DataFileWriter;
-import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
-import org.apache.flink.table.store.file.writer.MetricFileWriter;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -42,7 +40,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.function.Function;
 
 /** test file format suffix. */
 public class FileFormatSuffixTest extends DataFileTest {
@@ -65,17 +62,12 @@ public class FileFormatSuffixTest extends DataFileTest {
         AppendOnlyWriter appendOnlyWriter =
                 new AppendOnlyWriter(
                         0,
+                        fileFormat,
                         10,
-                        MetricFileWriter.createFactory(
-                                fileFormat.createWriterFactory(SCHEMA),
-                                Function.identity(),
-                                SCHEMA,
-                                fileFormat.createStatsExtractor(SCHEMA).orElse(null)),
-                        new FieldStatsArraySerializer(SCHEMA),
-                        new AppendOnlyCompactManager(null, null, null), // not used
-                        false,
+                        SCHEMA,
                         Collections.emptyList(),
-                        0,
+                        new AppendOnlyCompactManager(null, 10, 10, null), // not used
+                        false,
                         dataFilePathFactory);
         appendOnlyWriter.write(
                 GenericRowData.of(1, StringData.fromString("aaa"), StringData.fromString("1")));

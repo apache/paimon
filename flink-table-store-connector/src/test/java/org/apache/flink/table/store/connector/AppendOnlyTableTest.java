@@ -127,6 +127,7 @@ public class AppendOnlyTableTest extends FileStoreTableITCase {
 
     @Test
     public void testAutoCompaction() {
+        batchSql("ALTER TABLE append_table SET ('file-num.compaction-trigger' = '2')");
         batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')");
         Snapshot snapshot = findLatestSnapshot("append_table", true);
         assertThat(snapshot.id()).isEqualTo(1L);
@@ -139,11 +140,16 @@ public class AppendOnlyTableTest extends FileStoreTableITCase {
 
         batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB'), (3, 'CCC'), (4, 'DDD')");
         snapshot = findLatestSnapshot("append_table", true);
-        assertThat(snapshot.id()).isEqualTo(4L);
+        assertThat(snapshot.id()).isEqualTo(3L);
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+
+        batchSql("INSERT INTO append_table VALUES (5, 'EEE'), (6, 'FFF')");
+        snapshot = findLatestSnapshot("append_table", true);
+        assertThat(snapshot.id()).isEqualTo(5L);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
 
         List<Row> rows = batchSql("SELECT * FROM append_table");
-        assertThat(rows.size()).isEqualTo(8);
+        assertThat(rows.size()).isEqualTo(10);
         assertThat(rows)
                 .containsExactlyInAnyOrder(
                         Row.of(1, "AAA"),
@@ -153,7 +159,9 @@ public class AppendOnlyTableTest extends FileStoreTableITCase {
                         Row.of(1, "AAA"),
                         Row.of(2, "BBB"),
                         Row.of(3, "CCC"),
-                        Row.of(4, "DDD"));
+                        Row.of(4, "DDD"),
+                        Row.of(5, "EEE"),
+                        Row.of(6, "FFF"));
     }
 
     @Test

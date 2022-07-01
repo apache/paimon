@@ -21,34 +21,25 @@ package org.apache.flink.table.store.file.operation;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.compact.CompactResult;
-import org.apache.flink.table.store.file.compact.CompactRewriter;
 import org.apache.flink.table.store.file.data.AppendOnlyCompactManager;
-import org.apache.flink.table.store.file.data.AppendOnlyCompactStrategy;
+import org.apache.flink.table.store.file.data.AppendOnlyRollingFileWriter;
 import org.apache.flink.table.store.file.data.AppendOnlyWriter;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
-import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.file.writer.FileWriter;
-import org.apache.flink.table.store.file.writer.Metric;
-import org.apache.flink.table.store.file.writer.MetricFileWriter;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.util.CloseableIterator;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
-import java.util.function.Function;
 
 /** {@link FileStoreWrite} for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
@@ -59,6 +50,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
     private final FileFormat fileFormat;
     private final FileStorePathFactory pathFactory;
     private final long targetFileSize;
+    private final int smallFileNumTrigger;
     private final boolean commitForceCompact;
 
     public AppendOnlyFileStoreWrite(
@@ -70,6 +62,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             long targetFileSize,
+            int smallFileNumTrigger,
             boolean commitForceCompact) {
         super(snapshotManager, scan);
         this.read = read;
@@ -78,6 +71,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
         this.fileFormat = fileFormat;
         this.pathFactory = pathFactory;
         this.targetFileSize = targetFileSize;
+        this.smallFileNumTrigger = smallFileNumTrigger;
         this.commitForceCompact = commitForceCompact;
     }
 
@@ -107,86 +101,38 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
             List<DataFileMeta> restoredFiles,
             ExecutorService compactExecutor) {
         DataFilePathFactory factory = pathFactory.createDataFilePathFactory(partition, bucket);
-        FileWriter.Factory<RowData, Metric> fileWriterFactory =
-                MetricFileWriter.createFactory(
-                        fileFormat.createWriterFactory(rowType),
-                        Function.identity(),
-                        rowType,
-                        fileFormat.createStatsExtractor(rowType).orElse(null));
-        FieldStatsArraySerializer statsArraySerializer = new FieldStatsArraySerializer(rowType);
         return new AppendOnlyWriter(
                 schemaId,
+                fileFormat,
                 targetFileSize,
-                fileWriterFactory,
-                statsArraySerializer,
-                createCompactManager(
-                        compactExecutor,
-                        createCompactRewriter(
-                                partition, bucket, fileWriterFactory, statsArraySerializer)),
-                commitForceCompact,
+                rowType,
                 restoredFiles,
-                getMaxSequenceNumber(restoredFiles),
+                new AppendOnlyCompactManager(
+                        compactExecutor,
+                        smallFileNumTrigger,
+                        targetFileSize,
+                        compactRewriter(partition, bucket)),
+                commitForceCompact,
                 factory);
     }
 
-    private AppendOnlyCompactManager createCompactManager(
-            ExecutorService compactExecutor, CompactRewriter<DataFileMeta> rewriter) {
-        return new AppendOnlyCompactManager(
-                compactExecutor, new AppendOnlyCompactStrategy(targetFileSize), rewriter);
-    }
-
-    private CompactRewriter<DataFileMeta> createCompactRewriter(
-            BinaryRowData partition,
-            int bucket,
-            FileWriter.Factory<RowData, Metric> fileWriterFactory,
-            FieldStatsArraySerializer statsArraySerializer) {
-        return (outputLevel, dropDelete, sections) -> {
-            List<DataFileMeta> results = new ArrayList<>();
-            for (List<DataFileMeta> section : sections) {
-                AppendOnlyWriter.SingleFileWriter writer =
-                        createRewriter(
-                                partition,
-                                bucket,
-                                fileWriterFactory,
-                                statsArraySerializer,
-                                section);
-                results.add(
-                        writeIterator(
-                                writer,
-                                new RecordReaderIterator<>(
-                                        read.createReader(
-                                                new Split(partition, bucket, section, false)))));
+    private AppendOnlyCompactManager.CompactRewriter compactRewriter(
+            BinaryRowData partition, int bucket) {
+        return toCompact -> {
+            if (toCompact.isEmpty()) {
+                return Collections.emptyList();
             }
-            return results;
+            AppendOnlyRollingFileWriter rewriter =
+                    new AppendOnlyRollingFileWriter(
+                            schemaId,
+                            fileFormat,
+                            targetFileSize,
+                            rowType,
+                            toCompact.get(0).minSequenceNumber(),
+                            pathFactory.createDataFilePathFactory(partition, bucket));
+            return rewriter.write(
+                    new RecordReaderIterator<>(
+                            read.createReader(new Split(partition, bucket, toCompact, false))));
         };
-    }
-
-    private AppendOnlyWriter.SingleFileWriter createRewriter(
-            BinaryRowData partition,
-            int bucket,
-            FileWriter.Factory<RowData, Metric> fileWriterFactory,
-            FieldStatsArraySerializer statsArraySerializer,
-            List<DataFileMeta> section) {
-        return new AppendOnlyWriter.SingleFileWriter(
-                fileWriterFactory,
-                pathFactory.createDataFilePathFactory(partition, bucket).newPath(),
-                statsArraySerializer,
-                section.get(0).minSequenceNumber(),
-                section.get(section.size() - 1).maxSequenceNumber(),
-                schemaId);
-    }
-
-    private DataFileMeta writeIterator(
-            AppendOnlyWriter.SingleFileWriter writer, CloseableIterator<RowData> iterator)
-            throws Exception {
-        try {
-            writer.write(iterator);
-            writer.close();
-            return writer.result();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        } finally {
-            iterator.close();
-        }
     }
 }

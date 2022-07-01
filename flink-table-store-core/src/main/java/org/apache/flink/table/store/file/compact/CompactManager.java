@@ -19,47 +19,23 @@
 package org.apache.flink.table.store.file.compact;
 
 import java.util.Optional;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
-/**
- * Manager to submit compaction task.
- *
- * @param <I> The type of subject to be compacted.
- * @param <T> The record type of rewriter to write.
- * @param <O> The type of compact strategy's output.
- */
-public abstract class CompactManager<I, T, O> {
+/** Manager to submit compaction task. */
+public abstract class CompactManager {
 
     protected final ExecutorService executor;
 
-    protected final CompactStrategy<I, O> strategy;
-
-    protected final CompactRewriter<T> rewriter;
-
     protected Future<CompactResult> taskFuture;
 
-    public CompactManager(
-            ExecutorService executor, CompactStrategy<I, O> strategy, CompactRewriter<T> rewriter) {
+    public CompactManager(ExecutorService executor) {
         this.executor = executor;
-        this.strategy = strategy;
-        this.rewriter = rewriter;
     }
 
     /** Submit a new compaction task. */
-    public void submitCompaction(I input) {
-        if (taskFuture != null) {
-            throw new IllegalStateException(
-                    "Please finish the previous compaction before submitting new one.");
-        }
-        strategy.pick(input)
-                .flatMap(output -> createCompactTask(input, output))
-                .ifPresent((task) -> taskFuture = executor.submit(task));
-    }
-
-    protected abstract Optional<Callable<CompactResult>> createCompactTask(I input, O output);
+    public abstract void submitCompaction();
 
     public boolean isCompactionFinished() {
         return taskFuture == null;
