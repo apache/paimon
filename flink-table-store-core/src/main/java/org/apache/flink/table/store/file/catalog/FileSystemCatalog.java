@@ -106,7 +106,7 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public TableSchema getTable(ObjectPath tablePath) throws TableNotExistException {
+    public TableSchema getTableSchema(ObjectPath tablePath) throws TableNotExistException {
         Path path = getTableLocation(tablePath);
         return new SchemaManager(path)
                 .latest()
