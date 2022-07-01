@@ -111,6 +111,7 @@ under the License.
         <test.randomization.seed/>
         <test.unit.pattern>**/*Test.*</test.unit.pattern>
 
+        <flink.runtime>flink-runtime</flink.runtime>
         <flink.table.runtime>flink-table-runtime</flink.table.runtime>
         <flink.streaming.java>flink-streaming-java</flink.streaming.java>
         <flink.sql.orc>flink-sql-orc</flink.sql.orc>
@@ -287,6 +288,7 @@ under the License.
             <id>flink-1.14</id>
             <properties>
                 <flink.version>1.14.5</flink.version>
+                <flink.runtime>flink-runtime_${scala.binary.version}</flink.runtime>
                 <flink.table.runtime>flink-table-runtime_${scala.binary.version}</flink.table.runtime>
                 <flink.streaming.java>flink-streaming-java_${scala.binary.version}</flink.streaming.java>
                 <flink.sql.orc>flink-sql-orc_${scala.binary.version}</flink.sql.orc>
