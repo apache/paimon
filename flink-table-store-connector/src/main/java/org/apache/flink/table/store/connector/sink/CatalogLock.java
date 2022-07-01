@@ -16,18 +16,25 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.connector;
+package org.apache.flink.table.store.connector.sink;
 
-import org.apache.flink.api.connector.sink2.StatefulSink;
-import org.apache.flink.api.connector.sink2.TwoPhaseCommittingSink;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.connector.sink.Committable;
+import org.apache.flink.annotation.Internal;
+
+import java.io.Closeable;
+import java.io.Serializable;
+import java.util.concurrent.Callable;
 
 /**
- * The base interface for file store sink writers.
- *
- * @param <WriterStateT> The type of the writer's state.
+ * An interface that allows source and sink to use global lock to some transaction-related things.
  */
-public interface StatefulPrecommittingSinkWriter<WriterStateT>
-        extends StatefulSink.StatefulSinkWriter<RowData, WriterStateT>,
-                TwoPhaseCommittingSink.PrecommittingSinkWriter<RowData, Committable> {}
+@Internal
+public interface CatalogLock extends Closeable {
+
+    /** Run with catalog lock. The caller should tell catalog the database and table name. */
+    <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception;
+
+    /** Factory to create {@link CatalogLock}. */
+    interface Factory extends Serializable {
+        CatalogLock create();
+    }
+}

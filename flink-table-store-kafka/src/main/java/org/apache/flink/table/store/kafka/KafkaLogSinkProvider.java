@@ -20,22 +20,18 @@ package org.apache.flink.table.store.kafka;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.SerializationSchema;
-import org.apache.flink.connector.base.DeliveryGuarantee;
-import org.apache.flink.connector.kafka.sink.KafkaSink;
-import org.apache.flink.connector.kafka.sink.KafkaSinkBuilder;
+import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer.Semantic;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.log.LogOptions.LogChangelogMode;
 import org.apache.flink.table.store.log.LogOptions.LogConsistency;
 import org.apache.flink.table.store.log.LogSinkProvider;
-import org.apache.flink.table.store.table.sink.SinkRecord;
+import org.apache.flink.table.store.table.sink.LogSinkFunction;
 
 import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.clients.producer.RecordMetadata;
 
 import javax.annotation.Nullable;
 
 import java.util.Properties;
-import java.util.function.Consumer;
 
 /** A Kafka {@link LogSinkProvider}. */
 public class KafkaLogSinkProvider implements LogSinkProvider {
@@ -70,32 +66,24 @@ public class KafkaLogSinkProvider implements LogSinkProvider {
     }
 
     @Override
-    public KafkaSink<SinkRecord> createSink() {
-        KafkaSinkBuilder<SinkRecord> builder = KafkaSink.builder();
+    public LogSinkFunction createSink() {
+        Semantic semantic;
         switch (consistency) {
             case TRANSACTIONAL:
-                builder.setDeliverGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
-                        .setTransactionalIdPrefix("log-store-" + topic);
+                properties.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "log-store-" + topic);
+                semantic = Semantic.EXACTLY_ONCE;
                 break;
             case EVENTUAL:
                 if (primaryKeySerializer == null) {
                     throw new IllegalArgumentException(
                             "Can not use EVENTUAL consistency mode for non-pk table.");
                 }
-                builder.setDeliverGuarantee(DeliveryGuarantee.AT_LEAST_ONCE);
+                semantic = Semantic.AT_LEAST_ONCE;
                 break;
+            default:
+                throw new IllegalArgumentException("Unsupported: " + consistency);
         }
-
-        return builder.setBootstrapServers(
-                        properties.get(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG).toString())
-                .setKafkaProducerConfig(properties)
-                .setRecordSerializer(createSerializationSchema())
-                .build();
-    }
-
-    @Override
-    public Consumer<RecordMetadata> createMetadataConsumer(WriteCallback callback) {
-        return meta -> callback.onCompletion(meta.partition(), meta.offset());
+        return new KafkaSinkFunction(topic, createSerializationSchema(), properties, semantic);
     }
 
     @VisibleForTesting

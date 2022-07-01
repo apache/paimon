@@ -22,15 +22,13 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
-import org.apache.flink.table.catalog.CatalogLock;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.connector.TableStoreFactoryOptions;
-import org.apache.flink.table.store.connector.sink.global.GlobalCommittingSinkTranslator;
 import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
-import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.sink.LogSinkFunction;
 
 import javax.annotation.Nullable;
 
@@ -46,7 +44,7 @@ public class FlinkSinkBuilder {
     private DataStream<RowData> input;
     @Nullable private CatalogLock.Factory lockFactory;
     @Nullable private Map<String, String> overwritePartition;
-    @Nullable private LogSinkProvider logSinkProvider;
+    @Nullable private LogSinkFunction logSinkFunction;
     @Nullable private Integer parallelism;
 
     public FlinkSinkBuilder(ObjectIdentifier tableIdentifier, FileStoreTable table) {
@@ -70,8 +68,8 @@ public class FlinkSinkBuilder {
         return this;
     }
 
-    public FlinkSinkBuilder withLogSinkProvider(LogSinkProvider logSinkProvider) {
-        this.logSinkProvider = logSinkProvider;
+    public FlinkSinkBuilder withLogSinkFunction(@Nullable LogSinkFunction logSinkFunction) {
+        this.logSinkFunction = logSinkFunction;
         return this;
     }
 
@@ -101,16 +99,15 @@ public class FlinkSinkBuilder {
             partitioned.setParallelism(parallelism);
         }
 
-        StoreSink<?, ?> sink =
-                new StoreSink<>(
+        StoreSink sink =
+                new StoreSink(
                         tableIdentifier,
                         table,
                         conf.get(TableStoreFactoryOptions.COMPACTION_MANUAL_TRIGGERED),
                         getCompactPartSpec(),
                         lockFactory,
                         overwritePartition,
-                        logSinkProvider);
-        return GlobalCommittingSinkTranslator.translate(
-                new DataStream<>(input.getExecutionEnvironment(), partitioned), sink);
+                        logSinkFunction);
+        return sink.sinkTo(new DataStream<>(input.getExecutionEnvironment(), partitioned));
     }
 }

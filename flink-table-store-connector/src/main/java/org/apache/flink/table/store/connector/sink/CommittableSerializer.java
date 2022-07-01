@@ -29,13 +29,8 @@ public class CommittableSerializer implements SimpleVersionedSerializer<Committa
 
     private final FileCommittableSerializer fileCommittableSerializer;
 
-    private final SimpleVersionedSerializer<Object> logCommittableSerializer;
-
-    public CommittableSerializer(
-            FileCommittableSerializer fileCommittableSerializer,
-            SimpleVersionedSerializer<Object> logCommittableSerializer) {
+    public CommittableSerializer(FileCommittableSerializer fileCommittableSerializer) {
         this.fileCommittableSerializer = fileCommittableSerializer;
-        this.logCommittableSerializer = logCommittableSerializer;
     }
 
     @Override
@@ -53,10 +48,6 @@ public class CommittableSerializer implements SimpleVersionedSerializer<Committa
                 wrapped =
                         fileCommittableSerializer.serialize(
                                 (FileCommittable) committable.wrappedCommittable());
-                break;
-            case LOG:
-                version = logCommittableSerializer.getVersion();
-                wrapped = logCommittableSerializer.serialize(committable.wrappedCommittable());
                 break;
             case LOG_OFFSET:
                 version = 1;
@@ -85,9 +76,6 @@ public class CommittableSerializer implements SimpleVersionedSerializer<Committa
         switch (kind) {
             case FILE:
                 wrappedCommittable = fileCommittableSerializer.deserialize(version, wrapped);
-                break;
-            case LOG:
-                wrappedCommittable = logCommittableSerializer.deserialize(version, wrapped);
                 break;
             case LOG_OFFSET:
                 wrappedCommittable = LogOffsetCommittable.fromBytes(wrapped);

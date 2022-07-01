@@ -20,6 +20,7 @@ package org.apache.flink.table.store.kafka;
 
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
+import org.apache.flink.streaming.connectors.kafka.KafkaSerializationSchema;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.log.LogOptions.LogChangelogMode;
 import org.apache.flink.table.store.table.sink.SinkRecord;
@@ -30,7 +31,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import javax.annotation.Nullable;
 
 /** A {@link KafkaRecordSerializationSchema} for the table in log store. */
-public class KafkaLogSerializationSchema implements KafkaRecordSerializationSchema<SinkRecord> {
+public class KafkaLogSerializationSchema implements KafkaSerializationSchema<SinkRecord> {
 
     private static final long serialVersionUID = 1L;
 
@@ -55,9 +56,7 @@ public class KafkaLogSerializationSchema implements KafkaRecordSerializationSche
     }
 
     @Override
-    public void open(
-            SerializationSchema.InitializationContext context, KafkaSinkContext sinkContext)
-            throws Exception {
+    public void open(SerializationSchema.InitializationContext context) throws Exception {
         if (primaryKeySerializer != null) {
             primaryKeySerializer.open(context);
         }
@@ -65,8 +64,7 @@ public class KafkaLogSerializationSchema implements KafkaRecordSerializationSche
     }
 
     @Override
-    public ProducerRecord<byte[], byte[]> serialize(
-            SinkRecord element, KafkaSinkContext context, Long timestamp) {
+    public ProducerRecord<byte[], byte[]> serialize(SinkRecord element, @Nullable Long timestamp) {
         RowKind kind = element.row().getRowKind();
 
         byte[] primaryKeyBytes = null;

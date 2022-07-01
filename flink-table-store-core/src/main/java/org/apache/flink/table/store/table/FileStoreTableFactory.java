@@ -29,8 +29,16 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
+
 /** Factory to create {@link FileStoreTable}. */
 public class FileStoreTableFactory {
+
+    public static FileStoreTable create(Path path) {
+        Configuration conf = new Configuration();
+        conf.set(PATH, path.toString());
+        return create(conf);
+    }
 
     public static FileStoreTable create(Configuration conf) {
         return create(conf, UUID.randomUUID().toString());

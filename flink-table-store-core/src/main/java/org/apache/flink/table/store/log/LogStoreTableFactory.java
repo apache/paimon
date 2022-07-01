@@ -63,19 +63,15 @@ public interface LogStoreTableFactory extends DynamicTableFactory {
      * context information.
      */
     LogSourceProvider createSourceProvider(
-            Context context, SourceContext sourceContext, @Nullable int[][] projectFields);
+            Context context,
+            DynamicTableSource.Context sourceContext,
+            @Nullable int[][] projectFields);
 
     /**
      * Creates a {@link LogSinkProvider} instance from a {@link CatalogTable} and additional context
      * information.
      */
-    LogSinkProvider createSinkProvider(Context context, SinkContext sinkContext);
-
-    /** Context for create runtime source. */
-    interface SourceContext extends DynamicTableSource.Context {}
-
-    /** Context for create runtime sink. */
-    interface SinkContext extends DynamicTableSink.Context {}
+    LogSinkProvider createSinkProvider(Context context, DynamicTableSink.Context sinkContext);
 
     // --------------------------------------------------------------------------------------------
 
