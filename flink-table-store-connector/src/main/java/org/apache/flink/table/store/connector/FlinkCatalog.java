@@ -140,7 +140,7 @@ public class FlinkCatalog extends AbstractCatalog {
             throws TableNotExistException, CatalogException {
         TableSchema schema;
         try {
-            schema = catalog.getTable(tablePath);
+            schema = catalog.getTableSchema(tablePath);
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), e.tablePath());
         }

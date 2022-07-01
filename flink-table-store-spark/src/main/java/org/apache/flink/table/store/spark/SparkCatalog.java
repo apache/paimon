@@ -22,9 +22,6 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
-import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
@@ -110,11 +107,8 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         }
 
         try {
-            ObjectPath objectPath = new ObjectPath(ident.namespace()[0], ident.name());
-            TableSchema tableSchema = catalog.getTable(objectPath);
-            FileStoreTable table =
-                    FileStoreTableFactory.create(catalog.getTableLocation(objectPath), tableSchema);
-            return new SparkTable(table);
+            return new SparkTable(
+                    catalog.getTable(new ObjectPath(ident.namespace()[0], ident.name())));
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
         }

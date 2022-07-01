@@ -22,6 +22,8 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.FileStoreTableFactory;
 
 import java.util.List;
 
@@ -92,10 +94,22 @@ public interface Catalog extends AutoCloseable {
      * Return a {@link TableSchema} identified by the given {@link ObjectPath}.
      *
      * @param tablePath Path of the table
+     * @return The requested table schema
+     * @throws TableNotExistException if the target does not exist
+     */
+    TableSchema getTableSchema(ObjectPath tablePath) throws TableNotExistException;
+
+    /**
+     * Return a {@link FileStoreTable} identified by the given {@link ObjectPath}.
+     *
+     * @param tablePath Path of the table
      * @return The requested table
      * @throws TableNotExistException if the target does not exist
      */
-    TableSchema getTable(ObjectPath tablePath) throws TableNotExistException;
+    default FileStoreTable getTable(ObjectPath tablePath) throws TableNotExistException {
+        TableSchema tableSchema = getTableSchema(tablePath);
+        return FileStoreTableFactory.create(getTableLocation(tablePath), tableSchema);
+    }
 
     /**
      * Check if a table exists in this catalog.

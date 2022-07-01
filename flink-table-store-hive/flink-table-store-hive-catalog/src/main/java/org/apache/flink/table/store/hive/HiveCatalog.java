@@ -149,7 +149,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public TableSchema getTable(ObjectPath tablePath) throws TableNotExistException {
+    public TableSchema getTableSchema(ObjectPath tablePath) throws TableNotExistException {
         if (isTableStoreTableNotExisted(tablePath)) {
             throw new TableNotExistException(tablePath);
         }
