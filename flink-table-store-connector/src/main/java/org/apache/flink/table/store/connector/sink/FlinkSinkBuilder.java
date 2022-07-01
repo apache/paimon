@@ -68,7 +68,7 @@ public class FlinkSinkBuilder {
         return this;
     }
 
-    public FlinkSinkBuilder withLogSinkFunction(LogSinkFunction logSinkFunction) {
+    public FlinkSinkBuilder withLogSinkFunction(@Nullable LogSinkFunction logSinkFunction) {
         this.logSinkFunction = logSinkFunction;
         return this;
     }
