@@ -26,7 +26,11 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.function.Function;
 
-/** A bin packing implementation. */
+/**
+ * A bin packing implementation.
+ *
+ * <p>NOTE: Copied from Flink.
+ */
 @Internal
 public class BinPacking {
     private BinPacking() {}

@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.MapData;
@@ -38,8 +37,9 @@ import java.util.Arrays;
  * <p>Projection includes both reducing the accessible fields and reordering them.
  *
  * <p>Note: This class supports only top-level projections, not nested projections.
+ *
+ * <p>NOTE: Copied from Flink.
  */
-@PublicEvolving
 public class ProjectedRowData implements RowData {
 
     private final int[] indexMapping;

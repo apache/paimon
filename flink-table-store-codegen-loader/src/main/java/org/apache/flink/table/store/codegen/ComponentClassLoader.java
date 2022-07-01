@@ -51,6 +51,8 @@ import java.util.Iterator;
  *   <li>component-first: component -> bootstrap -> owner; opt-in.
  *   <li>owner-first: owner -> component -> bootstrap; opt-in.
  * </ul>
+ *
+ * <p>NOTE: Copied from Flink.
  */
 public class ComponentClassLoader extends URLClassLoader {
     private static final ClassLoader PLATFORM_OR_BOOTSTRAP_LOADER;

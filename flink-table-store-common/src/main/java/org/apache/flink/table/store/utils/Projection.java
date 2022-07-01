@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.FieldsDataType;
@@ -41,8 +40,9 @@ import static org.apache.flink.table.types.logical.LogicalTypeRoot.ROW;
 /**
  * {@link Projection} represents a list of (possibly nested) indexes that can be used to project
  * data types. A row projection includes both reducing the accessible fields and reordering them.
+ *
+ * <p>NOTE: Copied from Flink.
  */
-@PublicEvolving
 public abstract class Projection {
 
     // sealed class

@@ -41,7 +41,11 @@ import java.io.IOException;
 import java.util.Iterator;
 import java.util.function.Function;
 
-/** Provides a {@link BulkFormat} for Avro records. */
+/**
+ * Provides a {@link BulkFormat} for Avro records.
+ *
+ * <p>NOTE: Copied from Flink.
+ */
 @Internal
 public abstract class AbstractAvroBulkFormat<A, T, SplitT extends FileSourceSplit>
         implements BulkFormat<T, SplitT> {
