@@ -31,9 +31,7 @@ batch processing in Flink, supporting high-speed data ingestion and timely data 
 
 ## Architecture
 
-<center>
-<img src="/img/architecture.png" width="100%"/>
-</center>
+{{< img src="/img/architecture.png">}}
 
 As shown in the architecture above:
 
