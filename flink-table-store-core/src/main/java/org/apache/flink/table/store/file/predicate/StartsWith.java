@@ -24,8 +24,11 @@ import org.apache.flink.table.types.logical.LogicalType;
 
 import java.util.Optional;
 
-/** A {@link LeafBinaryFunction} to evaluate {@code filter like 'abc%' or filter like 'abc_'}. */
-public class StartsWith extends LeafBinaryFunction {
+/**
+ * A {@link NullFalseLeafBinaryFunction} to evaluate {@code filter like 'abc%' or filter like
+ * 'abc_'}.
+ */
+public class StartsWith extends NullFalseLeafBinaryFunction {
 
     public static final StartsWith INSTANCE = new StartsWith();
 
@@ -34,15 +37,12 @@ public class StartsWith extends LeafBinaryFunction {
     @Override
     public boolean test(LogicalType type, Object field, Object patternLiteral) {
         BinaryStringData fieldString = (BinaryStringData) field;
-        return fieldString != null && fieldString.startsWith((BinaryStringData) patternLiteral);
+        return fieldString.startsWith((BinaryStringData) patternLiteral);
     }
 
     @Override
     public boolean test(
             LogicalType type, long rowCount, FieldStats fieldStats, Object patternLiteral) {
-        if (rowCount == fieldStats.nullCount()) {
-            return false;
-        }
         BinaryStringData min = (BinaryStringData) fieldStats.minValue();
         BinaryStringData max = (BinaryStringData) fieldStats.maxValue();
         BinaryStringData pattern = (BinaryStringData) patternLiteral;

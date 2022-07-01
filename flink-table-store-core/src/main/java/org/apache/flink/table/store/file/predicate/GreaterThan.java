@@ -26,7 +26,7 @@ import java.util.Optional;
 import static org.apache.flink.table.store.file.predicate.CompareUtils.compareLiteral;
 
 /** A {@link LeafFunction} to eval greater. */
-public class GreaterThan extends LeafBinaryFunction {
+public class GreaterThan extends NullFalseLeafBinaryFunction {
 
     public static final GreaterThan INSTANCE = new GreaterThan();
 
@@ -34,14 +34,11 @@ public class GreaterThan extends LeafBinaryFunction {
 
     @Override
     public boolean test(LogicalType type, Object field, Object literal) {
-        return field != null && compareLiteral(type, literal, field) < 0;
+        return compareLiteral(type, literal, field) < 0;
     }
 
     @Override
     public boolean test(LogicalType type, long rowCount, FieldStats fieldStats, Object literal) {
-        if (rowCount == fieldStats.nullCount()) {
-            return false;
-        }
         return compareLiteral(type, literal, fieldStats.maxValue()) < 0;
     }
 

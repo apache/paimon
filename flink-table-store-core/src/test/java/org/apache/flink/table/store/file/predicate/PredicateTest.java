@@ -72,6 +72,24 @@ public class PredicateTest {
     }
 
     @Test
+    public void testEqualNull() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        CallExpression expression =
+                call(
+                        BuiltInFunctionDefinitions.EQUALS,
+                        field(0, DataTypes.INT()),
+                        literal(null, DataTypes.INT()));
+        Predicate predicate = expression.accept(new PredicateConverter(builder));
+
+        assertThat(predicate.test(new Object[] {4})).isEqualTo(false);
+        assertThat(predicate.test(new Object[] {null})).isEqualTo(false);
+
+        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 5, 0)})).isEqualTo(false);
+        assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
+                .isEqualTo(false);
+    }
+
+    @Test
     public void testNotEqual() {
         PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
         CallExpression expression =
@@ -90,6 +108,24 @@ public class PredicateTest {
                 .isEqualTo(false);
 
         assertThat(predicate.negate().orElse(null)).isEqualTo(builder.equal(0, 5));
+    }
+
+    @Test
+    public void testNotEqualNull() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        CallExpression expression =
+                call(
+                        BuiltInFunctionDefinitions.NOT_EQUALS,
+                        field(0, DataTypes.INT()),
+                        literal(null, DataTypes.INT()));
+        Predicate predicate = expression.accept(new PredicateConverter(builder));
+
+        assertThat(predicate.test(new Object[] {4})).isEqualTo(false);
+        assertThat(predicate.test(new Object[] {null})).isEqualTo(false);
+
+        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 5, 0)})).isEqualTo(false);
+        assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
+                .isEqualTo(false);
     }
 
     @Test
@@ -118,6 +154,24 @@ public class PredicateTest {
     }
 
     @Test
+    public void testGreaterNull() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        CallExpression expression =
+                call(
+                        BuiltInFunctionDefinitions.GREATER_THAN,
+                        field(0, DataTypes.INT()),
+                        literal(null, DataTypes.INT()));
+        Predicate predicate = expression.accept(new PredicateConverter(builder));
+
+        assertThat(predicate.test(new Object[] {4})).isEqualTo(false);
+        assertThat(predicate.test(new Object[] {null})).isEqualTo(false);
+
+        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 4, 0)})).isEqualTo(false);
+        assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
+                .isEqualTo(false);
+    }
+
+    @Test
     public void testGreaterOrEqual() {
         PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
         CallExpression expression =
@@ -143,6 +197,24 @@ public class PredicateTest {
     }
 
     @Test
+    public void testGreaterOrEqualNull() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        CallExpression expression =
+                call(
+                        BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL,
+                        field(0, DataTypes.INT()),
+                        literal(null, DataTypes.INT()));
+        Predicate predicate = expression.accept(new PredicateConverter(builder));
+
+        assertThat(predicate.test(new Object[] {4})).isEqualTo(false);
+        assertThat(predicate.test(new Object[] {null})).isEqualTo(false);
+
+        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 4, 0)})).isEqualTo(false);
+        assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
+                .isEqualTo(false);
+    }
+
+    @Test
     public void testLess() {
         PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
         CallExpression expression =
@@ -161,6 +233,24 @@ public class PredicateTest {
                 .isEqualTo(false);
 
         assertThat(predicate.negate().orElse(null)).isEqualTo(builder.greaterOrEqual(0, 5));
+    }
+
+    @Test
+    public void testLessNull() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        CallExpression expression =
+                call(
+                        BuiltInFunctionDefinitions.LESS_THAN,
+                        field(0, DataTypes.INT()),
+                        literal(null, DataTypes.INT()));
+        Predicate predicate = expression.accept(new PredicateConverter(builder));
+
+        assertThat(predicate.test(new Object[] {4})).isEqualTo(false);
+        assertThat(predicate.test(new Object[] {null})).isEqualTo(false);
+
+        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(6, 7, 0)})).isEqualTo(false);
+        assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
+                .isEqualTo(false);
     }
 
     @Test
@@ -185,6 +275,24 @@ public class PredicateTest {
                 .isEqualTo(false);
 
         assertThat(predicate.negate().orElse(null)).isEqualTo(builder.greaterThan(0, 5));
+    }
+
+    @Test
+    public void testLessOrEqualNull() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        CallExpression expression =
+                call(
+                        BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL,
+                        field(0, DataTypes.INT()),
+                        literal(null, DataTypes.INT()));
+        Predicate predicate = expression.accept(new PredicateConverter(builder));
+
+        assertThat(predicate.test(new Object[] {4})).isEqualTo(false);
+        assertThat(predicate.test(new Object[] {null})).isEqualTo(false);
+
+        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(6, 7, 0)})).isEqualTo(false);
+        assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
+                .isEqualTo(false);
     }
 
     @Test

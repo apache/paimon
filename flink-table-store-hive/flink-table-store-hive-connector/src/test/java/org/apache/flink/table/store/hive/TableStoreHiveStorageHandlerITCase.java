@@ -346,9 +346,16 @@ public class TableStoreHiveStorageHandlerITCase {
                 Arrays.asList("1", "3"),
                 hiveShell.executeQuery("SELECT * FROM test_table WHERE a IN (0, 1, 3, 7)"));
         Assert.assertEquals(
+                Collections.singletonList("3"),
+                hiveShell.executeQuery("SELECT * FROM test_table WHERE a IN (0, NULL, 3, 7)"));
+        Assert.assertEquals(
                 Arrays.asList("4", "6"),
                 hiveShell.executeQuery(
                         "SELECT * FROM test_table WHERE a NOT IN (0, 1, 3, 2, 5, 7)"));
+        Assert.assertEquals(
+                Collections.emptyList(),
+                hiveShell.executeQuery(
+                        "SELECT * FROM test_table WHERE a NOT IN (0, 1, NULL, 2, 5, 7)"));
         Assert.assertEquals(
                 Arrays.asList("2", "3"),
                 hiveShell.executeQuery("SELECT * FROM test_table WHERE a BETWEEN 2 AND 3"));
