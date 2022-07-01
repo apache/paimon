@@ -29,17 +29,17 @@ import java.util.function.Function;
 public class TableStoreDataStreamScanProvider implements DataStreamScanProvider {
 
     private final boolean isBounded;
-    private final Function<StreamExecutionEnvironment, DataStream<RowData>> produce;
+    private final Function<StreamExecutionEnvironment, DataStream<RowData>> producer;
 
     public TableStoreDataStreamScanProvider(
-            boolean isBounded, Function<StreamExecutionEnvironment, DataStream<RowData>> produce) {
+            boolean isBounded, Function<StreamExecutionEnvironment, DataStream<RowData>> producer) {
         this.isBounded = isBounded;
-        this.produce = produce;
+        this.producer = producer;
     }
 
     @Override
     public DataStream<RowData> produceDataStream(StreamExecutionEnvironment env) {
-        return produce.apply(env);
+        return producer.apply(env);
     }
 
     @Override

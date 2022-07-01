@@ -28,15 +28,15 @@ import java.util.function.Function;
 /** Table Store {@link DataStreamSinkProvider}. */
 public class TableStoreDataStreamSinkProvider implements DataStreamSinkProvider {
 
-    private final Function<DataStream<RowData>, DataStreamSink<?>> produce;
+    private final Function<DataStream<RowData>, DataStreamSink<?>> producer;
 
     public TableStoreDataStreamSinkProvider(
-            Function<DataStream<RowData>, DataStreamSink<?>> produce) {
-        this.produce = produce;
+            Function<DataStream<RowData>, DataStreamSink<?>> producer) {
+        this.producer = producer;
     }
 
     @Override
     public DataStreamSink<?> consumeDataStream(DataStream<RowData> dataStream) {
-        return produce.apply(dataStream);
+        return producer.apply(dataStream);
     }
 }

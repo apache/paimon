@@ -20,6 +20,8 @@ package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.StringUtils;
+
 
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -50,7 +52,7 @@ public class RowDataPartitionComputer {
         for (int i = 0; i < partitionFieldGetters.length; i++) {
             Object field = partitionFieldGetters[i].getFieldOrNull(in);
             String partitionValue = field != null ? field.toString() : null;
-            if (partitionValue == null || "".equals(partitionValue)) {
+            if (StringUtils.isNullOrWhitespaceOnly(partitionValue)) {
                 partitionValue = defaultPartValue;
             }
             partSpec.put(partitionColumns[i], partitionValue);
