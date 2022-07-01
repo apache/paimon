@@ -103,13 +103,11 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                     .is(LogicalTypeFamily.CHARACTER_STRING)) {
                 String sqlPattern =
                         extractLiteral(fieldRefExpr.getOutputDataType(), children.get(1))
-                                .orElseThrow(UnsupportedExpression::new)
                                 .toString();
                 String escape =
                         children.size() <= 2
                                 ? null
                                 : extractLiteral(fieldRefExpr.getOutputDataType(), children.get(2))
-                                        .orElseThrow(UnsupportedExpression::new)
                                         .toString();
                 String escapedSqlPattern = sqlPattern;
                 boolean allowQuick = false;
@@ -171,19 +169,16 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             BiFunction<Integer, Object, Predicate> visit1,
             BiFunction<Integer, Object, Predicate> visit2) {
         Optional<FieldReferenceExpression> fieldRefExpr = extractFieldReference(children.get(0));
-        Optional<Object> literal;
         if (fieldRefExpr.isPresent()) {
-            literal = extractLiteral(fieldRefExpr.get().getOutputDataType(), children.get(1));
-            if (literal.isPresent()) {
-                return visit1.apply(fieldRefExpr.get().getFieldIndex(), literal.get());
-            }
+            Object literal =
+                    extractLiteral(fieldRefExpr.get().getOutputDataType(), children.get(1));
+            return visit1.apply(fieldRefExpr.get().getFieldIndex(), literal);
         } else {
             fieldRefExpr = extractFieldReference(children.get(1));
             if (fieldRefExpr.isPresent()) {
-                literal = extractLiteral(fieldRefExpr.get().getOutputDataType(), children.get(0));
-                if (literal.isPresent()) {
-                    return visit2.apply(fieldRefExpr.get().getFieldIndex(), literal.get());
-                }
+                Object literal =
+                        extractLiteral(fieldRefExpr.get().getOutputDataType(), children.get(0));
+                return visit2.apply(fieldRefExpr.get().getFieldIndex(), literal);
             }
         }
 
@@ -197,33 +192,35 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         return Optional.empty();
     }
 
-    private Optional<Object> extractLiteral(DataType expectedType, Expression expression) {
+    private Object extractLiteral(DataType expectedType, Expression expression) {
         LogicalType expectedLogicalType = expectedType.getLogicalType();
         if (!supportsPredicate(expectedLogicalType)) {
-            return Optional.empty();
+            throw new UnsupportedExpression();
         }
-        Object literal = null;
+
         if (expression instanceof ValueLiteralExpression) {
             ValueLiteralExpression valueExpression = (ValueLiteralExpression) expression;
+            if (valueExpression.isNull()) {
+                return null;
+            }
+
             DataType actualType = valueExpression.getOutputDataType();
             LogicalType actualLogicalType = actualType.getLogicalType();
             Optional<?> valueOpt = valueExpression.getValueAs(actualType.getConversionClass());
-            if (!valueOpt.isPresent()) {
-                return Optional.empty();
-            }
-            Object value = valueOpt.get();
-            if (actualLogicalType.getTypeRoot().equals(expectedLogicalType.getTypeRoot())) {
-                literal = getConverter(expectedType).toInternalOrNull(value);
-            } else if (supportsImplicitCast(actualLogicalType, expectedLogicalType)) {
-                try {
-                    value = TypeUtils.castFromString(value.toString(), expectedLogicalType);
-                    literal = value;
-                } catch (Exception ignored) {
-                    // ignore here, let #visit throw UnsupportedExpression
+            if (valueOpt.isPresent()) {
+                Object value = valueOpt.get();
+                if (actualLogicalType.getTypeRoot().equals(expectedLogicalType.getTypeRoot())) {
+                    return getConverter(expectedType).toInternalOrNull(value);
+                } else if (supportsImplicitCast(actualLogicalType, expectedLogicalType)) {
+                    try {
+                        return TypeUtils.castFromString(value.toString(), expectedLogicalType);
+                    } catch (Exception ignored) {
+                    }
                 }
             }
         }
-        return literal == null ? Optional.empty() : Optional.of(literal);
+
+        throw new UnsupportedExpression();
     }
 
     private boolean supportsPredicate(LogicalType type) {

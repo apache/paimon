@@ -23,7 +23,7 @@ import org.apache.flink.table.types.logical.LogicalType;
 
 import java.util.Optional;
 
-/** A {@link LeafBinaryFunction} to eval is null. */
+/** A {@link NullFalseLeafBinaryFunction} to eval is null. */
 public class IsNull extends LeafUnaryFunction {
 
     public static final IsNull INSTANCE = new IsNull();

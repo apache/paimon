@@ -682,17 +682,6 @@ under the License.
 
                             <removeUnusedImports/>
                         </java>
-                        <scala>
-                            <scalafmt>
-                                <version>3.4.3</version>
-                                <!-- This file is in the root of the project to make sure IntelliJ picks it up automatically -->
-                                <file>.scalafmt.conf</file>
-                            </scalafmt>
-                            <licenseHeader>
-                                <content>${spotless.license.header}</content>
-                                <delimiter>${spotless.delimiter}</delimiter>
-                            </licenseHeader>
-                        </scala>
                     </configuration>
                     <executions>
                         <execution>

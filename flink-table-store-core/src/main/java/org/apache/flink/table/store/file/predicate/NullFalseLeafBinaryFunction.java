@@ -24,7 +24,7 @@ import org.apache.flink.table.types.logical.LogicalType;
 import java.util.List;
 
 /** Function to test a field with a literal. */
-public abstract class LeafBinaryFunction implements LeafFunction {
+public abstract class NullFalseLeafBinaryFunction implements LeafFunction {
 
     private static final long serialVersionUID = 1L;
 
@@ -35,12 +35,18 @@ public abstract class LeafBinaryFunction implements LeafFunction {
 
     @Override
     public boolean test(LogicalType type, Object field, List<Object> literals) {
+        if (field == null || literals.get(0) == null) {
+            return false;
+        }
         return test(type, field, literals.get(0));
     }
 
     @Override
     public boolean test(
             LogicalType type, long rowCount, FieldStats fieldStats, List<Object> literals) {
+        if (rowCount == fieldStats.nullCount() || literals.get(0) == null) {
+            return false;
+        }
         return test(type, rowCount, fieldStats, literals.get(0));
     }
 }
