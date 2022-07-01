@@ -283,7 +283,7 @@ under the License.
             </build>
         </profile>
 
-        <!-- Activate these profiles with -Pspark-x.x to build and test against different Spark versions -->
+        <!-- Activate these profiles with -Pflink-x.xx to build and test against different Flink versions -->
         <profile>
             <id>flink-1.14</id>
             <properties>

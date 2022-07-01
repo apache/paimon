@@ -22,7 +22,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.StringUtils;
 
-
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;

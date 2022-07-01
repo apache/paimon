@@ -35,7 +35,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
 
-/** Factory to create orc input format. */
+/** Factory to create orc input format for different Flink versions. */
 public class OrcInputFormatFactory {
 
     public static BulkFormat<RowData, FileSourceSplit> create(
