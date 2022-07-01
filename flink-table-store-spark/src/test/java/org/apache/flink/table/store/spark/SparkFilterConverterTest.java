@@ -71,25 +71,50 @@ public class SparkFilterConverterTest {
         Predicate actualLt = converter.convert(lt);
         assertThat(actualLt).isEqualTo(expectedLt);
 
+        LessThan ltNull = LessThan.apply(field, null);
+        Predicate expectedLtNull = builder.lessThan(0, null);
+        Predicate actualLtNull = converter.convert(ltNull);
+        assertThat(actualLtNull).isEqualTo(expectedLtNull);
+
         LessThanOrEqual ltEq = LessThanOrEqual.apply(field, 1);
         Predicate expectedLtEq = builder.lessOrEqual(0, 1);
         Predicate actualLtEq = converter.convert(ltEq);
         assertThat(actualLtEq).isEqualTo(expectedLtEq);
+
+        LessThanOrEqual ltEqNull = LessThanOrEqual.apply(field, null);
+        Predicate expectedLtEqNull = builder.lessOrEqual(0, null);
+        Predicate actualLtEqNull = converter.convert(ltEqNull);
+        assertThat(actualLtEqNull).isEqualTo(expectedLtEqNull);
 
         GreaterThan gt = GreaterThan.apply(field, 1);
         Predicate expectedGt = builder.greaterThan(0, 1);
         Predicate actualGt = converter.convert(gt);
         assertThat(actualGt).isEqualTo(expectedGt);
 
+        GreaterThan gtNull = GreaterThan.apply(field, null);
+        Predicate expectedGtNull = builder.greaterThan(0, null);
+        Predicate actualGtNull = converter.convert(gtNull);
+        assertThat(actualGtNull).isEqualTo(expectedGtNull);
+
         GreaterThanOrEqual gtEq = GreaterThanOrEqual.apply(field, 1);
         Predicate expectedGtEq = builder.greaterOrEqual(0, 1);
         Predicate actualGtEq = converter.convert(gtEq);
         assertThat(actualGtEq).isEqualTo(expectedGtEq);
 
+        GreaterThanOrEqual gtEqNull = GreaterThanOrEqual.apply(field, null);
+        Predicate expectedGtEqNull = builder.greaterOrEqual(0, null);
+        Predicate actualGtEqNull = converter.convert(gtEqNull);
+        assertThat(actualGtEqNull).isEqualTo(expectedGtEqNull);
+
         EqualTo eq = EqualTo.apply(field, 1);
         Predicate expectedEq = builder.equal(0, 1);
         Predicate actualEq = converter.convert(eq);
         assertThat(actualEq).isEqualTo(expectedEq);
+
+        EqualTo eqNull = EqualTo.apply(field, null);
+        Predicate expectedEqNull = builder.equal(0, null);
+        Predicate actualEqNull = converter.convert(eqNull);
+        assertThat(actualEqNull).isEqualTo(expectedEqNull);
     }
 
     @Test

@@ -25,8 +25,8 @@ import java.util.Optional;
 
 import static org.apache.flink.table.store.file.predicate.CompareUtils.compareLiteral;
 
-/** A {@link LeafBinaryFunction} to eval less or equal. */
-public class LessThan extends LeafBinaryFunction {
+/** A {@link NullFalseLeafBinaryFunction} to eval less or equal. */
+public class LessThan extends NullFalseLeafBinaryFunction {
 
     public static final LessThan INSTANCE = new LessThan();
 
@@ -34,14 +34,11 @@ public class LessThan extends LeafBinaryFunction {
 
     @Override
     public boolean test(LogicalType type, Object field, Object literal) {
-        return field != null && compareLiteral(type, literal, field) > 0;
+        return compareLiteral(type, literal, field) > 0;
     }
 
     @Override
     public boolean test(LogicalType type, long rowCount, FieldStats fieldStats, Object literal) {
-        if (rowCount == fieldStats.nullCount()) {
-            return false;
-        }
         return compareLiteral(type, literal, fieldStats.minValue()) > 0;
     }
 

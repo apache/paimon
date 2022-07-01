@@ -64,6 +64,8 @@ public class PredicateConverterTest {
                 new FieldReferenceExpression("long1", DataTypes.BIGINT(), 0, 0);
         ValueLiteralExpression intLitExpr = new ValueLiteralExpression(10);
         long longLit = 10L;
+        ValueLiteralExpression nullLongLitExpr =
+                new ValueLiteralExpression(null, DataTypes.BIGINT());
 
         FieldReferenceExpression doubleRefExpr =
                 new FieldReferenceExpression("double1", DataTypes.DOUBLE(), 0, 1);
@@ -94,10 +96,22 @@ public class PredicateConverterTest {
                         BUILDER.equal(0, longLit)),
                 Arguments.of(
                         CallExpression.permanent(
+                                BuiltInFunctionDefinitions.EQUALS,
+                                Arrays.asList(nullLongLitExpr, longRefExpr),
+                                DataTypes.BOOLEAN()),
+                        BUILDER.equal(0, null)),
+                Arguments.of(
+                        CallExpression.permanent(
                                 BuiltInFunctionDefinitions.NOT_EQUALS,
                                 Arrays.asList(longRefExpr, intLitExpr),
                                 DataTypes.BOOLEAN()),
                         BUILDER.notEqual(0, longLit)),
+                Arguments.of(
+                        CallExpression.permanent(
+                                BuiltInFunctionDefinitions.NOT_EQUALS,
+                                Arrays.asList(longRefExpr, nullLongLitExpr),
+                                DataTypes.BOOLEAN()),
+                        BUILDER.notEqual(0, null)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.GREATER_THAN,
@@ -106,10 +120,22 @@ public class PredicateConverterTest {
                         BUILDER.greaterThan(0, longLit)),
                 Arguments.of(
                         CallExpression.permanent(
+                                BuiltInFunctionDefinitions.GREATER_THAN,
+                                Arrays.asList(longRefExpr, nullLongLitExpr),
+                                DataTypes.BOOLEAN()),
+                        BUILDER.greaterThan(0, null)),
+                Arguments.of(
+                        CallExpression.permanent(
                                 BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL,
                                 Arrays.asList(longRefExpr, intLitExpr),
                                 DataTypes.BOOLEAN()),
                         BUILDER.greaterOrEqual(0, longLit)),
+                Arguments.of(
+                        CallExpression.permanent(
+                                BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL,
+                                Arrays.asList(longRefExpr, nullLongLitExpr),
+                                DataTypes.BOOLEAN()),
+                        BUILDER.greaterOrEqual(0, null)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.LESS_THAN,
@@ -118,10 +144,22 @@ public class PredicateConverterTest {
                         BUILDER.lessThan(0, longLit)),
                 Arguments.of(
                         CallExpression.permanent(
+                                BuiltInFunctionDefinitions.LESS_THAN,
+                                Arrays.asList(longRefExpr, nullLongLitExpr),
+                                DataTypes.BOOLEAN()),
+                        BUILDER.lessThan(0, null)),
+                Arguments.of(
+                        CallExpression.permanent(
                                 BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL,
                                 Arrays.asList(longRefExpr, intLitExpr),
                                 DataTypes.BOOLEAN()),
                         BUILDER.lessOrEqual(0, longLit)),
+                Arguments.of(
+                        CallExpression.permanent(
+                                BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL,
+                                Arrays.asList(longRefExpr, nullLongLitExpr),
+                                DataTypes.BOOLEAN()),
+                        BUILDER.lessOrEqual(0, null)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.AND,

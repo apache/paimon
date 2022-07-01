@@ -86,7 +86,7 @@ public class PredicateBuilder {
         return leaf(StartsWith.INSTANCE, idx, patternLiteral);
     }
 
-    public Predicate leaf(LeafBinaryFunction function, int idx, Object literal) {
+    public Predicate leaf(NullFalseLeafBinaryFunction function, int idx, Object literal) {
         return new LeafPredicate(function, rowType.getTypeAt(idx), idx, singletonList(literal));
     }
 
@@ -160,7 +160,7 @@ public class PredicateBuilder {
 
     public static Object convertJavaObject(LogicalType literalType, Object o) {
         if (o == null) {
-            throw new UnsupportedOperationException("Null literals are currently unsupported");
+            return null;
         }
         switch (literalType.getTypeRoot()) {
             case BOOLEAN:
