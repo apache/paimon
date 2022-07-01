@@ -18,44 +18,32 @@
 
 package org.apache.flink.table.store.connector.sink;
 
-import org.apache.flink.api.connector.sink2.Committer;
-import org.apache.flink.api.connector.sink2.Sink;
-import org.apache.flink.api.connector.sink2.SinkWriter;
-import org.apache.flink.api.connector.sink2.StatefulSink;
-import org.apache.flink.api.connector.sink2.TwoPhaseCommittingSink;
-import org.apache.flink.core.io.SimpleVersionedSerializer;
-import org.apache.flink.table.catalog.CatalogLock;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.DataStreamSink;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
+import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.connector.StatefulPrecommittingSinkWriter;
-import org.apache.flink.table.store.connector.sink.global.GlobalCommittingSink;
-import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.operation.Lock;
-import org.apache.flink.table.store.log.LogInitContext;
-import org.apache.flink.table.store.log.LogSinkProvider;
-import org.apache.flink.table.store.log.LogWriteCallback;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.sink.SinkRecord;
-import org.apache.flink.table.store.table.sink.TableCompact;
+import org.apache.flink.table.store.table.sink.LogSinkFunction;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.util.Collection;
-import java.util.Collections;
+import java.io.Serializable;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.Callable;
-import java.util.function.Consumer;
 
-/** {@link Sink} of dynamic store. */
-public class StoreSink<WriterStateT, LogCommT>
-        implements StatefulSink<RowData, WriterStateT>,
-                GlobalCommittingSink<RowData, Committable, ManifestCommittable> {
+/** Sink of dynamic store. */
+public class StoreSink implements Serializable {
 
     private static final long serialVersionUID = 1L;
+
+    private static final String WRITER_NAME = "Writer";
+
+    private static final String GLOBAL_COMMITTER_NAME = "Global Committer";
 
     private final ObjectIdentifier tableIdentifier;
 
@@ -69,7 +57,7 @@ public class StoreSink<WriterStateT, LogCommT>
 
     @Nullable private final Map<String, String> overwritePartition;
 
-    @Nullable private final LogSinkProvider logSinkProvider;
+    @Nullable private final LogSinkFunction logSinkFunction;
 
     public StoreSink(
             ObjectIdentifier tableIdentifier,
@@ -78,100 +66,24 @@ public class StoreSink<WriterStateT, LogCommT>
             @Nullable Map<String, String> compactPartitionSpec,
             @Nullable CatalogLock.Factory lockFactory,
             @Nullable Map<String, String> overwritePartition,
-            @Nullable LogSinkProvider logSinkProvider) {
+            @Nullable LogSinkFunction logSinkFunction) {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
         this.compactionTask = compactionTask;
         this.compactPartitionSpec = compactPartitionSpec;
         this.lockFactory = lockFactory;
         this.overwritePartition = overwritePartition;
-        this.logSinkProvider = logSinkProvider;
+        this.logSinkFunction = logSinkFunction;
     }
 
-    @Override
-    public StatefulPrecommittingSinkWriter<WriterStateT> createWriter(InitContext initContext)
-            throws IOException {
-        return restoreWriter(initContext, null);
-    }
-
-    @Override
-    public StatefulPrecommittingSinkWriter<WriterStateT> restoreWriter(
-            InitContext initContext, Collection<WriterStateT> states) throws IOException {
+    private OneInputStreamOperator<RowData, Committable> createWriteOperator() {
         if (compactionTask) {
-            return createCompactWriter(initContext);
+            return new StoreCompactOperator(table, compactPartitionSpec);
         }
-        SinkWriter<SinkRecord> logWriter = null;
-        LogWriteCallback logCallback = null;
-        if (logSinkProvider != null) {
-            logCallback = new LogWriteCallback();
-            Consumer<?> metadataConsumer = logSinkProvider.createMetadataConsumer(logCallback);
-            LogInitContext logInitContext = new LogInitContext(initContext, metadataConsumer);
-            Sink<SinkRecord> logSink = logSinkProvider.createSink();
-            logWriter =
-                    states == null
-                            ? logSink.createWriter(logInitContext)
-                            : ((StatefulSink<SinkRecord, WriterStateT>) logSink)
-                                    .restoreWriter(logInitContext, states);
-        }
-        return new StoreSinkWriter<>(
-                table.newWrite().withOverwrite(overwritePartition != null), logWriter, logCallback);
+        return new StoreWriteOperator(table, overwritePartition, logSinkFunction);
     }
 
-    private StoreSinkCompactor<WriterStateT> createCompactWriter(InitContext initContext) {
-        int task = initContext.getSubtaskId();
-        int numTask = initContext.getNumberOfParallelSubtasks();
-        TableCompact tableCompact = table.newCompact();
-        tableCompact.withPartitions(
-                compactPartitionSpec == null ? Collections.emptyMap() : compactPartitionSpec);
-        tableCompact.withFilter(
-                (partition, bucket) -> task == Math.abs(Objects.hash(partition, bucket) % numTask));
-        return new StoreSinkCompactor<>(tableCompact);
-    }
-
-    @Override
-    public SimpleVersionedSerializer<WriterStateT> getWriterStateSerializer() {
-        return logSinkProvider == null
-                ? new NoOutputSerializer<>()
-                : ((StatefulSink<SinkRecord, WriterStateT>) logSinkProvider.createSink())
-                        .getWriterStateSerializer();
-    }
-
-    @Nullable
-    private Committer<LogCommT> logCommitter() {
-        if (logSinkProvider != null) {
-            Sink<SinkRecord> sink = logSinkProvider.createSink();
-            if (sink instanceof TwoPhaseCommittingSink) {
-                try {
-                    return ((TwoPhaseCommittingSink<SinkRecord, LogCommT>) sink).createCommitter();
-                } catch (IOException e) {
-                    throw new UncheckedIOException(e);
-                }
-            }
-        }
-
-        return null;
-    }
-
-    @Nullable
-    private SimpleVersionedSerializer<LogCommT> logCommitSerializer() {
-        if (logSinkProvider != null) {
-            Sink<SinkRecord> sink = logSinkProvider.createSink();
-            if (sink instanceof TwoPhaseCommittingSink) {
-                return ((TwoPhaseCommittingSink<SinkRecord, LogCommT>) sink)
-                        .getCommittableSerializer();
-            }
-        }
-
-        return null;
-    }
-
-    @Override
-    public Committer<Committable> createCommitter() {
-        return new StoreLocalCommitter<>(logCommitter());
-    }
-
-    @Override
-    public StoreGlobalCommitter createGlobalCommitter() {
+    private StoreCommitter createCommitter() {
         CatalogLock catalogLock;
         Lock lock;
         if (lockFactory == null) {
@@ -191,40 +103,25 @@ public class StoreSink<WriterStateT, LogCommT>
                     };
         }
 
-        return new StoreGlobalCommitter(
+        return new StoreCommitter(
                 table.newCommit().withOverwritePartition(overwritePartition).withLock(lock),
                 catalogLock);
     }
 
-    @SuppressWarnings("unchecked")
-    @Override
-    public SimpleVersionedSerializer<Committable> getCommittableSerializer() {
-        return new CommittableSerializer(
-                fileCommitSerializer(), (SimpleVersionedSerializer<Object>) logCommitSerializer());
-    }
+    public DataStreamSink<?> sinkTo(DataStream<RowData> input) {
+        CommittableTypeInfo typeInfo = new CommittableTypeInfo();
+        SingleOutputStreamOperator<Committable> written =
+                input.transform(WRITER_NAME, typeInfo, createWriteOperator())
+                        .setParallelism(input.getParallelism());
 
-    @Override
-    public ManifestCommittableSerializer getGlobalCommittableSerializer() {
-        return new ManifestCommittableSerializer();
-    }
-
-    private FileCommittableSerializer fileCommitSerializer() {
-        return new FileCommittableSerializer();
-    }
-
-    private static class NoOutputSerializer<T> implements SimpleVersionedSerializer<T> {
-        private NoOutputSerializer() {}
-
-        public int getVersion() {
-            return 1;
-        }
-
-        public byte[] serialize(T obj) {
-            throw new IllegalStateException("Should not serialize anything");
-        }
-
-        public T deserialize(int version, byte[] serialized) {
-            throw new IllegalStateException("Should not deserialize anything");
-        }
+        SingleOutputStreamOperator<?> committed =
+                written.transform(
+                                GLOBAL_COMMITTER_NAME,
+                                typeInfo,
+                                new CommitterOperator(
+                                        this::createCommitter, ManifestCommittableSerializer::new))
+                        .setParallelism(1)
+                        .setMaxParallelism(1);
+        return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 }

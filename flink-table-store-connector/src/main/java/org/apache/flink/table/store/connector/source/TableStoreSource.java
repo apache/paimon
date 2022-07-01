@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.connector.source;
 
-import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.DelegatingConfiguration;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -46,7 +45,6 @@ import org.apache.flink.table.store.table.ChangelogValueCountFileStoreTable;
 import org.apache.flink.table.store.table.ChangelogWithKeyFileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.types.DataType;
-import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
@@ -119,28 +117,7 @@ public class TableStoreSource
         if (logStoreTableFactory != null) {
             logSourceProvider =
                     logStoreTableFactory.createSourceProvider(
-                            logStoreContext,
-                            new LogStoreTableFactory.SourceContext() {
-                                @Override
-                                public <T> TypeInformation<T> createTypeInformation(
-                                        DataType producedDataType) {
-                                    return scanContext.createTypeInformation(producedDataType);
-                                }
-
-                                @Override
-                                public <T> TypeInformation<T> createTypeInformation(
-                                        LogicalType producedLogicalType) {
-                                    return scanContext.createTypeInformation(producedLogicalType);
-                                }
-
-                                @Override
-                                public DataStructureConverter createDataStructureConverter(
-                                        DataType producedDataType) {
-                                    return scanContext.createDataStructureConverter(
-                                            producedDataType);
-                                }
-                            },
-                            projectFields);
+                            logStoreContext, scanContext, projectFields);
         }
 
         FlinkSourceBuilder sourceBuilder =

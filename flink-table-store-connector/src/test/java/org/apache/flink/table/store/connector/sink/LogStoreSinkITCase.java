@@ -47,8 +47,6 @@ import static org.apache.flink.table.store.connector.FileStoreITCase.buildFileSt
 import static org.apache.flink.table.store.connector.FileStoreITCase.buildStreamEnv;
 import static org.apache.flink.table.store.connector.FileStoreITCase.buildTestSource;
 import static org.apache.flink.table.store.connector.FileStoreITCase.executeAndCollect;
-import static org.apache.flink.table.store.kafka.KafkaLogTestUtils.SINK_CONTEXT;
-import static org.apache.flink.table.store.kafka.KafkaLogTestUtils.SOURCE_CONTEXT;
 import static org.apache.flink.table.store.kafka.KafkaLogTestUtils.discoverKafkaLogFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -112,9 +110,8 @@ public class LogStoreSinkITCase extends KafkaTableTestBase {
                         hasPk ? new int[] {2} : new int[0]);
 
         KafkaLogStoreFactory factory = discoverKafkaLogFactory();
-        KafkaLogSinkProvider sinkProvider = factory.createSinkProvider(context, SINK_CONTEXT);
-        KafkaLogSourceProvider sourceProvider =
-                factory.createSourceProvider(context, SOURCE_CONTEXT, null);
+        KafkaLogSinkProvider sinkProvider = factory.createSinkProvider(context, null);
+        KafkaLogSourceProvider sourceProvider = factory.createSourceProvider(context, null, null);
 
         factory.onCreateTable(context, 3, true);
 
@@ -122,7 +119,7 @@ public class LogStoreSinkITCase extends KafkaTableTestBase {
             // write
             new FlinkSinkBuilder(IDENTIFIER, table)
                     .withInput(buildTestSource(env, isBatch))
-                    .withLogSinkProvider(sinkProvider)
+                    .withLogSinkFunction(sinkProvider.createSink())
                     .build();
             env.execute();
 

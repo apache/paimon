@@ -34,7 +34,6 @@ import org.junit.jupiter.api.Assertions;
 
 import java.util.Comparator;
 import java.util.List;
-import java.util.UUID;
 
 import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.ENABLE_CHECKPOINTS_AFTER_TASKS_FINISH;
 import static org.apache.flink.table.store.kafka.KafkaLogTestUtils.SINK_CONTEXT;
@@ -146,17 +145,16 @@ public class KafkaLogITCase extends KafkaTableTestBase {
             // transactional need to commit
             enableCheckpoint();
 
-            // 1.1 sink
-            String uuid = UUID.randomUUID().toString();
+            // 1 sink
             env.fromElements(
                             testRecord(true, 2, 1, 2, RowKind.DELETE),
                             testRecord(true, 1, 3, 4, RowKind.INSERT),
                             testRecord(true, 0, 5, 6, RowKind.INSERT),
                             testRecord(true, 0, 7, 8, RowKind.INSERT))
-                    .sinkTo(new TestOffsetsLogSink<>(sinkProvider, uuid));
+                    .addSink(sinkProvider.createSink());
             env.execute();
 
-            // 1.2 read
+            // 2 read
             List<RowData> records =
                     collect(
                             factory.createSourceProvider(context, SOURCE_CONTEXT, null)
@@ -174,7 +172,7 @@ public class KafkaLogITCase extends KafkaTableTestBase {
             assertRow(records.get(2), RowKind.INSERT, 5, 6);
             assertRow(records.get(3), RowKind.INSERT, 7, 8);
 
-            // 1.3 read with projection
+            // 3 read with projection
             records =
                     collect(
                             factory.createSourceProvider(
@@ -192,24 +190,6 @@ public class KafkaLogITCase extends KafkaTableTestBase {
             assertValue(records.get(1), RowKind.INSERT, 4);
             assertValue(records.get(2), RowKind.INSERT, 6);
             assertValue(records.get(3), RowKind.INSERT, 8);
-
-            // 2.1 sink
-            env.fromElements(
-                            testRecord(true, 0, 9, 10, RowKind.INSERT),
-                            testRecord(true, 1, 11, 12, RowKind.INSERT),
-                            testRecord(true, 2, 13, 14, RowKind.INSERT))
-                    .sinkTo(new TestOffsetsLogSink<>(sinkProvider, UUID.randomUUID().toString()));
-            env.execute();
-
-            // 2.2 read from offsets
-            records =
-                    collect(
-                            factory.createSourceProvider(context, SOURCE_CONTEXT, null)
-                                    .createSource(TestOffsetsLogSink.drainOffsets(uuid)),
-                            3);
-            assertRow(records.get(0), RowKind.INSERT, 9, 10);
-            assertRow(records.get(1), RowKind.INSERT, 11, 12);
-            assertRow(records.get(2), RowKind.INSERT, 13, 14);
         } finally {
             factory.onDropTable(context, true);
         }

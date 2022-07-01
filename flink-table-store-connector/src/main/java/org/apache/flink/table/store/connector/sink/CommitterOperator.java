@@ -15,23 +15,21 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.connector.sink.global;
+package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
-import org.apache.flink.api.connector.sink2.Sink;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
-import org.apache.flink.streaming.api.connector.sink2.CommittableMessage;
-import org.apache.flink.streaming.api.connector.sink2.CommittableWithLineage;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.util.function.SerializableSupplier;
 
 import java.util.ArrayDeque;
@@ -41,16 +39,16 @@ import java.util.List;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
-/** An operator that processes committables of a {@link Sink}. */
-public abstract class AbstractCommitterOperator<IN, CommT>
-        extends AbstractStreamOperator<CommittableMessage<IN>>
-        implements OneInputStreamOperator<CommittableMessage<IN>, CommittableMessage<IN>>,
-                BoundedOneInput {
+import static org.apache.flink.util.Preconditions.checkNotNull;
+
+/** Committer operator to commit {@link Committable}. */
+public class CommitterOperator extends AbstractStreamOperator<Committable>
+        implements OneInputStreamOperator<Committable, Committable>, BoundedOneInput {
 
     private static final long serialVersionUID = 1L;
 
     /** Record all the inputs until commit. */
-    private final Deque<IN> inputs = new ArrayDeque<>();
+    private final Deque<Committable> inputs = new ArrayDeque<>();
 
     /** The operator's state descriptor. */
     private static final ListStateDescriptor<byte[]> STREAMING_COMMITTER_RAW_STATES_DESC =
@@ -58,43 +56,64 @@ public abstract class AbstractCommitterOperator<IN, CommT>
                     "streaming_committer_raw_states", BytePrimitiveArraySerializer.INSTANCE);
 
     /** Group the committable by the checkpoint id. */
-    private final NavigableMap<Long, List<CommT>> committablesPerCheckpoint;
+    private final NavigableMap<Long, ManifestCommittable> committablesPerCheckpoint;
 
     /** The committable's serializer. */
-    private final SerializableSupplier<SimpleVersionedSerializer<CommT>> committableSerializer;
+    private final SerializableSupplier<SimpleVersionedSerializer<ManifestCommittable>>
+            committableSerializer;
 
     /** The operator's state. */
-    private ListState<CommT> streamingCommitterState;
+    private ListState<ManifestCommittable> streamingCommitterState;
 
-    public AbstractCommitterOperator(
-            SerializableSupplier<SimpleVersionedSerializer<CommT>> committableSerializer) {
+    private final SerializableSupplier<Committer> committerFactory;
+
+    /**
+     * Aggregate committables to global committables and commit the global committables to the
+     * external system.
+     */
+    private Committer committer;
+
+    public CommitterOperator(
+            SerializableSupplier<Committer> committerFactory,
+            SerializableSupplier<SimpleVersionedSerializer<ManifestCommittable>>
+                    committableSerializer) {
         this.committableSerializer = committableSerializer;
         this.committablesPerCheckpoint = new TreeMap<>();
+        this.committerFactory = checkNotNull(committerFactory);
         setChainingStrategy(ChainingStrategy.ALWAYS);
     }
 
     @Override
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
+        committer = committerFactory.get();
         streamingCommitterState =
                 new SimpleVersionedListState<>(
                         context.getOperatorStateStore()
                                 .getListState(STREAMING_COMMITTER_RAW_STATES_DESC),
                         committableSerializer.get());
-        List<CommT> restored = new ArrayList<>();
+        List<ManifestCommittable> restored = new ArrayList<>();
         streamingCommitterState.get().forEach(restored::add);
         streamingCommitterState.clear();
         commit(true, restored);
     }
 
-    public abstract void commit(boolean isRecover, List<CommT> committables) throws Exception;
+    public void commit(boolean isRecover, List<ManifestCommittable> committables) throws Exception {
+        if (isRecover) {
+            committables = committer.filterRecoveredCommittables(committables);
+        }
+        committer.commit(committables);
+    }
 
-    public abstract List<CommT> toCommittables(long checkpoint, List<IN> inputs) throws Exception;
+    public ManifestCommittable toCommittables(long checkpoint, List<Committable> inputs)
+            throws Exception {
+        return committer.combine(checkpoint, inputs);
+    }
 
     @Override
     public void snapshotState(StateSnapshotContext context) throws Exception {
         super.snapshotState(context);
-        List<IN> poll = pollInputs();
+        List<Committable> poll = pollInputs();
         if (poll.size() > 0) {
             committablesPerCheckpoint.put(
                     context.getCheckpointId(), toCommittables(context.getCheckpointId(), poll));
@@ -102,10 +121,8 @@ public abstract class AbstractCommitterOperator<IN, CommT>
         streamingCommitterState.update(committables(committablesPerCheckpoint));
     }
 
-    private List<CommT> committables(NavigableMap<Long, List<CommT>> map) {
-        List<CommT> committables = new ArrayList<>();
-        map.values().forEach(committables::addAll);
-        return committables;
+    private List<ManifestCommittable> committables(NavigableMap<Long, ManifestCommittable> map) {
+        return new ArrayList<>(map.values());
     }
 
     @Override
@@ -118,7 +135,7 @@ public abstract class AbstractCommitterOperator<IN, CommT>
         // 5. this.notifyCheckpointComplete(5)
         // So we should submit all the data in the endInput in order to avoid disordered commits.
         long checkpointId = Long.MAX_VALUE;
-        List<IN> poll = pollInputs();
+        List<Committable> poll = pollInputs();
         if (!poll.isEmpty()) {
             committablesPerCheckpoint.put(checkpointId, toCommittables(checkpointId, poll));
         }
@@ -132,19 +149,16 @@ public abstract class AbstractCommitterOperator<IN, CommT>
     }
 
     private void commitUpToCheckpoint(long checkpointId) throws Exception {
-        NavigableMap<Long, List<CommT>> headMap =
+        NavigableMap<Long, ManifestCommittable> headMap =
                 committablesPerCheckpoint.headMap(checkpointId, true);
         commit(false, committables(headMap));
         headMap.clear();
     }
 
     @Override
-    public void processElement(StreamRecord<CommittableMessage<IN>> element) {
+    public void processElement(StreamRecord<Committable> element) {
         output.collect(element);
-        CommittableMessage<IN> message = element.getValue();
-        if (message instanceof CommittableWithLineage) {
-            this.inputs.add(((CommittableWithLineage<IN>) message).getCommittable());
-        }
+        this.inputs.add(element.getValue());
     }
 
     @Override
@@ -154,8 +168,8 @@ public abstract class AbstractCommitterOperator<IN, CommT>
         super.close();
     }
 
-    private List<IN> pollInputs() {
-        List<IN> poll = new ArrayList<>(this.inputs);
+    private List<Committable> pollInputs() {
+        List<Committable> poll = new ArrayList<>(this.inputs);
         this.inputs.clear();
         return poll;
     }

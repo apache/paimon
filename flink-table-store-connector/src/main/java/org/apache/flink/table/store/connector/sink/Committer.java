@@ -17,29 +17,30 @@
  *
  */
 
-package org.apache.flink.table.store.connector.sink.global;
+package org.apache.flink.table.store.connector.sink;
+
+import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 
 import java.io.IOException;
 import java.util.List;
 
 /**
- * The {@code GlobalCommitter} is responsible for creating and committing an aggregated committable,
- * which we call global committable (see {@link #combine}).
+ * The {@code Committer} is responsible for creating and committing an aggregated committable, which
+ * we call committable (see {@link #combine}).
  *
- * <p>The {@code GlobalCommitter} runs with parallelism equal to 1.
- *
- * @param <CommT> The type of information needed to commit data staged by the sink
- * @param <GlobalCommT> The type of the aggregated committable
+ * <p>The {@code Committer} runs with parallelism equal to 1.
  */
-public interface GlobalCommitter<CommT, GlobalCommT> extends AutoCloseable {
+public interface Committer extends AutoCloseable {
 
     /** Find out which global committables need to be retried when recovering from the failure. */
-    List<GlobalCommT> filterRecoveredCommittables(List<GlobalCommT> globalCommittables)
-            throws IOException;
+    List<ManifestCommittable> filterRecoveredCommittables(
+            List<ManifestCommittable> globalCommittables) throws IOException;
 
     /** Compute an aggregated committable from a list of committables. */
-    GlobalCommT combine(long checkpointId, List<CommT> committables) throws IOException;
+    ManifestCommittable combine(long checkpointId, List<Committable> committables)
+            throws IOException;
 
-    /** Commits the given {@link GlobalCommT}. */
-    void commit(List<GlobalCommT> globalCommittables) throws IOException, InterruptedException;
+    /** Commits the given {@link ManifestCommittable}. */
+    void commit(List<ManifestCommittable> globalCommittables)
+            throws IOException, InterruptedException;
 }

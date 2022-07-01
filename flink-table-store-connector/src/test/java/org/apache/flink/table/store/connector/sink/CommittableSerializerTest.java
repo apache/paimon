@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.connector.sink;
 
-import org.apache.flink.core.io.SimpleVersionedSerializer;
-import org.apache.flink.streaming.runtime.operators.sink.TestSink;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 
@@ -36,10 +34,7 @@ public class CommittableSerializerTest {
 
     private final FileCommittableSerializer fileSerializer = new FileCommittableSerializer();
 
-    private final CommittableSerializer serializer =
-            new CommittableSerializer(
-                    fileSerializer,
-                    (SimpleVersionedSerializer) TestSink.StringCommittableSerializer.INSTANCE);
+    private final CommittableSerializer serializer = new CommittableSerializer(fileSerializer);
 
     @Test
     public void testFile() throws IOException {
@@ -70,19 +65,5 @@ public class CommittableSerializerTest {
                                                         Committable.Kind.LOG_OFFSET, committable)))
                                 .wrappedCommittable();
         assertThat(newCommittable).isEqualTo(committable);
-    }
-
-    @Test
-    public void testLog() throws IOException {
-        String log = "random_string";
-        String newCommittable =
-                (String)
-                        serializer
-                                .deserialize(
-                                        1,
-                                        serializer.serialize(
-                                                new Committable(Committable.Kind.LOG, log)))
-                                .wrappedCommittable();
-        assertThat(newCommittable).isEqualTo(log);
     }
 }

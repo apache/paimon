@@ -16,15 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.log;
+package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.store.table.sink.LogSinkFunction;
+import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 
-import java.io.Serializable;
+/** Log {@link SinkFunction} with {@link WriteCallback}. */
+public interface LogSinkFunction extends SinkFunction<SinkRecord> {
 
-/** A {@link Serializable} sink provider for log store. */
-public interface LogSinkProvider extends Serializable {
+    void setWriteCallback(WriteCallback writeCallback);
 
-    /** Creates a {@link LogSinkFunction} instance. */
-    LogSinkFunction createSink();
+    /**
+     * A callback interface that the user can implement to know the offset of the bucket when the
+     * request is complete.
+     */
+    interface WriteCallback {
+
+        /**
+         * A callback method the user can implement to provide asynchronous handling of request
+         * completion. This method will be called when the record sent to the server has been
+         * acknowledged.
+         */
+        void onCompletion(int bucket, long offset);
+    }
 }
