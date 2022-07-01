@@ -195,7 +195,7 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
     private Object extractLiteral(DataType expectedType, Expression expression) {
         LogicalType expectedLogicalType = expectedType.getLogicalType();
         if (!supportsPredicate(expectedLogicalType)) {
-            throw new UnsupportedOperationException();
+            throw new UnsupportedExpression();
         }
 
         if (expression instanceof ValueLiteralExpression) {
@@ -220,7 +220,7 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             }
         }
 
-        throw new UnsupportedOperationException();
+        throw new UnsupportedExpression();
     }
 
     private boolean supportsPredicate(LogicalType type) {
