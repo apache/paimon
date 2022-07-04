@@ -40,6 +40,8 @@ public class SinkRecordConverter {
 
     private final Projection<RowData, BinaryRowData> partProjection;
 
+    private final Projection<RowData, BinaryRowData> bucketProjection;
+
     private final Projection<RowData, BinaryRowData> pkProjection;
 
     @Nullable private final Projection<RowData, BinaryRowData> logPkProjection;
@@ -49,14 +51,16 @@ public class SinkRecordConverter {
                 numBucket,
                 tableSchema.logicalRowType(),
                 tableSchema.projection(tableSchema.partitionKeys()),
+                tableSchema.projection(tableSchema.bucketKeys()),
                 tableSchema.projection(tableSchema.trimmedPrimaryKeys()),
                 tableSchema.projection(tableSchema.primaryKeys()));
     }
 
-    public SinkRecordConverter(
+    private SinkRecordConverter(
             int numBucket,
             RowType inputType,
             int[] partitions,
+            int[] bucketKeys,
             int[] primaryKeys,
             int[] logPrimaryKeys) {
         this.numBucket = numBucket;
@@ -64,6 +68,7 @@ public class SinkRecordConverter {
                 CodeGenUtils.newProjection(
                         inputType, IntStream.range(0, inputType.getFieldCount()).toArray());
         this.partProjection = CodeGenUtils.newProjection(inputType, partitions);
+        this.bucketProjection = CodeGenUtils.newProjection(inputType, bucketKeys);
         this.pkProjection = CodeGenUtils.newProjection(inputType, primaryKeys);
         this.logPkProjection =
                 Arrays.equals(primaryKeys, logPrimaryKeys)
@@ -74,7 +79,7 @@ public class SinkRecordConverter {
     public SinkRecord convert(RowData row) {
         BinaryRowData partition = partProjection.apply(row);
         BinaryRowData primaryKey = primaryKey(row);
-        int bucket = bucket(row, primaryKey);
+        int bucket = bucket(row, bucketKey(row, primaryKey));
         return new SinkRecord(partition, bucket, primaryKey, row);
     }
 
@@ -86,8 +91,22 @@ public class SinkRecordConverter {
         return new SinkRecord(record.partition(), record.bucket(), logPrimaryKey, record.row());
     }
 
-    public BinaryRowData primaryKey(RowData row) {
+    public int bucket(RowData row) {
+        return bucket(row, bucketKey(row));
+    }
+
+    private BinaryRowData primaryKey(RowData row) {
         return pkProjection.apply(row);
+    }
+
+    private BinaryRowData bucketKey(RowData row) {
+        BinaryRowData bucketKey = bucketProjection.apply(row);
+        return bucketKey.getArity() == 0 ? pkProjection.apply(row) : bucketKey;
+    }
+
+    private BinaryRowData bucketKey(RowData row, BinaryRowData primaryKey) {
+        BinaryRowData bucketKey = bucketProjection.apply(row);
+        return bucketKey.getArity() == 0 ? primaryKey : bucketKey;
     }
 
     private BinaryRowData logPrimaryKey(RowData row) {
@@ -95,8 +114,8 @@ public class SinkRecordConverter {
         return logPkProjection.apply(row);
     }
 
-    public int bucket(RowData row, BinaryRowData primaryKey) {
-        int hash = primaryKey.getArity() == 0 ? hashRow(row) : primaryKey.hashCode();
+    private int bucket(RowData row, BinaryRowData bucketKey) {
+        int hash = bucketKey.getArity() == 0 ? hashRow(row) : bucketKey.hashCode();
         return Math.abs(hash % numBucket);
     }
 

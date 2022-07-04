@@ -51,6 +51,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(1)
                     .withDescription("Bucket number for file store.");
 
+    public static final ConfigOption<String> BUCKET_KEY =
+            ConfigOptions.key("bucket-key")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specifies the table store distribution policy. Data is assigned"
+                                    + " to each bucket according to the hash value of bucket-key.");
+
     @Internal
     public static final ConfigOption<String> PATH =
             ConfigOptions.key("path")

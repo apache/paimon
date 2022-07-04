@@ -25,9 +25,11 @@ import org.apache.flink.table.types.logical.MapType;
 import org.apache.flink.table.types.logical.MultisetType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
+import org.apache.flink.util.StringUtils;
 
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -36,6 +38,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+
+import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET_KEY;
 
 /** Schema of a table. */
 public class TableSchema implements Serializable {
@@ -116,7 +120,8 @@ public class TableSchema implements Serializable {
             Preconditions.checkState(
                     adjusted.size() > 0,
                     String.format(
-                            "Primary key constraint %s should not be same with partition fields %s, this will result in only one record in a partition",
+                            "Primary key constraint %s should not be same with partition fields %s,"
+                                    + " this will result in only one record in a partition",
                             primaryKeys, partitionKeys));
 
             return adjusted;
@@ -127,6 +132,33 @@ public class TableSchema implements Serializable {
 
     public Map<String, String> options() {
         return options;
+    }
+
+    public List<String> bucketKeys() {
+        String key = options.get(BUCKET_KEY.key());
+        if (StringUtils.isNullOrWhitespaceOnly(key)) {
+            return Collections.emptyList();
+        }
+        List<String> bucketKeys = Arrays.asList(key.split(","));
+        if (!containsAll(fieldNames(), bucketKeys)) {
+            throw new RuntimeException(
+                    String.format(
+                            "Field names %s should contains all bucket keys %s.",
+                            fieldNames(), bucketKeys));
+        }
+        if (primaryKeys.size() > 0) {
+            if (!containsAll(primaryKeys, bucketKeys)) {
+                throw new RuntimeException(
+                        String.format(
+                                "Primary keys %s should contains all bucket keys %s.",
+                                primaryKeys, bucketKeys));
+            }
+        }
+        return bucketKeys;
+    }
+
+    private boolean containsAll(List<String> all, List<String> contains) {
+        return new HashSet<>(all).containsAll(new HashSet<>(contains));
     }
 
     public String comment() {

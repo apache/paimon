@@ -48,8 +48,7 @@ public class BucketStreamPartitioner extends StreamPartitioner<RowData> {
     @Override
     public int selectChannel(SerializationDelegate<StreamRecord<RowData>> record) {
         RowData row = record.getInstance().getValue();
-        int bucket = recordConverter.bucket(row, recordConverter.primaryKey(row));
-        return bucket % numberOfChannels;
+        return recordConverter.bucket(row) % numberOfChannels;
     }
 
     @Override
