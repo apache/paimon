@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.utils;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.FileSystemKind;
 import org.apache.flink.core.fs.Path;
@@ -52,6 +53,28 @@ public interface AtomicFileWriter {
                             new Path(path.getParent(), "." + path.getName() + UUID.randomUUID()));
         } else {
             return new RecoverableAtomicFileWriter(recoverableWriter);
+        }
+    }
+
+    /**
+     * Write an utf8 string to file.
+     *
+     * @return True if the committing was successful, False otherwise
+     */
+    static boolean writeFileUtf8(Path path, String content) throws IOException {
+        return writeFileUtf8(AtomicFileWriter.create(path.getFileSystem()), path, content);
+    }
+
+    @VisibleForTesting
+    static boolean writeFileUtf8(AtomicFileWriter writer, Path path, String content)
+            throws IOException {
+        AtomicFsDataOutputStream out = writer.open(path);
+        try {
+            FileUtils.writeOutputStreamUtf8(out, content);
+            return out.closeAndCommit();
+        } catch (IOException e) {
+            out.close();
+            throw e;
         }
     }
 }
