@@ -20,7 +20,6 @@ package org.apache.flink.table.store.utils;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.datagen.table.RandomGeneratorVisitor;
-import org.apache.flink.connector.datagen.table.types.RowDataGenerator;
 import org.apache.flink.streaming.api.functions.source.datagen.DataGenerator;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.TableSchema;
@@ -78,8 +77,8 @@ public class RowDataUtilsTest {
                                                                 new Configuration()))
                                                 .getGenerator())
                         .toArray(DataGenerator[]::new);
-        this.rowDataGenerator = new RowDataGenerator(generators, ROW_TYPE.getFieldNames());
-        this.rowDataGenerator.open(null, null, null);
+        this.rowDataGenerator =
+                new RowDataGenerator(generators, ROW_TYPE.getFieldNames().toArray(new String[0]));
         this.serializer = new RowDataSerializer(ROW_TYPE);
     }
 

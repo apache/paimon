@@ -18,6 +18,9 @@
 
 package org.apache.flink.table.store.utils;
 
+import org.apache.flink.table.api.TableException;
+import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.data.binary.BinaryStringData;
 import org.apache.flink.table.data.binary.BinaryStringDataUtil;
 import org.apache.flink.table.types.logical.DecimalType;
@@ -26,12 +29,26 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.TimestampType;
 
+import java.time.DateTimeException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /** Type related helper functions. */
 public class TypeUtils {
+
+    private static final List<BinaryStringData> TRUE_STRINGS =
+            Stream.of("t", "true", "y", "yes", "1")
+                    .map(BinaryStringData::fromString)
+                    .peek(BinaryStringData::ensureMaterialized)
+                    .collect(Collectors.toList());
+
+    private static final List<BinaryStringData> FALSE_STRINGS =
+            Stream.of("f", "false", "n", "no", "0")
+                    .map(BinaryStringData::fromString)
+                    .peek(BinaryStringData::ensureMaterialized)
+                    .collect(Collectors.toList());
 
     public static RowType project(RowType inputType, int[] mapping) {
         List<RowType.RowField> fields = inputType.getFields();
@@ -46,7 +63,7 @@ public class TypeUtils {
             case VARCHAR:
                 return str;
             case BOOLEAN:
-                return BinaryStringDataUtil.toBoolean(str);
+                return toBoolean(str);
             case BINARY:
             case VARBINARY:
                 // this implementation does not match the new behavior of StringToBinaryCastRule,
@@ -69,12 +86,12 @@ public class TypeUtils {
             case DOUBLE:
                 return BinaryStringDataUtil.toDouble(str);
             case DATE:
-                return BinaryStringDataUtil.toDate(str);
+                return toDate(str);
             case TIME_WITHOUT_TIME_ZONE:
-                return BinaryStringDataUtil.toTime(str);
+                return toTime(str);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 TimestampType timestampType = (TimestampType) type;
-                return BinaryStringDataUtil.toTimestamp(str, timestampType.getPrecision());
+                return toTimestamp(str, timestampType.getPrecision());
             default:
                 throw new UnsupportedOperationException("Unsupported type " + type);
         }
@@ -88,5 +105,41 @@ public class TypeUtils {
         }
 
         throw new UnsupportedOperationException("Unsupported type: " + type);
+    }
+
+    /** Parse a {@link StringData} to boolean. */
+    public static boolean toBoolean(BinaryStringData str) throws TableException {
+        BinaryStringData lowerCase = str.toLowerCase();
+        if (TRUE_STRINGS.contains(lowerCase)) {
+            return true;
+        }
+        if (FALSE_STRINGS.contains(lowerCase)) {
+            return false;
+        }
+        throw new TableException("Cannot parse '" + str + "' as BOOLEAN.");
+    }
+
+    public static int toDate(BinaryStringData input) throws DateTimeException {
+        Integer date = DateTimeUtils.parseDate(input.toString());
+        if (date == null) {
+            throw new DateTimeException("For input string: '" + input + "'.");
+        }
+
+        return date;
+    }
+
+    public static int toTime(BinaryStringData input) throws DateTimeException {
+        Integer date = DateTimeUtils.parseTime(input.toString());
+        if (date == null) {
+            throw new DateTimeException("For input string: '" + input + "'.");
+        }
+
+        return date;
+    }
+
+    /** Used by {@code CAST(x as TIMESTAMP)}. */
+    public static TimestampData toTimestamp(BinaryStringData input, int precision)
+            throws DateTimeException {
+        return DateTimeUtils.parseTimestampData(input.toString(), precision);
     }
 }

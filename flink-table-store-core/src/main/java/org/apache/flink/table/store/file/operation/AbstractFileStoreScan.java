@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.connector.file.table.FileSystemConnectorOptions;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.Snapshot;
@@ -213,8 +212,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                 ? "partition "
                                         + FileStorePathFactory.getPartitionComputer(
                                                         partitionConverter.rowType(),
-                                                        FileSystemConnectorOptions
-                                                                .PARTITION_DEFAULT_NAME
+                                                        FileStorePathFactory.PARTITION_DEFAULT_NAME
                                                                 .defaultValue())
                                                 .generatePartValues(file.partition())
                                 : "table";

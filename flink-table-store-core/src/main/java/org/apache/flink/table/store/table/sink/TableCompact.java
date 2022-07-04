@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.connector.file.table.FileSystemConnectorOptions;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.Increment;
@@ -89,8 +88,7 @@ public class TableCompact {
                     "Do compaction for partition {}, bucket {}",
                     FileStorePathFactory.getPartitionComputer(
                                     partitionType,
-                                    FileSystemConnectorOptions.PARTITION_DEFAULT_NAME
-                                            .defaultValue())
+                                    FileStorePathFactory.PARTITION_DEFAULT_NAME.defaultValue())
                             .generatePartValues(partition),
                     bucket);
         }
