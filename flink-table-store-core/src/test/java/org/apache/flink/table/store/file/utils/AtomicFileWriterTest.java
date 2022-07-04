@@ -25,7 +25,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
-import java.util.UUID;
 
 import static org.apache.flink.table.store.file.utils.AtomicFileWriter.writeFileUtf8;
 import static org.apache.flink.table.store.file.utils.FileUtils.readFileUtf8;
@@ -45,31 +44,7 @@ public class AtomicFileWriterTest {
 
     @Test
     public void testDefault() throws IOException {
-        test(root, AtomicFileWriter.create(root.getFileSystem()));
-    }
-
-    @Test
-    public void testSafety() throws IOException {
-        AtomicFileWriter writer =
-                path ->
-                        new RenamingAtomicFsDataOutputStream(
-                                path.getFileSystem(),
-                                path,
-                                new Path(
-                                        path.getParent(),
-                                        "." + path.getName() + UUID.randomUUID())) {
-                            @Override
-                            public boolean closeAndCommit() throws IOException {
-                                super.closeAndCommit();
-
-                                // always return true
-                                return true;
-                            }
-                        };
-        test(root, writer);
-    }
-
-    private void test(Path root, AtomicFileWriter writer) throws IOException {
+        AtomicFileWriter writer = AtomicFileWriter.create(root.getFileSystem());
         Path path1 = new Path(root, "f1");
         boolean success = writeFileUtf8(writer, path1, "hahaha");
         assertThat(success).isTrue();
