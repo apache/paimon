@@ -1,0 +1,54 @@
+<table class="configuration table table-bordered">
+    <thead>
+        <tr>
+            <th class="text-left" style="width: 20%">Key</th>
+            <th class="text-left" style="width: 15%">Default</th>
+            <th class="text-left" style="width: 10%">Type</th>
+            <th class="text-left" style="width: 55%">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><h5>changelog-mode</h5></td>
+            <td style="word-wrap: break-word;">auto</td>
+            <td><p>Enum</p></td>
+            <td>Specify the log changelog mode for table.<br /><ul><li>"auto": Upsert for table with primary key, all for table without primary key..</li><li>"all": The log system stores all changes including UPDATE_BEFORE.</li><li>"upsert": The log system does not store the UPDATE_BEFORE changes, the log consumed job will automatically add the normalized node, relying on the state to generate the required update_before.</li></ul><br /><br />Possible values:<ul><li>"auto": Upsert for table with primary key, all for table without primary key..</li><li>"all": The log system stores all changes including UPDATE_BEFORE.</li><li>"upsert": The log system does not store the UPDATE_BEFORE changes, the log consumed job will automatically add the normalized node, relying on the state to generate the required update_before.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>consistency</h5></td>
+            <td style="word-wrap: break-word;">transactional</td>
+            <td><p>Enum</p></td>
+            <td>Specify the log consistency mode for table.<br /><ul><li>"transactional": Only the data after the checkpoint can be seen by readers, the latency depends on checkpoint interval.</li><li>"eventual": Immediate data visibility, you may see some intermediate states, but eventually the right results will be produced, only works for table with primary key.</li></ul><br /><br />Possible values:<ul><li>"transactional": Only the data after the checkpoint can be seen by readers, the latency depends on checkpoint interval.</li><li>"eventual": Immediate data visibility, you may see some intermediate states, but eventually the right results will be produced, only works for table with primary key.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>format</h5></td>
+            <td style="word-wrap: break-word;">"debezium-json"</td>
+            <td>String</td>
+            <td>Specify the message format of log system.</td>
+        </tr>
+        <tr>
+            <td><h5>key.format</h5></td>
+            <td style="word-wrap: break-word;">"json"</td>
+            <td>String</td>
+            <td>Specify the key message format of log system with primary key.</td>
+        </tr>
+        <tr>
+            <td><h5>retention</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>It means how long changes log will be kept. The default value is from the log system cluster.</td>
+        </tr>
+        <tr>
+            <td><h5>scan</h5></td>
+            <td style="word-wrap: break-word;">full</td>
+            <td><p>Enum</p></td>
+            <td>Specify the startup mode for log consumer.<br /><ul><li>"full": Perform a snapshot on the table upon first startup, and continue to read the latest changes.</li></ul><ul><li>"latest": Start from the latest.</li></ul><ul><li>"from-timestamp": Start from user-supplied timestamp.</li></ul><br /><br />Possible values:<ul><li>"full": Perform a snapshot on the table upon first startup, and continue to read the latest changes.</li><li>"latest": Start from the latest.</li><li>"from-timestamp": Start from user-supplied timestamp.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>scan.timestamp-millis</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>Optional timestamp used in case of "from-timestamp" scan mode</td>
+        </tr>
+    </tbody>
+</table>

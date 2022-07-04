@@ -58,6 +58,7 @@ under the License.
         <module>flink-table-store-connector</module>
         <module>flink-table-store-core</module>
         <module>flink-table-store-dist</module>
+        <module>flink-table-store-docs</module>
         <module>flink-table-store-e2e-tests</module>
         <module>flink-table-store-format</module>
         <module>flink-table-store-shade</module>
@@ -395,6 +396,7 @@ under the License.
                         <exclude>docs/themes/book/**</exclude>
                         <exclude>docs/assets/github.css</exclude>
                         <exclude>docs/static/js/anchor.min.js</exclude>
+                        <exclude>docs/layouts/shortcodes/generated/**</exclude>
                         <exclude>**/*.svg</exclude>
                         <!-- Bundled license files -->
                         <exclude>**/LICENSE*</exclude>
@@ -637,6 +639,29 @@ under the License.
                                     <encoding>UTF-8</encoding>
                                 </transformer>
                             </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- generate configuration docs -->
+            <plugin>
+                <groupId>org.commonjava.maven.plugins</groupId>
+                <artifactId>directory-maven-plugin</artifactId>
+                <version>0.1</version>
+                <executions>
+                    <execution>
+                        <id>directories</id>
+                        <goals>
+                            <goal>directory-of</goal>
+                        </goals>
+                        <phase>initialize</phase>
+                        <configuration>
+                            <property>rootDir</property>
+                            <project>
+                                <groupId>org.apache.flink</groupId>
+                                <artifactId>flink-table-store-parent</artifactId>
+                            </project>
                         </configuration>
                     </execution>
                 </executions>
