@@ -145,8 +145,10 @@ public class TestChangelogDataReadWrite {
                 new KeyValueFileStoreWrite(
                                 new SchemaManager(tablePath),
                                 0,
+                                RowType.of(),
                                 KEY_TYPE,
                                 VALUE_TYPE,
+                                2,
                                 () -> COMPARATOR,
                                 new DeduplicateMergeFunction(),
                                 avro,

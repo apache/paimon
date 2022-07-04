@@ -65,8 +65,10 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
     public KeyValueFileStoreWrite(
             SchemaManager schemaManager,
             long schemaId,
+            RowType partitionType,
             RowType keyType,
             RowType valueType,
+            int expectedNumBucket,
             Supplier<Comparator<RowData>> keyComparatorSupplier,
             MergeFunction mergeFunction,
             FileFormat fileFormat,
@@ -74,7 +76,7 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             MergeTreeOptions options) {
-        super(snapshotManager, scan);
+        super(partitionType, snapshotManager, scan, expectedNumBucket);
         this.dataFileReaderFactory =
                 new DataFileReader.Factory(
                         schemaManager, schemaId, keyType, valueType, fileFormat, pathFactory);

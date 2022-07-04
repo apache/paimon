@@ -47,13 +47,15 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
 
     public AppendOnlyFileStoreWrite(
             long schemaId,
+            RowType partitionType,
             RowType rowType,
+            int expectedNumBucket,
             FileFormat fileFormat,
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             long targetFileSize) {
-        super(snapshotManager, scan);
+        super(partitionType, snapshotManager, scan, expectedNumBucket);
         this.schemaId = schemaId;
         this.rowType = rowType;
         this.fileFormat = fileFormat;

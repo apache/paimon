@@ -38,16 +38,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             RowType rowType,
             SnapshotManager snapshotManager,
             ManifestFile.Factory manifestFileFactory,
-            ManifestList.Factory manifestListFactory,
-            int numOfBuckets,
-            boolean checkNumOfBuckets) {
-        super(
-                partitionType,
-                snapshotManager,
-                manifestFileFactory,
-                manifestListFactory,
-                numOfBuckets,
-                checkNumOfBuckets);
+            ManifestList.Factory manifestListFactory) {
+        super(partitionType, snapshotManager, manifestFileFactory, manifestListFactory);
         this.rowStatsConverter = new FieldStatsArraySerializer(rowType);
     }
 

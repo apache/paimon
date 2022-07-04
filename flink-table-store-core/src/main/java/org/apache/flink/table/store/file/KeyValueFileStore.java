@@ -56,7 +56,12 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public KeyValueFileStoreScan newScan() {
-        return newScan(false);
+        return new KeyValueFileStoreScan(
+                partitionType,
+                keyType,
+                snapshotManager(),
+                manifestFileFactory(),
+                manifestListFactory());
     }
 
     @Override
@@ -77,26 +82,17 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         return new KeyValueFileStoreWrite(
                 schemaManager,
                 schemaId,
+                partitionType,
                 keyType,
                 valueType,
+                options.bucket(),
                 keyComparatorSupplier,
                 mergeFunction,
                 options.fileFormat(),
                 pathFactory(),
                 snapshotManager(),
-                newScan(true),
+                newScan(),
                 options.mergeTreeOptions());
-    }
-
-    private KeyValueFileStoreScan newScan(boolean checkNumOfBuckets) {
-        return new KeyValueFileStoreScan(
-                partitionType,
-                keyType,
-                snapshotManager(),
-                manifestFileFactory(),
-                manifestListFactory(),
-                options.bucket(),
-                checkNumOfBuckets);
     }
 
     public Comparator<RowData> newKeyComparator() {
