@@ -56,7 +56,7 @@ public class ValueCountMergeFunction implements MergeFunction {
         return new ValueCountMergeFunction();
     }
 
-    protected static long count(RowData value) {
+    private long count(RowData value) {
         checkArgument(!value.isNullAt(0), "Value count should not be null.");
         return value.getLong(0);
     }

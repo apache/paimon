@@ -18,10 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
-
-import static org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction.count;
 
 /** Helper functions for the interaction with {@link MergeFunction}. */
 public class MergeFunctionHelper {
@@ -64,10 +61,6 @@ public class MergeFunctionHelper {
      * skipped.
      */
     public RowData getValue() {
-        return isInitialized
-                ? mergeFunction.getValue()
-                : mergeFunction instanceof ValueCountMergeFunction
-                        ? (count(rowData) == 0 ? null : GenericRowData.of(count(rowData)))
-                        : rowData;
+        return isInitialized ? mergeFunction.getValue() : rowData;
     }
 }

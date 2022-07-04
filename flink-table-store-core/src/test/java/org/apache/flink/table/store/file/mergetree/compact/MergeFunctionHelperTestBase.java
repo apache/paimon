@@ -39,8 +39,6 @@ public abstract class MergeFunctionHelperTestBase {
 
     protected MergeFunctionHelper mergeFunctionHelper;
 
-    private List<RowData> rows;
-
     protected abstract MergeFunction createMergeFunction();
 
     protected abstract RowData getExpected(List<RowData> rows);
@@ -59,10 +57,9 @@ public abstract class MergeFunctionHelperTestBase {
 
     public static Stream<Arguments> provideMergedRowData() {
         return Stream.of(
-                Arguments.of(Collections.singletonList(row(0))),
                 Arguments.of(Collections.singletonList(row(1))),
-                Arguments.of(Arrays.asList(row(-1), row(0), row(1))),
-                Arguments.of(Arrays.asList(row(0), row(1), row(2))));
+                Arguments.of(Arrays.asList(row(-1), row(1))),
+                Arguments.of(Arrays.asList(row(1), row(2))));
     }
 
     /** Tests for {@link MergeFunctionHelper} with {@link DeduplicateMergeFunction}. */
@@ -89,8 +86,12 @@ public abstract class MergeFunctionHelperTestBase {
 
         @Override
         protected RowData getExpected(List<RowData> rows) {
-            long total = rows.stream().mapToLong(r -> r.getLong(0)).sum();
-            return total == 0 ? null : GenericRowData.of(total);
+            if (rows.size() == 1) {
+                return rows.get(0);
+            } else {
+                long total = rows.stream().mapToLong(r -> r.getLong(0)).sum();
+                return total == 0 ? null : GenericRowData.of(total);
+            }
         }
     }
 }
