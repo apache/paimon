@@ -27,7 +27,6 @@ import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.DynamicTableSourceFactory;
-import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.connector.source.TableStoreSource;
 import org.apache.flink.table.store.file.FileStoreOptions;
@@ -140,13 +139,7 @@ public abstract class AbstractTableStoreFactory
 
     static DynamicTableFactory.Context createLogContext(
             DynamicTableFactory.Context context, Map<String, String> options) {
-        return new FactoryUtil.DefaultDynamicTableContext(
-                context.getObjectIdentifier(),
-                context.getCatalogTable().copy(filterLogStoreOptions(options)),
-                filterLogStoreOptions(context.getEnrichmentOptions()),
-                context.getConfiguration(),
-                context.getClassLoader(),
-                context.isTemporary());
+        return new TableStoreDynamicContext(context, filterLogStoreOptions(options));
     }
 
     static Map<String, String> filterLogStoreOptions(Map<String, String> options) {

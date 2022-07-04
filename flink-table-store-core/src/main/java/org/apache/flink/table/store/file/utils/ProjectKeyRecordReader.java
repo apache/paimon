@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.data.utils.ProjectedRowData;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.utils.ProjectedRowData;
 
 import javax.annotation.Nullable;
 

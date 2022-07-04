@@ -110,6 +110,16 @@ under the License.
         <!-- Can be set to any value to reproduce a specific build. -->
         <test.randomization.seed/>
         <test.unit.pattern>**/*Test.*</test.unit.pattern>
+
+        <flink.runtime>flink-runtime</flink.runtime>
+        <flink.table.runtime>flink-table-runtime</flink.table.runtime>
+        <flink.streaming.java>flink-streaming-java</flink.streaming.java>
+        <flink.sql.orc>flink-sql-orc</flink.sql.orc>
+        <flink.orc>flink-orc</flink.orc>
+        <flink.connector.kafka>flink-connector-kafka</flink.connector.kafka>
+        <flink.sql.connector.kafka>flink-sql-connector-kafka</flink.sql.connector.kafka>
+        <flink.test.utils>flink-test-utils</flink.test.utils>
+        <flink.sql.parquet>flink-sql-parquet</flink.sql.parquet>
     </properties>
 
     <dependencies>
@@ -271,6 +281,23 @@ under the License.
                     </plugin>
                 </plugins>
             </build>
+        </profile>
+
+        <!-- Activate these profiles with -Pflink-x.xx to build and test against different Flink versions -->
+        <profile>
+            <id>flink-1.14</id>
+            <properties>
+                <flink.version>1.14.5</flink.version>
+                <flink.runtime>flink-runtime_${scala.binary.version}</flink.runtime>
+                <flink.table.runtime>flink-table-runtime_${scala.binary.version}</flink.table.runtime>
+                <flink.streaming.java>flink-streaming-java_${scala.binary.version}</flink.streaming.java>
+                <flink.sql.orc>flink-sql-orc_${scala.binary.version}</flink.sql.orc>
+                <flink.orc>flink-orc_${scala.binary.version}</flink.orc>
+                <flink.connector.kafka>flink-connector-kafka_${scala.binary.version}</flink.connector.kafka>
+                <flink.sql.connector.kafka>flink-sql-connector-kafka_${scala.binary.version}</flink.sql.connector.kafka>
+                <flink.test.utils>flink-test-utils_${scala.binary.version}</flink.test.utils>
+                <flink.sql.parquet>flink-sql-parquet_${scala.binary.version}</flink.sql.parquet>
+            </properties>
         </profile>
     </profiles>
 

@@ -28,7 +28,6 @@ import org.apache.flink.table.expressions.TypeLiteralExpression;
 import org.apache.flink.table.expressions.ValueLiteralExpression;
 import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
 import org.apache.flink.table.functions.FunctionDefinition;
-import org.apache.flink.table.functions.SqlLikeUtils;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -100,7 +99,9 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             if (fieldRefExpr
                     .getOutputDataType()
                     .getLogicalType()
-                    .is(LogicalTypeFamily.CHARACTER_STRING)) {
+                    .getTypeRoot()
+                    .getFamilies()
+                    .contains(LogicalTypeFamily.CHARACTER_STRING)) {
                 String sqlPattern =
                         extractLiteral(fieldRefExpr.getOutputDataType(), children.get(1))
                                 .toString();
@@ -115,7 +116,7 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                     allowQuick = true;
                 } else if (escape != null) {
                     if (escape.length() != 1) {
-                        throw SqlLikeUtils.invalidEscapeCharacter(escape);
+                        throw new RuntimeException("Invalid escape character '" + escape + "'");
                     }
                     char escapeChar = escape.charAt(0);
                     boolean matched = true;
@@ -125,7 +126,8 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                         char c = sqlPattern.charAt(i);
                         if (c == escapeChar) {
                             if (i == (sqlPattern.length() - 1)) {
-                                throw SqlLikeUtils.invalidEscapeSequence(sqlPattern, i);
+                                throw new RuntimeException(
+                                        "Invalid escape sequence '" + sqlPattern + "', " + i);
                             }
                             char nextChar = sqlPattern.charAt(i + 1);
                             if (nextChar == '%') {
@@ -134,7 +136,8 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                                 sb.append(nextChar);
                                 i += 1;
                             } else {
-                                throw SqlLikeUtils.invalidEscapeSequence(sqlPattern, i);
+                                throw new RuntimeException(
+                                        "Invalid escape sequence '" + sqlPattern + "', " + i);
                             }
                         } else if (c == '_') {
                             matched = false;

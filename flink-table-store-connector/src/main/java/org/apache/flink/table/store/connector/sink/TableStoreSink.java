@@ -24,11 +24,11 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
-import org.apache.flink.table.connector.sink.DataStreamSinkProvider;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.table.store.connector.TableStoreDataStreamSinkProvider;
 import org.apache.flink.table.store.connector.TableStoreFactoryOptions;
 import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.table.store.log.LogSinkProvider;
@@ -117,8 +117,8 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
                 overwrite || conf.get(TableStoreFactoryOptions.COMPACTION_MANUAL_TRIGGERED)
                         ? null
                         : (logSinkProvider == null ? null : logSinkProvider.createSink());
-        return (DataStreamSinkProvider)
-                (providerContext, dataStream) ->
+        return new TableStoreDataStreamSinkProvider(
+                (dataStream) ->
                         new FlinkSinkBuilder(tableIdentifier, table)
                                 .withInput(
                                         new DataStream<>(
@@ -129,7 +129,7 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
                                 .withOverwritePartition(overwrite ? staticPartitions : null)
                                 .withParallelism(
                                         conf.get(TableStoreFactoryOptions.SINK_PARALLELISM))
-                                .build();
+                                .build());
     }
 
     @Override

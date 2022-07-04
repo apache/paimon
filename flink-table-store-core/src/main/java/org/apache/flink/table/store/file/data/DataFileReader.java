@@ -22,7 +22,6 @@ import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.connector.Projection;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
@@ -32,6 +31,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.utils.Projection;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
@@ -81,7 +81,7 @@ public class DataFileReader {
 
         private DataFileRecordReader(Path path) throws IOException {
             long fileSize = FileUtils.getFileSize(path);
-            FileSourceSplit split = new FileSourceSplit("ignore", path, 0, fileSize, 0, fileSize);
+            FileSourceSplit split = new FileSourceSplit("ignore", path, 0, fileSize);
             this.reader = readerFactory.createReader(FileUtils.DEFAULT_READER_CONFIG, split);
             this.serializer = new KeyValueSerializer(keyType, valueType);
         }

@@ -20,8 +20,6 @@ package org.apache.flink.table.store.codegen;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ConfigurationUtils;
-import org.apache.flink.configuration.CoreOptions;
-import org.apache.flink.core.classloading.ComponentClassLoader;
 import org.apache.flink.util.IOUtils;
 
 import java.io.IOException;
@@ -32,9 +30,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.ServiceLoader;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -45,9 +41,18 @@ public class CodeGenLoader {
 
     static final String FLINK_TABLE_STORE_CODEGEN_FAT_JAR = "flink-table-store-codegen.jar";
 
+    public static final String[] PARENT_FIRST_LOGGING_PATTERNS =
+            new String[] {
+                "org.slf4j",
+                "org.apache.log4j",
+                "org.apache.logging",
+                "org.apache.commons.logging",
+                "ch.qos.logback"
+            };
+
     private static final String[] OWNER_CLASSPATH =
             Stream.concat(
-                            Arrays.stream(CoreOptions.PARENT_FIRST_LOGGING_PATTERNS),
+                            Arrays.stream(PARENT_FIRST_LOGGING_PATTERNS),
                             Stream.of(
                                     // These packages are shipped either by
                                     // flink-table-runtime or flink-dist itself
@@ -57,18 +62,6 @@ public class CodeGenLoader {
                     .toArray(String[]::new);
 
     private static final String[] COMPONENT_CLASSPATH = new String[] {"org.apache.flink"};
-
-    private static final Map<String, String> KNOWN_MODULE_ASSOCIATIONS = new HashMap<>();
-
-    static {
-        KNOWN_MODULE_ASSOCIATIONS.put("org.apache.flink.table.runtime", "flink-table-runtime");
-        KNOWN_MODULE_ASSOCIATIONS.put("org.apache.flink.formats.raw", "flink-table-runtime");
-
-        KNOWN_MODULE_ASSOCIATIONS.put("org.codehaus.janino", "flink-table-runtime");
-        KNOWN_MODULE_ASSOCIATIONS.put("org.codehaus.commons", "flink-table-runtime");
-        KNOWN_MODULE_ASSOCIATIONS.put(
-                "org.apache.flink.table.shaded.com.jayway", "flink-table-runtime");
-    }
 
     private final ClassLoader submoduleClassLoader;
 
@@ -91,8 +84,7 @@ public class CodeGenLoader {
                             new URL[] {delegateJar.toUri().toURL()},
                             flinkClassLoader,
                             OWNER_CLASSPATH,
-                            COMPONENT_CLASSPATH,
-                            KNOWN_MODULE_ASSOCIATIONS);
+                            COMPONENT_CLASSPATH);
         } catch (IOException e) {
             throw new RuntimeException(
                     "Could not initialize the table planner components loader.", e);

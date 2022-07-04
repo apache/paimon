@@ -24,27 +24,22 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
-import org.apache.flink.orc.OrcColumnarRowInputFormat;
 import org.apache.flink.orc.OrcFilters;
 import org.apache.flink.orc.OrcSplitReaderUtil;
-import org.apache.flink.orc.shim.OrcShim;
 import org.apache.flink.orc.vector.RowDataVectorizer;
 import org.apache.flink.orc.writer.OrcBulkWriterFactory;
-import org.apache.flink.table.connector.Projection;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.columnar.vector.VectorizedColumnBatch;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.expressions.ResolvedExpression;
-import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
+import org.apache.flink.table.store.utils.Projection;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.orc.TypeDescription;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
@@ -89,16 +84,8 @@ public class OrcFileFormat extends FileFormat {
         org.apache.hadoop.conf.Configuration conf = new org.apache.hadoop.conf.Configuration();
         properties.forEach((k, v) -> conf.set(k.toString(), v.toString()));
 
-        return OrcColumnarRowInputFormat.createPartitionedFormat(
-                OrcShim.defaultShim(),
-                conf,
-                type,
-                Collections.emptyList(),
-                null,
-                Projection.of(projection).toTopLevelIndexes(),
-                orcPredicates,
-                VectorizedColumnBatch.DEFAULT_SIZE,
-                InternalTypeInfo::of);
+        return OrcInputFormatFactory.create(
+                conf, type, Projection.of(projection).toTopLevelIndexes(), orcPredicates);
     }
 
     @Override

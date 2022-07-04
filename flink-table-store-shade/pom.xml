@@ -107,7 +107,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-runtime</artifactId>
+            <artifactId>${flink.table.runtime}</artifactId>
             <version>${flink.version}</version>
             <exclusions>
                 <exclusion>
@@ -127,7 +127,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-streaming-java</artifactId>
+            <artifactId>${flink.streaming.java}</artifactId>
             <version>${flink.version}</version>
             <exclusions>
                 <exclusion>
@@ -235,8 +235,8 @@ under the License.
                                 <includes combine.children="append">
                                     <!-- Flink -->
                                     <include>org.apache.flink:flink-core</include>
-                                    <include>org.apache.flink:flink-runtime</include>
-                                    <include>org.apache.flink:flink-streaming-java</include>
+                                    <include>org.apache.flink:${flink.runtime}</include>
+                                    <include>org.apache.flink:${flink.streaming.java}</include>
                                     <include>org.apache.flink:flink-connector-files</include>
                                     <include>org.apache.flink:flink-hadoop-fs</include>
                                     <include>org.apache.flink:flink-shaded-jackson</include>
@@ -247,7 +247,7 @@ under the License.
                                     <!-- Flink Table -->
                                     <include>org.apache.flink:flink-table-common</include>
                                     <include>org.apache.flink:flink-table-api-java</include>
-                                    <include>org.apache.flink:flink-table-runtime</include>
+                                    <include>org.apache.flink:${flink.table.runtime}</include>
 
                                     <!-- Flink Table Store -->
                                     <include>org.apache.flink:flink-table-store-common</include>

@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.data.utils.ProjectedRowData;
 import org.apache.flink.table.store.file.utils.ProjectKeyRecordReader;
 import org.apache.flink.table.store.file.utils.ReusingTestData;
+import org.apache.flink.table.store.utils.ProjectedRowData;
 import org.apache.flink.types.RowKind;
 
 import org.junit.jupiter.api.Test;
