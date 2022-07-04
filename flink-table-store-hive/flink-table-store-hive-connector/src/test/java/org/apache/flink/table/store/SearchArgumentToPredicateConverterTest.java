@@ -174,9 +174,7 @@ public class SearchArgumentToPredicateConverterTest {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.in("f_bigint", PredicateLeaf.Type.LONG, 100L, 200L, 300L).build();
-        Predicate expected =
-                PredicateBuilder.or(
-                        BUILDER.equal(1, 100L), BUILDER.equal(1, 200L), BUILDER.equal(1, 300L));
+        Predicate expected = BUILDER.in(1, Arrays.asList(100L, 200L, 300L));
         assertExpected(sarg, expected);
     }
 
@@ -185,9 +183,7 @@ public class SearchArgumentToPredicateConverterTest {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.in("f_bigint", PredicateLeaf.Type.LONG, 100L, null, 300L).build();
-        Predicate expected =
-                PredicateBuilder.or(
-                        BUILDER.equal(1, 100L), BUILDER.equal(1, null), BUILDER.equal(1, 300L));
+        Predicate expected = BUILDER.in(1, Arrays.asList(100L, null, 300L));
         assertExpected(sarg, expected);
     }
 
@@ -199,11 +195,7 @@ public class SearchArgumentToPredicateConverterTest {
                         .in("f_bigint", PredicateLeaf.Type.LONG, 100L, 200L, 300L)
                         .end()
                         .build();
-        Predicate expected =
-                PredicateBuilder.and(
-                        BUILDER.notEqual(1, 100L),
-                        BUILDER.notEqual(1, 200L),
-                        BUILDER.notEqual(1, 300L));
+        Predicate expected = BUILDER.notIn(1, Arrays.asList(100L, 200L, 300L));
         assertExpected(sarg, expected);
     }
 
@@ -215,11 +207,7 @@ public class SearchArgumentToPredicateConverterTest {
                         .in("f_bigint", PredicateLeaf.Type.LONG, 100L, null, 300L)
                         .end()
                         .build();
-        Predicate expected =
-                PredicateBuilder.and(
-                        BUILDER.notEqual(1, 100L),
-                        BUILDER.notEqual(1, null),
-                        BUILDER.notEqual(1, 300L));
+        Predicate expected = BUILDER.notIn(1, Arrays.asList(100L, null, 300L));
         assertExpected(sarg, expected);
     }
 
