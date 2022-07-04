@@ -36,6 +36,7 @@ import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -83,6 +84,14 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             return visitBiFunction(children, builder::lessThan, builder::greaterThan);
         } else if (func == BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL) {
             return visitBiFunction(children, builder::lessOrEqual, builder::greaterOrEqual);
+        } else if (func == BuiltInFunctionDefinitions.IN) {
+            FieldReferenceExpression fieldRefExpr =
+                    extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
+            List<Object> literals = new ArrayList<>();
+            for (int i = 1; i < children.size(); i++) {
+                literals.add(extractLiteral(fieldRefExpr.getOutputDataType(), children.get(i)));
+            }
+            return builder.in(fieldRefExpr.getInputIndex(), literals);
         } else if (func == BuiltInFunctionDefinitions.IS_NULL) {
             return extractFieldReference(children.get(0))
                     .map(FieldReferenceExpression::getFieldIndex)

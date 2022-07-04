@@ -95,13 +95,11 @@ public class PredicateBuilder {
     }
 
     public Predicate in(int idx, List<Object> literals) {
-        Preconditions.checkArgument(
-                literals.size() > 0,
-                "There must be at least 1 literal to construct an IN predicate");
-        return literals.stream()
-                .map(l -> equal(idx, l))
-                .reduce((a, b) -> new CompoundPredicate(Or.INSTANCE, Arrays.asList(a, b)))
-                .get();
+        return new LeafPredicate(In.INSTANCE, rowType.getTypeAt(idx), idx, literals);
+    }
+
+    public Predicate notIn(int idx, List<Object> literals) {
+        return new LeafPredicate(NotIn.INSTANCE, rowType.getTypeAt(idx), idx, literals);
     }
 
     public Predicate between(int idx, Object includedLowerBound, Object includedUpperBound) {
