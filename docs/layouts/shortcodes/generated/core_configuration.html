@@ -1,0 +1,210 @@
+<table class="configuration table table-bordered">
+    <thead>
+        <tr>
+            <th class="text-left" style="width: 20%">Key</th>
+            <th class="text-left" style="width: 15%">Default</th>
+            <th class="text-left" style="width: 10%">Type</th>
+            <th class="text-left" style="width: 55%">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><h5>bucket</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>Bucket number for file store.</td>
+        </tr>
+        <tr>
+            <td><h5>bucket-key</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the table store distribution policy. Data is assigned to each bucket according to the hash value of bucket-key.<br />If you specify multiple fields, delimiter is ','.<br />If not specified, the primary key will be used; if there is no primary key, the full row will be used.</td>
+        </tr>
+        <tr>
+            <td><h5>changelog-file</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to double write to a changelog file when flushing memory table. This changelog file keeps the order of data input and the details of data changes, it can be read directly during stream reads.</td>
+        </tr>
+        <tr>
+            <td><h5>commit.force-compact</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to force a compaction before commit.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.max-size-amplification-percent</h5></td>
+            <td style="word-wrap: break-word;">200</td>
+            <td>Integer</td>
+            <td>The size amplification is defined as the amount (in percentage) of additional storage needed to store a single byte of data in the merge tree.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.size-ratio</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>Percentage flexibility while comparing sorted run size. If the candidate sorted run(s) size is 1% smaller than the next sorted run's size, then include next sorted run into this candidate set.</td>
+        </tr>
+        <tr>
+            <td><h5>continuous.discovery-interval</h5></td>
+            <td style="word-wrap: break-word;">1 s</td>
+            <td>Duration</td>
+            <td>The discovery interval of continuous reading.</td>
+        </tr>
+        <tr>
+            <td><h5>file.format</h5></td>
+            <td style="word-wrap: break-word;">"orc"</td>
+            <td>String</td>
+            <td>Specify the message format of data files.</td>
+        </tr>
+        <tr>
+            <td><h5>log.changelog-mode</h5></td>
+            <td style="word-wrap: break-word;">auto</td>
+            <td><p>Enum</p></td>
+            <td>Specify the log changelog mode for table.<br /><ul><li>"auto": Upsert for table with primary key, all for table without primary key..</li><li>"all": The log system stores all changes including UPDATE_BEFORE.</li><li>"upsert": The log system does not store the UPDATE_BEFORE changes, the log consumed job will automatically add the normalized node, relying on the state to generate the required update_before.</li></ul><br /><br />Possible values:<ul><li>"auto": Upsert for table with primary key, all for table without primary key..</li><li>"all": The log system stores all changes including UPDATE_BEFORE.</li><li>"upsert": The log system does not store the UPDATE_BEFORE changes, the log consumed job will automatically add the normalized node, relying on the state to generate the required update_before.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>log.consistency</h5></td>
+            <td style="word-wrap: break-word;">transactional</td>
+            <td><p>Enum</p></td>
+            <td>Specify the log consistency mode for table.<br /><ul><li>"transactional": Only the data after the checkpoint can be seen by readers, the latency depends on checkpoint interval.</li><li>"eventual": Immediate data visibility, you may see some intermediate states, but eventually the right results will be produced, only works for table with primary key.</li></ul><br /><br />Possible values:<ul><li>"transactional": Only the data after the checkpoint can be seen by readers, the latency depends on checkpoint interval.</li><li>"eventual": Immediate data visibility, you may see some intermediate states, but eventually the right results will be produced, only works for table with primary key.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>log.format</h5></td>
+            <td style="word-wrap: break-word;">"debezium-json"</td>
+            <td>String</td>
+            <td>Specify the message format of log system.</td>
+        </tr>
+        <tr>
+            <td><h5>log.key.format</h5></td>
+            <td style="word-wrap: break-word;">"json"</td>
+            <td>String</td>
+            <td>Specify the key message format of log system with primary key.</td>
+        </tr>
+        <tr>
+            <td><h5>log.retention</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>It means how long changes log will be kept. The default value is from the log system cluster.</td>
+        </tr>
+        <tr>
+            <td><h5>log.scan</h5></td>
+            <td style="word-wrap: break-word;">full</td>
+            <td><p>Enum</p></td>
+            <td>Specify the startup mode for log consumer.<br /><ul><li>"full": Perform a snapshot on the table upon first startup, and continue to read the latest changes.</li></ul><ul><li>"latest": Start from the latest.</li></ul><ul><li>"from-timestamp": Start from user-supplied timestamp.</li></ul><br /><br />Possible values:<ul><li>"full": Perform a snapshot on the table upon first startup, and continue to read the latest changes.</li><li>"latest": Start from the latest.</li><li>"from-timestamp": Start from user-supplied timestamp.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>log.scan.timestamp-millis</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>Optional timestamp used in case of "from-timestamp" scan mode</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.format</h5></td>
+            <td style="word-wrap: break-word;">"avro"</td>
+            <td>String</td>
+            <td>Specify the message format of manifest files.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.merge-min-count</h5></td>
+            <td style="word-wrap: break-word;">30</td>
+            <td>Integer</td>
+            <td>To avoid frequent manifest merges, this parameter specifies the minimum number of ManifestFileMeta to merge.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.target-file-size</h5></td>
+            <td style="word-wrap: break-word;">8 mb</td>
+            <td>MemorySize</td>
+            <td>Suggested file size of a manifest file.</td>
+        </tr>
+        <tr>
+            <td><h5>merge-engine</h5></td>
+            <td style="word-wrap: break-word;">deduplicate</td>
+            <td><p>Enum</p></td>
+            <td>Specify the merge engine for table with primary key.<br /><ul><li>"deduplicate": De-duplicate and keep the last row.</li><li>"partial-update": Partial update non-null fields.</li></ul><br /><br />Possible values:<ul><li>"deduplicate": De-duplicate and keep the last row.</li><li>"partial-update": Partial update non-null fields.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>num-levels</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Total level number, for example, there are 3 levels, including 0,1,2 levels.</td>
+        </tr>
+        <tr>
+            <td><h5>num-sorted-run.compaction-trigger</h5></td>
+            <td style="word-wrap: break-word;">5</td>
+            <td>Integer</td>
+            <td>The sorted run number to trigger compaction. Includes level0 files (one file one sorted run) and high-level runs (one level one sorted run).</td>
+        </tr>
+        <tr>
+            <td><h5>num-sorted-run.stop-trigger</h5></td>
+            <td style="word-wrap: break-word;">10</td>
+            <td>Integer</td>
+            <td>The number of sorted-runs that trigger the stopping of writes.</td>
+        </tr>
+        <tr>
+            <td><h5>page-size</h5></td>
+            <td style="word-wrap: break-word;">64 kb</td>
+            <td>MemorySize</td>
+            <td>Memory page size.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.default-name</h5></td>
+            <td style="word-wrap: break-word;">"__DEFAULT_PARTITION__"</td>
+            <td>String</td>
+            <td>The default partition name in case the dynamic partition column value is null/empty string.</td>
+        </tr>
+        <tr>
+            <td><h5>sequence.field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The field that generates the sequence number for primary key table, the sequence number determines which data is the most recent.</td>
+        </tr>
+        <tr>
+            <td><h5>snapshot.num-retained.max</h5></td>
+            <td style="word-wrap: break-word;">2147483647</td>
+            <td>Integer</td>
+            <td>The maximum number of completed snapshots to retain.</td>
+        </tr>
+        <tr>
+            <td><h5>snapshot.num-retained.min</h5></td>
+            <td style="word-wrap: break-word;">10</td>
+            <td>Integer</td>
+            <td>The minimum number of completed snapshots to retain.</td>
+        </tr>
+        <tr>
+            <td><h5>snapshot.time-retained</h5></td>
+            <td style="word-wrap: break-word;">1 h</td>
+            <td>Duration</td>
+            <td>The maximum time of completed snapshots to retain.</td>
+        </tr>
+        <tr>
+            <td><h5>source.split.open-file-cost</h5></td>
+            <td style="word-wrap: break-word;">4 mb</td>
+            <td>MemorySize</td>
+            <td>Open file cost of a source file. It is used to avoid reading too many files with a source split, which can be very slow.</td>
+        </tr>
+        <tr>
+            <td><h5>source.split.target-size</h5></td>
+            <td style="word-wrap: break-word;">128 mb</td>
+            <td>MemorySize</td>
+            <td>Target size of a source split when scanning a bucket.</td>
+        </tr>
+        <tr>
+            <td><h5>target-file-size</h5></td>
+            <td style="word-wrap: break-word;">128 mb</td>
+            <td>MemorySize</td>
+            <td>Target size of a file.</td>
+        </tr>
+        <tr>
+            <td><h5>write-buffer-size</h5></td>
+            <td style="word-wrap: break-word;">256 mb</td>
+            <td>MemorySize</td>
+            <td>Amount of data to build up in memory before converting to a sorted on-disk file.</td>
+        </tr>
+        <tr>
+            <td><h5>write-mode</h5></td>
+            <td style="word-wrap: break-word;">change-log</td>
+            <td><p>Enum</p></td>
+            <td>Specify the write mode for table.<br /><ul><li>"append-only": The table can only accept append-only insert operations. Neither data deduplication nor any primary key constraints will be done when inserting rows into table store.</li></ul><ul><li>"change-log": The table can accept insert/delete/update operations.</li></ul><br /><br />Possible values:<ul><li>"append-only": The table can only accept append-only insert operations. Neither data deduplication nor any primary key constraints will be done when inserting rows into table store.</li><li>"change-log": The table can accept insert/delete/update operations.</li></ul></td>
+        </tr>
+    </tbody>
+</table>
