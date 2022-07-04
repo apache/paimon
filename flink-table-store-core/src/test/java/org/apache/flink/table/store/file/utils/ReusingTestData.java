@@ -105,7 +105,7 @@ public class ReusingTestData implements Comparable<ReusingTestData> {
                             random.nextInt(numRecords),
                             generator.next(),
                             random.nextBoolean() || onlyAdd ? RowKind.INSERT : RowKind.DELETE,
-                            random.nextInt(10) - 5));
+                            getValue(random)));
         }
         return result;
     }
@@ -123,9 +123,14 @@ public class ReusingTestData implements Comparable<ReusingTestData> {
                             key,
                             generator.next(),
                             random.nextBoolean() || onlyAdd ? RowKind.INSERT : RowKind.DELETE,
-                            random.nextInt(10) - 5));
+                            getValue(random)));
         }
         return new ArrayList<>(result.values());
+    }
+
+    private static long getValue(ThreadLocalRandom random) {
+        int value = random.nextInt(10) - 5;
+        return value == 0 ? getValue(random) : value;
     }
 
     private static class SequenceNumberGenerator {
