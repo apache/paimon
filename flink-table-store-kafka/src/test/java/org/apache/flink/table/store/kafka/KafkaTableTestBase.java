@@ -53,6 +53,7 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
 /** Base class for Kafka Table IT Cases. */
@@ -110,9 +111,11 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
     }
 
     @After
-    public void after() {
+    public void after() throws ExecutionException, InterruptedException {
         // Cancel timer for debug logging
         cancelTimeoutLogger();
+        // Delete topics for avoid reusing topics of Kafka cluster
+        deleteTopics();
     }
 
     public Properties getStandardProps() {
@@ -167,6 +170,11 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
                         String.format("Failed to drop Kafka topic %s", topicName), e);
             }
         }
+    }
+
+    private void deleteTopics() throws ExecutionException, InterruptedException {
+        final AdminClient adminClient = AdminClient.create(getStandardProps());
+        adminClient.deleteTopics(adminClient.listTopics().names().get()).all().get();
     }
 
     // ------------------------ For Debug Logging Purpose ----------------------------------
