@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.annotation.docs.Documentation;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -34,6 +35,7 @@ public class FlinkConnectorOptions {
     public static final String TABLE_STORE_PREFIX = "table-store.";
 
     @Internal
+    @Documentation.ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<String> ROOT_PATH =
             ConfigOptions.key("root-path")
                     .stringType()
@@ -41,6 +43,7 @@ public class FlinkConnectorOptions {
                     .withDescription("The root file path of the table store in the filesystem.");
 
     @Internal
+    @Documentation.ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<Boolean> COMPACTION_MANUAL_TRIGGERED =
             ConfigOptions.key("compaction.manual-triggered")
                     .booleanType()
@@ -49,6 +52,7 @@ public class FlinkConnectorOptions {
                             "An internal flag to indicate a manual triggered compaction job.");
 
     @Internal
+    @Documentation.ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<String> COMPACTION_PARTITION_SPEC =
             ConfigOptions.key("compaction.partition-spec")
                     .stringType()
