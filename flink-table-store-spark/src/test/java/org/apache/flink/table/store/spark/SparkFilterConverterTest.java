@@ -29,6 +29,7 @@ import org.apache.flink.table.types.logical.TimestampType;
 import org.apache.spark.sql.sources.EqualTo;
 import org.apache.spark.sql.sources.GreaterThan;
 import org.apache.spark.sql.sources.GreaterThanOrEqual;
+import org.apache.spark.sql.sources.In;
 import org.apache.spark.sql.sources.IsNotNull;
 import org.apache.spark.sql.sources.IsNull;
 import org.apache.spark.sql.sources.LessThan;
@@ -41,6 +42,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -115,6 +117,11 @@ public class SparkFilterConverterTest {
         Predicate expectedEqNull = builder.equal(0, null);
         Predicate actualEqNull = converter.convert(eqNull);
         assertThat(actualEqNull).isEqualTo(expectedEqNull);
+
+        In in = In.apply(field, new Object[] {1, null, 2});
+        Predicate expectedIn = builder.in(0, Arrays.asList(1, null, 2));
+        Predicate actualIn = converter.convert(in);
+        assertThat(actualIn).isEqualTo(expectedIn);
     }
 
     @Test
