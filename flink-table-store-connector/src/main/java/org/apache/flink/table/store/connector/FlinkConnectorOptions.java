@@ -21,14 +21,19 @@ package org.apache.flink.table.store.connector;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
+import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.factories.FactoryUtil;
 
-import java.util.HashSet;
-import java.util.Set;
+import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.List;
 
-/** Options for {@link TableStoreManagedFactory}. */
-public class TableStoreFactoryOptions {
+/** Options for flink connector. */
+public class FlinkConnectorOptions {
 
+    public static final String TABLE_STORE_PREFIX = "table-store.";
+
+    @Internal
     public static final ConfigOption<String> ROOT_PATH =
             ConfigOptions.key("root-path")
                     .stringType()
@@ -68,11 +73,27 @@ public class TableStoreFactoryOptions {
                                     + "By default, if this option is not defined, the planner will derive the parallelism "
                                     + "for each statement individually by also considering the global configuration.");
 
-    public static Set<ConfigOption<?>> allOptions() {
-        Set<ConfigOption<?>> allOptions = new HashSet<>();
-        allOptions.add(LOG_SYSTEM);
-        allOptions.add(SINK_PARALLELISM);
-        allOptions.add(SCAN_PARALLELISM);
-        return allOptions;
+    public static String relativeTablePath(ObjectIdentifier tableIdentifier) {
+        return String.format(
+                "%s.catalog/%s.db/%s",
+                tableIdentifier.getCatalogName(),
+                tableIdentifier.getDatabaseName(),
+                tableIdentifier.getObjectName());
+    }
+
+    @Internal
+    public static List<ConfigOption<?>> getOptions() {
+        final Field[] fields = FlinkConnectorOptions.class.getFields();
+        final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
+        for (Field field : fields) {
+            if (ConfigOption.class.isAssignableFrom(field.getType())) {
+                try {
+                    list.add((ConfigOption<?>) field.get(FlinkConnectorOptions.class));
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
+        return list;
     }
 }

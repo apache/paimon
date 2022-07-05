@@ -18,23 +18,17 @@
 
 package org.apache.flink.table.store.hive;
 
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.util.Preconditions;
 
+import static org.apache.flink.table.store.CatalogOptions.URI;
+
 /** Factory to create {@link HiveCatalog}. */
 public class HiveCatalogFactory implements CatalogFactory {
 
     private static final String IDENTIFIER = "hive";
-
-    private static final ConfigOption<String> URI =
-            ConfigOptions.key("uri")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("Uri of Hive metastore's thrift server.");
 
     @Override
     public String identifier() {

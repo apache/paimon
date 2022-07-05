@@ -21,13 +21,15 @@ package org.apache.flink.table.store.connector;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.DelegatingConfiguration;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.DynamicTableSourceFactory;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
+import org.apache.flink.table.store.CoreOptions.LogConsistency;
+import org.apache.flink.table.store.CoreOptions.LogStartupMode;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.connector.source.TableStoreSource;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -39,17 +41,16 @@ import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
-import static org.apache.flink.table.store.CoreOptions.LOG_PREFIX;
 import static org.apache.flink.table.store.CoreOptions.LOG_SCAN;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.apache.flink.table.store.log.LogStoreTableFactory.discoverLogStoreFactory;
 
 /** Abstract table store factory to create table source and table sink. */
@@ -63,7 +64,7 @@ public abstract class AbstractTableStoreFactory
                 buildFileStoreTable(context),
                 context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                         == RuntimeExecutionMode.STREAMING,
-                createLogContext(context),
+                context,
                 createOptionalLogStoreFactory(context).orElse(null));
     }
 
@@ -72,7 +73,7 @@ public abstract class AbstractTableStoreFactory
         return new TableStoreSink(
                 context.getObjectIdentifier(),
                 buildFileStoreTable(context),
-                createLogContext(context),
+                context,
                 createOptionalLogStoreFactory(context).orElse(null));
     }
 
@@ -83,9 +84,9 @@ public abstract class AbstractTableStoreFactory
 
     @Override
     public Set<ConfigOption<?>> optionalOptions() {
-        Set<ConfigOption<?>> options = CoreOptions.allOptions();
-        options.addAll(CoreOptions.allOptions());
-        options.addAll(TableStoreFactoryOptions.allOptions());
+        Set<ConfigOption<?>> options = new HashSet<>();
+        options.addAll(FlinkConnectorOptions.getOptions());
+        options.addAll(CoreOptions.getOptions());
         return options;
     }
 
@@ -112,42 +113,22 @@ public abstract class AbstractTableStoreFactory
     }
 
     private static void validateFileStoreContinuous(Configuration options) {
-        Configuration logOptions = new DelegatingConfiguration(options, LOG_PREFIX);
-        CoreOptions.LogChangelogMode changelogMode = logOptions.get(LOG_CHANGELOG_MODE);
-        if (changelogMode == CoreOptions.LogChangelogMode.UPSERT) {
+        LogChangelogMode changelogMode = options.get(LOG_CHANGELOG_MODE);
+        if (changelogMode == LogChangelogMode.UPSERT) {
             throw new ValidationException(
                     "File store continuous reading dose not support upsert changelog mode.");
         }
-        CoreOptions.LogConsistency consistency = logOptions.get(LOG_CONSISTENCY);
-        if (consistency == CoreOptions.LogConsistency.EVENTUAL) {
+        LogConsistency consistency = options.get(LOG_CONSISTENCY);
+        if (consistency == LogConsistency.EVENTUAL) {
             throw new ValidationException(
                     "File store continuous reading dose not support eventual consistency mode.");
         }
-        CoreOptions.LogStartupMode startupMode = logOptions.get(LOG_SCAN);
-        if (startupMode == CoreOptions.LogStartupMode.FROM_TIMESTAMP) {
+        LogStartupMode startupMode = options.get(LOG_SCAN);
+        if (startupMode == LogStartupMode.FROM_TIMESTAMP) {
             throw new ValidationException(
                     "File store continuous reading dose not support from_timestamp scan mode, "
                             + "you can add timestamp filters instead.");
         }
-    }
-
-    static DynamicTableFactory.Context createLogContext(DynamicTableFactory.Context context) {
-        return createLogContext(context, context.getCatalogTable().getOptions());
-    }
-
-    static DynamicTableFactory.Context createLogContext(
-            DynamicTableFactory.Context context, Map<String, String> options) {
-        return new TableStoreDynamicContext(context, filterLogStoreOptions(options));
-    }
-
-    static Map<String, String> filterLogStoreOptions(Map<String, String> options) {
-        return options.entrySet().stream()
-                .filter(entry -> !entry.getKey().equals(LOG_SYSTEM.key())) // exclude log.system
-                .filter(entry -> entry.getKey().startsWith(LOG_PREFIX))
-                .collect(
-                        Collectors.toMap(
-                                entry -> entry.getKey().substring(LOG_PREFIX.length()),
-                                Map.Entry::getValue));
     }
 
     static FileStoreTable buildFileStoreTable(DynamicTableFactory.Context context) {

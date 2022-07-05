@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.DelegatingConfiguration;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.DynamicTableSource;
@@ -28,9 +27,10 @@ import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
+import org.apache.flink.table.store.CoreOptions.LogConsistency;
+import org.apache.flink.table.store.connector.FlinkConnectorOptions;
 import org.apache.flink.table.store.connector.TableStoreDataStreamScanProvider;
-import org.apache.flink.table.store.connector.TableStoreFactoryOptions;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.predicate.PredicateConverter;
@@ -47,6 +47,9 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
+import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
+
 /**
  * Table source to create {@link FileStoreSource} under batch mode or change-tracking is disabled.
  * For streaming mode with change-tracking enabled and FULL scan mode, it will create a {@link
@@ -59,7 +62,7 @@ public class TableStoreSource
     private final ObjectIdentifier tableIdentifier;
     private final FileStoreTable table;
     private final boolean streaming;
-    private final DynamicTableFactory.Context logStoreContext;
+    private final DynamicTableFactory.Context context;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
     @Nullable private Predicate predicate;
@@ -69,12 +72,12 @@ public class TableStoreSource
             ObjectIdentifier tableIdentifier,
             FileStoreTable table,
             boolean streaming,
-            DynamicTableFactory.Context logStoreContext,
+            DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
         this.streaming = streaming;
-        this.logStoreContext = logStoreContext;
+        this.context = context;
         this.logStoreTableFactory = logStoreTableFactory;
     }
 
@@ -92,14 +95,9 @@ public class TableStoreSource
         } else if (table instanceof ChangelogWithKeyFileStoreTable) {
             // optimization: transaction consistency and all changelog mode avoid the generation of
             // normalized nodes. See TableStoreSink.getChangelogMode validation.
-            Configuration logOptions =
-                    new DelegatingConfiguration(
-                            Configuration.fromMap(table.schema().options()),
-                            CoreOptions.LOG_PREFIX);
-            return logOptions.get(CoreOptions.LOG_CONSISTENCY)
-                                    == CoreOptions.LogConsistency.TRANSACTIONAL
-                            && logOptions.get(CoreOptions.LOG_CHANGELOG_MODE)
-                                    == CoreOptions.LogChangelogMode.ALL
+            Configuration options = Configuration.fromMap(table.schema().options());
+            return options.get(LOG_CONSISTENCY) == LogConsistency.TRANSACTIONAL
+                            && options.get(LOG_CHANGELOG_MODE) == LogChangelogMode.ALL
                     ? ChangelogMode.all()
                     : ChangelogMode.upsert();
         } else {
@@ -113,8 +111,7 @@ public class TableStoreSource
         LogSourceProvider logSourceProvider = null;
         if (logStoreTableFactory != null) {
             logSourceProvider =
-                    logStoreTableFactory.createSourceProvider(
-                            logStoreContext, scanContext, projectFields);
+                    logStoreTableFactory.createSourceProvider(context, scanContext, projectFields);
         }
 
         FlinkSourceBuilder sourceBuilder =
@@ -125,7 +122,7 @@ public class TableStoreSource
                         .withPredicate(predicate)
                         .withParallelism(
                                 Configuration.fromMap(table.schema().options())
-                                        .get(TableStoreFactoryOptions.SCAN_PARALLELISM));
+                                        .get(FlinkConnectorOptions.SCAN_PARALLELISM));
 
         return new TableStoreDataStreamScanProvider(
                 !streaming, env -> sourceBuilder.withEnv(env).build());
@@ -135,7 +132,7 @@ public class TableStoreSource
     public DynamicTableSource copy() {
         TableStoreSource copied =
                 new TableStoreSource(
-                        tableIdentifier, table, streaming, logStoreContext, logStoreTableFactory);
+                        tableIdentifier, table, streaming, context, logStoreTableFactory);
         copied.predicate = predicate;
         copied.projectFields = projectFields;
         return copied;

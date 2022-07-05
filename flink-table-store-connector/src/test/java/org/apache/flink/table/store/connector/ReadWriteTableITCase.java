@@ -58,14 +58,14 @@ import java.util.concurrent.TimeUnit;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.registerData;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.ROOT_PATH;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.SCAN_PARALLELISM;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.SINK_PARALLELISM;
 import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.dailyRates;
 import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.dailyRatesChangelogWithUB;
 import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.dailyRatesChangelogWithoutUB;
 import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.rates;
 import static org.apache.flink.table.store.connector.ShowCreateUtil.buildSimpleSelectQuery;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.SCAN_PARALLELISM;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.SINK_PARALLELISM;
 import static org.apache.flink.table.store.connector.TableStoreTestBase.createResolvedTable;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

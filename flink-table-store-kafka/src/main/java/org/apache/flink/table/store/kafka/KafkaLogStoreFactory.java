@@ -57,8 +57,6 @@ import java.util.concurrent.ExecutionException;
 import static org.apache.flink.table.factories.FactoryUtil.createTableFactoryHelper;
 import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
-import static org.apache.flink.table.store.CoreOptions.LOG_FORMAT;
-import static org.apache.flink.table.store.CoreOptions.LOG_KEY_FORMAT;
 import static org.apache.flink.table.store.CoreOptions.LOG_RETENTION;
 import static org.apache.flink.table.store.CoreOptions.LOG_SCAN;
 import static org.apache.flink.table.store.CoreOptions.LOG_SCAN_TIMESTAMP_MILLS;
@@ -88,16 +86,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
 
     @Override
     public Set<ConfigOption<?>> optionalOptions() {
-        Set<ConfigOption<?>> options = new HashSet<>();
-        options.add(LOG_SCAN);
-        options.add(TOPIC);
-        options.add(LOG_SCAN_TIMESTAMP_MILLS);
-        options.add(LOG_RETENTION);
-        options.add(LOG_CONSISTENCY);
-        options.add(LOG_CHANGELOG_MODE);
-        options.add(LOG_KEY_FORMAT);
-        options.add(LOG_FORMAT);
-        return options;
+        return new HashSet<>();
     }
 
     @Override
@@ -119,12 +108,10 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
 
     @Override
     public void onCreateTable(Context context, int numBucket, boolean ignoreIfExists) {
-        FactoryUtil.TableFactoryHelper helper = createTableFactoryHelper(this, context);
-        helper.validateExcept(KAFKA_PREFIX);
-        try (AdminClient adminClient = AdminClient.create(toKafkaProperties(helper.getOptions()))) {
+        Configuration options = Configuration.fromMap(context.getCatalogTable().getOptions());
+        try (AdminClient adminClient = AdminClient.create(toKafkaProperties(options))) {
             Map<String, String> configs = new HashMap<>();
-            helper.getOptions()
-                    .getOptional(LOG_RETENTION)
+            options.getOptional(LOG_RETENTION)
                     .ifPresent(
                             retention ->
                                     configs.put(

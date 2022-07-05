@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
@@ -26,16 +27,16 @@ import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.configuration.description.Description;
 import org.apache.flink.configuration.description.InlineElement;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.util.Preconditions;
 
 import java.io.Serializable;
+import java.lang.reflect.Field;
 import java.time.Duration;
-import java.util.HashSet;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
 import static org.apache.flink.configuration.description.TextElement.text;
@@ -43,8 +44,6 @@ import static org.apache.flink.table.store.utils.OptionsUtils.formatEnumOption;
 
 /** Core options for table store. */
 public class CoreOptions implements Serializable {
-    public static final String LOG_PREFIX = "log.";
-    public static final String TABLE_STORE_PREFIX = "table-store.";
 
     public static final ConfigOption<Integer> BUCKET =
             ConfigOptions.key("bucket")
@@ -52,6 +51,7 @@ public class CoreOptions implements Serializable {
                     .defaultValue(1)
                     .withDescription("Bucket number for file store.");
 
+    @Internal
     public static final ConfigOption<String> PATH =
             ConfigOptions.key("path")
                     .stringType()
@@ -116,18 +116,17 @@ public class CoreOptions implements Serializable {
                     .defaultValue(Duration.ofSeconds(1))
                     .withDescription("The discovery interval of continuous reading.");
 
-    public static final ConfigOption<CoreOptions.MergeEngine> MERGE_ENGINE =
+    public static final ConfigOption<MergeEngine> MERGE_ENGINE =
             ConfigOptions.key("merge-engine")
-                    .enumType(CoreOptions.MergeEngine.class)
-                    .defaultValue(CoreOptions.MergeEngine.DEDUPLICATE)
+                    .enumType(MergeEngine.class)
+                    .defaultValue(MergeEngine.DEDUPLICATE)
                     .withDescription(
                             Description.builder()
                                     .text("Specify the merge engine for table with primary key.")
                                     .linebreak()
                                     .list(
-                                            formatEnumOption(CoreOptions.MergeEngine.DEDUPLICATE),
-                                            formatEnumOption(
-                                                    CoreOptions.MergeEngine.PARTIAL_UPDATE))
+                                            formatEnumOption(MergeEngine.DEDUPLICATE),
+                                            formatEnumOption(MergeEngine.PARTIAL_UPDATE))
                                     .build());
 
     public static final ConfigOption<WriteMode> WRITE_MODE =
@@ -230,7 +229,7 @@ public class CoreOptions implements Serializable {
                                     + "it can be read directly during stream reads.");
 
     public static final ConfigOption<LogStartupMode> LOG_SCAN =
-            ConfigOptions.key("scan")
+            ConfigOptions.key("log.scan")
                     .enumType(LogStartupMode.class)
                     .defaultValue(LogStartupMode.FULL)
                     .withDescription(
@@ -243,21 +242,21 @@ public class CoreOptions implements Serializable {
                                     .build());
 
     public static final ConfigOption<Long> LOG_SCAN_TIMESTAMP_MILLS =
-            ConfigOptions.key("scan.timestamp-millis")
+            ConfigOptions.key("log.scan.timestamp-millis")
                     .longType()
                     .noDefaultValue()
                     .withDescription(
                             "Optional timestamp used in case of \"from-timestamp\" scan mode");
 
     public static final ConfigOption<Duration> LOG_RETENTION =
-            ConfigOptions.key("retention")
+            ConfigOptions.key("log.retention")
                     .durationType()
                     .noDefaultValue()
                     .withDescription(
                             "It means how long changes log will be kept. The default value is from the log system cluster.");
 
     public static final ConfigOption<LogConsistency> LOG_CONSISTENCY =
-            ConfigOptions.key("consistency")
+            ConfigOptions.key("log.consistency")
                     .enumType(LogConsistency.class)
                     .defaultValue(LogConsistency.TRANSACTIONAL)
                     .withDescription(
@@ -270,7 +269,7 @@ public class CoreOptions implements Serializable {
                                     .build());
 
     public static final ConfigOption<LogChangelogMode> LOG_CHANGELOG_MODE =
-            ConfigOptions.key("changelog-mode")
+            ConfigOptions.key("log.changelog-mode")
                     .enumType(LogChangelogMode.class)
                     .defaultValue(LogChangelogMode.AUTO)
                     .withDescription(
@@ -284,79 +283,27 @@ public class CoreOptions implements Serializable {
                                     .build());
 
     public static final ConfigOption<String> LOG_KEY_FORMAT =
-            ConfigOptions.key("key.format")
+            ConfigOptions.key("log.key.format")
                     .stringType()
                     .defaultValue("json")
                     .withDescription(
                             "Specify the key message format of log system with primary key.");
 
     public static final ConfigOption<String> LOG_FORMAT =
-            ConfigOptions.key("format")
+            ConfigOptions.key("log.format")
                     .stringType()
                     .defaultValue("debezium-json")
                     .withDescription("Specify the message format of log system.");
 
-    public long writeBufferSize;
+    private final Configuration options;
 
-    public int pageSize;
-
-    public long targetFileSize;
-
-    public int numSortedRunCompactionTrigger;
-
-    public int numSortedRunStopTrigger;
-
-    public int numLevels;
-
-    public boolean commitForceCompact;
-
-    public int maxSizeAmplificationPercent;
-
-    public int sizeRatio;
-
-    public boolean enableChangelogFile;
-
-    private Configuration options;
-
-    public CoreOptions(
-            long writeBufferSize,
-            int pageSize,
-            long targetFileSize,
-            int numSortedRunCompactionTrigger,
-            int numSortedRunStopTrigger,
-            Integer numLevels,
-            boolean commitForceCompact,
-            int maxSizeAmplificationPercent,
-            int sizeRatio,
-            boolean enableChangelogFile) {
-        this.writeBufferSize = writeBufferSize;
-        this.pageSize = pageSize;
-        this.targetFileSize = targetFileSize;
-        this.numSortedRunCompactionTrigger = numSortedRunCompactionTrigger;
-        this.numSortedRunStopTrigger =
-                Math.max(numSortedRunCompactionTrigger, numSortedRunStopTrigger);
-        // By default, this ensures that the compaction does not fall to level 0, but at least to
-        // level 1
-        this.numLevels = numLevels == null ? numSortedRunCompactionTrigger + 1 : numLevels;
-        this.commitForceCompact = commitForceCompact;
-        this.maxSizeAmplificationPercent = maxSizeAmplificationPercent;
-        this.sizeRatio = sizeRatio;
-        this.enableChangelogFile = enableChangelogFile;
+    public CoreOptions(Map<String, String> options) {
+        this(Configuration.fromMap(options));
     }
 
-    public CoreOptions(Configuration config) {
-        this(
-                config.get(WRITE_BUFFER_SIZE).getBytes(),
-                (int) config.get(PAGE_SIZE).getBytes(),
-                config.get(TARGET_FILE_SIZE).getBytes(),
-                config.get(NUM_SORTED_RUNS_COMPACTION_TRIGGER),
-                config.get(NUM_SORTED_RUNS_STOP_TRIGGER),
-                config.get(NUM_LEVELS),
-                config.get(COMMIT_FORCE_COMPACT),
-                config.get(COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT),
-                config.get(COMPACTION_SIZE_RATIO),
-                config.get(CHANGELOG_FILE));
-        this.options = config;
+    public CoreOptions(Configuration options) {
+        this.options = options;
+        // TODO validate all keys
         Preconditions.checkArgument(
                 snapshotNumRetainMin() > 0,
                 SNAPSHOT_NUM_RETAINED_MIN.key() + " should be at least 1");
@@ -365,39 +312,6 @@ public class CoreOptions implements Serializable {
                 SNAPSHOT_NUM_RETAINED_MIN.key()
                         + " should not be larger than "
                         + SNAPSHOT_NUM_RETAINED_MAX.key());
-    }
-
-    public CoreOptions(Map<String, String> options) {
-        this(Configuration.fromMap(options));
-    }
-
-    public static Set<ConfigOption<?>> allOptions() {
-        Set<ConfigOption<?>> allOptions = new HashSet<>();
-        allOptions.add(BUCKET);
-        allOptions.add(PATH);
-        allOptions.add(FILE_FORMAT);
-        allOptions.add(MANIFEST_FORMAT);
-        allOptions.add(MANIFEST_TARGET_FILE_SIZE);
-        allOptions.add(MANIFEST_MERGE_MIN_COUNT);
-        allOptions.add(PARTITION_DEFAULT_NAME);
-        allOptions.add(SNAPSHOT_NUM_RETAINED_MIN);
-        allOptions.add(SNAPSHOT_NUM_RETAINED_MAX);
-        allOptions.add(SNAPSHOT_TIME_RETAINED);
-        allOptions.add(CONTINUOUS_DISCOVERY_INTERVAL);
-        allOptions.add(MERGE_ENGINE);
-        allOptions.add(WRITE_MODE);
-        allOptions.add(SOURCE_SPLIT_TARGET_SIZE);
-        allOptions.add(SOURCE_SPLIT_OPEN_FILE_COST);
-        allOptions.add(WRITE_BUFFER_SIZE);
-        allOptions.add(PAGE_SIZE);
-        allOptions.add(TARGET_FILE_SIZE);
-        allOptions.add(NUM_SORTED_RUNS_COMPACTION_TRIGGER);
-        allOptions.add(NUM_SORTED_RUNS_STOP_TRIGGER);
-        allOptions.add(NUM_LEVELS);
-        allOptions.add(COMMIT_FORCE_COMPACT);
-        allOptions.add(COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT);
-        allOptions.add(COMPACTION_SIZE_RATIO);
-        return allOptions;
     }
 
     public int bucket() {
@@ -414,14 +328,6 @@ public class CoreOptions implements Serializable {
 
     public static Path path(Configuration options) {
         return new Path(options.get(PATH));
-    }
-
-    public static String relativeTablePath(ObjectIdentifier tableIdentifier) {
-        return String.format(
-                "%s.catalog/%s.db/%s",
-                tableIdentifier.getCatalogName(),
-                tableIdentifier.getDatabaseName(),
-                tableIdentifier.getObjectName());
     }
 
     public FileFormat fileFormat() {
@@ -462,6 +368,50 @@ public class CoreOptions implements Serializable {
 
     public long splitOpenFileCost() {
         return options.get(SOURCE_SPLIT_OPEN_FILE_COST).getBytes();
+    }
+
+    public long writeBufferSize() {
+        return options.get(WRITE_BUFFER_SIZE).getBytes();
+    }
+
+    public int pageSize() {
+        return (int) options.get(PAGE_SIZE).getBytes();
+    }
+
+    public long targetFileSize() {
+        return options.get(TARGET_FILE_SIZE).getBytes();
+    }
+
+    public int numSortedRunCompactionTrigger() {
+        return options.get(NUM_SORTED_RUNS_COMPACTION_TRIGGER);
+    }
+
+    public int numSortedRunStopTrigger() {
+        return Math.max(numSortedRunCompactionTrigger(), options.get(NUM_SORTED_RUNS_STOP_TRIGGER));
+    }
+
+    public int numLevels() {
+        // By default, this ensures that the compaction does not fall to level 0, but at least to
+        // level 1
+        Integer numLevels = options.get(NUM_LEVELS);
+        numLevels = numLevels == null ? numSortedRunCompactionTrigger() + 1 : numLevels;
+        return numLevels;
+    }
+
+    public boolean commitForceCompact() {
+        return options.get(COMMIT_FORCE_COMPACT);
+    }
+
+    public int maxSizeAmplificationPercent() {
+        return options.get(COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT);
+    }
+
+    public int sizeRatio() {
+        return options.get(COMPACTION_SIZE_RATIO);
+    }
+
+    public boolean enableChangelogFile() {
+        return options.get(CHANGELOG_FILE);
     }
 
     /** Specifies the merge engine for table with primary key. */
@@ -578,5 +528,21 @@ public class CoreOptions implements Serializable {
         public InlineElement getDescription() {
             return text(description);
         }
+    }
+
+    @Internal
+    public static List<ConfigOption<?>> getOptions() {
+        final Field[] fields = CoreOptions.class.getFields();
+        final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
+        for (Field field : fields) {
+            if (ConfigOption.class.isAssignableFrom(field.getType())) {
+                try {
+                    list.add((ConfigOption<?>) field.get(CoreOptions.class));
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
+        return list;
     }
 }

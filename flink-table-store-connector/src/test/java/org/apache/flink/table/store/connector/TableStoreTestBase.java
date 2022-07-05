@@ -31,7 +31,6 @@ import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.catalog.UniqueConstraint;
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.kafka.KafkaTableTestBase;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
@@ -50,10 +49,10 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static org.apache.flink.table.store.CoreOptions.LOG_PREFIX;
-import static org.apache.flink.table.store.CoreOptions.TABLE_STORE_PREFIX;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.LOG_SYSTEM;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.ROOT_PATH;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.TABLE_STORE_PREFIX;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.relativeTablePath;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 
 /** End-to-end test base for table store. */
@@ -111,7 +110,7 @@ public abstract class TableStoreTestBase extends KafkaTableTestBase {
         Configuration configuration = tEnv.getConfig().getConfiguration();
         configuration.setString(TABLE_STORE_PREFIX + ROOT_PATH.key(), rootPath);
         configuration.setString(
-                TABLE_STORE_PREFIX + LOG_PREFIX + BOOTSTRAP_SERVERS.key(), getBootstrapServers());
+                TABLE_STORE_PREFIX + BOOTSTRAP_SERVERS.key(), getBootstrapServers());
         if (enableLogStore) {
             configuration.setString(TABLE_STORE_PREFIX + LOG_SYSTEM.key(), "kafka");
         }
@@ -153,8 +152,7 @@ public abstract class TableStoreTestBase extends KafkaTableTestBase {
     }
 
     protected void deleteTablePath() {
-        FileUtils.deleteQuietly(
-                Paths.get(rootPath, CoreOptions.relativeTablePath(tableIdentifier)).toFile());
+        FileUtils.deleteQuietly(Paths.get(rootPath, relativeTablePath(tableIdentifier)).toFile());
     }
 
     /** Expected result wrapper. */

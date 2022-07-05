@@ -115,14 +115,14 @@ Important options include the following:
       <td>The log system used to keep changes of the table, supports 'kafka'.</td>
     </tr>
     <tr>
-      <td><h5>log.kafka.bootstrap.servers</h5></td>
+      <td><h5>kafka.bootstrap.servers</h5></td>
       <td>No</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>
       <td>Required Kafka server connection string for log store.</td>
     </tr>
     <tr>
-      <td><h5>log.topic</h5></td>
+      <td><h5>kafka.topic</h5></td>
       <td>No</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>

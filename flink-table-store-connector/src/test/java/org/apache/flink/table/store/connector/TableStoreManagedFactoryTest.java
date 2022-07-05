@@ -57,13 +57,13 @@ import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
 import static org.apache.flink.table.store.CoreOptions.BUCKET;
 import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
-import static org.apache.flink.table.store.CoreOptions.LOG_PREFIX;
 import static org.apache.flink.table.store.CoreOptions.PATH;
-import static org.apache.flink.table.store.CoreOptions.TABLE_STORE_PREFIX;
 import static org.apache.flink.table.store.CoreOptions.path;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_MANUAL_TRIGGERED;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_PARTITION_SPEC;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.COMPACTION_PARTITION_SPEC;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.ROOT_PATH;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.TABLE_STORE_PREFIX;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.relativeTablePath;
 import static org.apache.flink.table.store.connector.TableStoreTestBase.createResolvedTable;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.DEFAULT_PART_TYPE;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.DEFAULT_ROW_TYPE;
@@ -122,20 +122,20 @@ public class TableStoreManagedFactoryTest {
         Map<String, String> sessionMap = new HashMap<>();
         sessionMap.put("table-store.root-path", "my_path");
         sessionMap.put("table-store.log.system", "kafka");
-        sessionMap.put("table-store.log.topic", "my_topic");
+        sessionMap.put("table-store.kafka.topic", "my_topic");
         context = createNonEnrichedContext(sessionMap, emptyMap());
         assertThatThrownBy(() -> tableStoreManagedFactory.enrichOptions(context))
                 .hasMessage(
                         "Managed table can not contain custom topic. You need to remove topic in table options or session config.");
 
-        sessionMap.remove("table-store.log.topic");
+        sessionMap.remove("table-store.kafka.topic");
         context = createNonEnrichedContext(sessionMap, emptyMap());
         Map<String, String> enriched = tableStoreManagedFactory.enrichOptions(context);
 
         Map<String, String> expected = new HashMap<>();
         expected.put("path", "my_path/catalog.catalog/database.db/table");
         expected.put("log.system", "kafka");
-        expected.put("log.topic", "catalog.database.table");
+        expected.put("kafka.topic", "catalog.database.table");
         assertThat(enriched).containsExactlyEntriesOf(expected);
     }
 
@@ -186,27 +186,6 @@ public class TableStoreManagedFactoryTest {
                                             + "Suggestion: please try `DROP TABLE IF EXISTS` ddl instead.",
                                     expectedPath, TABLE_IDENTIFIER.asSerializableString()));
         }
-    }
-
-    @Test
-    public void testFilterLogStoreOptions() {
-        // mix invalid key and leave value to empty to emphasize the deferred validation
-        Map<String, String> expectedLogOptions =
-                of(
-                        CoreOptions.LOG_SCAN.key(),
-                        "",
-                        CoreOptions.LOG_RETENTION.key(),
-                        "",
-                        "dummy.key",
-                        "",
-                        CoreOptions.LOG_CHANGELOG_MODE.key(),
-                        "");
-        Map<String, String> enrichedOptions =
-                addPrefix(expectedLogOptions, LOG_PREFIX, (key) -> true);
-        enrichedOptions.put("foo", "bar");
-
-        assertThat(TableStoreManagedFactory.filterLogStoreOptions(enrichedOptions))
-                .containsExactlyInAnyOrderEntriesOf(expectedLogOptions);
     }
 
     @ParameterizedTest
@@ -322,9 +301,9 @@ public class TableStoreManagedFactoryTest {
                         BUCKET.defaultValue().toString(),
                         ROOT_PATH.key(),
                         sharedTempDir.toString(),
-                        LOG_PREFIX + BOOTSTRAP_SERVERS.key(),
+                        BOOTSTRAP_SERVERS.key(),
                         "localhost:9092",
-                        LOG_PREFIX + LOG_CONSISTENCY.key(),
+                        LOG_CONSISTENCY.key(),
                         LOG_CONSISTENCY.defaultValue().name());
 
         // set configuration under session level
@@ -365,8 +344,7 @@ public class TableStoreManagedFactoryTest {
         Map<String, String> expected = new HashMap<>(enrichedOptions);
         String rootPath = expected.remove(ROOT_PATH.key());
         if (rootPath != null) {
-            String path =
-                    rootPath + "/" + TableStoreManagedFactory.relativeTablePath(TABLE_IDENTIFIER);
+            String path = rootPath + "/" + relativeTablePath(TABLE_IDENTIFIER);
             expected.put(PATH.key(), path);
         }
         return expected;
