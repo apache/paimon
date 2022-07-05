@@ -18,11 +18,9 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
-import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.factories.ManagedTableFactory;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -30,6 +28,7 @@ import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.util.Preconditions;
+
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -39,13 +38,13 @@ import java.util.Objects;
 import java.util.Optional;
 
 import static org.apache.flink.table.store.CoreOptions.BUCKET;
-import static org.apache.flink.table.store.CoreOptions.LOG_PREFIX;
 import static org.apache.flink.table.store.CoreOptions.PATH;
-import static org.apache.flink.table.store.CoreOptions.TABLE_STORE_PREFIX;
 import static org.apache.flink.table.store.CoreOptions.WRITE_MODE;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_MANUAL_TRIGGERED;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_PARTITION_SPEC;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.COMPACTION_PARTITION_SPEC;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.ROOT_PATH;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.TABLE_STORE_PREFIX;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.relativeTablePath;
 import static org.apache.flink.table.store.file.WriteMode.APPEND_ONLY;
 
 /** Default implementation of {@link ManagedTableFactory}. */
@@ -85,19 +84,10 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
                 createOptionalLogStoreFactory(context.getClassLoader(), enrichedOptions);
         logFactory.ifPresent(
                 factory ->
-                        factory.enrichOptions(createLogContext(context, enrichedOptions))
-                                .forEach((k, v) -> enrichedOptions.putIfAbsent(LOG_PREFIX + k, v)));
+                        factory.enrichOptions(new TableStoreDynamicContext(context, enrichedOptions))
+                                .forEach(enrichedOptions::putIfAbsent));
 
         return enrichedOptions;
-    }
-
-    @VisibleForTesting
-    static String relativeTablePath(ObjectIdentifier tableIdentifier) {
-        return String.format(
-                "%s.catalog/%s.db/%s",
-                tableIdentifier.getCatalogName(),
-                tableIdentifier.getDatabaseName(),
-                tableIdentifier.getObjectName());
     }
 
     @Override
@@ -151,7 +141,7 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
                 .ifPresent(
                         factory ->
                                 factory.onCreateTable(
-                                        createLogContext(context),
+                                        context,
                                         Integer.parseInt(
                                                 options.getOrDefault(
                                                         BUCKET.key(),
@@ -179,7 +169,7 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
         createOptionalLogStoreFactory(context)
                 .ifPresent(
                         factory ->
-                                factory.onDropTable(createLogContext(context), ignoreIfNotExists));
+                                factory.onDropTable(context, ignoreIfNotExists));
     }
 
     @Override

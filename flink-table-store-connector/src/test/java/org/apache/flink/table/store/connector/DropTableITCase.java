@@ -25,7 +25,6 @@ import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
@@ -40,6 +39,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.relativeTablePath;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -80,7 +80,7 @@ public class DropTableITCase extends TableStoreTestBase {
             assertThat(((TableEnvironmentImpl) tEnv).getCatalogManager().getTable(tableIdentifier))
                     .isNotPresent();
             // check table store
-            assertThat(Paths.get(rootPath, CoreOptions.relativeTablePath(tableIdentifier)).toFile())
+            assertThat(Paths.get(rootPath, relativeTablePath(tableIdentifier)).toFile())
                     .doesNotExist();
             // check log store
             assertThat(topicExists(tableIdentifier.asSummaryString())).isFalse();

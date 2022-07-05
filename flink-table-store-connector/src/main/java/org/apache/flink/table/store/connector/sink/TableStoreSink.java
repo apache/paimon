@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.DelegatingConfiguration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -28,9 +27,9 @@ import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
+import org.apache.flink.table.store.connector.FlinkConnectorOptions;
 import org.apache.flink.table.store.connector.TableStoreDataStreamSinkProvider;
-import org.apache.flink.table.store.connector.TableStoreFactoryOptions;
 import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.store.table.AppendOnlyFileStoreTable;
@@ -45,12 +44,14 @@ import javax.annotation.Nullable;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
+
 /** Table sink to create {@link StoreSink}. */
 public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, SupportsPartitioning {
 
     private final ObjectIdentifier tableIdentifier;
     private final FileStoreTable table;
-    private final DynamicTableFactory.Context logStoreContext;
+    private final DynamicTableFactory.Context context;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
     private Map<String, String> staticPartitions = new HashMap<>();
@@ -60,11 +61,11 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
     public TableStoreSink(
             ObjectIdentifier tableIdentifier,
             FileStoreTable table,
-            DynamicTableFactory.Context logStoreContext,
+            DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
-        this.logStoreContext = logStoreContext;
+        this.context = context;
         this.logStoreTableFactory = logStoreTableFactory;
     }
 
@@ -76,12 +77,8 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
             // no primary key, sink all changelogs
             return requestedMode;
         } else if (table instanceof ChangelogWithKeyFileStoreTable) {
-            Configuration logOptions =
-                    new DelegatingConfiguration(
-                            Configuration.fromMap(table.schema().options()),
-                            CoreOptions.LOG_PREFIX);
-            if (logOptions.get(CoreOptions.LOG_CHANGELOG_MODE)
-                    != CoreOptions.LogChangelogMode.ALL) {
+            Configuration options = Configuration.fromMap(table.schema().options());
+            if (options.get(LOG_CHANGELOG_MODE) != LogChangelogMode.ALL) {
                 // with primary key, default sink upsert
                 ChangelogMode.Builder builder = ChangelogMode.newBuilder();
                 for (RowKind kind : requestedMode.getContainedKinds()) {
@@ -110,13 +107,13 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
     public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
         LogSinkProvider logSinkProvider = null;
         if (logStoreTableFactory != null) {
-            logSinkProvider = logStoreTableFactory.createSinkProvider(logStoreContext, context);
+            logSinkProvider = logStoreTableFactory.createSinkProvider(this.context, context);
         }
 
         Configuration conf = Configuration.fromMap(table.schema().options());
         // Do not sink to log store when overwrite mode
         final LogSinkFunction logSinkFunction =
-                overwrite || conf.get(TableStoreFactoryOptions.COMPACTION_MANUAL_TRIGGERED)
+                overwrite || conf.get(FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED)
                         ? null
                         : (logSinkProvider == null ? null : logSinkProvider.createSink());
         return new TableStoreDataStreamSinkProvider(
@@ -129,15 +126,14 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
                                 .withLockFactory(lockFactory)
                                 .withLogSinkFunction(logSinkFunction)
                                 .withOverwritePartition(overwrite ? staticPartitions : null)
-                                .withParallelism(
-                                        conf.get(TableStoreFactoryOptions.SINK_PARALLELISM))
+                                .withParallelism(conf.get(FlinkConnectorOptions.SINK_PARALLELISM))
                                 .build());
     }
 
     @Override
     public DynamicTableSink copy() {
         TableStoreSink copied =
-                new TableStoreSink(tableIdentifier, table, logStoreContext, logStoreTableFactory);
+                new TableStoreSink(tableIdentifier, table, context, logStoreTableFactory);
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
         copied.lockFactory = lockFactory;

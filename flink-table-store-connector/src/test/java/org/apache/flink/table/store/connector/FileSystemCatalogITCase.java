@@ -60,8 +60,8 @@ public class FileSystemCatalogITCase extends KafkaTableTestBase {
                     String.format(
                             "CREATE TABLE T (a STRING, b STRING, c STRING) WITH ("
                                     + "'log.system'='kafka', "
-                                    + "'log.kafka.bootstrap.servers'='%s',"
-                                    + "'log.topic'='%s'"
+                                    + "'kafka.bootstrap.servers'='%s',"
+                                    + "'kafka.topic'='%s'"
                                     + ")",
                             getBootstrapServers(), topic));
             innerTestWriteRead();
@@ -85,8 +85,8 @@ public class FileSystemCatalogITCase extends KafkaTableTestBase {
                                     + "d AS CAST(c as INT) + 1"
                                     + ") WITH ("
                                     + "'log.system'='kafka', "
-                                    + "'log.kafka.bootstrap.servers'='%s',"
-                                    + "'log.topic'='%s'"
+                                    + "'kafka.bootstrap.servers'='%s',"
+                                    + "'kafka.topic'='%s'"
                                     + ")",
                             getBootstrapServers(), topic));
             BlockingIterator<Row, Row> iterator =

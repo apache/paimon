@@ -122,7 +122,7 @@ public class MergeTreeTest {
                                 valueType,
                                 flushingAvro,
                                 pathFactory,
-                                options.targetFileSize)
+                                options.targetFileSize())
                         .create(BinaryRowDataUtil.EMPTY_ROW, 0);
         writer = createMergeTreeWriter(Collections.emptyList());
     }
@@ -271,15 +271,16 @@ public class MergeTreeTest {
                         dataFileWriter.keyType(),
                         dataFileWriter.valueType(),
                         createCompactManager(dataFileWriter, service),
-                        new Levels(comparator, files, options.numLevels),
+                        new Levels(comparator, files, options.numLevels()),
                         maxSequenceNumber,
                         comparator,
                         new DeduplicateMergeFunction(),
                         dataFileWriter,
-                        options.commitForceCompact,
-                        options.numSortedRunStopTrigger,
+                        options.commitForceCompact(),
+                        options.numSortedRunStopTrigger(),
                         false);
-        writer.setMemoryPool(new HeapMemorySegmentPool(options.writeBufferSize, options.pageSize));
+        writer.setMemoryPool(
+                new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return writer;
     }
 
@@ -287,9 +288,9 @@ public class MergeTreeTest {
             DataFileWriter dataFileWriter, ExecutorService compactExecutor) {
         CompactStrategy compactStrategy =
                 new UniversalCompaction(
-                        options.maxSizeAmplificationPercent,
-                        options.sizeRatio,
-                        options.numSortedRunCompactionTrigger);
+                        options.maxSizeAmplificationPercent(),
+                        options.sizeRatio(),
+                        options.numSortedRunCompactionTrigger());
         CompactRewriter rewriter =
                 (outputLevel, dropDelete, sections) ->
                         dataFileWriter.write(
@@ -302,7 +303,7 @@ public class MergeTreeTest {
                                                 new DeduplicateMergeFunction())),
                                 outputLevel);
         return new CompactManager(
-                compactExecutor, compactStrategy, comparator, options.targetFileSize, rewriter);
+                compactExecutor, compactStrategy, comparator, options.targetFileSize(), rewriter);
     }
 
     private void mergeCompacted(

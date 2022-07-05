@@ -74,7 +74,7 @@ public class LogStoreE2eTest extends E2eTestBase {
                         + "    'root-path' = '%s',\n"
                         + "    'log.consistency' = 'eventual',\n"
                         + "    'log.system' = 'kafka',\n"
-                        + "    'log.kafka.bootstrap.servers' = '%s'\n"
+                        + "    'kafka.bootstrap.servers' = '%s'\n"
                         + ");";
         tableStoreStreamDdl =
                 String.format(

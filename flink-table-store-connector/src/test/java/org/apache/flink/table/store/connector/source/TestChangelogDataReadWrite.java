@@ -156,7 +156,7 @@ public class TestChangelogDataReadWrite {
                         .createEmptyWriter(partition, bucket, service);
         ((MemoryOwner) writer)
                 .setMemoryPool(
-                        new HeapMemorySegmentPool(options.writeBufferSize, options.pageSize));
+                        new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return writer;
     }
 }

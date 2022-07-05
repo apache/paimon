@@ -30,7 +30,7 @@ import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.CoreOptions.LogStartupMode;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.kafka.KafkaTableTestBase;
 import org.apache.flink.types.Row;
@@ -49,7 +49,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.CoreOptions.LOG_PREFIX;
+import static org.apache.flink.table.store.CoreOptions.LOG_SCAN;
+import static org.apache.flink.table.store.CoreOptions.LOG_SCAN_TIMESTAMP_MILLS;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.LOG_SYSTEM;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.ROOT_PATH;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.relativeTablePath;
 import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.prepareHelperSourceWithChangelogRecords;
 import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.prepareHelperSourceWithInsertOnlyRecords;
 import static org.apache.flink.table.store.connector.ShowCreateUtil.buildInsertIntoQuery;
@@ -57,8 +61,6 @@ import static org.apache.flink.table.store.connector.ShowCreateUtil.buildInsertO
 import static org.apache.flink.table.store.connector.ShowCreateUtil.buildSelectQuery;
 import static org.apache.flink.table.store.connector.ShowCreateUtil.buildSimpleSelectQuery;
 import static org.apache.flink.table.store.connector.ShowCreateUtil.createTableLikeDDL;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
-import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -71,7 +73,7 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
     protected void checkFileStorePath(
             StreamTableEnvironment tEnv, String managedTable, @Nullable String partitionList) {
         String relativeFilePath =
-                CoreOptions.relativeTablePath(
+                relativeTablePath(
                         ObjectIdentifier.of(
                                 tEnv.getCurrentCatalog(), tEnv.getCurrentDatabase(), managedTable));
         // check snapshot file path
@@ -230,9 +232,7 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
             List<Row> expected)
             throws Exception {
         Map<String, String> hints = new HashMap<>();
-        hints.put(
-                LOG_PREFIX + CoreOptions.LOG_SCAN.key(),
-                CoreOptions.LogStartupMode.LATEST.name().toLowerCase());
+        hints.put(LOG_SCAN.key(), LogStartupMode.LATEST.name().toLowerCase());
         collectAndCheckUnderSameEnv(
                         true,
                         true,
@@ -258,9 +258,8 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
             List<Row> expected)
             throws Exception {
         Map<String, String> hints = new HashMap<>();
-        hints.put(LOG_PREFIX + CoreOptions.LOG_SCAN.key(), "from-timestamp");
-        hints.put(
-                LOG_PREFIX + CoreOptions.LOG_SCAN_TIMESTAMP_MILLS.key(), String.valueOf(timestamp));
+        hints.put(LOG_SCAN.key(), "from-timestamp");
+        hints.put(LOG_SCAN_TIMESTAMP_MILLS.key(), String.valueOf(timestamp));
         collectAndCheckUnderSameEnv(
                         true,
                         true,
@@ -292,7 +291,7 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
         tableOptions.put(ROOT_PATH.key(), rootPath);
         if (enableLogStore) {
             tableOptions.put(LOG_SYSTEM.key(), "kafka");
-            tableOptions.put(LOG_PREFIX + BOOTSTRAP_SERVERS.key(), getBootstrapServers());
+            tableOptions.put(BOOTSTRAP_SERVERS.key(), getBootstrapServers());
         }
         String sourceTable = "source_table_" + UUID.randomUUID();
         String managedTable = "managed_table_" + UUID.randomUUID();

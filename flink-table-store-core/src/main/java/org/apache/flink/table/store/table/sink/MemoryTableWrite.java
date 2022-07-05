@@ -42,7 +42,7 @@ public abstract class MemoryTableWrite<T> extends AbstractTableWrite<T> {
         super(write, recordConverter);
 
         HeapMemorySegmentPool memoryPool =
-                new HeapMemorySegmentPool(options.writeBufferSize, options.pageSize);
+                new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize());
         this.memoryPoolFactory = new MemoryPoolFactory(memoryPool, this::memoryOwners);
     }
 

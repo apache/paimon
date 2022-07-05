@@ -34,6 +34,8 @@ import java.util.function.Supplier;
 /** {@link FileStore} for querying and updating {@link KeyValue}s. */
 public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
+    private static final long serialVersionUID = 1L;
+
     private final RowType keyType;
     private final RowType valueType;
     private final Supplier<Comparator<RowData>> keyComparatorSupplier;
