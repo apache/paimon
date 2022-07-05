@@ -23,7 +23,7 @@ import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
-import org.apache.flink.table.store.TableStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
@@ -93,31 +93,26 @@ public class TestFileStore extends KeyValueFileStore {
             MergeFunction mergeFunction) {
         Configuration conf = new Configuration();
 
-        conf.set(TableStoreOptions.WRITE_BUFFER_SIZE, WRITE_BUFFER_SIZE);
-        conf.set(TableStoreOptions.PAGE_SIZE, PAGE_SIZE);
-        conf.set(TableStoreOptions.TARGET_FILE_SIZE, MemorySize.parse("1 kb"));
+        conf.set(CoreOptions.WRITE_BUFFER_SIZE, WRITE_BUFFER_SIZE);
+        conf.set(CoreOptions.PAGE_SIZE, PAGE_SIZE);
+        conf.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.parse("1 kb"));
 
         conf.set(
-                TableStoreOptions.MANIFEST_TARGET_FILE_SIZE,
+                CoreOptions.MANIFEST_TARGET_FILE_SIZE,
                 MemorySize.parse((ThreadLocalRandom.current().nextInt(16) + 1) + "kb"));
 
-        conf.set(TableStoreOptions.FILE_FORMAT, format);
-        conf.set(TableStoreOptions.MANIFEST_FORMAT, format);
-        conf.set(TableStoreOptions.PATH, root);
-        conf.set(TableStoreOptions.BUCKET, numBuckets);
+        conf.set(CoreOptions.FILE_FORMAT, format);
+        conf.set(CoreOptions.MANIFEST_FORMAT, format);
+        conf.set(CoreOptions.PATH, root);
+        conf.set(CoreOptions.BUCKET, numBuckets);
 
         return new TestFileStore(
-                root,
-                new TableStoreOptions(conf),
-                partitionType,
-                keyType,
-                valueType,
-                mergeFunction);
+                root, new CoreOptions(conf), partitionType, keyType, valueType, mergeFunction);
     }
 
     private TestFileStore(
             String root,
-            TableStoreOptions options,
+            CoreOptions options,
             RowType partitionType,
             RowType keyType,
             RowType valueType,

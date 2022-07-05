@@ -22,7 +22,7 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
-import org.apache.flink.table.store.TableStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -84,7 +84,7 @@ public class FileStorePathFactoryTest {
                                 new LogicalType[] {new VarCharType(10), new IntType()},
                                 new String[] {"dt", "hr"}),
                         "default",
-                        TableStoreOptions.FILE_FORMAT.defaultValue());
+                        CoreOptions.FILE_FORMAT.defaultValue());
 
         assertPartition("20211224", 16, pathFactory, "/dt=20211224/hr=16");
         assertPartition("20211224", null, pathFactory, "/dt=20211224/hr=default");

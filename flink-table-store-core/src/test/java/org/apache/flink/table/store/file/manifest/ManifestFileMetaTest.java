@@ -23,7 +23,7 @@ import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
-import org.apache.flink.table.store.TableStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
@@ -146,7 +146,7 @@ public class ManifestFileMetaTest {
                                 new Path(path),
                                 PARTITION_TYPE,
                                 "default",
-                                TableStoreOptions.FILE_FORMAT.defaultValue()),
+                                CoreOptions.FILE_FORMAT.defaultValue()),
                         Long.MAX_VALUE)
                 .create();
     }

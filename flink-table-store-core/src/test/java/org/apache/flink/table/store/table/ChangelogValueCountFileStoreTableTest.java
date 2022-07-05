@@ -21,7 +21,7 @@ package org.apache.flink.table.store.table;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.store.TableStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
@@ -166,9 +166,9 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
     protected FileStoreTable createFileStoreTable() throws Exception {
         Path tablePath = new Path(tempDir.toString());
         Configuration conf = new Configuration();
-        conf.set(TableStoreOptions.PATH, tablePath.toString());
-        conf.set(TableStoreOptions.FILE_FORMAT, "avro");
-        conf.set(TableStoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
+        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.FILE_FORMAT, "avro");
+        conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
         SchemaManager schemaManager = new SchemaManager(tablePath);
         TableSchema tableSchema =
                 schemaManager.commitNewVersion(

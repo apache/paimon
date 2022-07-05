@@ -32,7 +32,7 @@ import org.apache.flink.table.data.conversion.DataStructureConverter;
 import org.apache.flink.table.data.conversion.DataStructureConverters;
 import org.apache.flink.table.runtime.typeutils.InternalSerializers;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-import org.apache.flink.table.store.TableStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.sink.FlinkSinkBuilder;
 import org.apache.flink.table.store.connector.sink.StoreSink;
 import org.apache.flink.table.store.connector.source.FileStoreSource;
@@ -70,9 +70,9 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.apache.flink.table.store.TableStoreOptions.BUCKET;
-import static org.apache.flink.table.store.TableStoreOptions.FILE_FORMAT;
-import static org.apache.flink.table.store.TableStoreOptions.PATH;
+import static org.apache.flink.table.store.CoreOptions.BUCKET;
+import static org.apache.flink.table.store.CoreOptions.FILE_FORMAT;
+import static org.apache.flink.table.store.CoreOptions.PATH;
 import static org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -365,7 +365,7 @@ public class FileStoreITCase extends AbstractTestBase {
             boolean noFail, TemporaryFolder temporaryFolder, int[] partitions, int[] primaryKey)
             throws Exception {
         Configuration options = buildConfiguration(noFail, temporaryFolder.newFolder());
-        Path tablePath = new TableStoreOptions(options).path();
+        Path tablePath = new CoreOptions(options).path();
         UpdateSchema updateSchema =
                 new UpdateSchema(
                         TABLE_TYPE,

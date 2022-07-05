@@ -52,7 +52,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
-import static org.apache.flink.table.store.TableStoreOptions.PATH;
+import static org.apache.flink.table.store.CoreOptions.PATH;
 import static org.apache.flink.table.store.connector.FlinkCatalogFactory.IDENTIFIER;
 
 /** Catalog for table store. */

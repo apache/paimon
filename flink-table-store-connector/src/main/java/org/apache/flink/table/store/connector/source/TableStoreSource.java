@@ -28,7 +28,7 @@ import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.flink.table.store.TableStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.TableStoreDataStreamScanProvider;
 import org.apache.flink.table.store.connector.TableStoreFactoryOptions;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -95,11 +95,11 @@ public class TableStoreSource
             Configuration logOptions =
                     new DelegatingConfiguration(
                             Configuration.fromMap(table.schema().options()),
-                            TableStoreOptions.LOG_PREFIX);
-            return logOptions.get(TableStoreOptions.CONSISTENCY)
-                                    == TableStoreOptions.LogConsistency.TRANSACTIONAL
-                            && logOptions.get(TableStoreOptions.CHANGELOG_MODE)
-                                    == TableStoreOptions.LogChangelogMode.ALL
+                            CoreOptions.LOG_PREFIX);
+            return logOptions.get(CoreOptions.CONSISTENCY)
+                                    == CoreOptions.LogConsistency.TRANSACTIONAL
+                            && logOptions.get(CoreOptions.CHANGELOG_MODE)
+                                    == CoreOptions.LogChangelogMode.ALL
                     ? ChangelogMode.all()
                     : ChangelogMode.upsert();
         } else {

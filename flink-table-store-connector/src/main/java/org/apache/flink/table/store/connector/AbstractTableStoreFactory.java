@@ -27,8 +27,7 @@ import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.DynamicTableSourceFactory;
-import org.apache.flink.table.factories.FactoryUtil;
-import org.apache.flink.table.store.TableStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.connector.source.TableStoreSource;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -46,10 +45,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.TableStoreOptions.CHANGELOG_MODE;
-import static org.apache.flink.table.store.TableStoreOptions.CONSISTENCY;
-import static org.apache.flink.table.store.TableStoreOptions.LOG_PREFIX;
-import static org.apache.flink.table.store.TableStoreOptions.SCAN;
+import static org.apache.flink.table.store.CoreOptions.CHANGELOG_MODE;
+import static org.apache.flink.table.store.CoreOptions.CONSISTENCY;
+import static org.apache.flink.table.store.CoreOptions.LOG_PREFIX;
+import static org.apache.flink.table.store.CoreOptions.SCAN;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
 import static org.apache.flink.table.store.log.LogStoreTableFactory.discoverLogStoreFactory;
 
@@ -84,8 +83,8 @@ public abstract class AbstractTableStoreFactory
 
     @Override
     public Set<ConfigOption<?>> optionalOptions() {
-        Set<ConfigOption<?>> options = TableStoreOptions.allOptions();
-        options.addAll(TableStoreOptions.allOptions());
+        Set<ConfigOption<?>> options = CoreOptions.allOptions();
+        options.addAll(CoreOptions.allOptions());
         options.addAll(TableStoreFactoryOptions.allOptions());
         return options;
     }
@@ -114,18 +113,18 @@ public abstract class AbstractTableStoreFactory
 
     private static void validateFileStoreContinuous(Configuration options) {
         Configuration logOptions = new DelegatingConfiguration(options, LOG_PREFIX);
-        TableStoreOptions.LogChangelogMode changelogMode = logOptions.get(CHANGELOG_MODE);
-        if (changelogMode == TableStoreOptions.LogChangelogMode.UPSERT) {
+        CoreOptions.LogChangelogMode changelogMode = logOptions.get(CHANGELOG_MODE);
+        if (changelogMode == CoreOptions.LogChangelogMode.UPSERT) {
             throw new ValidationException(
                     "File store continuous reading dose not support upsert changelog mode.");
         }
-        TableStoreOptions.LogConsistency consistency = logOptions.get(CONSISTENCY);
-        if (consistency == TableStoreOptions.LogConsistency.EVENTUAL) {
+        CoreOptions.LogConsistency consistency = logOptions.get(CONSISTENCY);
+        if (consistency == CoreOptions.LogConsistency.EVENTUAL) {
             throw new ValidationException(
                     "File store continuous reading dose not support eventual consistency mode.");
         }
-        TableStoreOptions.LogStartupMode startupMode = logOptions.get(SCAN);
-        if (startupMode == TableStoreOptions.LogStartupMode.FROM_TIMESTAMP) {
+        CoreOptions.LogStartupMode startupMode = logOptions.get(SCAN);
+        if (startupMode == CoreOptions.LogStartupMode.FROM_TIMESTAMP) {
             throw new ValidationException(
                     "File store continuous reading dose not support from_timestamp scan mode, "
                             + "you can add timestamp filters instead.");
@@ -138,13 +137,7 @@ public abstract class AbstractTableStoreFactory
 
     static DynamicTableFactory.Context createLogContext(
             DynamicTableFactory.Context context, Map<String, String> options) {
-        return new FactoryUtil.DefaultDynamicTableContext(
-                context.getObjectIdentifier(),
-                context.getCatalogTable().copy(filterLogStoreOptions(options)),
-                filterLogStoreOptions(context.getEnrichmentOptions()),
-                context.getConfiguration(),
-                context.getClassLoader(),
-                context.isTemporary());
+        return new TableStoreDynamicContext(context, options);
     }
 
     static Map<String, String> filterLogStoreOptions(Map<String, String> options) {

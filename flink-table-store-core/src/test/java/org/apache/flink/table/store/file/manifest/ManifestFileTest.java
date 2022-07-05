@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.manifest;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.TableStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
@@ -97,7 +97,7 @@ public class ManifestFileTest {
                         new Path(path),
                         DEFAULT_PART_TYPE,
                         "default",
-                        TableStoreOptions.FILE_FORMAT.defaultValue());
+                        CoreOptions.FILE_FORMAT.defaultValue());
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         return new ManifestFile.Factory(
                         new SchemaManager(new Path(path)),

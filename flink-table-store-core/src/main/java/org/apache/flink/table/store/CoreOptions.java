@@ -41,8 +41,8 @@ import static org.apache.flink.configuration.ConfigOptions.key;
 import static org.apache.flink.configuration.description.TextElement.text;
 import static org.apache.flink.table.store.utils.OptionsUtils.formatEnumOption;
 
-/** Options for table store. */
-public class TableStoreOptions implements Serializable {
+/** Core options for table store. */
+public class CoreOptions implements Serializable {
     public static final String LOG_PREFIX = "log.";
     public static final String TABLE_STORE_PREFIX = "table-store.";
 
@@ -116,19 +116,18 @@ public class TableStoreOptions implements Serializable {
                     .defaultValue(Duration.ofSeconds(1))
                     .withDescription("The discovery interval of continuous reading.");
 
-    public static final ConfigOption<TableStoreOptions.MergeEngine> MERGE_ENGINE =
+    public static final ConfigOption<CoreOptions.MergeEngine> MERGE_ENGINE =
             ConfigOptions.key("merge-engine")
-                    .enumType(TableStoreOptions.MergeEngine.class)
-                    .defaultValue(TableStoreOptions.MergeEngine.DEDUPLICATE)
+                    .enumType(CoreOptions.MergeEngine.class)
+                    .defaultValue(CoreOptions.MergeEngine.DEDUPLICATE)
                     .withDescription(
                             Description.builder()
                                     .text("Specify the merge engine for table with primary key.")
                                     .linebreak()
                                     .list(
+                                            formatEnumOption(CoreOptions.MergeEngine.DEDUPLICATE),
                                             formatEnumOption(
-                                                    TableStoreOptions.MergeEngine.DEDUPLICATE),
-                                            formatEnumOption(
-                                                    TableStoreOptions.MergeEngine.PARTIAL_UPDATE))
+                                                    CoreOptions.MergeEngine.PARTIAL_UPDATE))
                                     .build());
 
     public static final ConfigOption<WriteMode> WRITE_MODE =
@@ -319,7 +318,7 @@ public class TableStoreOptions implements Serializable {
 
     private Configuration options;
 
-    public TableStoreOptions(
+    public CoreOptions(
             long writeBufferSize,
             int pageSize,
             long targetFileSize,
@@ -345,7 +344,7 @@ public class TableStoreOptions implements Serializable {
         this.enableChangelogFile = enableChangelogFile;
     }
 
-    public TableStoreOptions(Configuration config) {
+    public CoreOptions(Configuration config) {
         this(
                 config.get(WRITE_BUFFER_SIZE).getBytes(),
                 (int) config.get(PAGE_SIZE).getBytes(),
@@ -368,7 +367,7 @@ public class TableStoreOptions implements Serializable {
                         + SNAPSHOT_NUM_RETAINED_MAX.key());
     }
 
-    public TableStoreOptions(Map<String, String> options) {
+    public CoreOptions(Map<String, String> options) {
         this(Configuration.fromMap(options));
     }
 

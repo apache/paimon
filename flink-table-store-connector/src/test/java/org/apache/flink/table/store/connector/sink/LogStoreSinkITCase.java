@@ -21,7 +21,7 @@ package org.apache.flink.table.store.connector.sink;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.flink.table.store.TableStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.source.FlinkSourceBuilder;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.kafka.KafkaLogSinkProvider;
@@ -102,10 +102,10 @@ public class LogStoreSinkITCase extends KafkaTableTestBase {
                 KafkaLogTestUtils.testContext(
                         name,
                         getBootstrapServers(),
-                        TableStoreOptions.LogChangelogMode.AUTO,
+                        CoreOptions.LogChangelogMode.AUTO,
                         transaction
-                                ? TableStoreOptions.LogConsistency.TRANSACTIONAL
-                                : TableStoreOptions.LogConsistency.EVENTUAL,
+                                ? CoreOptions.LogConsistency.TRANSACTIONAL
+                                : CoreOptions.LogConsistency.EVENTUAL,
                         TABLE_TYPE,
                         hasPk ? new int[] {2} : new int[0]);
 

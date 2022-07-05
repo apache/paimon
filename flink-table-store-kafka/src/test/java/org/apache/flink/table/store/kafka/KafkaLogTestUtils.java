@@ -54,10 +54,10 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.flink.table.data.binary.BinaryRowDataUtil.EMPTY_ROW;
-import static org.apache.flink.table.store.TableStoreOptions.CHANGELOG_MODE;
-import static org.apache.flink.table.store.TableStoreOptions.CONSISTENCY;
-import static org.apache.flink.table.store.TableStoreOptions.LogChangelogMode;
-import static org.apache.flink.table.store.TableStoreOptions.LogConsistency;
+import static org.apache.flink.table.store.CoreOptions.CHANGELOG_MODE;
+import static org.apache.flink.table.store.CoreOptions.CONSISTENCY;
+import static org.apache.flink.table.store.CoreOptions.LogChangelogMode;
+import static org.apache.flink.table.store.CoreOptions.LogConsistency;
 import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.TOPIC;

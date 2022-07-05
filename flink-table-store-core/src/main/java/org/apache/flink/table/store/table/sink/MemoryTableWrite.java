@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.store.TableStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.memory.MemoryPoolFactory;
@@ -38,9 +38,7 @@ public abstract class MemoryTableWrite<T> extends AbstractTableWrite<T> {
     private final MemoryPoolFactory memoryPoolFactory;
 
     protected MemoryTableWrite(
-            FileStoreWrite<T> write,
-            SinkRecordConverter recordConverter,
-            TableStoreOptions options) {
+            FileStoreWrite<T> write, SinkRecordConverter recordConverter, CoreOptions options) {
         super(write, recordConverter);
 
         HeapMemorySegmentPool memoryPool =

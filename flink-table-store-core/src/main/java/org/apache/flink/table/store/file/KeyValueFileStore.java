@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file;
 
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.TableStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreRead;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
@@ -42,7 +42,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     public KeyValueFileStore(
             SchemaManager schemaManager,
             long schemaId,
-            TableStoreOptions options,
+            CoreOptions options,
             String user,
             RowType partitionType,
             RowType keyType,

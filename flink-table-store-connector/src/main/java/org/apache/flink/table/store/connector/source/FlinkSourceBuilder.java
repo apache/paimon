@@ -30,7 +30,7 @@ import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-import org.apache.flink.table.store.TableStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.TableStoreFactoryOptions;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.log.LogSourceProvider;
@@ -94,7 +94,7 @@ public class FlinkSourceBuilder {
     }
 
     private long discoveryIntervalMills() {
-        return conf.get(TableStoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis();
+        return conf.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis();
     }
 
     private FileStoreSource buildFileSource(boolean isContinuous, boolean continuousScanLatest) {
@@ -111,20 +111,18 @@ public class FlinkSourceBuilder {
         if (isContinuous) {
             // TODO move validation to a dedicated method
             if (table.schema().primaryKeys().size() > 0
-                    && conf.get(TableStoreOptions.MERGE_ENGINE)
-                            == TableStoreOptions.MergeEngine.PARTIAL_UPDATE) {
+                    && conf.get(CoreOptions.MERGE_ENGINE)
+                            == CoreOptions.MergeEngine.PARTIAL_UPDATE) {
                 throw new ValidationException(
                         "Partial update continuous reading is not supported.");
             }
 
-            TableStoreOptions.LogStartupMode startupMode =
-                    new DelegatingConfiguration(conf, TableStoreOptions.LOG_PREFIX)
-                            .get(TableStoreOptions.SCAN);
+            CoreOptions.LogStartupMode startupMode =
+                    new DelegatingConfiguration(conf, CoreOptions.LOG_PREFIX).get(CoreOptions.SCAN);
             if (logSourceProvider == null) {
-                return buildFileSource(
-                        true, startupMode == TableStoreOptions.LogStartupMode.LATEST);
+                return buildFileSource(true, startupMode == CoreOptions.LogStartupMode.LATEST);
             } else {
-                if (startupMode != TableStoreOptions.LogStartupMode.FULL) {
+                if (startupMode != CoreOptions.LogStartupMode.FULL) {
                     return logSourceProvider.createSource(null);
                 }
                 return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(

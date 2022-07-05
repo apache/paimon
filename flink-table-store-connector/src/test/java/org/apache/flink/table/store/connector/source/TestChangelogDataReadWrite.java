@@ -24,7 +24,7 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.TableStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
@@ -80,7 +80,7 @@ public class TestChangelogDataReadWrite {
                         tablePath,
                         RowType.of(new IntType()),
                         "default",
-                        TableStoreOptions.FILE_FORMAT.defaultValue());
+                        CoreOptions.FILE_FORMAT.defaultValue());
         this.snapshotManager = new SnapshotManager(new Path(root));
         this.service = service;
     }
@@ -139,7 +139,7 @@ public class TestChangelogDataReadWrite {
     }
 
     public RecordWriter<KeyValue> createMergeTreeWriter(BinaryRowData partition, int bucket) {
-        TableStoreOptions options = new TableStoreOptions(new Configuration());
+        CoreOptions options = new CoreOptions(new Configuration());
         RecordWriter<KeyValue> writer =
                 new KeyValueFileStoreWrite(
                                 new SchemaManager(tablePath),

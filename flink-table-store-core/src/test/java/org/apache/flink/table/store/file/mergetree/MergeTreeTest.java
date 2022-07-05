@@ -25,7 +25,7 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowDataUtil;
-import org.apache.flink.table.store.TableStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileReader;
@@ -82,7 +82,7 @@ public class MergeTreeTest {
     private FileStorePathFactory pathFactory;
     private Comparator<RowData> comparator;
 
-    private TableStoreOptions options;
+    private CoreOptions options;
     private DataFileReader dataFileReader;
     private DataFileWriter dataFileWriter;
     private RecordWriter<KeyValue> writer;
@@ -99,10 +99,10 @@ public class MergeTreeTest {
 
     private void recreateMergeTree(long targetFileSize) {
         Configuration configuration = new Configuration();
-        configuration.set(TableStoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
-        configuration.set(TableStoreOptions.PAGE_SIZE, new MemorySize(4096));
-        configuration.set(TableStoreOptions.TARGET_FILE_SIZE, new MemorySize(targetFileSize));
-        options = new TableStoreOptions(configuration);
+        configuration.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
+        configuration.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
+        configuration.set(CoreOptions.TARGET_FILE_SIZE, new MemorySize(targetFileSize));
+        options = new CoreOptions(configuration);
         RowType keyType = new RowType(singletonList(new RowType.RowField("k", new IntType())));
         RowType valueType = new RowType(singletonList(new RowType.RowField("v", new IntType())));
         FileFormat flushingAvro = new FlushingFileFormat("avro");

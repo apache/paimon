@@ -30,7 +30,7 @@ import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
-import org.apache.flink.table.store.TableStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.kafka.KafkaTableTestBase;
 import org.apache.flink.types.Row;
@@ -49,7 +49,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.TableStoreOptions.LOG_PREFIX;
+import static org.apache.flink.table.store.CoreOptions.LOG_PREFIX;
 import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.prepareHelperSourceWithChangelogRecords;
 import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.prepareHelperSourceWithInsertOnlyRecords;
 import static org.apache.flink.table.store.connector.ShowCreateUtil.buildInsertIntoQuery;
@@ -71,7 +71,7 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
     protected void checkFileStorePath(
             StreamTableEnvironment tEnv, String managedTable, @Nullable String partitionList) {
         String relativeFilePath =
-                TableStoreOptions.relativeTablePath(
+                CoreOptions.relativeTablePath(
                         ObjectIdentifier.of(
                                 tEnv.getCurrentCatalog(), tEnv.getCurrentDatabase(), managedTable));
         // check snapshot file path
@@ -231,8 +231,8 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
             throws Exception {
         Map<String, String> hints = new HashMap<>();
         hints.put(
-                LOG_PREFIX + TableStoreOptions.SCAN.key(),
-                TableStoreOptions.LogStartupMode.LATEST.name().toLowerCase());
+                LOG_PREFIX + CoreOptions.SCAN.key(),
+                CoreOptions.LogStartupMode.LATEST.name().toLowerCase());
         collectAndCheckUnderSameEnv(
                         true,
                         true,
@@ -258,10 +258,8 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
             List<Row> expected)
             throws Exception {
         Map<String, String> hints = new HashMap<>();
-        hints.put(LOG_PREFIX + TableStoreOptions.SCAN.key(), "from-timestamp");
-        hints.put(
-                LOG_PREFIX + TableStoreOptions.SCAN_TIMESTAMP_MILLS.key(),
-                String.valueOf(timestamp));
+        hints.put(LOG_PREFIX + CoreOptions.SCAN.key(), "from-timestamp");
+        hints.put(LOG_PREFIX + CoreOptions.SCAN_TIMESTAMP_MILLS.key(), String.valueOf(timestamp));
         collectAndCheckUnderSameEnv(
                         true,
                         true,

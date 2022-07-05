@@ -21,7 +21,7 @@ package org.apache.flink.table.store.table;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.TableStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueFileStore;
 import org.apache.flink.table.store.file.WriteMode;
@@ -67,7 +67,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                 new KeyValueFileStore(
                         schemaManager,
                         tableSchema.id(),
-                        new TableStoreOptions(tableSchema.options()),
+                        new CoreOptions(tableSchema.options()),
                         user,
                         tableSchema.logicalPartitionType(),
                         tableSchema.logicalRowType(),

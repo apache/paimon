@@ -28,7 +28,7 @@ import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.flink.table.store.TableStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.TableStoreDataStreamSinkProvider;
 import org.apache.flink.table.store.connector.TableStoreFactoryOptions;
 import org.apache.flink.table.store.log.LogSinkProvider;
@@ -79,9 +79,8 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
             Configuration logOptions =
                     new DelegatingConfiguration(
                             Configuration.fromMap(table.schema().options()),
-                            TableStoreOptions.LOG_PREFIX);
-            if (logOptions.get(TableStoreOptions.CHANGELOG_MODE)
-                    != TableStoreOptions.LogChangelogMode.ALL) {
+                            CoreOptions.LOG_PREFIX);
+            if (logOptions.get(CoreOptions.CHANGELOG_MODE) != CoreOptions.LogChangelogMode.ALL) {
                 // with primary key, default sink upsert
                 ChangelogMode.Builder builder = ChangelogMode.newBuilder();
                 for (RowKind kind : requestedMode.getContainedKinds()) {
