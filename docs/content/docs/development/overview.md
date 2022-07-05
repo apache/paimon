@@ -56,8 +56,7 @@ __Note:__ Table Store is only supported since Flink 1.15.
 {{< /hint >}}
 
 You can get the bundle jar for the Table Store in one of the following ways:
-- [Download the latest bundle jar](https://flink.apache.org/downloads.html) of
-  Flink Table Store.
+- Download [flink-table-store-dist-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/flink/flink-table-store-dist/{{< version >}}/flink-table-store-dist-{{< version >}}.jar).
 - Build bundle jar under submodule `flink-table-store-dist` from source code.
 
 Flink Table Store has shaded all the dependencies in the package, so you don't have
