@@ -62,7 +62,7 @@ spark-sql --conf spark.sql.catalog.table_store=org.apache.flink.table.store.spar
 
 ## Create Temporary View
 
-If you don't want to use Table Store Catalog. The CREATE TEMPORARY VIEW command
+Use the `CREATE TEMPORARY VIEW` command to create a Spark mapping table if you don't want to use Table Store Catalog.
 is used to create a Spark mapping table on top of an existing Table Store table.
 
 ```sql
