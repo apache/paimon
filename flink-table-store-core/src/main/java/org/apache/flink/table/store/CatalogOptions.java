@@ -35,7 +35,9 @@ public class CatalogOptions {
     public static final ConfigOption<String> METASTORE =
             ConfigOptions.key("metastore")
                     .stringType()
-                    .defaultValue(FileSystemCatalogFactory.IDENTIFIER);
+                    .defaultValue(FileSystemCatalogFactory.IDENTIFIER)
+                    .withDescription(
+                            "Metastore of table store catalog, supports filesystem and hive.");
 
     public static final ConfigOption<String> URI =
             ConfigOptions.key("uri")

@@ -26,25 +26,25 @@ under the License.
 
 # Configuration
 
-**`CoreOptions`**
+### CoreOptions
 
 Core options for table store.
 
 {{< generated/core_configuration >}}
 
-**`CatalogOptions`**
+### CatalogOptions
 
 Options for table store catalog.
 
 {{< generated/catalog_configuration >}}
 
-**`FlinkConnectorOptions`**
+### FlinkConnectorOptions
 
 Flink connector options for table store.
 
 {{< generated/flink_connector_configuration >}}
 
-**`KafkaLogOptions`**
+### KafkaLogOptions
 
 Kafka log options provided after configuring `log.system` for kafka.
 
