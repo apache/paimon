@@ -52,6 +52,23 @@ public class CoreOptions implements Serializable {
                     .defaultValue(1)
                     .withDescription("Bucket number for file store.");
 
+    public static final ConfigOption<String> BUCKET_KEY =
+            ConfigOptions.key("bucket-key")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Specify the table store distribution policy. Data is assigned"
+                                                    + " to each bucket according to the hash value of bucket-key.")
+                                    .linebreak()
+                                    .text("If you specify multiple fields, delimiter is ','.")
+                                    .linebreak()
+                                    .text(
+                                            "If not specified, the primary key will be used; "
+                                                    + "if there is no primary key, the full row will be used.")
+                                    .build());
+
     @Internal
     public static final ConfigOption<String> PATH =
             ConfigOptions.key("path")
