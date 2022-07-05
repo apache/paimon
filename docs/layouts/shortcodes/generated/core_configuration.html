@@ -60,13 +60,13 @@
             <td><h5>log.changelog-mode</h5></td>
             <td style="word-wrap: break-word;">auto</td>
             <td><p>Enum</p></td>
-            <td>Specify the log changelog mode for table.<br /><ul><li>"auto": Upsert for table with primary key, all for table without primary key..</li><li>"all": The log system stores all changes including UPDATE_BEFORE.</li><li>"upsert": The log system does not store the UPDATE_BEFORE changes, the log consumed job will automatically add the normalized node, relying on the state to generate the required update_before.</li></ul><br /><br />Possible values:<ul><li>"auto": Upsert for table with primary key, all for table without primary key..</li><li>"all": The log system stores all changes including UPDATE_BEFORE.</li><li>"upsert": The log system does not store the UPDATE_BEFORE changes, the log consumed job will automatically add the normalized node, relying on the state to generate the required update_before.</li></ul></td>
+            <td>Specify the log changelog mode for table.<br /><br />Possible values:<ul><li>"auto": Upsert for table with primary key, all for table without primary key..</li><li>"all": The log system stores all changes including UPDATE_BEFORE.</li><li>"upsert": The log system does not store the UPDATE_BEFORE changes, the log consumed job will automatically add the normalized node, relying on the state to generate the required update_before.</li></ul></td>
         </tr>
         <tr>
             <td><h5>log.consistency</h5></td>
             <td style="word-wrap: break-word;">transactional</td>
             <td><p>Enum</p></td>
-            <td>Specify the log consistency mode for table.<br /><ul><li>"transactional": Only the data after the checkpoint can be seen by readers, the latency depends on checkpoint interval.</li><li>"eventual": Immediate data visibility, you may see some intermediate states, but eventually the right results will be produced, only works for table with primary key.</li></ul><br /><br />Possible values:<ul><li>"transactional": Only the data after the checkpoint can be seen by readers, the latency depends on checkpoint interval.</li><li>"eventual": Immediate data visibility, you may see some intermediate states, but eventually the right results will be produced, only works for table with primary key.</li></ul></td>
+            <td>Specify the log consistency mode for table.<br /><br />Possible values:<ul><li>"transactional": Only the data after the checkpoint can be seen by readers, the latency depends on checkpoint interval.</li><li>"eventual": Immediate data visibility, you may see some intermediate states, but eventually the right results will be produced, only works for table with primary key.</li></ul></td>
         </tr>
         <tr>
             <td><h5>log.format</h5></td>
@@ -90,7 +90,7 @@
             <td><h5>log.scan</h5></td>
             <td style="word-wrap: break-word;">full</td>
             <td><p>Enum</p></td>
-            <td>Specify the startup mode for log consumer.<br /><ul><li>"full": Perform a snapshot on the table upon first startup, and continue to read the latest changes.</li></ul><ul><li>"latest": Start from the latest.</li></ul><ul><li>"from-timestamp": Start from user-supplied timestamp.</li></ul><br /><br />Possible values:<ul><li>"full": Perform a snapshot on the table upon first startup, and continue to read the latest changes.</li><li>"latest": Start from the latest.</li><li>"from-timestamp": Start from user-supplied timestamp.</li></ul></td>
+            <td>Specify the startup mode for log consumer.<br /><br />Possible values:<ul><li>"full": Perform a snapshot on the table upon first startup, and continue to read the latest changes.</li><li>"latest": Start from the latest.</li><li>"from-timestamp": Start from user-supplied timestamp.</li></ul></td>
         </tr>
         <tr>
             <td><h5>log.scan.timestamp-millis</h5></td>
@@ -120,7 +120,7 @@
             <td><h5>merge-engine</h5></td>
             <td style="word-wrap: break-word;">deduplicate</td>
             <td><p>Enum</p></td>
-            <td>Specify the merge engine for table with primary key.<br /><ul><li>"deduplicate": De-duplicate and keep the last row.</li><li>"partial-update": Partial update non-null fields.</li></ul><br /><br />Possible values:<ul><li>"deduplicate": De-duplicate and keep the last row.</li><li>"partial-update": Partial update non-null fields.</li></ul></td>
+            <td>Specify the merge engine for table with primary key.<br /><br />Possible values:<ul><li>"deduplicate": De-duplicate and keep the last row.</li><li>"partial-update": Partial update non-null fields.</li></ul></td>
         </tr>
         <tr>
             <td><h5>num-levels</h5></td>
@@ -204,7 +204,7 @@
             <td><h5>write-mode</h5></td>
             <td style="word-wrap: break-word;">change-log</td>
             <td><p>Enum</p></td>
-            <td>Specify the write mode for table.<br /><ul><li>"append-only": The table can only accept append-only insert operations. Neither data deduplication nor any primary key constraints will be done when inserting rows into table store.</li></ul><ul><li>"change-log": The table can accept insert/delete/update operations.</li></ul><br /><br />Possible values:<ul><li>"append-only": The table can only accept append-only insert operations. Neither data deduplication nor any primary key constraints will be done when inserting rows into table store.</li><li>"change-log": The table can accept insert/delete/update operations.</li></ul></td>
+            <td>Specify the write mode for table.<br /><br />Possible values:<ul><li>"append-only": The table can only accept append-only insert operations. Neither data deduplication nor any primary key constraints will be done when inserting rows into table store.</li><li>"change-log": The table can accept insert/delete/update operations.</li></ul></td>
         </tr>
     </tbody>
 </table>

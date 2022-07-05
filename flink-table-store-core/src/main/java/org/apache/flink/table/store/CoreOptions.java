@@ -42,7 +42,6 @@ import java.util.Optional;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
 import static org.apache.flink.configuration.description.TextElement.text;
-import static org.apache.flink.table.store.utils.OptionsUtils.formatEnumOption;
 
 /** Core options for table store. */
 public class CoreOptions implements Serializable {
@@ -140,26 +139,13 @@ public class CoreOptions implements Serializable {
             ConfigOptions.key("merge-engine")
                     .enumType(MergeEngine.class)
                     .defaultValue(MergeEngine.DEDUPLICATE)
-                    .withDescription(
-                            Description.builder()
-                                    .text("Specify the merge engine for table with primary key.")
-                                    .linebreak()
-                                    .list(
-                                            formatEnumOption(MergeEngine.DEDUPLICATE),
-                                            formatEnumOption(MergeEngine.PARTIAL_UPDATE))
-                                    .build());
+                    .withDescription("Specify the merge engine for table with primary key.");
 
     public static final ConfigOption<WriteMode> WRITE_MODE =
             ConfigOptions.key("write-mode")
                     .enumType(WriteMode.class)
                     .defaultValue(WriteMode.CHANGE_LOG)
-                    .withDescription(
-                            Description.builder()
-                                    .text("Specify the write mode for table.")
-                                    .linebreak()
-                                    .list(formatEnumOption(WriteMode.APPEND_ONLY))
-                                    .list(formatEnumOption(WriteMode.CHANGE_LOG))
-                                    .build());
+                    .withDescription("Specify the write mode for table.");
 
     public static final ConfigOption<MemorySize> SOURCE_SPLIT_TARGET_SIZE =
             ConfigOptions.key("source.split.target-size")
@@ -260,14 +246,7 @@ public class CoreOptions implements Serializable {
             ConfigOptions.key("log.scan")
                     .enumType(LogStartupMode.class)
                     .defaultValue(LogStartupMode.FULL)
-                    .withDescription(
-                            Description.builder()
-                                    .text("Specify the startup mode for log consumer.")
-                                    .linebreak()
-                                    .list(formatEnumOption(LogStartupMode.FULL))
-                                    .list(formatEnumOption(LogStartupMode.LATEST))
-                                    .list(formatEnumOption(LogStartupMode.FROM_TIMESTAMP))
-                                    .build());
+                    .withDescription("Specify the startup mode for log consumer.");
 
     public static final ConfigOption<Long> LOG_SCAN_TIMESTAMP_MILLS =
             ConfigOptions.key("log.scan.timestamp-millis")
@@ -287,28 +266,13 @@ public class CoreOptions implements Serializable {
             ConfigOptions.key("log.consistency")
                     .enumType(LogConsistency.class)
                     .defaultValue(LogConsistency.TRANSACTIONAL)
-                    .withDescription(
-                            Description.builder()
-                                    .text("Specify the log consistency mode for table.")
-                                    .linebreak()
-                                    .list(
-                                            formatEnumOption(LogConsistency.TRANSACTIONAL),
-                                            formatEnumOption(LogConsistency.EVENTUAL))
-                                    .build());
+                    .withDescription("Specify the log consistency mode for table.");
 
     public static final ConfigOption<LogChangelogMode> LOG_CHANGELOG_MODE =
             ConfigOptions.key("log.changelog-mode")
                     .enumType(LogChangelogMode.class)
                     .defaultValue(LogChangelogMode.AUTO)
-                    .withDescription(
-                            Description.builder()
-                                    .text("Specify the log changelog mode for table.")
-                                    .linebreak()
-                                    .list(
-                                            formatEnumOption(LogChangelogMode.AUTO),
-                                            formatEnumOption(LogChangelogMode.ALL),
-                                            formatEnumOption(LogChangelogMode.UPSERT))
-                                    .build());
+                    .withDescription("Specify the log changelog mode for table.");
 
     public static final ConfigOption<String> LOG_KEY_FORMAT =
             ConfigOptions.key("log.key.format")
