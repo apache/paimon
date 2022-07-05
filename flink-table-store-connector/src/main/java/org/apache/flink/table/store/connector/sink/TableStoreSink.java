@@ -28,9 +28,9 @@ import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.TableStoreDataStreamSinkProvider;
 import org.apache.flink.table.store.connector.TableStoreFactoryOptions;
-import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.store.table.AppendOnlyFileStoreTable;
@@ -78,8 +78,10 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
         } else if (table instanceof ChangelogWithKeyFileStoreTable) {
             Configuration logOptions =
                     new DelegatingConfiguration(
-                            Configuration.fromMap(table.schema().options()), LogOptions.LOG_PREFIX);
-            if (logOptions.get(LogOptions.CHANGELOG_MODE) != LogOptions.LogChangelogMode.ALL) {
+                            Configuration.fromMap(table.schema().options()),
+                            CoreOptions.LOG_PREFIX);
+            if (logOptions.get(CoreOptions.LOG_CHANGELOG_MODE)
+                    != CoreOptions.LogChangelogMode.ALL) {
                 // with primary key, default sink upsert
                 ChangelogMode.Builder builder = ChangelogMode.newBuilder();
                 for (RowKind kind : requestedMode.getContainedKinds()) {

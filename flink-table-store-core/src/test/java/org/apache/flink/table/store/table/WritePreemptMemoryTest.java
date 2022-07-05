@@ -22,9 +22,8 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
@@ -89,11 +88,11 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
     protected FileStoreTable createFileStoreTable() throws Exception {
         Path tablePath = new Path(tempDir.toString());
         Configuration conf = new Configuration();
-        conf.set(FileStoreOptions.PATH, tablePath.toString());
-        conf.set(FileStoreOptions.FILE_FORMAT, "avro");
-        conf.set(FileStoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
-        conf.set(MergeTreeOptions.WRITE_BUFFER_SIZE, new MemorySize(30 * 1024));
-        conf.set(MergeTreeOptions.PAGE_SIZE, new MemorySize(1024));
+        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.FILE_FORMAT, "avro");
+        conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
+        conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(30 * 1024));
+        conf.set(CoreOptions.PAGE_SIZE, new MemorySize(1024));
         SchemaManager schemaManager = new SchemaManager(tablePath);
         TableSchema schema =
                 schemaManager.commitNewVersion(

@@ -20,7 +20,6 @@ package org.apache.flink.table.store;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.table.FileStoreTable;
@@ -29,7 +28,7 @@ import org.apache.flink.table.types.logical.RowType;
 
 import java.util.List;
 
-import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
+import static org.apache.flink.table.store.CoreOptions.PATH;
 
 /** Test utils related to {@link org.apache.flink.table.store.file.FileStore}. */
 public class FileStoreTestUtils {
@@ -40,7 +39,7 @@ public class FileStoreTestUtils {
             List<String> partitionKeys,
             List<String> primaryKeys)
             throws Exception {
-        Path tablePath = FileStoreOptions.path(conf);
+        Path tablePath = CoreOptions.path(conf);
         new SchemaManager(tablePath)
                 .commitNewVersion(
                         new UpdateSchema(rowType, partitionKeys, primaryKeys, conf.toMap(), ""));

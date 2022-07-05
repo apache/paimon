@@ -28,9 +28,8 @@ import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
-import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
-import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -56,22 +55,22 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
+import static org.apache.flink.table.store.CoreOptions.BUCKET;
+import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
+import static org.apache.flink.table.store.CoreOptions.LOG_PREFIX;
+import static org.apache.flink.table.store.CoreOptions.PATH;
+import static org.apache.flink.table.store.CoreOptions.TABLE_STORE_PREFIX;
+import static org.apache.flink.table.store.CoreOptions.path;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_MANUAL_TRIGGERED;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_PARTITION_SPEC;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
 import static org.apache.flink.table.store.connector.TableStoreTestBase.createResolvedTable;
-import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
-import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
-import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
-import static org.apache.flink.table.store.file.FileStoreOptions.path;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.DEFAULT_PART_TYPE;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.DEFAULT_ROW_TYPE;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.getPrimaryKeys;
 import static org.apache.flink.table.store.file.WriteMode.APPEND_ONLY;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
-import static org.apache.flink.table.store.log.LogOptions.CONSISTENCY;
-import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -194,13 +193,13 @@ public class TableStoreManagedFactoryTest {
         // mix invalid key and leave value to empty to emphasize the deferred validation
         Map<String, String> expectedLogOptions =
                 of(
-                        LogOptions.SCAN.key(),
+                        CoreOptions.LOG_SCAN.key(),
                         "",
-                        LogOptions.RETENTION.key(),
+                        CoreOptions.LOG_RETENTION.key(),
                         "",
                         "dummy.key",
                         "",
-                        LogOptions.CHANGELOG_MODE.key(),
+                        CoreOptions.LOG_CHANGELOG_MODE.key(),
                         "");
         Map<String, String> enrichedOptions =
                 addPrefix(expectedLogOptions, LOG_PREFIX, (key) -> true);
@@ -273,7 +272,7 @@ public class TableStoreManagedFactoryTest {
         context =
                 createEnrichedContext(
                         Collections.singletonMap(
-                                FileStoreOptions.WRITE_MODE.key(), APPEND_ONLY.toString()));
+                                CoreOptions.WRITE_MODE.key(), APPEND_ONLY.toString()));
         assertThatThrownBy(
                         () ->
                                 tableStoreManagedFactory.onCompactTable(
@@ -325,8 +324,8 @@ public class TableStoreManagedFactoryTest {
                         sharedTempDir.toString(),
                         LOG_PREFIX + BOOTSTRAP_SERVERS.key(),
                         "localhost:9092",
-                        LOG_PREFIX + CONSISTENCY.key(),
-                        CONSISTENCY.defaultValue().name());
+                        LOG_PREFIX + LOG_CONSISTENCY.key(),
+                        LOG_CONSISTENCY.defaultValue().name());
 
         // set configuration under session level
         Arguments arg1 =
@@ -342,7 +341,7 @@ public class TableStoreManagedFactoryTest {
         // set both session and table level configuration to test options combination
         Map<String, String> tableOptions = new HashMap<>(enrichedOptions);
         tableOptions.remove(ROOT_PATH.key());
-        tableOptions.remove(CONSISTENCY.key());
+        tableOptions.remove(LOG_CONSISTENCY.key());
         Arguments arg3 =
                 Arguments.of(
                         addPrefix(

@@ -23,9 +23,9 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory.Context;
+import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
+import org.apache.flink.table.store.CoreOptions.LogConsistency;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
-import org.apache.flink.table.store.log.LogOptions.LogChangelogMode;
-import org.apache.flink.table.store.log.LogOptions.LogConsistency;
 import org.apache.flink.types.RowKind;
 
 import org.junit.Assert;

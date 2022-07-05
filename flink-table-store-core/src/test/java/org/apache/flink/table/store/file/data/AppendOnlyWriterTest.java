@@ -25,7 +25,7 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowDataUtil;
-import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.writer.RecordWriter;
@@ -215,7 +215,7 @@ public class AppendOnlyWriterTest {
                 new Path(tempDir.toString()),
                 "dt=" + PART,
                 1,
-                FileStoreOptions.FILE_FORMAT.defaultValue());
+                CoreOptions.FILE_FORMAT.defaultValue());
     }
 
     private RecordWriter<RowData> createWriter(
