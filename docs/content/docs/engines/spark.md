@@ -69,7 +69,7 @@ an existing Table Store table if you don't want to use Table Store Catalog.
 CREATE TEMPORARY VIEW myTable
 USING tablestore
 OPTIONS (
-  path "file:/tmpe/warehouse/default.db/myTable"
+  path "file:/tmp/warehouse/default.db/myTable"
 )
 ```
 
