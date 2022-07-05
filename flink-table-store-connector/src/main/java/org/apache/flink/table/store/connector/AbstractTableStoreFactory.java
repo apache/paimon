@@ -137,7 +137,7 @@ public abstract class AbstractTableStoreFactory
 
     static DynamicTableFactory.Context createLogContext(
             DynamicTableFactory.Context context, Map<String, String> options) {
-        return new TableStoreDynamicContext(context, options);
+        return new TableStoreDynamicContext(context, filterLogStoreOptions(options));
     }
 
     static Map<String, String> filterLogStoreOptions(Map<String, String> options) {
