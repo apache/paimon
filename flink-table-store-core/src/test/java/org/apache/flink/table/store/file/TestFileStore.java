@@ -124,6 +124,7 @@ public class TestFileStore extends KeyValueFileStore {
                 options,
                 partitionType,
                 keyType,
+                keyType,
                 valueType,
                 mergeFunction);
         this.root = root;

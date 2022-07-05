@@ -41,6 +41,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -87,7 +88,8 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
     }
 
     @Override
-    protected FileStoreTable createFileStoreTable() throws Exception {
+    protected FileStoreTable createFileStoreTable(Consumer<Configuration> configure)
+            throws Exception {
         Path tablePath = new Path(tempDir.toString());
         Configuration conf = new Configuration();
         conf.set(CoreOptions.PATH, tablePath.toString());
@@ -95,6 +97,7 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
         conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
         conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(30 * 1024));
         conf.set(CoreOptions.PAGE_SIZE, new MemorySize(1024));
+        configure.accept(conf);
         SchemaManager schemaManager = new SchemaManager(tablePath);
         TableSchema schema =
                 schemaManager.commitNewVersion(

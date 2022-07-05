@@ -26,11 +26,25 @@ import java.util.List;
 import java.util.Optional;
 
 /** Function to test a field with literals. */
-public interface LeafFunction extends Serializable {
+public abstract class LeafFunction implements Serializable {
 
-    boolean test(LogicalType type, Object field, List<Object> literals);
+    public abstract boolean test(LogicalType type, Object field, List<Object> literals);
 
-    boolean test(LogicalType type, long rowCount, FieldStats fieldStats, List<Object> literals);
+    public abstract boolean test(
+            LogicalType type, long rowCount, FieldStats fieldStats, List<Object> literals);
 
-    Optional<LeafFunction> negate();
+    public abstract Optional<LeafFunction> negate();
+
+    @Override
+    public int hashCode() {
+        return this.getClass().getName().hashCode();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        return o != null && getClass() == o.getClass();
+    }
 }

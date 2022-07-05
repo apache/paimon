@@ -29,7 +29,6 @@ import org.apache.flink.table.store.file.utils.KeyComparatorSupplier;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.Comparator;
-import java.util.List;
 import java.util.function.Supplier;
 
 /** {@link FileStore} for querying and updating {@link KeyValue}s. */
@@ -37,7 +36,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     private static final long serialVersionUID = 1L;
 
-    private final List<String> bucketKeys;
+    private final RowType bucketKeyType;
     private final RowType keyType;
     private final RowType valueType;
     private final Supplier<Comparator<RowData>> keyComparatorSupplier;
@@ -48,12 +47,12 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             long schemaId,
             CoreOptions options,
             RowType partitionType,
-            List<String> bucketKeys,
+            RowType bucketKeyType,
             RowType keyType,
             RowType valueType,
             MergeFunction mergeFunction) {
         super(schemaManager, schemaId, options, partitionType);
-        this.bucketKeys = bucketKeys;
+        this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
         this.valueType = valueType;
         this.mergeFunction = mergeFunction;
@@ -97,7 +96,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private KeyValueFileStoreScan newScan(boolean checkNumOfBuckets) {
         return new KeyValueFileStoreScan(
                 partitionType,
-                bucketKeys.isEmpty() ? keyType.getFieldNames() : bucketKeys,
+                bucketKeyType,
                 keyType,
                 snapshotManager(),
                 manifestFileFactory(),

@@ -60,7 +60,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                         tableSchema.id(),
                         new CoreOptions(tableSchema.options()),
                         tableSchema.logicalPartitionType(),
-                        tableSchema.bucketKeys(),
+                        tableSchema.logicalBucketKeyType(),
                         tableSchema.logicalRowType());
     }
 

@@ -51,7 +51,7 @@ public class SinkRecordConverter {
                 numBucket,
                 tableSchema.logicalRowType(),
                 tableSchema.projection(tableSchema.partitionKeys()),
-                tableSchema.projection(tableSchema.bucketKeys()),
+                tableSchema.projection(tableSchema.originalBucketKeys()),
                 tableSchema.projection(tableSchema.trimmedPrimaryKeys()),
                 tableSchema.projection(tableSchema.primaryKeys()));
     }

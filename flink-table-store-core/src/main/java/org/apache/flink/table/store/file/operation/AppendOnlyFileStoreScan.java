@@ -26,19 +26,23 @@ import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.RowType;
 
-
 import java.util.List;
+
+import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
+import static org.apache.flink.table.store.file.predicate.PredicateBuilder.pickTransformFieldMapping;
+import static org.apache.flink.table.store.file.predicate.PredicateBuilder.splitAnd;
 
 /** {@link FileStoreScan} for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
     private final FieldStatsArraySerializer rowStatsConverter;
+    private final RowType rowType;
 
     private Predicate filter;
 
     public AppendOnlyFileStoreScan(
             RowType partitionType,
-            List<String> bucketKeys,
+            RowType bucketKeyType,
             RowType rowType,
             SnapshotManager snapshotManager,
             ManifestFile.Factory manifestFileFactory,
@@ -47,17 +51,27 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             boolean checkNumOfBuckets) {
         super(
                 partitionType,
-                bucketKeys,
+                bucketKeyType,
                 snapshotManager,
                 manifestFileFactory,
                 manifestListFactory,
                 numOfBuckets,
                 checkNumOfBuckets);
         this.rowStatsConverter = new FieldStatsArraySerializer(rowType);
+        this.rowType = rowType;
     }
 
     public AppendOnlyFileStoreScan withFilter(Predicate predicate) {
         this.filter = predicate;
+
+        List<Predicate> bucketFilters =
+                pickTransformFieldMapping(
+                        splitAnd(predicate),
+                        rowType.getFieldNames(),
+                        bucketKeyType.getFieldNames());
+        if (bucketFilters.size() > 0) {
+            withBucketKeyFilter(and(bucketFilters));
+        }
         return this;
     }
 

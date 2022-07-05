@@ -22,8 +22,6 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
-import org.apache.flink.table.store.file.predicate.CompoundPredicate;
-import org.apache.flink.table.store.file.predicate.LeafPredicate;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -35,6 +33,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+
+import static org.apache.flink.table.store.file.predicate.PredicateBuilder.transformFieldMapping;
 
 /** An abstraction layer above {@link FileStoreScan} to provide input split generation. */
 public abstract class TableScan {
@@ -74,7 +74,7 @@ public abstract class TableScan {
         List<Predicate> partitionFilters = new ArrayList<>();
         List<Predicate> nonPartitionFilters = new ArrayList<>();
         for (Predicate p : PredicateBuilder.splitAnd(predicate)) {
-            Optional<Predicate> mapped = mapFilterFields(p, fieldIdxToPartitionIdx);
+            Optional<Predicate> mapped = transformFieldMapping(p, fieldIdxToPartitionIdx);
             if (mapped.isPresent()) {
                 partitionFilters.add(mapped.get());
             } else {
@@ -135,35 +135,6 @@ public abstract class TableScan {
     protected abstract SplitGenerator splitGenerator(FileStorePathFactory pathFactory);
 
     protected abstract void withNonPartitionFilter(Predicate predicate);
-
-    protected Optional<Predicate> mapFilterFields(Predicate predicate, int[] fieldIdxMapping) {
-        if (predicate instanceof CompoundPredicate) {
-            CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
-            List<Predicate> children = new ArrayList<>();
-            for (Predicate child : compoundPredicate.children()) {
-                Optional<Predicate> mapped = mapFilterFields(child, fieldIdxMapping);
-                if (mapped.isPresent()) {
-                    children.add(mapped.get());
-                } else {
-                    return Optional.empty();
-                }
-            }
-            return Optional.of(new CompoundPredicate(compoundPredicate.function(), children));
-        } else {
-            LeafPredicate leafPredicate = (LeafPredicate) predicate;
-            int mapped = fieldIdxMapping[leafPredicate.index()];
-            if (mapped >= 0) {
-                return Optional.of(
-                        new LeafPredicate(
-                                leafPredicate.function(),
-                                leafPredicate.type(),
-                                mapped,
-                                leafPredicate.literals()));
-            } else {
-                return Optional.empty();
-            }
-        }
-    }
 
     /** Scanning plan containing snapshot ID and input splits. */
     public static class Plan {

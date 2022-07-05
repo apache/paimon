@@ -39,6 +39,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -162,12 +163,14 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Override
-    protected FileStoreTable createFileStoreTable() throws Exception {
+    protected FileStoreTable createFileStoreTable(Consumer<Configuration> configure)
+            throws Exception {
         Path tablePath = new Path(tempDir.toString());
         Configuration conf = new Configuration();
         conf.set(CoreOptions.PATH, tablePath.toString());
         conf.set(CoreOptions.FILE_FORMAT, "avro");
         conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
+        configure.accept(conf);
         SchemaManager schemaManager = new SchemaManager(tablePath);
         TableSchema tableSchema =
                 schemaManager.commitNewVersion(
