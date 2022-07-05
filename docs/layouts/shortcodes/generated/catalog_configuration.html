@@ -9,16 +9,22 @@
     </thead>
     <tbody>
         <tr>
-            <td><h5>kafka.bootstrap.servers</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
+            <td><h5>metastore</h5></td>
+            <td style="word-wrap: break-word;">"filesystem"</td>
             <td>String</td>
-            <td>Required Kafka server connection string</td>
+            <td></td>
         </tr>
         <tr>
-            <td><h5>kafka.topic</h5></td>
+            <td><h5>uri</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Topic of this kafka table.</td>
+            <td>Uri of metastore server.</td>
+        </tr>
+        <tr>
+            <td><h5>warehouse</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The warehouse root path of catalog.</td>
         </tr>
     </tbody>
 </table>

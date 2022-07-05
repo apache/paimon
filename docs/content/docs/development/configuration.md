@@ -1,10 +1,9 @@
 ---
-title: Deployment
-icon: <i class="fa fa-code title maindish" aria-hidden="true"></i>
-bold: true
-sectionBreak: true
-bookCollapseSection: true
-weight: 3
+title: "Configuration"
+weight: 6
+type: docs
+aliases:
+- /development/configuration.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,4 +23,31 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 -->
-__
+
+# Configuration
+
+# Configuration Options
+
+**`CoreOptions`**
+
+Core options for table store.
+
+{{< generated/core_configuration >}}
+
+**`CatalogOptions`**
+
+Options for table store catalog.
+
+{{< generated/catalog_configuration >}}
+
+**`FlinkConnectorOptions`**
+
+Flink connector options for table store.
+
+{{< generated/flink_connector_configuration >}}
+
+**`KafkaLogOptions`**
+
+Kafka log options provided after configuring `log.system` for kafka.
+
+{{< generated/kafka_log_configuration >}}
