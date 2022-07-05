@@ -37,6 +37,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
 import static org.apache.flink.configuration.description.TextElement.text;
@@ -228,6 +229,14 @@ public class CoreOptions implements Serializable {
                                     + "This changelog file keeps the order of data input and the details of data changes, "
                                     + "it can be read directly during stream reads.");
 
+    public static final ConfigOption<String> SEQUENCE_FIELD =
+            ConfigOptions.key("sequence.field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The field that generates the sequence number for primary key table,"
+                                    + " the sequence number determines which data is the most recent.");
+
     public static final ConfigOption<LogStartupMode> LOG_SCAN =
             ConfigOptions.key("log.scan")
                     .enumType(LogStartupMode.class)
@@ -412,6 +421,10 @@ public class CoreOptions implements Serializable {
 
     public boolean enableChangelogFile() {
         return options.get(CHANGELOG_FILE);
+    }
+
+    public Optional<String> sequenceField() {
+        return options.getOptional(SEQUENCE_FIELD);
     }
 
     /** Specifies the merge engine for table with primary key. */

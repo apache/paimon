@@ -37,6 +37,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.store.table.sink.MemoryTableWrite;
+import org.apache.flink.table.store.table.sink.SequenceGenerator;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
@@ -171,6 +172,11 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     public TableWrite newWrite() {
         SinkRecordConverter recordConverter =
                 new SinkRecordConverter(store.options().bucket(), tableSchema);
+        SequenceGenerator sequenceGenerator =
+                store.options()
+                        .sequenceField()
+                        .map(field -> new SequenceGenerator(field, schema().logicalRowType()))
+                        .orElse(null);
         return new MemoryTableWrite<KeyValue>(store.newWrite(), recordConverter, store.options()) {
 
             private final KeyValue kv = new KeyValue();
@@ -178,8 +184,16 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
             @Override
             protected void writeSinkRecord(SinkRecord record, RecordWriter<KeyValue> writer)
                     throws Exception {
+                long sequenceNumber =
+                        sequenceGenerator == null
+                                ? KeyValue.UNKNOWN_SEQUENCE
+                                : sequenceGenerator.generate(record.row());
                 writer.write(
-                        kv.replace(record.primaryKey(), record.row().getRowKind(), record.row()));
+                        kv.replace(
+                                record.primaryKey(),
+                                sequenceNumber,
+                                record.row().getRowKind(),
+                                record.row()));
             }
         };
     }

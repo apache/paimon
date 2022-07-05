@@ -37,6 +37,8 @@ import java.util.stream.IntStream;
  */
 public class KeyValue {
 
+    public static final long UNKNOWN_SEQUENCE = -1;
+
     private RowData key;
     private long sequenceNumber;
     private RowKind valueKind;
@@ -48,7 +50,7 @@ public class KeyValue {
     }
 
     public KeyValue replace(RowData key, RowKind valueKind, RowData value) {
-        return replace(key, -1, valueKind, value);
+        return replace(key, UNKNOWN_SEQUENCE, valueKind, value);
     }
 
     public KeyValue replace(RowData key, long sequenceNumber, RowKind valueKind, RowData value) {
