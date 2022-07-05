@@ -82,11 +82,26 @@ public class TableStoreSource
             boolean streaming,
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
+        this(tableIdentifier, table, streaming, context, logStoreTableFactory, null, null, null);
+    }
+
+    private TableStoreSource(
+            ObjectIdentifier tableIdentifier,
+            FileStoreTable table,
+            boolean streaming,
+            DynamicTableFactory.Context context,
+            @Nullable LogStoreTableFactory logStoreTableFactory,
+            @Nullable Predicate predicate,
+            @Nullable int[][] projectFields,
+            @Nullable WatermarkStrategy<RowData> watermarkStrategy) {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
         this.streaming = streaming;
         this.context = context;
         this.logStoreTableFactory = logStoreTableFactory;
+        this.predicate = predicate;
+        this.projectFields = projectFields;
+        this.watermarkStrategy = watermarkStrategy;
     }
 
     @Override
@@ -139,12 +154,15 @@ public class TableStoreSource
 
     @Override
     public DynamicTableSource copy() {
-        TableStoreSource copied =
-                new TableStoreSource(
-                        tableIdentifier, table, streaming, context, logStoreTableFactory);
-        copied.predicate = predicate;
-        copied.projectFields = projectFields;
-        return copied;
+        return new TableStoreSource(
+                tableIdentifier,
+                table,
+                streaming,
+                context,
+                logStoreTableFactory,
+                predicate,
+                projectFields,
+                watermarkStrategy);
     }
 
     @Override
