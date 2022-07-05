@@ -69,6 +69,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                         tableSchema.id(),
                         new CoreOptions(tableSchema.options()),
                         tableSchema.logicalPartitionType(),
+                        schema().bucketKeys(),
                         tableSchema.logicalRowType(),
                         countType,
                         mergeFunction);

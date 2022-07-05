@@ -26,15 +26,20 @@ import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.RowType;
 
+
+import java.util.List;
+
 /** {@link FileStoreScan} for {@link org.apache.flink.table.store.file.KeyValueFileStore}. */
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
+    private final List<String> bucketKeys;
     private final FieldStatsArraySerializer keyStatsConverter;
 
     private Predicate keyFilter;
 
     public KeyValueFileStoreScan(
             RowType partitionType,
+            List<String> bucketKeys,
             RowType keyType,
             SnapshotManager snapshotManager,
             ManifestFile.Factory manifestFileFactory,
@@ -43,11 +48,13 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             boolean checkNumOfBuckets) {
         super(
                 partitionType,
+                bucketKeys,
                 snapshotManager,
                 manifestFileFactory,
                 manifestListFactory,
                 numOfBuckets,
                 checkNumOfBuckets);
+        this.bucketKeys = bucketKeys;
         this.keyStatsConverter = new FieldStatsArraySerializer(keyType);
     }
 

@@ -50,6 +50,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private final FieldStatsArraySerializer partitionStatsConverter;
     private final RowDataToObjectArrayConverter partitionConverter;
+    private final List<String> bucketKeys;
     private final SnapshotManager snapshotManager;
     private final ManifestFile.Factory manifestFileFactory;
     private final ManifestList manifestList;
@@ -65,6 +66,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     public AbstractFileStoreScan(
             RowType partitionType,
+            List<String> bucketKeys,
             SnapshotManager snapshotManager,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
@@ -72,6 +74,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             boolean checkNumOfBuckets) {
         this.partitionStatsConverter = new FieldStatsArraySerializer(partitionType);
         this.partitionConverter = new RowDataToObjectArrayConverter(partitionType);
+        Preconditions.checkArgument(bucketKeys.size() > 0, "The bucket keys should not be empty.");
+        this.bucketKeys = bucketKeys;
         this.snapshotManager = snapshotManager;
         this.manifestFileFactory = manifestFileFactory;
         this.manifestList = manifestListFactory.create();

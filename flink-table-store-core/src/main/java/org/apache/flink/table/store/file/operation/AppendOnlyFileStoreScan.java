@@ -26,6 +26,9 @@ import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.RowType;
 
+
+import java.util.List;
+
 /** {@link FileStoreScan} for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
@@ -35,6 +38,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
     public AppendOnlyFileStoreScan(
             RowType partitionType,
+            List<String> bucketKeys,
             RowType rowType,
             SnapshotManager snapshotManager,
             ManifestFile.Factory manifestFileFactory,
@@ -43,6 +47,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             boolean checkNumOfBuckets) {
         super(
                 partitionType,
+                bucketKeys,
                 snapshotManager,
                 manifestFileFactory,
                 manifestListFactory,

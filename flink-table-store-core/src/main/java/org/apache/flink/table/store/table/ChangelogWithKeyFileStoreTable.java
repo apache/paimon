@@ -105,6 +105,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                         tableSchema.id(),
                         new CoreOptions(conf),
                         tableSchema.logicalPartitionType(),
+                        tableSchema.bucketKeys(),
                         keyType,
                         rowType,
                         mergeFunction);

@@ -26,9 +26,13 @@ import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreWrite;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.types.logical.RowType;
 
+
+import java.util.List;
+
 /** {@link FileStore} for reading and writing {@link RowData}. */
 public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
 
+    private final List<String> bucketKeys;
     private final RowType rowType;
 
     public AppendOnlyFileStore(
@@ -36,8 +40,10 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
             long schemaId,
             CoreOptions options,
             RowType partitionType,
+            List<String> bucketKeys,
             RowType rowType) {
         super(schemaManager, schemaId, options, partitionType);
+        this.bucketKeys = bucketKeys;
         this.rowType = rowType;
     }
 
@@ -67,6 +73,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
     private AppendOnlyFileStoreScan newScan(boolean checkNumOfBuckets) {
         return new AppendOnlyFileStoreScan(
                 partitionType,
+                bucketKeys.isEmpty() ? rowType.getFieldNames() : bucketKeys,
                 rowType,
                 snapshotManager(),
                 manifestFileFactory(),
