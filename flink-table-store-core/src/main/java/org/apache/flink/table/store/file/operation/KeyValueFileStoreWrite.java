@@ -85,7 +85,7 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
                         valueType,
                         fileFormat,
                         pathFactory,
-                        options.targetFileSize);
+                        options.targetFileSize());
         this.keyComparatorSupplier = keyComparatorSupplier;
         this.mergeFunction = mergeFunction;
         this.options = options;
@@ -112,10 +112,10 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
         }
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
         CompactRewriter rewriter = compactRewriter(partition, bucket, keyComparator);
-        Levels levels = new Levels(keyComparator, compactFiles, options.numLevels);
+        Levels levels = new Levels(keyComparator, compactFiles, options.numLevels());
         CompactUnit unit =
                 CompactUnit.fromLevelRuns(levels.numberOfLevels() - 1, levels.levelSortedRuns());
-        return new CompactTask(keyComparator, options.targetFileSize, rewriter, unit, true);
+        return new CompactTask(keyComparator, options.targetFileSize(), rewriter, unit, true);
     }
 
     private MergeTreeWriter createMergeTreeWriter(
@@ -132,18 +132,18 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
                         partition,
                         bucket,
                         new UniversalCompaction(
-                                options.maxSizeAmplificationPercent,
-                                options.sizeRatio,
-                                options.numSortedRunCompactionTrigger),
+                                options.maxSizeAmplificationPercent(),
+                                options.sizeRatio(),
+                                options.numSortedRunCompactionTrigger()),
                         compactExecutor),
-                new Levels(keyComparator, restoreFiles, options.numLevels),
+                new Levels(keyComparator, restoreFiles, options.numLevels()),
                 getMaxSequenceNumber(restoreFiles),
                 keyComparator,
                 mergeFunction.copy(),
                 dataFileWriter,
-                options.commitForceCompact,
-                options.numSortedRunStopTrigger,
-                options.enableChangelogFile);
+                options.commitForceCompact(),
+                options.numSortedRunStopTrigger(),
+                options.enableChangelogFile());
     }
 
     private CompactManager createCompactManager(
@@ -154,7 +154,11 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
         CompactRewriter rewriter = compactRewriter(partition, bucket, keyComparator);
         return new CompactManager(
-                compactExecutor, compactStrategy, keyComparator, options.targetFileSize, rewriter);
+                compactExecutor,
+                compactStrategy,
+                keyComparator,
+                options.targetFileSize(),
+                rewriter);
     }
 
     private CompactRewriter compactRewriter(

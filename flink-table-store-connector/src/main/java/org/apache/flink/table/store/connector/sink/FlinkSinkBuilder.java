@@ -25,7 +25,7 @@ import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.connector.TableStoreFactoryOptions;
+import org.apache.flink.table.store.connector.FlinkConnectorOptions;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.LogSinkFunction;
@@ -81,7 +81,7 @@ public class FlinkSinkBuilder {
     @SuppressWarnings("unchecked")
     @Nullable
     private Map<String, String> getCompactPartSpec() {
-        String json = conf.get(TableStoreFactoryOptions.COMPACTION_PARTITION_SPEC);
+        String json = conf.get(FlinkConnectorOptions.COMPACTION_PARTITION_SPEC);
         if (json == null) {
             return null;
         }
@@ -103,7 +103,7 @@ public class FlinkSinkBuilder {
                 new StoreSink(
                         tableIdentifier,
                         table,
-                        conf.get(TableStoreFactoryOptions.COMPACTION_MANUAL_TRIGGERED),
+                        conf.get(FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED),
                         getCompactPartSpec(),
                         lockFactory,
                         overwritePartition,

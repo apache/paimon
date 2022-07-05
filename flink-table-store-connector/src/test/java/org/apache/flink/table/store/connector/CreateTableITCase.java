@@ -26,7 +26,6 @@ import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
@@ -42,6 +41,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.apache.flink.table.store.CoreOptions.BUCKET;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.relativeTablePath;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -79,8 +79,7 @@ public class CreateTableITCase extends TableStoreTestBase {
             assertThat(((TableEnvironmentImpl) tEnv).getCatalogManager().getTable(tableIdentifier))
                     .isPresent();
             // check table store
-            assertThat(Paths.get(rootPath, CoreOptions.relativeTablePath(tableIdentifier)).toFile())
-                    .exists();
+            assertThat(Paths.get(rootPath, relativeTablePath(tableIdentifier)).toFile()).exists();
             // check log store
             assertThat(topicExists(tableIdentifier.asSummaryString())).isEqualTo(enableLogStore);
         } else {
@@ -129,7 +128,7 @@ public class CreateTableITCase extends TableStoreTestBase {
             }
         } else if (expectedResult.expectedMessage.startsWith("Failed to create file store path.")) {
             // failed when creating file store
-            Paths.get(rootPath, CoreOptions.relativeTablePath(tableIdentifier)).toFile().mkdirs();
+            Paths.get(rootPath, relativeTablePath(tableIdentifier)).toFile().mkdirs();
         } else if (expectedResult.expectedMessage.startsWith("Failed to create kafka topic.")) {
             // failed when creating log store
             createTopicIfNotExists(tableIdentifier.asSummaryString(), BUCKET.defaultValue());

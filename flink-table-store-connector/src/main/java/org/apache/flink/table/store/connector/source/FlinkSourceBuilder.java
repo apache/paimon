@@ -22,7 +22,6 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.DelegatingConfiguration;
 import org.apache.flink.connector.base.source.hybrid.HybridSource;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -30,8 +29,8 @@ import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.connector.TableStoreFactoryOptions;
+import org.apache.flink.table.store.CoreOptions.LogStartupMode;
+import org.apache.flink.table.store.CoreOptions.MergeEngine;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.table.FileStoreTable;
@@ -42,6 +41,11 @@ import org.apache.flink.table.types.logical.RowType;
 import javax.annotation.Nullable;
 
 import java.util.Optional;
+
+import static org.apache.flink.table.store.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
+import static org.apache.flink.table.store.CoreOptions.LOG_SCAN;
+import static org.apache.flink.table.store.CoreOptions.MERGE_ENGINE;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED;
 
 /** Source builder to build a Flink {@link Source}. */
 public class FlinkSourceBuilder {
@@ -94,7 +98,7 @@ public class FlinkSourceBuilder {
     }
 
     private long discoveryIntervalMills() {
-        return conf.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis();
+        return conf.get(CONTINUOUS_DISCOVERY_INTERVAL).toMillis();
     }
 
     private FileStoreSource buildFileSource(boolean isContinuous, boolean continuousScanLatest) {
@@ -111,19 +115,16 @@ public class FlinkSourceBuilder {
         if (isContinuous) {
             // TODO move validation to a dedicated method
             if (table.schema().primaryKeys().size() > 0
-                    && conf.get(CoreOptions.MERGE_ENGINE)
-                            == CoreOptions.MergeEngine.PARTIAL_UPDATE) {
+                    && conf.get(MERGE_ENGINE) == MergeEngine.PARTIAL_UPDATE) {
                 throw new ValidationException(
                         "Partial update continuous reading is not supported.");
             }
 
-            CoreOptions.LogStartupMode startupMode =
-                    new DelegatingConfiguration(conf, CoreOptions.LOG_PREFIX)
-                            .get(CoreOptions.LOG_SCAN);
+            LogStartupMode startupMode = conf.get(LOG_SCAN);
             if (logSourceProvider == null) {
-                return buildFileSource(true, startupMode == CoreOptions.LogStartupMode.LATEST);
+                return buildFileSource(true, startupMode == LogStartupMode.LATEST);
             } else {
-                if (startupMode != CoreOptions.LogStartupMode.FULL) {
+                if (startupMode != LogStartupMode.FULL) {
                     return logSourceProvider.createSource(null);
                 }
                 return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
@@ -151,7 +152,7 @@ public class FlinkSourceBuilder {
                         .orElse(rowType);
         DataStreamSource<RowData> dataStream =
                 env.fromSource(
-                        conf.get(TableStoreFactoryOptions.COMPACTION_MANUAL_TRIGGERED)
+                        conf.get(COMPACTION_MANUAL_TRIGGERED)
                                 ? new FileStoreEmptySource()
                                 : buildSource(),
                         WatermarkStrategy.noWatermarks(),

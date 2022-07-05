@@ -16,23 +16,30 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.kafka;
+package org.apache.flink.table.store;
 
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
+import org.apache.flink.table.store.file.catalog.FileSystemCatalogFactory;
 
-/** Options for kafka log. */
-public class KafkaLogOptions {
+/** Catalog options for table store. */
+public class CatalogOptions {
+    private CatalogOptions() {}
 
-    public static final ConfigOption<String> BOOTSTRAP_SERVERS =
-            ConfigOptions.key("kafka.bootstrap.servers")
+    public static final ConfigOption<String> WAREHOUSE =
+            ConfigOptions.key("warehouse")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("Required Kafka server connection string");
+                    .withDescription("The warehouse root path of catalog.");
 
-    public static final ConfigOption<String> TOPIC =
-            ConfigOptions.key("kafka.topic")
+    public static final ConfigOption<String> METASTORE =
+            ConfigOptions.key("metastore")
+                    .stringType()
+                    .defaultValue(FileSystemCatalogFactory.IDENTIFIER);
+
+    public static final ConfigOption<String> URI =
+            ConfigOptions.key("uri")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("Topic of this kafka table.");
+                    .withDescription("Uri of metastore server.");
 }

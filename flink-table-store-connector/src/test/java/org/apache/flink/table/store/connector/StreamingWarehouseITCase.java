@@ -90,7 +90,7 @@ public class StreamingWarehouseITCase extends ReadWriteTableTestBase {
                                 + "WITH (\n"
                                 + "    'path' = '%s',\n"
                                 + "    'log.system' = 'kafka', "
-                                + "    'log.kafka.bootstrap.servers' = '%s');",
+                                + "    'kafka.bootstrap.servers' = '%s');",
                         rootPath, getBootstrapServers());
         streamTableEnv.executeSql(orderSource);
         streamTableEnv.executeSql(cleanedOrders);

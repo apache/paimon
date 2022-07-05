@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.catalog;
 
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.util.Preconditions;
 
@@ -28,23 +26,15 @@ import java.util.List;
 import java.util.ServiceLoader;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.table.store.CatalogOptions.METASTORE;
+import static org.apache.flink.table.store.CatalogOptions.WAREHOUSE;
+
 /** Factory to create {@link Catalog}. Each factory should have a unique identifier. */
 public interface CatalogFactory {
 
     String identifier();
 
     Catalog create(String warehouse, ReadableConfig options);
-
-    ConfigOption<String> METASTORE =
-            ConfigOptions.key("metastore")
-                    .stringType()
-                    .defaultValue(FileSystemCatalogFactory.IDENTIFIER);
-
-    ConfigOption<String> WAREHOUSE =
-            ConfigOptions.key("warehouse")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("The warehouse root path of catalog.");
 
     static Catalog createCatalog(ReadableConfig options) {
         // manual validation
