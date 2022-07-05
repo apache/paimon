@@ -19,6 +19,7 @@
 package org.apache.flink.table.store;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.annotation.docs.Documentation;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
@@ -52,6 +53,7 @@ public class CoreOptions implements Serializable {
                     .withDescription("Bucket number for file store.");
 
     @Internal
+    @Documentation.ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<String> PATH =
             ConfigOptions.key("path")
                     .stringType()

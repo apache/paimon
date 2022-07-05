@@ -26,8 +26,6 @@ under the License.
 
 # Configuration
 
-# Configuration Options
-
 **`CoreOptions`**
 
 Core options for table store.
