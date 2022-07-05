@@ -28,12 +28,12 @@ import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.TableStoreDataStreamScanProvider;
 import org.apache.flink.table.store.connector.TableStoreFactoryOptions;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.predicate.PredicateConverter;
-import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.store.table.AppendOnlyFileStoreTable;
@@ -94,10 +94,12 @@ public class TableStoreSource
             // normalized nodes. See TableStoreSink.getChangelogMode validation.
             Configuration logOptions =
                     new DelegatingConfiguration(
-                            Configuration.fromMap(table.schema().options()), LogOptions.LOG_PREFIX);
-            return logOptions.get(LogOptions.CONSISTENCY) == LogOptions.LogConsistency.TRANSACTIONAL
-                            && logOptions.get(LogOptions.CHANGELOG_MODE)
-                                    == LogOptions.LogChangelogMode.ALL
+                            Configuration.fromMap(table.schema().options()),
+                            CoreOptions.LOG_PREFIX);
+            return logOptions.get(CoreOptions.LOG_CONSISTENCY)
+                                    == CoreOptions.LogConsistency.TRANSACTIONAL
+                            && logOptions.get(CoreOptions.LOG_CHANGELOG_MODE)
+                                    == CoreOptions.LogChangelogMode.ALL
                     ? ChangelogMode.all()
                     : ChangelogMode.upsert();
         } else {

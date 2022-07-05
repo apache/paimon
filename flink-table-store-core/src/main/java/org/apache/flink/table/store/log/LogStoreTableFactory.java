@@ -34,6 +34,7 @@ import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.factories.FactoryUtil.TableFactoryHelper;
 import org.apache.flink.table.factories.SerializationFormatFactory;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
@@ -83,8 +84,8 @@ public interface LogStoreTableFactory extends DynamicTableFactory {
             TableFactoryHelper helper) {
         DecodingFormat<DeserializationSchema<RowData>> format =
                 helper.discoverDecodingFormat(
-                        DeserializationFormatFactory.class, LogOptions.KEY_FORMAT);
-        validateKeyFormat(format, helper.getOptions().get(LogOptions.KEY_FORMAT));
+                        DeserializationFormatFactory.class, CoreOptions.LOG_KEY_FORMAT);
+        validateKeyFormat(format, helper.getOptions().get(CoreOptions.LOG_KEY_FORMAT));
         return format;
     }
 
@@ -92,8 +93,8 @@ public interface LogStoreTableFactory extends DynamicTableFactory {
             TableFactoryHelper helper) {
         EncodingFormat<SerializationSchema<RowData>> format =
                 helper.discoverEncodingFormat(
-                        SerializationFormatFactory.class, LogOptions.KEY_FORMAT);
-        validateKeyFormat(format, helper.getOptions().get(LogOptions.KEY_FORMAT));
+                        SerializationFormatFactory.class, CoreOptions.LOG_KEY_FORMAT);
+        validateKeyFormat(format, helper.getOptions().get(CoreOptions.LOG_KEY_FORMAT));
         return format;
     }
 
@@ -101,16 +102,17 @@ public interface LogStoreTableFactory extends DynamicTableFactory {
             TableFactoryHelper helper) {
         DecodingFormat<DeserializationSchema<RowData>> format =
                 helper.discoverDecodingFormat(
-                        DeserializationFormatFactory.class, LogOptions.FORMAT);
-        validateValueFormat(format, helper.getOptions().get(LogOptions.FORMAT));
+                        DeserializationFormatFactory.class, CoreOptions.LOG_FORMAT);
+        validateValueFormat(format, helper.getOptions().get(CoreOptions.LOG_FORMAT));
         return format;
     }
 
     static EncodingFormat<SerializationSchema<RowData>> getValueEncodingFormat(
             TableFactoryHelper helper) {
         EncodingFormat<SerializationSchema<RowData>> format =
-                helper.discoverEncodingFormat(SerializationFormatFactory.class, LogOptions.FORMAT);
-        validateValueFormat(format, helper.getOptions().get(LogOptions.FORMAT));
+                helper.discoverEncodingFormat(
+                        SerializationFormatFactory.class, CoreOptions.LOG_FORMAT);
+        validateValueFormat(format, helper.getOptions().get(CoreOptions.LOG_FORMAT));
         return format;
     }
 

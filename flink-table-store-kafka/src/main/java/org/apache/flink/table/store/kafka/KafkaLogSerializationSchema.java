@@ -22,7 +22,7 @@ import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.streaming.connectors.kafka.KafkaSerializationSchema;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.log.LogOptions.LogChangelogMode;
+import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.types.RowKind;
 

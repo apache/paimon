@@ -20,8 +20,8 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.AppendOnlyFileStore;
-import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreRead;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreScan;
@@ -59,7 +59,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                 new AppendOnlyFileStore(
                         schemaManager,
                         tableSchema.id(),
-                        new FileStoreOptions(tableSchema.options()),
+                        new CoreOptions(tableSchema.options()),
                         user,
                         tableSchema.logicalPartitionType(),
                         tableSchema.logicalRowType());

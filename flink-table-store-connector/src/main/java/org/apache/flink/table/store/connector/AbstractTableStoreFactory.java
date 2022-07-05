@@ -27,13 +27,11 @@ import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.DynamicTableSourceFactory;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.connector.source.TableStoreSource;
-import org.apache.flink.table.store.file.FileStoreOptions;
-import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
@@ -47,11 +45,11 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
+import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
+import static org.apache.flink.table.store.CoreOptions.LOG_PREFIX;
+import static org.apache.flink.table.store.CoreOptions.LOG_SCAN;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
-import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
-import static org.apache.flink.table.store.log.LogOptions.CONSISTENCY;
-import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
-import static org.apache.flink.table.store.log.LogOptions.SCAN;
 import static org.apache.flink.table.store.log.LogStoreTableFactory.discoverLogStoreFactory;
 
 /** Abstract table store factory to create table source and table sink. */
@@ -85,8 +83,8 @@ public abstract class AbstractTableStoreFactory
 
     @Override
     public Set<ConfigOption<?>> optionalOptions() {
-        Set<ConfigOption<?>> options = FileStoreOptions.allOptions();
-        options.addAll(MergeTreeOptions.allOptions());
+        Set<ConfigOption<?>> options = CoreOptions.allOptions();
+        options.addAll(CoreOptions.allOptions());
         options.addAll(TableStoreFactoryOptions.allOptions());
         return options;
     }
@@ -115,18 +113,18 @@ public abstract class AbstractTableStoreFactory
 
     private static void validateFileStoreContinuous(Configuration options) {
         Configuration logOptions = new DelegatingConfiguration(options, LOG_PREFIX);
-        LogOptions.LogChangelogMode changelogMode = logOptions.get(CHANGELOG_MODE);
-        if (changelogMode == LogOptions.LogChangelogMode.UPSERT) {
+        CoreOptions.LogChangelogMode changelogMode = logOptions.get(LOG_CHANGELOG_MODE);
+        if (changelogMode == CoreOptions.LogChangelogMode.UPSERT) {
             throw new ValidationException(
                     "File store continuous reading dose not support upsert changelog mode.");
         }
-        LogOptions.LogConsistency consistency = logOptions.get(CONSISTENCY);
-        if (consistency == LogOptions.LogConsistency.EVENTUAL) {
+        CoreOptions.LogConsistency consistency = logOptions.get(LOG_CONSISTENCY);
+        if (consistency == CoreOptions.LogConsistency.EVENTUAL) {
             throw new ValidationException(
                     "File store continuous reading dose not support eventual consistency mode.");
         }
-        LogOptions.LogStartupMode startupMode = logOptions.get(SCAN);
-        if (startupMode == LogOptions.LogStartupMode.FROM_TIMESTAMP) {
+        CoreOptions.LogStartupMode startupMode = logOptions.get(LOG_SCAN);
+        if (startupMode == CoreOptions.LogStartupMode.FROM_TIMESTAMP) {
             throw new ValidationException(
                     "File store continuous reading dose not support from_timestamp scan mode, "
                             + "you can add timestamp filters instead.");

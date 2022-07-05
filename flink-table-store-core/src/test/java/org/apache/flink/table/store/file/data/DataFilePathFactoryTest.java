@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -38,7 +38,7 @@ public class DataFilePathFactoryTest {
                         new Path(tempDir.toString()),
                         "",
                         123,
-                        FileStoreOptions.FILE_FORMAT.defaultValue());
+                        CoreOptions.FILE_FORMAT.defaultValue());
         String uuid = pathFactory.uuid();
 
         for (int i = 0; i < 20; i++) {
@@ -51,7 +51,7 @@ public class DataFilePathFactoryTest {
                                             + "-"
                                             + i
                                             + "."
-                                            + FileStoreOptions.FILE_FORMAT.defaultValue()));
+                                            + CoreOptions.FILE_FORMAT.defaultValue()));
         }
         assertThat(pathFactory.toPath("my-data-file-name"))
                 .isEqualTo(new Path(tempDir.toString() + "/bucket-123/my-data-file-name"));
@@ -64,7 +64,7 @@ public class DataFilePathFactoryTest {
                         new Path(tempDir.toString()),
                         "dt=20211224",
                         123,
-                        FileStoreOptions.FILE_FORMAT.defaultValue());
+                        CoreOptions.FILE_FORMAT.defaultValue());
         String uuid = pathFactory.uuid();
 
         for (int i = 0; i < 20; i++) {
@@ -77,7 +77,7 @@ public class DataFilePathFactoryTest {
                                             + "-"
                                             + i
                                             + "."
-                                            + FileStoreOptions.FILE_FORMAT.defaultValue()));
+                                            + CoreOptions.FILE_FORMAT.defaultValue()));
         }
         assertThat(pathFactory.toPath("my-data-file-name"))
                 .isEqualTo(

@@ -21,7 +21,7 @@ package org.apache.flink.table.store.table;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
@@ -163,9 +163,9 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     protected FileStoreTable createFileStoreTable() throws Exception {
         Path tablePath = new Path(tempDir.toString());
         Configuration conf = new Configuration();
-        conf.set(FileStoreOptions.PATH, tablePath.toString());
-        conf.set(FileStoreOptions.FILE_FORMAT, "avro");
-        conf.set(FileStoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
+        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.FILE_FORMAT, "avro");
+        conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
         SchemaManager schemaManager = new SchemaManager(tablePath);
         TableSchema tableSchema =
                 schemaManager.commitNewVersion(

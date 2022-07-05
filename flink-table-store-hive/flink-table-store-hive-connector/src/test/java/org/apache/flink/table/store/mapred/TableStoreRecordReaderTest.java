@@ -26,9 +26,9 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.binary.BinaryRowDataUtil;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.FileStoreTestUtils;
 import org.apache.flink.table.store.RowDataContainer;
-import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.table.FileStoreTable;
@@ -57,8 +57,8 @@ public class TableStoreRecordReaderTest {
     @Test
     public void testPk() throws Exception {
         Configuration conf = new Configuration();
-        conf.setString(FileStoreOptions.PATH, tempDir.toString());
-        conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
+        conf.setString(CoreOptions.PATH, tempDir.toString());
+        conf.setString(CoreOptions.FILE_FORMAT, "avro");
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -98,8 +98,8 @@ public class TableStoreRecordReaderTest {
     @Test
     public void testValueCount() throws Exception {
         Configuration conf = new Configuration();
-        conf.setString(FileStoreOptions.PATH, tempDir.toString());
-        conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
+        conf.setString(CoreOptions.PATH, tempDir.toString());
+        conf.setString(CoreOptions.FILE_FORMAT, "avro");
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,

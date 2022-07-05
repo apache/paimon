@@ -24,8 +24,8 @@ import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.TableStoreFactoryOptions;
-import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.LogSinkFunction;
@@ -89,7 +89,7 @@ public class FlinkSinkBuilder {
     }
 
     public DataStreamSink<?> build() {
-        int numBucket = conf.get(FileStoreOptions.BUCKET);
+        int numBucket = conf.get(CoreOptions.BUCKET);
 
         BucketStreamPartitioner partitioner =
                 new BucketStreamPartitioner(numBucket, table.schema());

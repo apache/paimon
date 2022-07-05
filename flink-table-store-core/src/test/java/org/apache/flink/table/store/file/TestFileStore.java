@@ -23,6 +23,7 @@ import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
@@ -31,7 +32,6 @@ import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.mergetree.Increment;
-import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.FileStoreExpireImpl;
@@ -93,26 +93,26 @@ public class TestFileStore extends KeyValueFileStore {
             MergeFunction mergeFunction) {
         Configuration conf = new Configuration();
 
-        conf.set(MergeTreeOptions.WRITE_BUFFER_SIZE, WRITE_BUFFER_SIZE);
-        conf.set(MergeTreeOptions.PAGE_SIZE, PAGE_SIZE);
-        conf.set(MergeTreeOptions.TARGET_FILE_SIZE, MemorySize.parse("1 kb"));
+        conf.set(CoreOptions.WRITE_BUFFER_SIZE, WRITE_BUFFER_SIZE);
+        conf.set(CoreOptions.PAGE_SIZE, PAGE_SIZE);
+        conf.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.parse("1 kb"));
 
         conf.set(
-                FileStoreOptions.MANIFEST_TARGET_FILE_SIZE,
+                CoreOptions.MANIFEST_TARGET_FILE_SIZE,
                 MemorySize.parse((ThreadLocalRandom.current().nextInt(16) + 1) + "kb"));
 
-        conf.set(FileStoreOptions.FILE_FORMAT, format);
-        conf.set(FileStoreOptions.MANIFEST_FORMAT, format);
-        conf.set(FileStoreOptions.PATH, root);
-        conf.set(FileStoreOptions.BUCKET, numBuckets);
+        conf.set(CoreOptions.FILE_FORMAT, format);
+        conf.set(CoreOptions.MANIFEST_FORMAT, format);
+        conf.set(CoreOptions.PATH, root);
+        conf.set(CoreOptions.BUCKET, numBuckets);
 
         return new TestFileStore(
-                root, new FileStoreOptions(conf), partitionType, keyType, valueType, mergeFunction);
+                root, new CoreOptions(conf), partitionType, keyType, valueType, mergeFunction);
     }
 
     private TestFileStore(
             String root,
-            FileStoreOptions options,
+            CoreOptions options,
             RowType partitionType,
             RowType keyType,
             RowType valueType,
