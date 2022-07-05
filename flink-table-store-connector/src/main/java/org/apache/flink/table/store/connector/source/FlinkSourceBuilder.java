@@ -118,7 +118,8 @@ public class FlinkSourceBuilder {
             }
 
             CoreOptions.LogStartupMode startupMode =
-                    new DelegatingConfiguration(conf, CoreOptions.LOG_PREFIX).get(CoreOptions.SCAN);
+                    new DelegatingConfiguration(conf, CoreOptions.LOG_PREFIX)
+                            .get(CoreOptions.LOG_SCAN);
             if (logSourceProvider == null) {
                 return buildFileSource(true, startupMode == CoreOptions.LogStartupMode.LATEST);
             } else {

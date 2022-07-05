@@ -55,14 +55,14 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 
 import static org.apache.flink.table.factories.FactoryUtil.createTableFactoryHelper;
-import static org.apache.flink.table.store.CoreOptions.CHANGELOG_MODE;
-import static org.apache.flink.table.store.CoreOptions.CONSISTENCY;
-import static org.apache.flink.table.store.CoreOptions.FORMAT;
-import static org.apache.flink.table.store.CoreOptions.KEY_FORMAT;
+import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
+import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
+import static org.apache.flink.table.store.CoreOptions.LOG_FORMAT;
+import static org.apache.flink.table.store.CoreOptions.LOG_KEY_FORMAT;
+import static org.apache.flink.table.store.CoreOptions.LOG_RETENTION;
+import static org.apache.flink.table.store.CoreOptions.LOG_SCAN;
+import static org.apache.flink.table.store.CoreOptions.LOG_SCAN_TIMESTAMP_MILLS;
 import static org.apache.flink.table.store.CoreOptions.LogConsistency;
-import static org.apache.flink.table.store.CoreOptions.RETENTION;
-import static org.apache.flink.table.store.CoreOptions.SCAN;
-import static org.apache.flink.table.store.CoreOptions.SCAN_TIMESTAMP_MILLS;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.TOPIC;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ISOLATION_LEVEL_CONFIG;
@@ -89,14 +89,14 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
     @Override
     public Set<ConfigOption<?>> optionalOptions() {
         Set<ConfigOption<?>> options = new HashSet<>();
-        options.add(SCAN);
+        options.add(LOG_SCAN);
         options.add(TOPIC);
-        options.add(SCAN_TIMESTAMP_MILLS);
-        options.add(RETENTION);
-        options.add(CONSISTENCY);
-        options.add(CHANGELOG_MODE);
-        options.add(KEY_FORMAT);
-        options.add(FORMAT);
+        options.add(LOG_SCAN_TIMESTAMP_MILLS);
+        options.add(LOG_RETENTION);
+        options.add(LOG_CONSISTENCY);
+        options.add(LOG_CHANGELOG_MODE);
+        options.add(LOG_KEY_FORMAT);
+        options.add(LOG_FORMAT);
         return options;
     }
 
@@ -124,7 +124,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
         try (AdminClient adminClient = AdminClient.create(toKafkaProperties(helper.getOptions()))) {
             Map<String, String> configs = new HashMap<>();
             helper.getOptions()
-                    .getOptional(RETENTION)
+                    .getOptional(LOG_RETENTION)
                     .ifPresent(
                             retention ->
                                     configs.put(
@@ -210,9 +210,9 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                 primaryKeyDeserializer,
                 valueDeserializer,
                 projectFields,
-                helper.getOptions().get(CONSISTENCY),
-                helper.getOptions().get(SCAN),
-                helper.getOptions().get(SCAN_TIMESTAMP_MILLS));
+                helper.getOptions().get(LOG_CONSISTENCY),
+                helper.getOptions().get(LOG_SCAN),
+                helper.getOptions().get(LOG_SCAN_TIMESTAMP_MILLS));
     }
 
     @Override
@@ -237,8 +237,8 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                 toKafkaProperties(helper.getOptions()),
                 primaryKeySerializer,
                 valueSerializer,
-                helper.getOptions().get(CONSISTENCY),
-                helper.getOptions().get(CHANGELOG_MODE));
+                helper.getOptions().get(LOG_CONSISTENCY),
+                helper.getOptions().get(LOG_CHANGELOG_MODE));
     }
 
     private int[] getPrimaryKeyIndexes(ResolvedSchema schema) {
@@ -261,7 +261,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                                         optionMap.get(key)));
 
         // Add read committed for transactional consistency mode.
-        if (options.get(CONSISTENCY) == LogConsistency.TRANSACTIONAL) {
+        if (options.get(LOG_CONSISTENCY) == LogConsistency.TRANSACTIONAL) {
             properties.setProperty(ISOLATION_LEVEL_CONFIG, "read_committed");
         }
         return properties;

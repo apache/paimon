@@ -45,10 +45,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.CoreOptions.CHANGELOG_MODE;
-import static org.apache.flink.table.store.CoreOptions.CONSISTENCY;
+import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
+import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.flink.table.store.CoreOptions.LOG_PREFIX;
-import static org.apache.flink.table.store.CoreOptions.SCAN;
+import static org.apache.flink.table.store.CoreOptions.LOG_SCAN;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
 import static org.apache.flink.table.store.log.LogStoreTableFactory.discoverLogStoreFactory;
 
@@ -113,17 +113,17 @@ public abstract class AbstractTableStoreFactory
 
     private static void validateFileStoreContinuous(Configuration options) {
         Configuration logOptions = new DelegatingConfiguration(options, LOG_PREFIX);
-        CoreOptions.LogChangelogMode changelogMode = logOptions.get(CHANGELOG_MODE);
+        CoreOptions.LogChangelogMode changelogMode = logOptions.get(LOG_CHANGELOG_MODE);
         if (changelogMode == CoreOptions.LogChangelogMode.UPSERT) {
             throw new ValidationException(
                     "File store continuous reading dose not support upsert changelog mode.");
         }
-        CoreOptions.LogConsistency consistency = logOptions.get(CONSISTENCY);
+        CoreOptions.LogConsistency consistency = logOptions.get(LOG_CONSISTENCY);
         if (consistency == CoreOptions.LogConsistency.EVENTUAL) {
             throw new ValidationException(
                     "File store continuous reading dose not support eventual consistency mode.");
         }
-        CoreOptions.LogStartupMode startupMode = logOptions.get(SCAN);
+        CoreOptions.LogStartupMode startupMode = logOptions.get(LOG_SCAN);
         if (startupMode == CoreOptions.LogStartupMode.FROM_TIMESTAMP) {
             throw new ValidationException(
                     "File store continuous reading dose not support from_timestamp scan mode, "

@@ -96,9 +96,9 @@ public class TableStoreSource
                     new DelegatingConfiguration(
                             Configuration.fromMap(table.schema().options()),
                             CoreOptions.LOG_PREFIX);
-            return logOptions.get(CoreOptions.CONSISTENCY)
+            return logOptions.get(CoreOptions.LOG_CONSISTENCY)
                                     == CoreOptions.LogConsistency.TRANSACTIONAL
-                            && logOptions.get(CoreOptions.CHANGELOG_MODE)
+                            && logOptions.get(CoreOptions.LOG_CHANGELOG_MODE)
                                     == CoreOptions.LogChangelogMode.ALL
                     ? ChangelogMode.all()
                     : ChangelogMode.upsert();

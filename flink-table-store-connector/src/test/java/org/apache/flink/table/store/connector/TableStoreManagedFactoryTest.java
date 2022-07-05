@@ -56,7 +56,7 @@ import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
 import static org.apache.flink.table.store.CoreOptions.BUCKET;
-import static org.apache.flink.table.store.CoreOptions.CONSISTENCY;
+import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.flink.table.store.CoreOptions.LOG_PREFIX;
 import static org.apache.flink.table.store.CoreOptions.PATH;
 import static org.apache.flink.table.store.CoreOptions.TABLE_STORE_PREFIX;
@@ -193,13 +193,13 @@ public class TableStoreManagedFactoryTest {
         // mix invalid key and leave value to empty to emphasize the deferred validation
         Map<String, String> expectedLogOptions =
                 of(
-                        CoreOptions.SCAN.key(),
+                        CoreOptions.LOG_SCAN.key(),
                         "",
-                        CoreOptions.RETENTION.key(),
+                        CoreOptions.LOG_RETENTION.key(),
                         "",
                         "dummy.key",
                         "",
-                        CoreOptions.CHANGELOG_MODE.key(),
+                        CoreOptions.LOG_CHANGELOG_MODE.key(),
                         "");
         Map<String, String> enrichedOptions =
                 addPrefix(expectedLogOptions, LOG_PREFIX, (key) -> true);
@@ -324,8 +324,8 @@ public class TableStoreManagedFactoryTest {
                         sharedTempDir.toString(),
                         LOG_PREFIX + BOOTSTRAP_SERVERS.key(),
                         "localhost:9092",
-                        LOG_PREFIX + CONSISTENCY.key(),
-                        CONSISTENCY.defaultValue().name());
+                        LOG_PREFIX + LOG_CONSISTENCY.key(),
+                        LOG_CONSISTENCY.defaultValue().name());
 
         // set configuration under session level
         Arguments arg1 =
@@ -341,7 +341,7 @@ public class TableStoreManagedFactoryTest {
         // set both session and table level configuration to test options combination
         Map<String, String> tableOptions = new HashMap<>(enrichedOptions);
         tableOptions.remove(ROOT_PATH.key());
-        tableOptions.remove(CONSISTENCY.key());
+        tableOptions.remove(LOG_CONSISTENCY.key());
         Arguments arg3 =
                 Arguments.of(
                         addPrefix(

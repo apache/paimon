@@ -146,7 +146,7 @@ public class ComputedColumnAndWatermarkTableITCase extends ReadWriteTableTestBas
                         null,
                         false,
                         Collections.singletonMap(
-                                LOG_PREFIX + CoreOptions.SCAN.key(),
+                                LOG_PREFIX + CoreOptions.LOG_SCAN.key(),
                                 CoreOptions.LogStartupMode.LATEST.name().toLowerCase()),
                         "rate_by_to_currency IS NULL",
                         Arrays.asList(
@@ -191,7 +191,7 @@ public class ComputedColumnAndWatermarkTableITCase extends ReadWriteTableTestBas
                         WatermarkSpec.of("ts", "ts - INTERVAL '3' YEAR"),
                         false,
                         Collections.singletonMap(
-                                LOG_PREFIX + CoreOptions.SCAN.key(),
+                                LOG_PREFIX + CoreOptions.LOG_SCAN.key(),
                                 CoreOptions.LogStartupMode.LATEST.name().toLowerCase()),
                         lateEventFilter,
                         Collections.emptyList(), // projection
@@ -215,7 +215,7 @@ public class ComputedColumnAndWatermarkTableITCase extends ReadWriteTableTestBas
                         WatermarkSpec.of("ts1", "ts1 - INTERVAL '3' YEAR"),
                         false,
                         Collections.singletonMap(
-                                LOG_PREFIX + CoreOptions.SCAN.key(),
+                                LOG_PREFIX + CoreOptions.LOG_SCAN.key(),
                                 CoreOptions.LogStartupMode.LATEST.name().toLowerCase()),
                         lateEventFilter.replaceAll("ts", "ts1"),
                         Arrays.asList("currency", "rate", "ts1"),
@@ -240,7 +240,7 @@ public class ComputedColumnAndWatermarkTableITCase extends ReadWriteTableTestBas
                         WatermarkSpec.of("ts", "ts - INTERVAL '3' YEAR"),
                         false,
                         Collections.singletonMap(
-                                LOG_PREFIX + CoreOptions.SCAN.key(),
+                                LOG_PREFIX + CoreOptions.LOG_SCAN.key(),
                                 CoreOptions.LogStartupMode.LATEST.name().toLowerCase()),
                         lateEventFilter,
                         Arrays.asList(

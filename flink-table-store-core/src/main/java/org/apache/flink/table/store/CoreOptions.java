@@ -229,7 +229,7 @@ public class CoreOptions implements Serializable {
                                     + "This changelog file keeps the order of data input and the details of data changes, "
                                     + "it can be read directly during stream reads.");
 
-    public static final ConfigOption<LogStartupMode> SCAN =
+    public static final ConfigOption<LogStartupMode> LOG_SCAN =
             ConfigOptions.key("scan")
                     .enumType(LogStartupMode.class)
                     .defaultValue(LogStartupMode.FULL)
@@ -242,21 +242,21 @@ public class CoreOptions implements Serializable {
                                     .list(formatEnumOption(LogStartupMode.FROM_TIMESTAMP))
                                     .build());
 
-    public static final ConfigOption<Long> SCAN_TIMESTAMP_MILLS =
+    public static final ConfigOption<Long> LOG_SCAN_TIMESTAMP_MILLS =
             ConfigOptions.key("scan.timestamp-millis")
                     .longType()
                     .noDefaultValue()
                     .withDescription(
                             "Optional timestamp used in case of \"from-timestamp\" scan mode");
 
-    public static final ConfigOption<Duration> RETENTION =
+    public static final ConfigOption<Duration> LOG_RETENTION =
             ConfigOptions.key("retention")
                     .durationType()
                     .noDefaultValue()
                     .withDescription(
                             "It means how long changes log will be kept. The default value is from the log system cluster.");
 
-    public static final ConfigOption<LogConsistency> CONSISTENCY =
+    public static final ConfigOption<LogConsistency> LOG_CONSISTENCY =
             ConfigOptions.key("consistency")
                     .enumType(LogConsistency.class)
                     .defaultValue(LogConsistency.TRANSACTIONAL)
@@ -269,7 +269,7 @@ public class CoreOptions implements Serializable {
                                             formatEnumOption(LogConsistency.EVENTUAL))
                                     .build());
 
-    public static final ConfigOption<LogChangelogMode> CHANGELOG_MODE =
+    public static final ConfigOption<LogChangelogMode> LOG_CHANGELOG_MODE =
             ConfigOptions.key("changelog-mode")
                     .enumType(LogChangelogMode.class)
                     .defaultValue(LogChangelogMode.AUTO)
@@ -283,14 +283,14 @@ public class CoreOptions implements Serializable {
                                             formatEnumOption(LogChangelogMode.UPSERT))
                                     .build());
 
-    public static final ConfigOption<String> KEY_FORMAT =
+    public static final ConfigOption<String> LOG_KEY_FORMAT =
             ConfigOptions.key("key.format")
                     .stringType()
                     .defaultValue("json")
                     .withDescription(
                             "Specify the key message format of log system with primary key.");
 
-    public static final ConfigOption<String> FORMAT =
+    public static final ConfigOption<String> LOG_FORMAT =
             ConfigOptions.key("format")
                     .stringType()
                     .defaultValue("debezium-json")

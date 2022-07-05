@@ -231,7 +231,7 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
             throws Exception {
         Map<String, String> hints = new HashMap<>();
         hints.put(
-                LOG_PREFIX + CoreOptions.SCAN.key(),
+                LOG_PREFIX + CoreOptions.LOG_SCAN.key(),
                 CoreOptions.LogStartupMode.LATEST.name().toLowerCase());
         collectAndCheckUnderSameEnv(
                         true,
@@ -258,8 +258,9 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
             List<Row> expected)
             throws Exception {
         Map<String, String> hints = new HashMap<>();
-        hints.put(LOG_PREFIX + CoreOptions.SCAN.key(), "from-timestamp");
-        hints.put(LOG_PREFIX + CoreOptions.SCAN_TIMESTAMP_MILLS.key(), String.valueOf(timestamp));
+        hints.put(LOG_PREFIX + CoreOptions.LOG_SCAN.key(), "from-timestamp");
+        hints.put(
+                LOG_PREFIX + CoreOptions.LOG_SCAN_TIMESTAMP_MILLS.key(), String.valueOf(timestamp));
         collectAndCheckUnderSameEnv(
                         true,
                         true,

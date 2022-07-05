@@ -80,7 +80,8 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
                     new DelegatingConfiguration(
                             Configuration.fromMap(table.schema().options()),
                             CoreOptions.LOG_PREFIX);
-            if (logOptions.get(CoreOptions.CHANGELOG_MODE) != CoreOptions.LogChangelogMode.ALL) {
+            if (logOptions.get(CoreOptions.LOG_CHANGELOG_MODE)
+                    != CoreOptions.LogChangelogMode.ALL) {
                 // with primary key, default sink upsert
                 ChangelogMode.Builder builder = ChangelogMode.newBuilder();
                 for (RowKind kind : requestedMode.getContainedKinds()) {

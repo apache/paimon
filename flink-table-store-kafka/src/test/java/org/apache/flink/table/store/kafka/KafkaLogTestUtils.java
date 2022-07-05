@@ -54,8 +54,8 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.flink.table.data.binary.BinaryRowDataUtil.EMPTY_ROW;
-import static org.apache.flink.table.store.CoreOptions.CHANGELOG_MODE;
-import static org.apache.flink.table.store.CoreOptions.CONSISTENCY;
+import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
+import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.flink.table.store.CoreOptions.LogChangelogMode;
 import static org.apache.flink.table.store.CoreOptions.LogConsistency;
 import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
@@ -188,8 +188,8 @@ public class KafkaLogTestUtils {
             RowType type,
             int[] keys) {
         Map<String, String> options = new HashMap<>();
-        options.put(CHANGELOG_MODE.key(), changelogMode.toString());
-        options.put(CONSISTENCY.key(), consistency.toString());
+        options.put(LOG_CHANGELOG_MODE.key(), changelogMode.toString());
+        options.put(LOG_CONSISTENCY.key(), consistency.toString());
         options.put(BOOTSTRAP_SERVERS.key(), servers);
         options.put(TOPIC.key(), UUID.randomUUID().toString());
         return createContext(name, type, keys, options);
