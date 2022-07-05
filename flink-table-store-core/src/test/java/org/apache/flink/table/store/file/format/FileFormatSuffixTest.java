@@ -38,7 +38,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.util.Collections;
+import java.util.LinkedList;
 import java.util.List;
 
 /** test file format suffix. */
@@ -59,14 +59,15 @@ public class FileFormatSuffixTest extends DataFileTest {
         DataFilePathFactory dataFilePathFactory =
                 new DataFilePathFactory(new Path(tempDir.toString()), "dt=1", 1, format);
         FileFormat fileFormat = FileFormat.fromIdentifier(format, new Configuration());
+        LinkedList<DataFileMeta> toCompact = new LinkedList<>();
         AppendOnlyWriter appendOnlyWriter =
                 new AppendOnlyWriter(
                         0,
                         fileFormat,
                         10,
                         SCHEMA,
-                        Collections.emptyList(),
-                        new AppendOnlyCompactManager(null, 10, 10, null), // not used
+                        toCompact,
+                        new AppendOnlyCompactManager(null, toCompact, 10, 4, 10, null), // not used
                         false,
                         dataFilePathFactory);
         appendOnlyWriter.write(

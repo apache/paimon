@@ -41,7 +41,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -65,7 +67,8 @@ public class AppendOnlyWriterTest {
     private static final String AVRO = "avro";
     private static final String PART = "2022-05-01";
     private static final long SCHEMA_ID = 0L;
-    private static final int SMALL_FILE_NUM_TRIGGER = 2;
+    private static final int FILE_NUM_COMPACTION_TRIGGER = 2;
+    private static final int FILE_SIZE_RATIO_COMPACTION_TRIGGER = 300;
 
     @BeforeEach
     public void before() {
@@ -220,7 +223,7 @@ public class AppendOnlyWriterTest {
         }
 
         // increase target file size to test compaction
-        long targetFileSize = 1000L;
+        long targetFileSize = 1024 * 1024L;
         writer = createWriter(targetFileSize, true, firstInc.newFiles());
         assertThat(writer.getToCompact()).containsExactlyElementsOf(firstInc.newFiles());
         writer.write(row(id, String.format("%03d", id), PART));
@@ -243,8 +246,11 @@ public class AppendOnlyWriterTest {
                 .isEqualTo(compactAfter.get(compactAfter.size() - 1).maxSequenceNumber());
         assertThat(secInc.newFiles()).hasSize(1);
 
-        // check new files are added
-        assertThat(writer.getToCompact()).containsExactlyElementsOf(secInc.newFiles());
+        // check the compact after file is added back due to small size
+        // check the new files are also added
+        List<DataFileMeta> toCompact = new ArrayList<>(compactAfter);
+        toCompact.addAll(secInc.newFiles());
+        assertThat(writer.getToCompact()).containsExactlyElementsOf(toCompact);
     }
 
     private FieldStats initStats(Integer min, Integer max, long nullCount) {
@@ -274,18 +280,21 @@ public class AppendOnlyWriterTest {
     private AppendOnlyWriter createWriter(
             long targetFileSize, boolean forceCompact, List<DataFileMeta> scannedFiles) {
         FileFormat fileFormat = FileFormat.fromIdentifier(AVRO, new Configuration());
+        LinkedList<DataFileMeta> toCompact = new LinkedList<>(scannedFiles);
         return new AppendOnlyWriter(
                 SCHEMA_ID,
                 fileFormat,
                 targetFileSize,
                 AppendOnlyWriterTest.SCHEMA,
-                scannedFiles,
+                toCompact,
                 new AppendOnlyCompactManager(
                         Executors.newSingleThreadScheduledExecutor(
                                 new ExecutorThreadFactory("compaction-thread")),
-                        SMALL_FILE_NUM_TRIGGER,
+                        toCompact,
+                        FILE_NUM_COMPACTION_TRIGGER,
+                        FILE_SIZE_RATIO_COMPACTION_TRIGGER,
                         targetFileSize,
-                        toCompact -> Collections.singletonList(generateCompactAfter(toCompact))),
+                        compact -> Collections.singletonList(generateCompactAfter(compact))),
                 forceCompact,
                 pathFactory);
     }

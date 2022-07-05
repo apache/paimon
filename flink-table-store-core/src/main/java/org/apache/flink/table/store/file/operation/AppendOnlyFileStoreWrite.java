@@ -37,6 +37,7 @@ import org.apache.flink.table.types.logical.RowType;
 import javax.annotation.Nullable;
 
 import java.util.Collections;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
@@ -50,7 +51,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
     private final FileFormat fileFormat;
     private final FileStorePathFactory pathFactory;
     private final long targetFileSize;
-    private final int smallFileNumTrigger;
+    private final int fileNumCompactionTrigger;
+    private final int fileSizeRatioCompactionTrigger;
     private final boolean commitForceCompact;
 
     public AppendOnlyFileStoreWrite(
@@ -62,7 +64,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             long targetFileSize,
-            int smallFileNumTrigger,
+            int fileNumCompactionTrigger,
+            int fileSizeRatioCompactionTrigger,
             boolean commitForceCompact) {
         super(snapshotManager, scan);
         this.read = read;
@@ -71,7 +74,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
         this.fileFormat = fileFormat;
         this.pathFactory = pathFactory;
         this.targetFileSize = targetFileSize;
-        this.smallFileNumTrigger = smallFileNumTrigger;
+        this.fileNumCompactionTrigger = fileNumCompactionTrigger;
+        this.fileSizeRatioCompactionTrigger = fileSizeRatioCompactionTrigger;
         this.commitForceCompact = commitForceCompact;
     }
 
@@ -100,16 +104,21 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
             int bucket,
             List<DataFileMeta> restoredFiles,
             ExecutorService compactExecutor) {
+        // let writer and compact manager hold the same reference
+        // and make restore files mutable to update
+        LinkedList<DataFileMeta> toCompact = new LinkedList<>(restoredFiles);
         DataFilePathFactory factory = pathFactory.createDataFilePathFactory(partition, bucket);
         return new AppendOnlyWriter(
                 schemaId,
                 fileFormat,
                 targetFileSize,
                 rowType,
-                restoredFiles,
+                toCompact,
                 new AppendOnlyCompactManager(
                         compactExecutor,
-                        smallFileNumTrigger,
+                        toCompact,
+                        fileNumCompactionTrigger,
+                        fileSizeRatioCompactionTrigger,
                         targetFileSize,
                         compactRewriter(partition, bucket)),
                 commitForceCompact,

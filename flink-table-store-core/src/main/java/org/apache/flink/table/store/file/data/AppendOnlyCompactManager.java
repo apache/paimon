@@ -18,32 +18,39 @@
 
 package org.apache.flink.table.store.file.data;
 
+import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactTask;
 
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 
 /** Compact manager for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyCompactManager extends CompactManager {
 
-    private final int smallFileNumTrigger;
+    private final int fileNumCompactionTrigger;
+    private final int fileSizeRatioCompactionTrigger;
     private final long targetFileSize;
     private final CompactRewriter rewriter;
-
-    private List<DataFileMeta> compactBefore;
+    private final LinkedList<DataFileMeta> toCompact;
 
     public AppendOnlyCompactManager(
             ExecutorService executor,
-            int smallFileNumTrigger,
+            LinkedList<DataFileMeta> toCompact,
+            int fileNumCompactionTrigger,
+            int fileSizeRatioCompactionTrigger,
             long targetFileSize,
             CompactRewriter rewriter) {
         super(executor);
-        this.smallFileNumTrigger = smallFileNumTrigger;
+        this.toCompact = toCompact;
+        this.fileNumCompactionTrigger = fileNumCompactionTrigger;
+        this.fileSizeRatioCompactionTrigger = fileSizeRatioCompactionTrigger;
         this.targetFileSize = targetFileSize;
-        this.compactBefore = new ArrayList<>();
         this.rewriter = rewriter;
     }
 
@@ -53,45 +60,112 @@ public class AppendOnlyCompactManager extends CompactManager {
             throw new IllegalStateException(
                     "Please finish the previous compaction before submitting new one.");
         }
-        if (compactBefore == null) {
-            throw new IllegalStateException(
-                    "Please update compactBefore before submitting a compaction");
-        }
-        if (triggerCompaction()) {
-            taskFuture =
-                    executor.submit(
-                            new CompactTask() {
-                                @Override
-                                protected CompactResult compact() throws Exception {
-                                    collectBeforeStats(compactBefore);
-                                    List<DataFileMeta> compactAfter =
-                                            rewriter.rewrite(compactBefore);
-                                    collectAfterStats(compactAfter);
-                                    return result(compactBefore, compactAfter);
-                                }
-                            });
-        }
+        pickCompactBefore()
+                .ifPresent(
+                        (compactBefore) ->
+                                taskFuture =
+                                        executor.submit(
+                                                new CompactTask() {
+                                                    @Override
+                                                    protected CompactResult compact()
+                                                            throws Exception {
+                                                        collectBeforeStats(compactBefore);
+                                                        List<DataFileMeta> compactAfter =
+                                                                rewriter.rewrite(compactBefore);
+                                                        collectAfterStats(compactAfter);
+                                                        return result(compactBefore, compactAfter);
+                                                    }
+                                                }));
     }
 
-    public void updateCompactBefore(List<DataFileMeta> files) {
-        this.compactBefore = files;
-    }
-
-    private boolean triggerCompaction() {
-        if (compactBefore.size() < smallFileNumTrigger) {
-            return false;
-        }
-        int adjacentSmallFileCtr = 0;
-        for (DataFileMeta file : compactBefore) {
-            if (file.fileSize() < targetFileSize) {
-                adjacentSmallFileCtr += 1;
-            } else if (adjacentSmallFileCtr >= smallFileNumTrigger) {
-                return true;
-            } else {
-                adjacentSmallFileCtr = 0;
+    @VisibleForTesting
+    Optional<List<DataFileMeta>> pickCompactBefore() {
+        List<Tuple2<Integer, Integer>> intervals =
+                findSmallFileIntervals(toCompact, targetFileSize);
+        for (Tuple2<Integer, Integer> interval : intervals) {
+            if (pickInterval(interval)) {
+                // [interval.f0, interval.f1] will be compacted
+                // [0, interval.f0 - 1] can be immediately released from toCompact
+                // Note: [interval.f0, interval.f1] should be released after compact task
+                // finished
+                List<DataFileMeta> compactBefore =
+                        new ArrayList<>(toCompact.subList(interval.f0, interval.f1 + 1));
+                for (int i = 0; i <= interval.f0 - 1; i++) {
+                    toCompact.pollFirst();
+                }
+                return Optional.of(compactBefore);
             }
         }
-        return adjacentSmallFileCtr > smallFileNumTrigger;
+        if (intervals.isEmpty()) {
+            // no small file detected, and toCompact can be released
+            toCompact.clear();
+        } else {
+            Tuple2<Integer, Integer> last = intervals.get(intervals.size() - 1);
+            boolean lastFile = last.f1 == toCompact.size() - 1;
+            boolean noAlmostFullFile =
+                    toCompact.subList(last.f0, last.f1 + 1).stream()
+                            .noneMatch(
+                                    file ->
+                                            file.fileSize()
+                                                    >= targetFileSize
+                                                            / fileSizeRatioCompactionTrigger);
+            if (lastFile && noAlmostFullFile) {
+                // wait for more small files to match fileNumTrigger
+                // keep them and release [0, last.f0 - 1]
+                for (int i = 0; i <= last.f0 - 1; i++) {
+                    toCompact.pollFirst();
+                }
+            } else {
+                toCompact.clear();
+            }
+        }
+        return Optional.empty();
+    }
+
+    private boolean pickInterval(Tuple2<Integer, Integer> interval) {
+        int start = interval.f0;
+        int end = interval.f1;
+        if (start == end) {
+            // single small file
+            return false;
+        } else {
+            long totalFileSize =
+                    toCompact.subList(start, end + 1).stream()
+                            .mapToLong(DataFileMeta::fileSize)
+                            .sum();
+            int fileNum = end - start + 1;
+            // find a balance between file num and compaction ratio
+            return fileNum > fileNumCompactionTrigger
+                    && totalFileSize < targetFileSize / fileSizeRatioCompactionTrigger;
+        }
+    }
+
+    @VisibleForTesting
+    static List<Tuple2<Integer, Integer>> findSmallFileIntervals(
+            List<DataFileMeta> toCompact, long targetFileSize) {
+        List<Tuple2<Integer, Integer>> intervals = new ArrayList<>();
+        int start = -1;
+        int end = -1;
+        for (int i = 0; i < toCompact.size(); i++) {
+            DataFileMeta file = toCompact.get(i);
+            if (file.fileSize() < targetFileSize) {
+                start = start == -1 ? i : start;
+                end = i;
+            } else if (start != -1 && end >= start) {
+                intervals.add(Tuple2.of(start, end));
+                start = -1;
+                end = -1;
+            }
+        }
+        if (start != -1 && end >= start) {
+            intervals.add(Tuple2.of(start, end));
+        }
+        return intervals;
+    }
+
+    @VisibleForTesting
+    LinkedList<DataFileMeta> getToCompact() {
+        return toCompact;
     }
 
     /** Compact rewriter for append-only table. */

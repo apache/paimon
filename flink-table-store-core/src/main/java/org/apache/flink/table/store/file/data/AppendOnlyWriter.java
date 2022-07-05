@@ -29,6 +29,7 @@ import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
@@ -45,7 +46,7 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     private final DataFilePathFactory pathFactory;
     private final AppendOnlyCompactManager compactManager;
     private final boolean forceCompact;
-    private final List<DataFileMeta> toCompact;
+    private final LinkedList<DataFileMeta> toCompact;
     private final List<DataFileMeta> compactBefore;
     private final List<DataFileMeta> compactAfter;
 
@@ -56,7 +57,7 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
             FileFormat fileFormat,
             long targetFileSize,
             RowType writeSchema,
-            List<DataFileMeta> restoredFiles,
+            LinkedList<DataFileMeta> toCompact,
             AppendOnlyCompactManager compactManager,
             boolean forceCompact,
             DataFilePathFactory pathFactory) {
@@ -67,10 +68,10 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
         this.pathFactory = pathFactory;
         this.compactManager = compactManager;
         this.forceCompact = forceCompact;
-        this.toCompact = new ArrayList<>(restoredFiles);
+        this.toCompact = toCompact;
         this.compactBefore = new ArrayList<>();
         this.compactAfter = new ArrayList<>();
-        this.writer = createRollingFileWriter(getMaxSequenceNumber(restoredFiles) + 1);
+        this.writer = createRollingFileWriter(getMaxSequenceNumber(new ArrayList<>(toCompact)) + 1);
     }
 
     @Override
@@ -135,7 +136,6 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
 
     private void submitCompaction() {
         if (compactManager.isCompactionFinished()) {
-            compactManager.updateCompactBefore(toCompact);
             compactManager.submitCompaction();
         }
     }
@@ -149,12 +149,16 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
                             compactBefore.addAll(result.before());
                             compactAfter.addAll(result.after());
                             if (!result.after().isEmpty()) {
-                                toCompact.clear();
-                                // if the last compacted file is still small, add it back
+                                // remove compactBefore from toCompact
+                                for (int i = 0; i < compactBefore.size(); i++) {
+                                    toCompact.pollFirst();
+                                }
+                                // if the last compacted file is still small,
+                                // add it back to the head
                                 DataFileMeta lastFile =
                                         result.after().get(result.after().size() - 1);
                                 if (lastFile.fileSize() < targetFileSize) {
-                                    toCompact.add(lastFile);
+                                    toCompact.offerFirst(lastFile);
                                 }
                             }
                         });
@@ -166,7 +170,8 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
                         newFiles, new ArrayList<>(compactBefore), new ArrayList<>(compactAfter));
         compactBefore.clear();
         compactAfter.clear();
-        toCompact.addAll(newFiles);
+        // add new generated files
+        newFiles.forEach(toCompact::offerLast);
         return increment;
     }
 
