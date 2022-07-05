@@ -39,7 +39,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET_KEY;
+import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
 
 /** Schema of a table. */
 public class TableSchema implements Serializable {

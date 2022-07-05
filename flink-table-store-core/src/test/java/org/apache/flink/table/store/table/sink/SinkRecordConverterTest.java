@@ -33,7 +33,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET_KEY;
+import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
