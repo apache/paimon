@@ -31,7 +31,7 @@ import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.catalog.UniqueConstraint;
-import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.TableStoreOptions;
 import org.apache.flink.table.store.kafka.KafkaTableTestBase;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
@@ -50,11 +50,11 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.flink.table.store.TableStoreOptions.LOG_PREFIX;
+import static org.apache.flink.table.store.TableStoreOptions.TABLE_STORE_PREFIX;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
-import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
-import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 
 /** End-to-end test base for table store. */
 public abstract class TableStoreTestBase extends KafkaTableTestBase {
@@ -154,7 +154,7 @@ public abstract class TableStoreTestBase extends KafkaTableTestBase {
 
     protected void deleteTablePath() {
         FileUtils.deleteQuietly(
-                Paths.get(rootPath, FileStoreOptions.relativeTablePath(tableIdentifier)).toFile());
+                Paths.get(rootPath, TableStoreOptions.relativeTablePath(tableIdentifier)).toFile());
     }
 
     /** Expected result wrapper. */

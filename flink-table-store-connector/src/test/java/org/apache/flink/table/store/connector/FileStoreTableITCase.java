@@ -51,9 +51,9 @@ import java.time.Duration;
 import java.util.List;
 
 import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
+import static org.apache.flink.table.store.TableStoreOptions.TABLE_STORE_PREFIX;
+import static org.apache.flink.table.store.TableStoreOptions.relativeTablePath;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
-import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
-import static org.apache.flink.table.store.file.FileStoreOptions.relativeTablePath;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /** ITCase for file store table api. */

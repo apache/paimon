@@ -21,7 +21,7 @@ package org.apache.flink.table.store.spark;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.TableStoreOptions;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.table.FileStoreTable;
@@ -44,7 +44,7 @@ public class SimpleTableTestHelper {
     public SimpleTableTestHelper(Path path, RowType rowType) throws Exception {
         Map<String, String> options = new HashMap<>();
         // orc is shaded, can not find shaded classes in ide
-        options.put(FileStoreOptions.FILE_FORMAT.key(), "avro");
+        options.put(TableStoreOptions.FILE_FORMAT.key(), "avro");
         new SchemaManager(path)
                 .commitNewVersion(
                         new UpdateSchema(

@@ -30,10 +30,9 @@ import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
+import org.apache.flink.table.store.TableStoreOptions;
 import org.apache.flink.table.store.connector.TableStoreFactoryOptions;
-import org.apache.flink.table.store.file.FileStoreOptions;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.utils.Projection;
@@ -95,7 +94,7 @@ public class FlinkSourceBuilder {
     }
 
     private long discoveryIntervalMills() {
-        return conf.get(FileStoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis();
+        return conf.get(TableStoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis();
     }
 
     private FileStoreSource buildFileSource(boolean isContinuous, boolean continuousScanLatest) {
@@ -112,18 +111,20 @@ public class FlinkSourceBuilder {
         if (isContinuous) {
             // TODO move validation to a dedicated method
             if (table.schema().primaryKeys().size() > 0
-                    && conf.get(FileStoreOptions.MERGE_ENGINE)
-                            == FileStoreOptions.MergeEngine.PARTIAL_UPDATE) {
+                    && conf.get(TableStoreOptions.MERGE_ENGINE)
+                            == TableStoreOptions.MergeEngine.PARTIAL_UPDATE) {
                 throw new ValidationException(
                         "Partial update continuous reading is not supported.");
             }
 
-            LogOptions.LogStartupMode startupMode =
-                    new DelegatingConfiguration(conf, LogOptions.LOG_PREFIX).get(LogOptions.SCAN);
+            TableStoreOptions.LogStartupMode startupMode =
+                    new DelegatingConfiguration(conf, TableStoreOptions.LOG_PREFIX)
+                            .get(TableStoreOptions.SCAN);
             if (logSourceProvider == null) {
-                return buildFileSource(true, startupMode == LogOptions.LogStartupMode.LATEST);
+                return buildFileSource(
+                        true, startupMode == TableStoreOptions.LogStartupMode.LATEST);
             } else {
-                if (startupMode != LogOptions.LogStartupMode.FULL) {
+                if (startupMode != TableStoreOptions.LogStartupMode.FULL) {
                     return logSourceProvider.createSource(null);
                 }
                 return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(

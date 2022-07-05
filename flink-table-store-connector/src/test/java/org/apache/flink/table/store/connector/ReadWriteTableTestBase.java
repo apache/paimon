@@ -30,10 +30,9 @@ import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
-import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.TableStoreOptions;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.kafka.KafkaTableTestBase;
-import org.apache.flink.table.store.log.LogOptions;
 import org.apache.flink.types.Row;
 
 import javax.annotation.Nullable;
@@ -50,6 +49,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.table.store.TableStoreOptions.LOG_PREFIX;
 import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.prepareHelperSourceWithChangelogRecords;
 import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.prepareHelperSourceWithInsertOnlyRecords;
 import static org.apache.flink.table.store.connector.ShowCreateUtil.buildInsertIntoQuery;
@@ -60,7 +60,6 @@ import static org.apache.flink.table.store.connector.ShowCreateUtil.createTableL
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.LOG_SYSTEM;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
-import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Table store read write test base. */
@@ -72,7 +71,7 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
     protected void checkFileStorePath(
             StreamTableEnvironment tEnv, String managedTable, @Nullable String partitionList) {
         String relativeFilePath =
-                FileStoreOptions.relativeTablePath(
+                TableStoreOptions.relativeTablePath(
                         ObjectIdentifier.of(
                                 tEnv.getCurrentCatalog(), tEnv.getCurrentDatabase(), managedTable));
         // check snapshot file path
@@ -232,8 +231,8 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
             throws Exception {
         Map<String, String> hints = new HashMap<>();
         hints.put(
-                LOG_PREFIX + LogOptions.SCAN.key(),
-                LogOptions.LogStartupMode.LATEST.name().toLowerCase());
+                LOG_PREFIX + TableStoreOptions.SCAN.key(),
+                TableStoreOptions.LogStartupMode.LATEST.name().toLowerCase());
         collectAndCheckUnderSameEnv(
                         true,
                         true,
@@ -259,8 +258,10 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
             List<Row> expected)
             throws Exception {
         Map<String, String> hints = new HashMap<>();
-        hints.put(LOG_PREFIX + LogOptions.SCAN.key(), "from-timestamp");
-        hints.put(LOG_PREFIX + LogOptions.SCAN_TIMESTAMP_MILLS.key(), String.valueOf(timestamp));
+        hints.put(LOG_PREFIX + TableStoreOptions.SCAN.key(), "from-timestamp");
+        hints.put(
+                LOG_PREFIX + TableStoreOptions.SCAN_TIMESTAMP_MILLS.key(),
+                String.valueOf(timestamp));
         collectAndCheckUnderSameEnv(
                         true,
                         true,

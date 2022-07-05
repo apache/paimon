@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.file;
 
 import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.table.store.TableStoreOptions;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.operation.FileStoreCommitImpl;
@@ -37,14 +38,14 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
 
     protected final SchemaManager schemaManager;
     protected final long schemaId;
-    protected final FileStoreOptions options;
+    protected final TableStoreOptions options;
     protected final String user;
     protected final RowType partitionType;
 
     public AbstractFileStore(
             SchemaManager schemaManager,
             long schemaId,
-            FileStoreOptions options,
+            TableStoreOptions options,
             String user,
             RowType partitionType) {
         this.schemaManager = schemaManager;
@@ -88,7 +89,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
         return partitionType;
     }
 
-    public FileStoreOptions options() {
+    public TableStoreOptions options() {
         return options;
     }
 

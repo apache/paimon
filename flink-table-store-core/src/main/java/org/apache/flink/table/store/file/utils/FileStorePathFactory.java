@@ -22,7 +22,7 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.TableStoreOptions;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.utils.PartitionPathUtils;
@@ -60,7 +60,7 @@ public class FileStorePathFactory {
                 root,
                 RowType.of(),
                 PARTITION_DEFAULT_NAME.defaultValue(),
-                FileStoreOptions.FILE_FORMAT.defaultValue());
+                TableStoreOptions.FILE_FORMAT.defaultValue());
     }
 
     // for tables without partition, partitionType should be a row type with 0 columns (not null)

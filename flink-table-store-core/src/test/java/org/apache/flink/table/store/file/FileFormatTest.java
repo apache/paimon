@@ -28,6 +28,7 @@ import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.TableStoreOptions;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -97,8 +98,8 @@ public class FileFormatTest {
 
     public FileFormat createFileFormat(String codec) {
         Configuration tableOptions = new Configuration();
-        tableOptions.set(FileStoreOptions.FILE_FORMAT, "avro");
+        tableOptions.set(TableStoreOptions.FILE_FORMAT, "avro");
         tableOptions.setString("avro.codec", codec);
-        return FileFormat.fromTableOptions(tableOptions, FileStoreOptions.FILE_FORMAT);
+        return FileFormat.fromTableOptions(tableOptions, TableStoreOptions.FILE_FORMAT);
     }
 }

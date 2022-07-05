@@ -26,7 +26,7 @@ import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
-import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.TableStoreOptions;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
@@ -41,7 +41,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
-import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
+import static org.apache.flink.table.store.TableStoreOptions.BUCKET;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -80,7 +80,9 @@ public class CreateTableITCase extends TableStoreTestBase {
                     .isPresent();
             // check table store
             assertThat(
-                            Paths.get(rootPath, FileStoreOptions.relativeTablePath(tableIdentifier))
+                            Paths.get(
+                                            rootPath,
+                                            TableStoreOptions.relativeTablePath(tableIdentifier))
                                     .toFile())
                     .exists();
             // check log store
@@ -131,7 +133,7 @@ public class CreateTableITCase extends TableStoreTestBase {
             }
         } else if (expectedResult.expectedMessage.startsWith("Failed to create file store path.")) {
             // failed when creating file store
-            Paths.get(rootPath, FileStoreOptions.relativeTablePath(tableIdentifier))
+            Paths.get(rootPath, TableStoreOptions.relativeTablePath(tableIdentifier))
                     .toFile()
                     .mkdirs();
         } else if (expectedResult.expectedMessage.startsWith("Failed to create kafka topic.")) {

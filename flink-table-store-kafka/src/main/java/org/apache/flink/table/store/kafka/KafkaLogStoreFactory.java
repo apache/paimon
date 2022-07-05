@@ -55,16 +55,16 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 
 import static org.apache.flink.table.factories.FactoryUtil.createTableFactoryHelper;
+import static org.apache.flink.table.store.TableStoreOptions.CHANGELOG_MODE;
+import static org.apache.flink.table.store.TableStoreOptions.CONSISTENCY;
+import static org.apache.flink.table.store.TableStoreOptions.FORMAT;
+import static org.apache.flink.table.store.TableStoreOptions.KEY_FORMAT;
+import static org.apache.flink.table.store.TableStoreOptions.LogConsistency;
+import static org.apache.flink.table.store.TableStoreOptions.RETENTION;
+import static org.apache.flink.table.store.TableStoreOptions.SCAN;
+import static org.apache.flink.table.store.TableStoreOptions.SCAN_TIMESTAMP_MILLS;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.TOPIC;
-import static org.apache.flink.table.store.log.LogOptions.CHANGELOG_MODE;
-import static org.apache.flink.table.store.log.LogOptions.CONSISTENCY;
-import static org.apache.flink.table.store.log.LogOptions.FORMAT;
-import static org.apache.flink.table.store.log.LogOptions.KEY_FORMAT;
-import static org.apache.flink.table.store.log.LogOptions.LogConsistency;
-import static org.apache.flink.table.store.log.LogOptions.RETENTION;
-import static org.apache.flink.table.store.log.LogOptions.SCAN;
-import static org.apache.flink.table.store.log.LogOptions.SCAN_TIMESTAMP_MILLS;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ISOLATION_LEVEL_CONFIG;
 
 /** The Kafka {@link LogStoreTableFactory} implementation. */

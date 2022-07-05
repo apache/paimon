@@ -25,7 +25,7 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.store.FileStoreTestUtils;
-import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.TableStoreOptions;
 import org.apache.flink.table.store.hive.objectinspector.TableStoreObjectInspectorFactory;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.TableWrite;
@@ -84,9 +84,9 @@ public class TableStoreHiveStorageHandlerITCase {
     public void testReadExternalTableWithPk() throws Exception {
         String path = folder.newFolder().toURI().toString();
         Configuration conf = new Configuration();
-        conf.setString(FileStoreOptions.PATH, path);
-        conf.setInteger(FileStoreOptions.BUCKET, 2);
-        conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
+        conf.setString(TableStoreOptions.PATH, path);
+        conf.setInteger(TableStoreOptions.BUCKET, 2);
+        conf.setString(TableStoreOptions.FILE_FORMAT, "avro");
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -126,9 +126,9 @@ public class TableStoreHiveStorageHandlerITCase {
     public void testReadExternalTableWithoutPk() throws Exception {
         String path = folder.newFolder().toURI().toString();
         Configuration conf = new Configuration();
-        conf.setString(FileStoreOptions.PATH, path);
-        conf.setInteger(FileStoreOptions.BUCKET, 2);
-        conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
+        conf.setString(TableStoreOptions.PATH, path);
+        conf.setInteger(TableStoreOptions.BUCKET, 2);
+        conf.setString(TableStoreOptions.FILE_FORMAT, "avro");
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -169,8 +169,8 @@ public class TableStoreHiveStorageHandlerITCase {
     public void testReadAllSupportedTypes() throws Exception {
         String root = folder.newFolder().toString();
         Configuration conf = new Configuration();
-        conf.setString(FileStoreOptions.PATH, root);
-        conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
+        conf.setString(TableStoreOptions.PATH, root);
+        conf.setString(TableStoreOptions.FILE_FORMAT, "avro");
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -284,8 +284,8 @@ public class TableStoreHiveStorageHandlerITCase {
     public void testPredicatePushDown() throws Exception {
         String path = folder.newFolder().toURI().toString();
         Configuration conf = new Configuration();
-        conf.setString(FileStoreOptions.PATH, path);
-        conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
+        conf.setString(TableStoreOptions.PATH, path);
+        conf.setString(TableStoreOptions.FILE_FORMAT, "avro");
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -374,8 +374,8 @@ public class TableStoreHiveStorageHandlerITCase {
     public void testDateAndTimestamp() throws Exception {
         String path = folder.newFolder().toURI().toString();
         Configuration conf = new Configuration();
-        conf.setString(FileStoreOptions.PATH, path);
-        conf.setString(FileStoreOptions.FILE_FORMAT, "avro");
+        conf.setString(TableStoreOptions.PATH, path);
+        conf.setString(TableStoreOptions.FILE_FORMAT, "avro");
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,

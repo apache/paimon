@@ -21,7 +21,7 @@ package org.apache.flink.table.store.table;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.TableStoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueFileStore;
 import org.apache.flink.table.store.file.WriteMode;
@@ -80,7 +80,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
         Configuration conf = Configuration.fromMap(tableSchema.options());
 
-        FileStoreOptions.MergeEngine mergeEngine = conf.get(FileStoreOptions.MERGE_ENGINE);
+        TableStoreOptions.MergeEngine mergeEngine = conf.get(TableStoreOptions.MERGE_ENGINE);
         MergeFunction mergeFunction;
         switch (mergeEngine) {
             case DEDUPLICATE:
@@ -102,7 +102,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                 new KeyValueFileStore(
                         schemaManager,
                         tableSchema.id(),
-                        new FileStoreOptions(conf),
+                        new TableStoreOptions(conf),
                         user,
                         tableSchema.logicalPartitionType(),
                         keyType,

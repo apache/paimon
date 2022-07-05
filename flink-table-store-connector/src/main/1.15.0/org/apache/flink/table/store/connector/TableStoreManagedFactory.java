@@ -24,7 +24,7 @@ import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.factories.ManagedTableFactory;
-import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.TableStoreOptions;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
@@ -38,15 +38,15 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
+import static org.apache.flink.table.store.TableStoreOptions.BUCKET;
+import static org.apache.flink.table.store.TableStoreOptions.LOG_PREFIX;
+import static org.apache.flink.table.store.TableStoreOptions.PATH;
+import static org.apache.flink.table.store.TableStoreOptions.TABLE_STORE_PREFIX;
+import static org.apache.flink.table.store.TableStoreOptions.WRITE_MODE;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_MANUAL_TRIGGERED;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.COMPACTION_PARTITION_SPEC;
 import static org.apache.flink.table.store.connector.TableStoreFactoryOptions.ROOT_PATH;
-import static org.apache.flink.table.store.file.FileStoreOptions.BUCKET;
-import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
-import static org.apache.flink.table.store.file.FileStoreOptions.TABLE_STORE_PREFIX;
-import static org.apache.flink.table.store.file.FileStoreOptions.WRITE_MODE;
 import static org.apache.flink.table.store.file.WriteMode.APPEND_ONLY;
-import static org.apache.flink.table.store.log.LogOptions.LOG_PREFIX;
 
 /** Default implementation of {@link ManagedTableFactory}. */
 public class TableStoreManagedFactory extends AbstractTableStoreFactory
@@ -103,7 +103,7 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
     @Override
     public void onCreateTable(Context context, boolean ignoreIfExists) {
         Map<String, String> options = context.getCatalogTable().getOptions();
-        Path path = FileStoreOptions.path(options);
+        Path path = TableStoreOptions.path(options);
         try {
             if (path.getFileSystem().exists(path) && !ignoreIfExists) {
                 throw new TableException(
@@ -161,7 +161,7 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
 
     @Override
     public void onDropTable(Context context, boolean ignoreIfNotExists) {
-        Path path = FileStoreOptions.path(context.getCatalogTable().getOptions());
+        Path path = TableStoreOptions.path(context.getCatalogTable().getOptions());
         try {
             if (path.getFileSystem().exists(path)) {
                 path.getFileSystem().delete(path, true);
@@ -186,7 +186,7 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
     public Map<String, String> onCompactTable(
             Context context, CatalogPartitionSpec catalogPartitionSpec) {
         Map<String, String> newOptions = new HashMap<>(context.getCatalogTable().getOptions());
-        if (APPEND_ONLY.toString().equals(newOptions.get(FileStoreOptions.WRITE_MODE.key()))) {
+        if (APPEND_ONLY.toString().equals(newOptions.get(TableStoreOptions.WRITE_MODE.key()))) {
             throw new UnsupportedOperationException(
                     "ALTER TABLE COMPACT is not yet supported for append only table.");
         }

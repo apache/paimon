@@ -20,14 +20,14 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.TableStoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 
 import java.util.UUID;
 
-import static org.apache.flink.table.store.file.FileStoreOptions.PATH;
+import static org.apache.flink.table.store.TableStoreOptions.PATH;
 
 /** Factory to create {@link FileStoreTable}. */
 public class FileStoreTableFactory {
@@ -43,7 +43,7 @@ public class FileStoreTableFactory {
     }
 
     public static FileStoreTable create(Configuration conf, String user) {
-        Path tablePath = FileStoreOptions.path(conf);
+        Path tablePath = TableStoreOptions.path(conf);
         TableSchema tableSchema =
                 new SchemaManager(tablePath)
                         .latest()
@@ -69,7 +69,7 @@ public class FileStoreTableFactory {
         tableSchema = tableSchema.copy(newOptions.toMap());
 
         SchemaManager schemaManager = new SchemaManager(tablePath);
-        if (newOptions.get(FileStoreOptions.WRITE_MODE) == WriteMode.APPEND_ONLY) {
+        if (newOptions.get(TableStoreOptions.WRITE_MODE) == WriteMode.APPEND_ONLY) {
             return new AppendOnlyFileStoreTable(tablePath, schemaManager, tableSchema, user);
         } else {
             if (tableSchema.primaryKeys().isEmpty()) {

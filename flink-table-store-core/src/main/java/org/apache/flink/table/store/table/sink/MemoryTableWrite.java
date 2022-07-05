@@ -18,11 +18,10 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.store.file.FileStoreOptions;
+import org.apache.flink.table.store.TableStoreOptions;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.memory.MemoryPoolFactory;
-import org.apache.flink.table.store.file.mergetree.MergeTreeOptions;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 
@@ -41,13 +40,11 @@ public abstract class MemoryTableWrite<T> extends AbstractTableWrite<T> {
     protected MemoryTableWrite(
             FileStoreWrite<T> write,
             SinkRecordConverter recordConverter,
-            FileStoreOptions options) {
+            TableStoreOptions options) {
         super(write, recordConverter);
 
-        MergeTreeOptions mergeTreeOptions = options.mergeTreeOptions();
         HeapMemorySegmentPool memoryPool =
-                new HeapMemorySegmentPool(
-                        mergeTreeOptions.writeBufferSize, mergeTreeOptions.pageSize);
+                new HeapMemorySegmentPool(options.writeBufferSize, options.pageSize);
         this.memoryPoolFactory = new MemoryPoolFactory(memoryPool, this::memoryOwners);
     }
 
