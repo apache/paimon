@@ -32,8 +32,8 @@ import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateConverter;
+import org.apache.flink.table.store.file.utils.AtomicFileWriter;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.file.utils.MetaFileWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
 import org.apache.flink.table.types.logical.RowType;
@@ -401,7 +401,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         }
 
                         boolean committed =
-                                MetaFileWriter.writeFileSafety(
+                                AtomicFileWriter.writeFileUtf8(
                                         newSnapshotPath, newSnapshot.toJson());
                         if (committed) {
                             snapshotManager.commitLatestHint(newSnapshotId);

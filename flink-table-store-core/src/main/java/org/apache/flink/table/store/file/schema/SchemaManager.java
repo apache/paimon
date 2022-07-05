@@ -21,9 +21,9 @@ package org.apache.flink.table.store.file.schema;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.operation.Lock;
+import org.apache.flink.table.store.file.utils.AtomicFileWriter;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
-import org.apache.flink.table.store.file.utils.MetaFileWriter;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
@@ -139,7 +139,7 @@ public class SchemaManager implements Serializable {
                                     return false;
                                 }
 
-                                return MetaFileWriter.writeFileSafety(
+                                return AtomicFileWriter.writeFileUtf8(
                                         schemaPath, tableSchema.toString());
                             });
             if (success) {
