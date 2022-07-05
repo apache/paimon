@@ -39,6 +39,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -46,6 +47,25 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     @TempDir java.nio.file.Path tempDir;
+
+    @Test
+    public void testSequenceNumber() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(conf -> conf.set(CoreOptions.SEQUENCE_FIELD, "b"));
+        TableWrite write = table.newWrite();
+        write.write(GenericRowData.of(1, 10, 200L));
+        write.write(GenericRowData.of(1, 10, 100L));
+        write.write(GenericRowData.of(1, 11, 101L));
+        table.newCommit().commit("0", write.prepareCommit());
+        write.write(GenericRowData.of(1, 11, 55L));
+        table.newCommit().commit("1", write.prepareCommit());
+        write.close();
+
+        List<Split> splits = table.newScan().plan().splits;
+        TableRead read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
+                .isEqualTo(Arrays.asList("1|10|200", "1|11|101"));
+    }
 
     @Test
     public void testBatchReadWrite() throws Exception {
@@ -191,12 +211,17 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     protected FileStoreTable createFileStoreTable(boolean changelogFile) throws Exception {
+        return createFileStoreTable(conf -> conf.set(CoreOptions.CHANGELOG_FILE, changelogFile));
+    }
+
+    protected FileStoreTable createFileStoreTable(Consumer<Configuration> configure)
+            throws Exception {
         Path tablePath = new Path(tempDir.toString());
         Configuration conf = new Configuration();
         conf.set(CoreOptions.PATH, tablePath.toString());
         conf.set(CoreOptions.FILE_FORMAT, "avro");
         conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
-        conf.set(CoreOptions.CHANGELOG_FILE, changelogFile);
+        configure.accept(conf);
         SchemaManager schemaManager = new SchemaManager(tablePath);
         TableSchema tableSchema =
                 schemaManager.commitNewVersion(

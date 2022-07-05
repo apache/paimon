@@ -43,6 +43,8 @@ import org.apache.flink.table.types.logical.MultisetType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.TimestampType;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -269,5 +271,13 @@ public class RowDataUtils {
             list.add(arrayData.isNullAt(i) ? null : arrayData.getString(i).toString());
         }
         return list;
+    }
+
+    public static long castToIntegral(DecimalData dec) {
+        BigDecimal bd = dec.toBigDecimal();
+        // rounding down. This is consistent with float=>int,
+        // and consistent with SQLServer, Spark.
+        bd = bd.setScale(0, RoundingMode.DOWN);
+        return bd.longValue();
     }
 }

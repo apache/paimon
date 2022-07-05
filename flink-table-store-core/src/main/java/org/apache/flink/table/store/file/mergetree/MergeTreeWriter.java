@@ -119,7 +119,10 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public void write(KeyValue kv) throws Exception {
-        long sequenceNumber = newSequenceNumber();
+        long sequenceNumber =
+                kv.sequenceNumber() == KeyValue.UNKNOWN_SEQUENCE
+                        ? newSequenceNumber()
+                        : kv.sequenceNumber();
         boolean success = memTable.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
         if (!success) {
             flushMemory();
