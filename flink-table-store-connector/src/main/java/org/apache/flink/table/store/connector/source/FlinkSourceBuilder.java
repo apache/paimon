@@ -60,6 +60,7 @@ public class FlinkSourceBuilder {
     @Nullable private Predicate predicate;
     @Nullable private LogSourceProvider logSourceProvider;
     @Nullable private Integer parallelism;
+    @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
 
     public FlinkSourceBuilder(ObjectIdentifier tableIdentifier, FileStoreTable table) {
         this.tableIdentifier = tableIdentifier;
@@ -94,6 +95,12 @@ public class FlinkSourceBuilder {
 
     public FlinkSourceBuilder withParallelism(@Nullable Integer parallelism) {
         this.parallelism = parallelism;
+        return this;
+    }
+
+    public FlinkSourceBuilder withWatermarkStrategy(
+            @Nullable WatermarkStrategy<RowData> watermarkStrategy) {
+        this.watermarkStrategy = watermarkStrategy;
         return this;
     }
 
@@ -155,7 +162,9 @@ public class FlinkSourceBuilder {
                         conf.get(COMPACTION_MANUAL_TRIGGERED)
                                 ? new FileStoreEmptySource()
                                 : buildSource(),
-                        WatermarkStrategy.noWatermarks(),
+                        watermarkStrategy == null
+                                ? WatermarkStrategy.noWatermarks()
+                                : watermarkStrategy,
                         tableIdentifier.asSummaryString(),
                         InternalTypeInfo.of(produceType));
         if (parallelism != null) {

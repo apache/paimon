@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector.source;
 
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
@@ -25,6 +26,8 @@ import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
 import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
+import org.apache.flink.table.connector.source.abilities.SupportsWatermarkPushDown;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
@@ -57,7 +60,10 @@ import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
  * log source created by {@link LogSourceProvider}.
  */
 public class TableStoreSource
-        implements ScanTableSource, SupportsFilterPushDown, SupportsProjectionPushDown {
+        implements ScanTableSource,
+                SupportsFilterPushDown,
+                SupportsProjectionPushDown,
+                SupportsWatermarkPushDown {
 
     private final ObjectIdentifier tableIdentifier;
     private final FileStoreTable table;
@@ -67,6 +73,8 @@ public class TableStoreSource
 
     @Nullable private Predicate predicate;
     @Nullable private int[][] projectFields;
+
+    @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
 
     public TableStoreSource(
             ObjectIdentifier tableIdentifier,
@@ -122,7 +130,8 @@ public class TableStoreSource
                         .withPredicate(predicate)
                         .withParallelism(
                                 Configuration.fromMap(table.schema().options())
-                                        .get(FlinkConnectorOptions.SCAN_PARALLELISM));
+                                        .get(FlinkConnectorOptions.SCAN_PARALLELISM))
+                        .withWatermarkStrategy(watermarkStrategy);
 
         return new TableStoreDataStreamScanProvider(
                 !streaming, env -> sourceBuilder.withEnv(env).build());
@@ -162,5 +171,10 @@ public class TableStoreSource
     @Override
     public void applyProjection(int[][] projectedFields) {
         this.projectFields = projectedFields;
+    }
+
+    @Override
+    public void applyWatermark(WatermarkStrategy<RowData> watermarkStrategy) {
+        this.watermarkStrategy = watermarkStrategy;
     }
 }
