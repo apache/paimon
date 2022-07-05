@@ -45,8 +45,7 @@ tar -xzf flink-*.tgz
 ## Step 2: Copy Table Store Bundle Jar
 
 {{< stable >}}
-[Download the latest bundle jar](https://flink.apache.org/downloads.html) of
-Flink Table Store.
+Download [flink-table-store-dist-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/flink/flink-table-store-dist/{{< version >}}/flink-table-store-dist-{{< version >}}.jar).
 {{< /stable >}}
 {{< unstable >}}
 
@@ -65,7 +64,7 @@ The simplest way of building Table Store is by running:
 mvn clean install -DskipTests
 ```
 
-You can find the bundle jar in `"./flink-table-store-dist/target/flink-table-store-dist-*.jar"`.
+You can find the bundle jar in `"./flink-table-store-dist/target/flink-table-store-dist-{{< version >}}.jar"`.
 
 {{< /unstable >}}
 
