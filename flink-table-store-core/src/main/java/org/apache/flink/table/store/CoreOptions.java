@@ -216,14 +216,31 @@ public class CoreOptions implements Serializable {
                             "The size amplification is defined as the amount (in percentage) of additional storage "
                                     + "needed to store a single byte of data in the merge tree.");
 
-    public static final ConfigOption<Integer> COMPACTION_SIZE_RATIO =
-            ConfigOptions.key("compaction.size-ratio")
+    public static final ConfigOption<Integer> COMPACTION_SORTED_RUN_SIZE_RATIO =
+            ConfigOptions.key("compaction.sorted-run.size-ratio")
                     .intType()
                     .defaultValue(1)
                     .withDescription(
                             "Percentage flexibility while comparing sorted run size. If the candidate sorted run(s) "
                                     + "size is 1% smaller than the next sorted run's size, then include next sorted run "
                                     + "into this candidate set.");
+
+    public static final ConfigOption<Integer> COMPACTION_FILE_NUM_TRIGGER =
+            ConfigOptions.key("compaction.file-num-trigger")
+                    .intType()
+                    .defaultValue(50)
+                    .withDescription(
+                            "The number of adjacent files whose size are smaller than "
+                                    + "the target file size to trigger a compaction for append-only table.");
+
+    public static final ConfigOption<Integer> COMPACTION_FILE_SIZE_RATIO =
+            ConfigOptions.key("compaction.file.size-ratio")
+                    .intType()
+                    .defaultValue(4)
+                    .withDescription(
+                            "The file size ratio to trigger a cost-effective compaction for append-only table. "
+                                    + "A compaction is considered cost-effective only when the to-compact file size "
+                                    + "is less than the target file size divided by the ratio.");
 
     public static final ConfigOption<Boolean> CHANGELOG_FILE =
             ConfigOptions.key("changelog-file")
@@ -398,8 +415,16 @@ public class CoreOptions implements Serializable {
         return options.get(COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT);
     }
 
-    public int sizeRatio() {
-        return options.get(COMPACTION_SIZE_RATIO);
+    public int sortedRunSizeRatio() {
+        return options.get(COMPACTION_SORTED_RUN_SIZE_RATIO);
+    }
+
+    public int fileNumTrigger() {
+        return options.get(COMPACTION_FILE_NUM_TRIGGER);
+    }
+
+    public int fileSizeRatio() {
+        return options.get(COMPACTION_FILE_SIZE_RATIO);
     }
 
     public boolean enableChangelogFile() {

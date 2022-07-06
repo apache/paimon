@@ -291,7 +291,7 @@ public class MergeTreeTest {
         CompactStrategy strategy =
                 new UniversalCompaction(
                         options.maxSizeAmplificationPercent(),
-                        options.sizeRatio(),
+                        options.sortedRunSizeRatio(),
                         options.numSortedRunCompactionTrigger());
         CompactRewriter rewriter =
                 (outputLevel, dropDelete, sections) ->

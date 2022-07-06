@@ -139,7 +139,7 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
                         bucket,
                         new UniversalCompaction(
                                 options.maxSizeAmplificationPercent(),
-                                options.sizeRatio(),
+                                options.sortedRunSizeRatio(),
                                 options.numSortedRunCompactionTrigger()),
                         compactExecutor,
                         levels),
@@ -162,7 +162,12 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
         CompactRewriter rewriter = compactRewriter(partition, bucket, keyComparator);
         return new MergeTreeCompactManager(
-                compactExecutor, levels, compactStrategy, keyComparator, targetFileSize, rewriter);
+                compactExecutor,
+                levels,
+                compactStrategy,
+                keyComparator,
+                options.targetFileSize(),
+                rewriter);
     }
 
     private CompactRewriter compactRewriter(
