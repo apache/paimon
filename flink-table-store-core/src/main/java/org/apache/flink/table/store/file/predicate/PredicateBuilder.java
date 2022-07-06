@@ -38,6 +38,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 import static java.util.Collections.singletonList;
 
@@ -141,15 +142,22 @@ public class PredicateBuilder {
 
     public static List<Predicate> splitAnd(Predicate predicate) {
         List<Predicate> result = new ArrayList<>();
-        splitAnd(predicate, result);
+        splitCompound(And.INSTANCE, predicate, result);
         return result;
     }
 
-    private static void splitAnd(Predicate predicate, List<Predicate> result) {
+    public static List<Predicate> splitOr(Predicate predicate) {
+        List<Predicate> result = new ArrayList<>();
+        splitCompound(Or.INSTANCE, predicate, result);
+        return result;
+    }
+
+    private static void splitCompound(
+            CompoundPredicate.Function function, Predicate predicate, List<Predicate> result) {
         if (predicate instanceof CompoundPredicate
-                && ((CompoundPredicate) predicate).function().equals(And.INSTANCE)) {
+                && ((CompoundPredicate) predicate).function().equals(function)) {
             for (Predicate child : ((CompoundPredicate) predicate).children()) {
-                splitAnd(child, result);
+                splitCompound(function, child, result);
             }
         } else {
             result.add(predicate);
@@ -218,6 +226,52 @@ public class PredicateBuilder {
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported predicate leaf type " + literalType.getTypeRoot().name());
+        }
+    }
+
+    public static List<Predicate> pickTransformFieldMapping(
+            List<Predicate> predicates, List<String> inputFields, List<String> pickedFields) {
+        return pickTransformFieldMapping(
+                predicates, inputFields.stream().mapToInt(pickedFields::indexOf).toArray());
+    }
+
+    public static List<Predicate> pickTransformFieldMapping(
+            List<Predicate> predicates, int[] fieldIdxMapping) {
+        List<Predicate> pick = new ArrayList<>();
+        for (Predicate p : predicates) {
+            Optional<Predicate> mapped = transformFieldMapping(p, fieldIdxMapping);
+            mapped.ifPresent(pick::add);
+        }
+        return pick;
+    }
+
+    public static Optional<Predicate> transformFieldMapping(
+            Predicate predicate, int[] fieldIdxMapping) {
+        if (predicate instanceof CompoundPredicate) {
+            CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
+            List<Predicate> children = new ArrayList<>();
+            for (Predicate child : compoundPredicate.children()) {
+                Optional<Predicate> mapped = transformFieldMapping(child, fieldIdxMapping);
+                if (mapped.isPresent()) {
+                    children.add(mapped.get());
+                } else {
+                    return Optional.empty();
+                }
+            }
+            return Optional.of(new CompoundPredicate(compoundPredicate.function(), children));
+        } else {
+            LeafPredicate leafPredicate = (LeafPredicate) predicate;
+            int mapped = fieldIdxMapping[leafPredicate.index()];
+            if (mapped >= 0) {
+                return Optional.of(
+                        new LeafPredicate(
+                                leafPredicate.function(),
+                                leafPredicate.type(),
+                                mapped,
+                                leafPredicate.literals()));
+            } else {
+                return Optional.empty();
+            }
         }
     }
 }

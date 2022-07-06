@@ -26,15 +26,23 @@ import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.RowType;
 
+import java.util.List;
+
+import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
+import static org.apache.flink.table.store.file.predicate.PredicateBuilder.pickTransformFieldMapping;
+import static org.apache.flink.table.store.file.predicate.PredicateBuilder.splitAnd;
+
 /** {@link FileStoreScan} for {@link org.apache.flink.table.store.file.KeyValueFileStore}. */
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     private final FieldStatsArraySerializer keyStatsConverter;
+    private final RowType keyType;
 
     private Predicate keyFilter;
 
     public KeyValueFileStoreScan(
             RowType partitionType,
+            RowType bucketKeyType,
             RowType keyType,
             SnapshotManager snapshotManager,
             ManifestFile.Factory manifestFileFactory,
@@ -43,16 +51,27 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             boolean checkNumOfBuckets) {
         super(
                 partitionType,
+                bucketKeyType,
                 snapshotManager,
                 manifestFileFactory,
                 manifestListFactory,
                 numOfBuckets,
                 checkNumOfBuckets);
         this.keyStatsConverter = new FieldStatsArraySerializer(keyType);
+        this.keyType = keyType;
     }
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {
         this.keyFilter = predicate;
+
+        List<Predicate> bucketFilters =
+                pickTransformFieldMapping(
+                        splitAnd(predicate),
+                        keyType.getFieldNames(),
+                        bucketKeyType.getFieldNames());
+        if (bucketFilters.size() > 0) {
+            withBucketKeyFilter(and(bucketFilters));
+        }
         return this;
     }
 

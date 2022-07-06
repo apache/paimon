@@ -25,6 +25,7 @@ import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
+import org.apache.flink.table.store.file.predicate.BucketSelector;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
@@ -50,6 +51,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private final FieldStatsArraySerializer partitionStatsConverter;
     private final RowDataToObjectArrayConverter partitionConverter;
+    protected final RowType bucketKeyType;
     private final SnapshotManager snapshotManager;
     private final ManifestFile.Factory manifestFileFactory;
     private final ManifestList manifestList;
@@ -57,6 +59,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private final boolean checkNumOfBuckets;
 
     private Predicate partitionFilter;
+    private BucketSelector bucketSelector;
 
     private Long specifiedSnapshotId = null;
     private Integer specifiedBucket = null;
@@ -65,6 +68,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     public AbstractFileStoreScan(
             RowType partitionType,
+            RowType bucketKeyType,
             SnapshotManager snapshotManager,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
@@ -72,6 +76,9 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             boolean checkNumOfBuckets) {
         this.partitionStatsConverter = new FieldStatsArraySerializer(partitionType);
         this.partitionConverter = new RowDataToObjectArrayConverter(partitionType);
+        Preconditions.checkArgument(
+                bucketKeyType.getFieldCount() > 0, "The bucket keys should not be empty.");
+        this.bucketKeyType = bucketKeyType;
         this.snapshotManager = snapshotManager;
         this.manifestFileFactory = manifestFileFactory;
         this.manifestList = manifestListFactory.create();
@@ -82,6 +89,11 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withPartitionFilter(Predicate predicate) {
         this.partitionFilter = predicate;
+        return this;
+    }
+
+    protected FileStoreScan withBucketKeyFilter(Predicate predicate) {
+        this.bucketSelector = BucketSelector.create(predicate, bucketKeyType).orElse(null);
         return this;
     }
 
@@ -228,7 +240,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             // however entry.bucket() was computed against the old numOfBuckets
             // and thus the filtered manifest entries might be empty
             // which renders the bucket check invalid
-            if (filterByBucket(file)) {
+            if (filterByBucket(file) && filterByBucketSelector(file)) {
                 files.add(file);
             }
         }
@@ -265,6 +277,11 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private boolean filterByBucket(ManifestEntry entry) {
         return (specifiedBucket == null || entry.bucket() == specifiedBucket);
+    }
+
+    private boolean filterByBucketSelector(ManifestEntry entry) {
+        return (bucketSelector == null
+                || bucketSelector.select(entry.bucket(), entry.totalBuckets()));
     }
 
     protected abstract boolean filterByStats(ManifestEntry entry);

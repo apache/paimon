@@ -24,7 +24,7 @@ import org.apache.flink.table.types.logical.LogicalType;
 import java.util.List;
 
 /** Function to test a field. */
-public abstract class LeafUnaryFunction implements LeafFunction {
+public abstract class LeafUnaryFunction extends LeafFunction {
 
     private static final long serialVersionUID = 1L;
 

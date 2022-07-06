@@ -47,6 +47,9 @@ public class SinkRecordConverterTest {
 
         assertThatThrownBy(() -> converter("a", "b"))
                 .hasMessageContaining("Primary keys [b] should contains all bucket keys [a].");
+
+        assertThatThrownBy(() -> converter("a", "a", "a,b"))
+                .hasMessageContaining("Bucket keys [a] should not in partition keys [a].");
     }
 
     @Test
@@ -69,6 +72,10 @@ public class SinkRecordConverterTest {
     }
 
     private SinkRecordConverter converter(String bk, String pk) {
+        return converter("", bk, pk);
+    }
+
+    private SinkRecordConverter converter(String partK, String bk, String pk) {
         RowType rowType =
                 new RowType(
                         Arrays.asList(
@@ -83,7 +90,9 @@ public class SinkRecordConverterTest {
                         0,
                         fields,
                         TableSchema.currentHighestFieldId(fields),
-                        Collections.emptyList(),
+                        "".equals(partK)
+                                ? Collections.emptyList()
+                                : Arrays.asList(partK.split(",")),
                         "".equals(pk) ? Collections.emptyList() : Arrays.asList(pk.split(",")),
                         options,
                         "");

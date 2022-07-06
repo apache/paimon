@@ -36,6 +36,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     private static final long serialVersionUID = 1L;
 
+    private final RowType bucketKeyType;
     private final RowType keyType;
     private final RowType valueType;
     private final Supplier<Comparator<RowData>> keyComparatorSupplier;
@@ -46,10 +47,12 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             long schemaId,
             CoreOptions options,
             RowType partitionType,
+            RowType bucketKeyType,
             RowType keyType,
             RowType valueType,
             MergeFunction mergeFunction) {
         super(schemaManager, schemaId, options, partitionType);
+        this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
         this.valueType = valueType;
         this.mergeFunction = mergeFunction;
@@ -93,6 +96,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private KeyValueFileStoreScan newScan(boolean checkNumOfBuckets) {
         return new KeyValueFileStoreScan(
                 partitionType,
+                bucketKeyType,
                 keyType,
                 snapshotManager(),
                 manifestFileFactory(),

@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
@@ -25,6 +26,7 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader.ReaderSupplier;
+import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.table.sink.TableCommit;
@@ -42,8 +44,11 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
+import static org.apache.flink.table.store.CoreOptions.BUCKET;
+import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base test class for {@link FileStoreTable}. */
@@ -101,6 +106,33 @@ public abstract class FileStoreTableTestBase {
                 .hasSameElementsAs(Collections.singletonList("2|21|201"));
     }
 
+    @Test
+    public void testBucketFilter() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(BUCKET, 5);
+                            conf.set(BUCKET_KEY, "a");
+                        });
+
+        TableWrite write = table.newWrite();
+        write.write(GenericRowData.of(1, 1, 2L));
+        write.write(GenericRowData.of(1, 3, 4L));
+        write.write(GenericRowData.of(1, 5, 6L));
+        write.write(GenericRowData.of(1, 7, 8L));
+        write.write(GenericRowData.of(1, 9, 10L));
+        table.newCommit("user").commit("0", write.prepareCommit());
+        write.close();
+
+        List<Split> splits =
+                table.newScan()
+                        .withFilter(new PredicateBuilder(ROW_TYPE).equal(1, 5))
+                        .plan()
+                        .splits;
+        assertThat(splits.size()).isEqualTo(1);
+        assertThat(splits.get(0).bucket()).isEqualTo(1);
+    }
+
     protected List<String> getResult(
             TableRead read,
             List<Split> splits,
@@ -141,5 +173,10 @@ public abstract class FileStoreTableTestBase {
         return b;
     }
 
-    protected abstract FileStoreTable createFileStoreTable() throws Exception;
+    protected FileStoreTable createFileStoreTable() throws Exception {
+        return createFileStoreTable(conf -> {});
+    }
+
+    protected abstract FileStoreTable createFileStoreTable(Consumer<Configuration> configure)
+            throws Exception;
 }

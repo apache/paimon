@@ -27,7 +27,7 @@ import java.util.Optional;
 import static org.apache.flink.table.store.file.predicate.CompareUtils.compareLiteral;
 
 /** A {@link LeafFunction} to eval not in. */
-public class NotIn implements LeafFunction {
+public class NotIn extends LeafFunction {
 
     private static final long serialVersionUID = 1L;
 
