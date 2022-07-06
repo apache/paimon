@@ -91,17 +91,31 @@ public abstract class FileFormat {
     }
 
     /** Create a {@link FileFormat} from format identifier and format options. */
-    public static FileFormat fromIdentifier(String formatIdentifier, Configuration formatOptions) {
+    public static FileFormat fromIdentifier(String identifier, Configuration options) {
+        Optional<FileFormat> format =
+                fromIdentifier(identifier, options, Thread.currentThread().getContextClassLoader());
+        return format.orElseGet(
+                () ->
+                        fromIdentifier(identifier, options, FileFormat.class.getClassLoader())
+                                .orElseThrow(
+                                        () ->
+                                                new ValidationException(
+                                                        String.format(
+                                                                "Could not find any factories that implement '%s' in the classpath.",
+                                                                FileFormatFactory.class
+                                                                        .getName()))));
+    }
+
+    private static Optional<FileFormat> fromIdentifier(
+            String formatIdentifier, Configuration formatOptions, ClassLoader classLoader) {
         ServiceLoader<FileFormatFactory> serviceLoader =
-                ServiceLoader.load(FileFormatFactory.class);
+                ServiceLoader.load(FileFormatFactory.class, FileFormat.class.getClassLoader());
         for (FileFormatFactory factory : serviceLoader) {
             if (factory.identifier().equals(formatIdentifier.toLowerCase())) {
-                return factory.create(formatOptions);
+                return Optional.of(factory.create(formatOptions));
             }
         }
-        throw new ValidationException(
-                String.format(
-                        "Could not find any factories that implement '%s' in the classpath.",
-                        FileFormatFactory.class.getName()));
+
+        return Optional.empty();
     }
 }
