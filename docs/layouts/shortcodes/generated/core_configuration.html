@@ -33,6 +33,18 @@
             <td>Whether to force a compaction before commit.</td>
         </tr>
         <tr>
+            <td><h5>compaction.file-num-trigger</h5></td>
+            <td style="word-wrap: break-word;">50</td>
+            <td>Integer</td>
+            <td>The number of adjacent files whose size are smaller than the target file size to trigger a compaction for append-only table.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.file.size-ratio</h5></td>
+            <td style="word-wrap: break-word;">4</td>
+            <td>Integer</td>
+            <td>The file size ratio to trigger a cost-effective compaction for append-only table. A compaction is considered cost-effective only when the to-compact file size is less than the target file size divided by the ratio.</td>
+        </tr>
+        <tr>
             <td><h5>compaction.max-size-amplification-percent</h5></td>
             <td style="word-wrap: break-word;">200</td>
             <td>Integer</td>
