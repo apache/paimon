@@ -51,8 +51,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
     private final FileFormat fileFormat;
     private final FileStorePathFactory pathFactory;
     private final long targetFileSize;
-    private final int fileNumCompactionTrigger;
-    private final int fileSizeRatioCompactionTrigger;
+    private final int minFileNum;
+    private final int maxFileNum;
     private final boolean commitForceCompact;
 
     public AppendOnlyFileStoreWrite(
@@ -64,8 +64,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             long targetFileSize,
-            int fileNumCompactionTrigger,
-            int fileSizeRatioCompactionTrigger,
+            int minFileNum,
+            int maxFileNum,
             boolean commitForceCompact) {
         super(snapshotManager, scan);
         this.read = read;
@@ -74,8 +74,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
         this.fileFormat = fileFormat;
         this.pathFactory = pathFactory;
         this.targetFileSize = targetFileSize;
-        this.fileNumCompactionTrigger = fileNumCompactionTrigger;
-        this.fileSizeRatioCompactionTrigger = fileSizeRatioCompactionTrigger;
+        this.maxFileNum = maxFileNum;
+        this.minFileNum = minFileNum;
         this.commitForceCompact = commitForceCompact;
     }
 
@@ -117,8 +117,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
                 new AppendOnlyCompactManager(
                         compactExecutor,
                         toCompact,
-                        fileNumCompactionTrigger,
-                        fileSizeRatioCompactionTrigger,
+                        minFileNum,
+                        maxFileNum,
                         targetFileSize,
                         compactRewriter(partition, bucket)),
                 commitForceCompact,

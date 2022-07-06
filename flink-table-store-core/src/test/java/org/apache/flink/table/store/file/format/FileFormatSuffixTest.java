@@ -67,7 +67,7 @@ public class FileFormatSuffixTest extends DataFileTest {
                         10,
                         SCHEMA,
                         toCompact,
-                        new AppendOnlyCompactManager(null, toCompact, 10, 4, 10, null), // not used
+                        new AppendOnlyCompactManager(null, toCompact, 4, 10, 10, null), // not used
                         false,
                         dataFilePathFactory);
         appendOnlyWriter.write(

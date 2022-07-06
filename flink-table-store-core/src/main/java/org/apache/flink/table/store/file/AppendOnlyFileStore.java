@@ -66,8 +66,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
                 snapshotManager(),
                 newScan(true),
                 options.targetFileSize(),
-                options.fileNumTrigger(),
-                options.fileSizeRatio(),
+                options.minFileNum(),
+                options.maxFileNum(),
                 options.commitForceCompact());
     }
 

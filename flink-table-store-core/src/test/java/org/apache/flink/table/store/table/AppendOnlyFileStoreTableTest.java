@@ -88,7 +88,6 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
                         Arrays.asList(
-                                "2|20|200",
                                 "2|21|201",
                                 // this record is in the same file with the first "2|21|201"
                                 "2|22|202",

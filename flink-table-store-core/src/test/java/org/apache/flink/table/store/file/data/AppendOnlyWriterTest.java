@@ -67,8 +67,8 @@ public class AppendOnlyWriterTest {
     private static final String AVRO = "avro";
     private static final String PART = "2022-05-01";
     private static final long SCHEMA_ID = 0L;
-    private static final int FILE_NUM_COMPACTION_TRIGGER = 2;
-    private static final int FILE_SIZE_RATIO_COMPACTION_TRIGGER = 300;
+    private static final int MIN_FILE_NUM = 3;
+    private static final int MAX_FILE_NUM = 4;
 
     @BeforeEach
     public void before() {
@@ -135,8 +135,8 @@ public class AppendOnlyWriterTest {
 
             writer.sync();
             Increment inc = writer.prepareCommit();
-            if (txn > 0 && txn % 3 == 0) {
-                assertThat(inc.compactBefore()).hasSize(3);
+            if (txn > 0 && txn % 4 == 0) {
+                assertThat(inc.compactBefore()).hasSize(4);
                 assertThat(inc.compactAfter()).hasSize(1);
                 DataFileMeta compactAfter = inc.compactAfter().get(0);
                 assertThat(compactAfter.fileName()).startsWith("compact-");
@@ -233,7 +233,8 @@ public class AppendOnlyWriterTest {
         // check compact before and after
         List<DataFileMeta> compactBefore = secInc.compactBefore();
         List<DataFileMeta> compactAfter = secInc.compactAfter();
-        assertThat(compactBefore).containsExactlyInAnyOrderElementsOf(firstInc.newFiles());
+        assertThat(compactBefore)
+                .containsExactlyInAnyOrderElementsOf(firstInc.newFiles().subList(0, 4));
         assertThat(compactAfter).hasSize(1);
         assertThat(compactBefore.stream().mapToLong(DataFileMeta::fileSize).sum())
                 .isEqualTo(compactAfter.stream().mapToLong(DataFileMeta::fileSize).sum());
@@ -246,9 +247,14 @@ public class AppendOnlyWriterTest {
                 .isEqualTo(compactAfter.get(compactAfter.size() - 1).maxSequenceNumber());
         assertThat(secInc.newFiles()).hasSize(1);
 
-        // check the compact after file is added back due to small size
-        // check the new files are also added
+        /* check toCompact[round + 1] is composed of
+         * <1> the compactAfter[round] (due to small size)
+         * <2> the rest of toCompact[round]
+         * <3> the newFiles[round]
+         * with strict order
+         */
         List<DataFileMeta> toCompact = new ArrayList<>(compactAfter);
+        toCompact.addAll(firstInc.newFiles().subList(4, firstInc.newFiles().size()));
         toCompact.addAll(secInc.newFiles());
         assertThat(writer.getToCompact()).containsExactlyElementsOf(toCompact);
     }
@@ -291,8 +297,8 @@ public class AppendOnlyWriterTest {
                         Executors.newSingleThreadScheduledExecutor(
                                 new ExecutorThreadFactory("compaction-thread")),
                         toCompact,
-                        FILE_NUM_COMPACTION_TRIGGER,
-                        FILE_SIZE_RATIO_COMPACTION_TRIGGER,
+                        MIN_FILE_NUM,
+                        MAX_FILE_NUM,
                         targetFileSize,
                         compact -> Collections.singletonList(generateCompactAfter(compact))),
                 forceCompact,

@@ -225,22 +225,24 @@ public class CoreOptions implements Serializable {
                                     + "size is 1% smaller than the next sorted run's size, then include next sorted run "
                                     + "into this candidate set.");
 
-    public static final ConfigOption<Integer> COMPACTION_FILE_NUM_TRIGGER =
-            ConfigOptions.key("compaction.file-num-trigger")
-                    .intType()
-                    .defaultValue(50)
-                    .withDescription(
-                            "The number of adjacent files whose size are smaller than "
-                                    + "the target file size to trigger a compaction for append-only table.");
-
-    public static final ConfigOption<Integer> COMPACTION_FILE_SIZE_RATIO =
-            ConfigOptions.key("compaction.file.size-ratio")
+    public static final ConfigOption<Integer> COMPACTION_MIN_FILE_NUM =
+            ConfigOptions.key("compaction.min.file-num")
                     .intType()
                     .defaultValue(4)
                     .withDescription(
-                            "The file size ratio to trigger a cost-effective compaction for append-only table. "
-                                    + "A compaction is considered cost-effective only when the to-compact file size "
-                                    + "is less than the target file size divided by the ratio.");
+                            "For file set [f_0,...,f_N], the minimum file number which satisfies "
+                                    + "sum(size(f_i)) >= targetFileSize to trigger a compaction for "
+                                    + "append-only table. This value avoids almost-full-file to be compacted, "
+                                    + "which is not cost-effective.");
+
+    public static final ConfigOption<Integer> COMPACTION_MAX_FILE_NUM =
+            ConfigOptions.key("compaction.max.file-num")
+                    .intType()
+                    .defaultValue(50)
+                    .withDescription(
+                            "For file set [f_0,...,f_N], the maximum file number to trigger a compaction "
+                                    + "for append-only table, even if sum(size(f_i)) < targetFileSize. This value "
+                                    + "avoids pending too much small files, which slows down the performance.");
 
     public static final ConfigOption<Boolean> CHANGELOG_FILE =
             ConfigOptions.key("changelog-file")
@@ -419,12 +421,12 @@ public class CoreOptions implements Serializable {
         return options.get(COMPACTION_SORTED_RUN_SIZE_RATIO);
     }
 
-    public int fileNumTrigger() {
-        return options.get(COMPACTION_FILE_NUM_TRIGGER);
+    public int minFileNum() {
+        return options.get(COMPACTION_MIN_FILE_NUM);
     }
 
-    public int fileSizeRatio() {
-        return options.get(COMPACTION_FILE_SIZE_RATIO);
+    public int maxFileNum() {
+        return options.get(COMPACTION_MAX_FILE_NUM);
     }
 
     public boolean enableChangelogFile() {

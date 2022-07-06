@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactTask;
@@ -33,8 +32,8 @@ import java.util.concurrent.ExecutorService;
 /** Compact manager for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyCompactManager extends CompactManager {
 
-    private final int fileNumCompactionTrigger;
-    private final int fileSizeRatioCompactionTrigger;
+    private final int minFileNum;
+    private final int maxFileNum;
     private final long targetFileSize;
     private final CompactRewriter rewriter;
     private final LinkedList<DataFileMeta> toCompact;
@@ -42,14 +41,14 @@ public class AppendOnlyCompactManager extends CompactManager {
     public AppendOnlyCompactManager(
             ExecutorService executor,
             LinkedList<DataFileMeta> toCompact,
-            int fileNumCompactionTrigger,
-            int fileSizeRatioCompactionTrigger,
+            int minFileNum,
+            int maxFileNum,
             long targetFileSize,
             CompactRewriter rewriter) {
         super(executor);
         this.toCompact = toCompact;
-        this.fileNumCompactionTrigger = fileNumCompactionTrigger;
-        this.fileSizeRatioCompactionTrigger = fileSizeRatioCompactionTrigger;
+        this.maxFileNum = maxFileNum;
+        this.minFileNum = minFileNum;
         this.targetFileSize = targetFileSize;
         this.rewriter = rewriter;
     }
@@ -80,87 +79,41 @@ public class AppendOnlyCompactManager extends CompactManager {
 
     @VisibleForTesting
     Optional<List<DataFileMeta>> pickCompactBefore() {
-        List<Tuple2<Integer, Integer>> intervals =
-                findSmallFileIntervals(toCompact, targetFileSize);
-        for (Tuple2<Integer, Integer> interval : intervals) {
-            if (pickInterval(interval)) {
-                // [interval.f0, interval.f1] will be compacted
-                // [0, interval.f0 - 1] can be immediately released from toCompact
-                // Note: [interval.f0, interval.f1] should be released after compact task
-                // finished
-                List<DataFileMeta> compactBefore =
-                        new ArrayList<>(toCompact.subList(interval.f0, interval.f1 + 1));
-                for (int i = 0; i <= interval.f0 - 1; i++) {
+        long totalFileSize = 0L;
+        int fileNum = 0;
+        int releaseCtr = 0;
+        for (int i = 0; i < toCompact.size(); i++) {
+            DataFileMeta file = toCompact.get(i);
+            totalFileSize += file.fileSize();
+            fileNum++;
+            int pos = i - fileNum + 1;
+            if ((totalFileSize >= targetFileSize && fileNum >= minFileNum)
+                    || fileNum >= maxFileNum) {
+                // trigger compaction for [pos, i]
+                List<DataFileMeta> compactBefore = new ArrayList<>(toCompact.subList(pos, i + 1));
+                // files in [0, pos - 1] can be released immediately
+                // [pos, i] should be released after compaction finished
+                for (int j = 0; j <= pos - 1; j++) {
                     toCompact.pollFirst();
                 }
                 return Optional.of(compactBefore);
+            } else if (totalFileSize >= targetFileSize) {
+                // this is equivalent to shift one pos to right
+                fileNum--;
+                totalFileSize -= toCompact.get(pos).fileSize();
+                releaseCtr++;
             }
         }
-        if (intervals.isEmpty()) {
-            // no small file detected, and toCompact can be released
-            toCompact.clear();
-        } else {
-            Tuple2<Integer, Integer> last = intervals.get(intervals.size() - 1);
-            boolean lastFile = last.f1 == toCompact.size() - 1;
-            boolean noAlmostFullFile =
-                    toCompact.subList(last.f0, last.f1 + 1).stream()
-                            .noneMatch(
-                                    file ->
-                                            file.fileSize()
-                                                    >= targetFileSize
-                                                            / fileSizeRatioCompactionTrigger);
-            if (lastFile && noAlmostFullFile) {
-                // wait for more small files to match fileNumTrigger
-                // keep them and release [0, last.f0 - 1]
-                for (int i = 0; i <= last.f0 - 1; i++) {
-                    toCompact.pollFirst();
-                }
-            } else {
-                toCompact.clear();
-            }
+        while (releaseCtr > 0) {
+            toCompact.pollFirst();
+            releaseCtr--;
+        }
+        // optimize when the last file size >= targetFileSize
+        DataFileMeta head = toCompact.peekFirst();
+        if (head != null && head.fileSize() >= targetFileSize) {
+            toCompact.pollFirst();
         }
         return Optional.empty();
-    }
-
-    private boolean pickInterval(Tuple2<Integer, Integer> interval) {
-        int start = interval.f0;
-        int end = interval.f1;
-        if (start == end) {
-            // single small file
-            return false;
-        } else {
-            long totalFileSize =
-                    toCompact.subList(start, end + 1).stream()
-                            .mapToLong(DataFileMeta::fileSize)
-                            .sum();
-            int fileNum = end - start + 1;
-            // find a balance between file num and compaction ratio
-            return fileNum > fileNumCompactionTrigger
-                    && totalFileSize < targetFileSize / fileSizeRatioCompactionTrigger;
-        }
-    }
-
-    @VisibleForTesting
-    static List<Tuple2<Integer, Integer>> findSmallFileIntervals(
-            List<DataFileMeta> toCompact, long targetFileSize) {
-        List<Tuple2<Integer, Integer>> intervals = new ArrayList<>();
-        int start = -1;
-        int end = -1;
-        for (int i = 0; i < toCompact.size(); i++) {
-            DataFileMeta file = toCompact.get(i);
-            if (file.fileSize() < targetFileSize) {
-                start = start == -1 ? i : start;
-                end = i;
-            } else if (start != -1 && end >= start) {
-                intervals.add(Tuple2.of(start, end));
-                start = -1;
-                end = -1;
-            }
-        }
-        if (start != -1 && end >= start) {
-            intervals.add(Tuple2.of(start, end));
-        }
-        return intervals;
     }
 
     @VisibleForTesting
