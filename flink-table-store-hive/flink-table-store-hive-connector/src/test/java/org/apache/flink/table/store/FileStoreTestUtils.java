@@ -47,6 +47,6 @@ public class FileStoreTestUtils {
         // only path, other config should be read from file store.
         conf = new Configuration();
         conf.set(PATH, tablePath.toString());
-        return FileStoreTableFactory.create(conf, "user");
+        return FileStoreTableFactory.create(conf);
     }
 }

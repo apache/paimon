@@ -44,6 +44,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.TreeSet;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -107,12 +108,14 @@ public class ManifestFileMetaTest {
 
     @RepeatedTest(10)
     public void testCleanUpForException() throws IOException {
-        FailingAtomicRenameFileSystem.get().reset(1, 10);
+        String failingName = UUID.randomUUID().toString();
+        FailingAtomicRenameFileSystem.reset(failingName, 1, 10);
         List<ManifestFileMeta> input = new ArrayList<>();
         createData(ThreadLocalRandom.current().nextInt(5), input, null);
         ManifestFile failingManifestFile =
                 createManifestFile(
-                        FailingAtomicRenameFileSystem.getFailingPath(tempDir.toString()));
+                        FailingAtomicRenameFileSystem.getFailingPath(
+                                failingName, tempDir.toString()));
 
         try {
             ManifestFileMeta.merge(input, failingManifestFile, 500, 3);

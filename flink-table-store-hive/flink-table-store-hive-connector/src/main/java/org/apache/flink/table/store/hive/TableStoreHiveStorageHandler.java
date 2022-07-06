@@ -39,7 +39,6 @@ import org.apache.hadoop.mapred.OutputFormat;
 
 import java.util.Map;
 import java.util.Properties;
-import java.util.UUID;
 
 /** {@link HiveStorageHandler} for table store. This is the entrance class of Hive API. */
 public class TableStoreHiveStorageHandler
@@ -85,10 +84,7 @@ public class TableStoreHiveStorageHandler
     public void configureTableJobProperties(TableDesc tableDesc, Map<String, String> map) {}
 
     @Override
-    public void configureJobConf(TableDesc tableDesc, JobConf jobConf) {
-        TableStoreJobConf wrapper = new TableStoreJobConf(jobConf);
-        wrapper.setFileStoreUser(UUID.randomUUID().toString());
-    }
+    public void configureJobConf(TableDesc tableDesc, JobConf jobConf) {}
 
     @Override
     public void setConf(Configuration configuration) {

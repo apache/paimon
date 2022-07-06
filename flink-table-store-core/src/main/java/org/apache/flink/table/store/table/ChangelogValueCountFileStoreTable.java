@@ -57,7 +57,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     private final KeyValueFileStore store;
 
     ChangelogValueCountFileStoreTable(
-            Path path, SchemaManager schemaManager, TableSchema tableSchema, String user) {
+            Path path, SchemaManager schemaManager, TableSchema tableSchema) {
         super(path, tableSchema);
         RowType countType =
                 RowType.of(
@@ -68,7 +68,6 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                         schemaManager,
                         tableSchema.id(),
                         new CoreOptions(tableSchema.options()),
-                        user,
                         tableSchema.logicalPartitionType(),
                         tableSchema.logicalRowType(),
                         countType,

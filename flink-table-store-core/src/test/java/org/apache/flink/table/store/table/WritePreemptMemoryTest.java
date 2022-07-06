@@ -28,6 +28,7 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.table.sink.FileCommittable;
+import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -62,6 +63,7 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
         // write
         FileStoreTable table = createFileStoreTable();
         TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
         Random random = new Random();
         List<String> expected = new ArrayList<>();
         for (int i = 0; i < 10_000; i++) {
@@ -71,7 +73,7 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
             expected.add(BATCH_ROW_TO_STRING.apply(row));
         }
         List<FileCommittable> committables = write.prepareCommit();
-        table.newCommit().commit("0", committables);
+        commit.commit("0", committables);
         write.close();
 
         // read
@@ -102,6 +104,6 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
                                 Arrays.asList("pt", "a"),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogWithKeyFileStoreTable(tablePath, schemaManager, schema, "user");
+        return new ChangelogWithKeyFileStoreTable(tablePath, schemaManager, schema);
     }
 }

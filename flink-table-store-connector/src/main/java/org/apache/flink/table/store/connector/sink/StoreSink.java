@@ -83,7 +83,7 @@ public class StoreSink implements Serializable {
         return new StoreWriteOperator(table, overwritePartition, logSinkFunction);
     }
 
-    private StoreCommitter createCommitter() {
+    private StoreCommitter createCommitter(String user) {
         CatalogLock catalogLock;
         Lock lock;
         if (lockFactory == null) {
@@ -104,7 +104,7 @@ public class StoreSink implements Serializable {
         }
 
         return new StoreCommitter(
-                table.newCommit().withOverwritePartition(overwritePartition).withLock(lock),
+                table.newCommit(user).withOverwritePartition(overwritePartition).withLock(lock),
                 catalogLock);
     }
 

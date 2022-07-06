@@ -32,6 +32,7 @@ import org.apache.flink.table.store.RowDataContainer;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -72,12 +73,13 @@ public class TableStoreRecordReaderTest {
                         Collections.singletonList("a"));
 
         TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
         write.write(GenericRowData.of(1L, StringData.fromString("Hi")));
         write.write(GenericRowData.of(2L, StringData.fromString("Hello")));
         write.write(GenericRowData.of(3L, StringData.fromString("World")));
         write.write(GenericRowData.of(1L, StringData.fromString("Hi again")));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 2L, StringData.fromString("Hello")));
-        table.newCommit().commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit());
 
         Tuple2<RecordReader<RowData>, Long> tuple = read(table, BinaryRowDataUtil.EMPTY_ROW, 0);
         TableStoreRecordReader reader = new TableStoreRecordReader(tuple.f0, tuple.f1);
@@ -113,13 +115,14 @@ public class TableStoreRecordReaderTest {
                         Collections.emptyList());
 
         TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
         write.write(GenericRowData.of(1, StringData.fromString("Hi")));
         write.write(GenericRowData.of(2, StringData.fromString("Hello")));
         write.write(GenericRowData.of(3, StringData.fromString("World")));
         write.write(GenericRowData.of(1, StringData.fromString("Hi")));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 2, StringData.fromString("Hello")));
         write.write(GenericRowData.of(1, StringData.fromString("Hi")));
-        table.newCommit().commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit());
 
         Tuple2<RecordReader<RowData>, Long> tuple = read(table, BinaryRowDataUtil.EMPTY_ROW, 0);
         TableStoreRecordReader reader = new TableStoreRecordReader(tuple.f0, tuple.f1);

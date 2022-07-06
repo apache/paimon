@@ -63,7 +63,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     private final KeyValueFileStore store;
 
     ChangelogWithKeyFileStoreTable(
-            Path path, SchemaManager schemaManager, TableSchema tableSchema, String user) {
+            Path path, SchemaManager schemaManager, TableSchema tableSchema) {
         super(path, tableSchema);
         RowType rowType = tableSchema.logicalRowType();
 
@@ -104,7 +104,6 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                         schemaManager,
                         tableSchema.id(),
                         new CoreOptions(conf),
-                        user,
                         tableSchema.logicalPartitionType(),
                         keyType,
                         rowType,

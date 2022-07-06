@@ -30,6 +30,7 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
+import org.apache.flink.util.function.SerializableFunction;
 import org.apache.flink.util.function.SerializableSupplier;
 
 import java.util.ArrayDeque;
@@ -38,6 +39,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.NavigableMap;
 import java.util.TreeMap;
+import java.util.UUID;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -50,11 +52,6 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     /** Record all the inputs until commit. */
     private final Deque<Committable> inputs = new ArrayDeque<>();
 
-    /** The operator's state descriptor. */
-    private static final ListStateDescriptor<byte[]> STREAMING_COMMITTER_RAW_STATES_DESC =
-            new ListStateDescriptor<>(
-                    "streaming_committer_raw_states", BytePrimitiveArraySerializer.INSTANCE);
-
     /** Group the committable by the checkpoint id. */
     private final NavigableMap<Long, ManifestCommittable> committablesPerCheckpoint;
 
@@ -62,10 +59,10 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     private final SerializableSupplier<SimpleVersionedSerializer<ManifestCommittable>>
             committableSerializer;
 
-    /** The operator's state. */
+    /** ManifestCommittable state of this job. Used to filter out previous successful commits. */
     private ListState<ManifestCommittable> streamingCommitterState;
 
-    private final SerializableSupplier<Committer> committerFactory;
+    private final SerializableFunction<String, Committer> committerFactory;
 
     /**
      * Aggregate committables to global committables and commit the global committables to the
@@ -74,7 +71,7 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     private Committer committer;
 
     public CommitterOperator(
-            SerializableSupplier<Committer> committerFactory,
+            SerializableFunction<String, Committer> committerFactory,
             SerializableSupplier<SimpleVersionedSerializer<ManifestCommittable>>
                     committableSerializer) {
         this.committableSerializer = committableSerializer;
@@ -86,11 +83,31 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     @Override
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
-        committer = committerFactory.get();
+
+        // commit user name state of this job
+        // each job can only have one user name and this name must be consistent across restarts
+        ListState<String> commitUserState =
+                context.getOperatorStateStore()
+                        .getListState(new ListStateDescriptor<>("commit_user_state", String.class));
+        // we cannot use job id as commit user name here because user may change job id by creating
+        // a savepoint, stop the job and then resume from savepoint
+        while (true) {
+            for (String user : commitUserState.get()) {
+                committer = committerFactory.apply(user);
+            }
+            if (committer != null) {
+                break;
+            }
+            commitUserState.add(UUID.randomUUID().toString());
+        }
+
         streamingCommitterState =
                 new SimpleVersionedListState<>(
                         context.getOperatorStateStore()
-                                .getListState(STREAMING_COMMITTER_RAW_STATES_DESC),
+                                .getListState(
+                                        new ListStateDescriptor<>(
+                                                "streaming_committer_raw_states",
+                                                BytePrimitiveArraySerializer.INSTANCE)),
                         committableSerializer.get());
         List<ManifestCommittable> restored = new ArrayList<>();
         streamingCommitterState.get().forEach(restored::add);
@@ -126,21 +143,7 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     }
 
     @Override
-    public void endInput() throws Exception {
-        // Suppose the last checkpoint before endInput is 5. Flink Streaming Job calling order:
-        // 1. Receives elements from upstream prepareSnapshotPreBarrier(5)
-        // 2. this.snapshotState(5)
-        // 3. Receives elements from upstream endInput
-        // 4. this.endInput
-        // 5. this.notifyCheckpointComplete(5)
-        // So we should submit all the data in the endInput in order to avoid disordered commits.
-        long checkpointId = Long.MAX_VALUE;
-        List<Committable> poll = pollInputs();
-        if (!poll.isEmpty()) {
-            committablesPerCheckpoint.put(checkpointId, toCommittables(checkpointId, poll));
-        }
-        commitUpToCheckpoint(checkpointId);
-    }
+    public void endInput() throws Exception {}
 
     @Override
     public void notifyCheckpointComplete(long checkpointId) throws Exception {

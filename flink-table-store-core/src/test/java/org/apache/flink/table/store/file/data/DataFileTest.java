@@ -49,6 +49,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 
@@ -100,11 +101,14 @@ public class DataFileTest {
 
     @RepeatedTest(10)
     public void testCleanUpForException() throws IOException {
-        FailingAtomicRenameFileSystem.get().reset(1, 10);
+        String failingName = UUID.randomUUID().toString();
+        FailingAtomicRenameFileSystem.reset(failingName, 1, 10);
         DataFileTestDataGenerator.Data data = gen.next();
         DataFileWriter writer =
                 createDataFileWriter(
-                        FailingAtomicRenameFileSystem.getFailingPath(tempDir.toString()), "avro");
+                        FailingAtomicRenameFileSystem.getFailingPath(
+                                failingName, tempDir.toString()),
+                        "avro");
 
         try {
             writer.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
