@@ -121,7 +121,7 @@ public abstract class FileStoreTableTestBase {
         write.write(GenericRowData.of(1, 5, 6L));
         write.write(GenericRowData.of(1, 7, 8L));
         write.write(GenericRowData.of(1, 9, 10L));
-        table.newCommit().commit("0", write.prepareCommit());
+        table.newCommit("user").commit("0", write.prepareCommit());
         write.close();
 
         List<Split> splits =
