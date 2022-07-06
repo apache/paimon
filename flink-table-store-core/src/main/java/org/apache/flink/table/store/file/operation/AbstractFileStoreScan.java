@@ -291,13 +291,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     private List<ManifestFileMeta> readIncremental(Long snapshotId) {
-        while (snapshotId >= 1L) {
-            Snapshot snapshot = snapshotManager.snapshot(snapshotId);
-            if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
-                return manifestList.read(snapshot.deltaManifestList());
-            }
-            snapshotId--;
+        Snapshot snapshot = snapshotManager.snapshot(snapshotId);
+        if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
+            return manifestList.read(snapshot.deltaManifestList());
         }
-        return Collections.emptyList();
+        throw new IllegalStateException(
+                String.format(
+                        "Incremental scan does not accept %s snapshot", snapshot.commitKind()));
     }
 }
