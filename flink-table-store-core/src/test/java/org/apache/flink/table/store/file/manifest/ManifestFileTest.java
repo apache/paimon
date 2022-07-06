@@ -34,6 +34,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
@@ -65,11 +66,13 @@ public class ManifestFileTest {
 
     @RepeatedTest(10)
     public void testCleanUpForException() throws IOException {
-        FailingAtomicRenameFileSystem.get().reset(1, 10);
+        String failingName = UUID.randomUUID().toString();
+        FailingAtomicRenameFileSystem.reset(failingName, 1, 10);
         List<ManifestEntry> entries = generateData();
         ManifestFile manifestFile =
                 createManifestFile(
-                        FailingAtomicRenameFileSystem.getFailingPath(tempDir.toString()));
+                        FailingAtomicRenameFileSystem.getFailingPath(
+                                failingName, tempDir.toString()));
 
         try {
             manifestFile.write(entries);

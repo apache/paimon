@@ -46,6 +46,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -58,13 +59,15 @@ public class FileStoreCommitTest {
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreCommitTest.class);
 
     private TestKeyValueGenerator gen;
+    private String failingName;
     @TempDir java.nio.file.Path tempDir;
 
     @BeforeEach
     public void beforeEach() {
         gen = new TestKeyValueGenerator();
         // for failure tests
-        FailingAtomicRenameFileSystem.get().reset(100, 5000);
+        failingName = UUID.randomUUID().toString();
+        FailingAtomicRenameFileSystem.reset(failingName, 100, 100);
     }
 
     @ParameterizedTest
@@ -105,7 +108,7 @@ public class FileStoreCommitTest {
         Path firstSnapshotPath = snapshotManager.snapshotPath(Snapshot.FIRST_SNAPSHOT_ID);
         FileUtils.deleteOrWarn(firstSnapshotPath);
         // this test succeeds if this call does not fail
-        store.newCommit()
+        store.newCommit(UUID.randomUUID().toString())
                 .filterCommitted(Collections.singletonList(new ManifestCommittable("dummy")));
     }
 
@@ -286,7 +289,8 @@ public class FileStoreCommitTest {
     private TestFileStore createStore(boolean failing, int numBucket) {
         String root =
                 failing
-                        ? FailingAtomicRenameFileSystem.getFailingPath(tempDir.toString())
+                        ? FailingAtomicRenameFileSystem.getFailingPath(
+                                failingName, tempDir.toString())
                         : TestAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString();
         return TestFileStore.create(
                 "avro",

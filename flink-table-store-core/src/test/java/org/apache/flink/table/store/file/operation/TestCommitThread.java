@@ -35,6 +35,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
@@ -64,7 +65,7 @@ public class TestCommitThread extends Thread {
         this.writers = new HashMap<>();
 
         this.write = safeStore.newWrite();
-        this.commit = testStore.newCommit();
+        this.commit = testStore.newCommit(UUID.randomUUID().toString());
     }
 
     public Map<BinaryRowData, List<KeyValue>> getResult() {

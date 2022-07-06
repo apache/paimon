@@ -31,7 +31,6 @@ import java.util.Properties;
 public class TableStoreJobConf {
 
     private static final String INTERNAL_LOCATION = "table-store.internal.location";
-    private static final String INTERNAL_FILE_STORE_USER = "table-store.internal.file-store.user";
 
     private final JobConf jobConf;
 
@@ -47,13 +46,5 @@ public class TableStoreJobConf {
 
     public String getLocation() {
         return jobConf.get(INTERNAL_LOCATION);
-    }
-
-    public String getFileStoreUser() {
-        return jobConf.get(INTERNAL_FILE_STORE_USER);
-    }
-
-    public void setFileStoreUser(String user) {
-        jobConf.set(INTERNAL_FILE_STORE_USER, user);
     }
 }

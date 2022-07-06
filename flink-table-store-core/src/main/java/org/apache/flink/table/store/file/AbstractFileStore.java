@@ -39,19 +39,16 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     protected final SchemaManager schemaManager;
     protected final long schemaId;
     protected final CoreOptions options;
-    protected final String user;
     protected final RowType partitionType;
 
     public AbstractFileStore(
             SchemaManager schemaManager,
             long schemaId,
             CoreOptions options,
-            String user,
             RowType partitionType) {
         this.schemaManager = schemaManager;
         this.schemaId = schemaId;
         this.options = options;
-        this.user = user;
         this.partitionType = partitionType;
     }
 
@@ -94,7 +91,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public FileStoreCommitImpl newCommit() {
+    public FileStoreCommitImpl newCommit(String user) {
         return new FileStoreCommitImpl(
                 schemaId,
                 user,

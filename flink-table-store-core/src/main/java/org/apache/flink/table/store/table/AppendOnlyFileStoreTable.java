@@ -52,15 +52,13 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     private final AppendOnlyFileStore store;
 
-    AppendOnlyFileStoreTable(
-            Path path, SchemaManager schemaManager, TableSchema tableSchema, String user) {
+    AppendOnlyFileStoreTable(Path path, SchemaManager schemaManager, TableSchema tableSchema) {
         super(path, tableSchema);
         this.store =
                 new AppendOnlyFileStore(
                         schemaManager,
                         tableSchema.id(),
                         new CoreOptions(tableSchema.options()),
-                        user,
                         tableSchema.logicalPartitionType(),
                         tableSchema.logicalRowType());
     }

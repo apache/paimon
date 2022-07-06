@@ -27,6 +27,7 @@ import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
+import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -78,18 +79,18 @@ public abstract class FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
 
         TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
         write.write(GenericRowData.of(1, 10, 100L));
         write.write(GenericRowData.of(2, 20, 200L));
-        table.newCommit().commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit());
         write.close();
 
         write = table.newWrite().withOverwrite(true);
+        commit = table.newCommit("user");
         write.write(GenericRowData.of(2, 21, 201L));
         Map<String, String> overwritePartition = new HashMap<>();
         overwritePartition.put("pt", "2");
-        table.newCommit()
-                .withOverwritePartition(overwritePartition)
-                .commit("1", write.prepareCommit());
+        commit.withOverwritePartition(overwritePartition).commit("1", write.prepareCommit());
         write.close();
 
         List<Split> splits = table.newScan().plan().splits;

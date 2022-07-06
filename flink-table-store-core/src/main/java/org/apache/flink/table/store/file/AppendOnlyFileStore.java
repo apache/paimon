@@ -35,10 +35,9 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
             SchemaManager schemaManager,
             long schemaId,
             CoreOptions options,
-            String user,
             RowType partitionType,
             RowType rowType) {
-        super(schemaManager, schemaId, options, user, partitionType);
+        super(schemaManager, schemaId, options, partitionType);
         this.rowType = rowType;
     }
 

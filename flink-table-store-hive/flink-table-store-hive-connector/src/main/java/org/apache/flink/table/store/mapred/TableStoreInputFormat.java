@@ -72,7 +72,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
         TableStoreJobConf wrapper = new TableStoreJobConf(jobConf);
         Configuration conf = new Configuration();
         conf.set(CoreOptions.PATH, wrapper.getLocation());
-        return FileStoreTableFactory.create(conf, wrapper.getFileStoreUser());
+        return FileStoreTableFactory.create(conf);
     }
 
     private Optional<Predicate> createPredicate(TableSchema tableSchema, JobConf jobConf) {

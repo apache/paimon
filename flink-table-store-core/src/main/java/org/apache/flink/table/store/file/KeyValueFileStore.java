@@ -45,12 +45,11 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             SchemaManager schemaManager,
             long schemaId,
             CoreOptions options,
-            String user,
             RowType partitionType,
             RowType keyType,
             RowType valueType,
             MergeFunction mergeFunction) {
-        super(schemaManager, schemaId, options, user, partitionType);
+        super(schemaManager, schemaId, options, partitionType);
         this.keyType = keyType;
         this.valueType = valueType;
         this.mergeFunction = mergeFunction;
