@@ -127,7 +127,7 @@ public class AppendOnlyTableTest extends FileStoreTableITCase {
 
     @Test
     public void testAutoCompaction() {
-        batchSql("ALTER TABLE append_table SET ('file-num.compaction-trigger' = '2')");
+        batchSql("ALTER TABLE append_table SET ('compaction.file-num-trigger' = '2')");
         batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')");
         Snapshot snapshot = findLatestSnapshot("append_table", true);
         assertThat(snapshot.id()).isEqualTo(1L);
