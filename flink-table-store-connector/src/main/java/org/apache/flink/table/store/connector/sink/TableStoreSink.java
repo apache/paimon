@@ -51,7 +51,6 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
 
     private final ObjectIdentifier tableIdentifier;
     private final FileStoreTable table;
-    private final boolean checkpointEnabled;
     private final DynamicTableFactory.Context context;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
@@ -62,12 +61,10 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
     public TableStoreSink(
             ObjectIdentifier tableIdentifier,
             FileStoreTable table,
-            boolean checkpointEnabled,
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
-        this.checkpointEnabled = checkpointEnabled;
         this.context = context;
         this.logStoreTableFactory = logStoreTableFactory;
     }
@@ -126,7 +123,6 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
                                         new DataStream<>(
                                                 dataStream.getExecutionEnvironment(),
                                                 dataStream.getTransformation()))
-                                .withCheckpointEnabled(checkpointEnabled)
                                 .withLockFactory(lockFactory)
                                 .withLogSinkFunction(logSinkFunction)
                                 .withOverwritePartition(overwrite ? staticPartitions : null)
@@ -137,8 +133,7 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
     @Override
     public DynamicTableSink copy() {
         TableStoreSink copied =
-                new TableStoreSink(
-                        tableIdentifier, table, checkpointEnabled, context, logStoreTableFactory);
+                new TableStoreSink(tableIdentifier, table, context, logStoreTableFactory);
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
         copied.lockFactory = lockFactory;

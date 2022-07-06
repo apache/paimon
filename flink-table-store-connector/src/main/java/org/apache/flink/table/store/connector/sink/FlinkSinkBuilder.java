@@ -21,6 +21,7 @@ package org.apache.flink.table.store.connector.sink;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
@@ -41,7 +42,6 @@ public class FlinkSinkBuilder {
     private final FileStoreTable table;
     private final Configuration conf;
 
-    private boolean checkpointEnabled = false;
     private DataStream<RowData> input;
     @Nullable private CatalogLock.Factory lockFactory;
     @Nullable private Map<String, String> overwritePartition;
@@ -52,11 +52,6 @@ public class FlinkSinkBuilder {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
         this.conf = Configuration.fromMap(table.schema().options());
-    }
-
-    public FlinkSinkBuilder withCheckpointEnabled(boolean checkpointEnabled) {
-        this.checkpointEnabled = checkpointEnabled;
-        return this;
     }
 
     public FlinkSinkBuilder withInput(DataStream<RowData> input) {
@@ -105,16 +100,17 @@ public class FlinkSinkBuilder {
             partitioned.setParallelism(parallelism);
         }
 
+        StreamExecutionEnvironment env = input.getExecutionEnvironment();
         StoreSink sink =
                 new StoreSink(
                         tableIdentifier,
                         table,
-                        checkpointEnabled,
+                        env.getCheckpointConfig().isCheckpointingEnabled(),
                         conf.get(FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED),
                         getCompactPartSpec(),
                         lockFactory,
                         overwritePartition,
                         logSinkFunction);
-        return sink.sinkTo(new DataStream<>(input.getExecutionEnvironment(), partitioned));
+        return sink.sinkTo(new DataStream<>(env, partitioned));
     }
 }

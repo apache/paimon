@@ -173,18 +173,7 @@ public abstract class AbstractAvroBulkFormat<A, T, SplitT extends FileSourceSpli
                     iterator,
                     currentBlockStart,
                     recordsToSkip,
-                    new Runnable() {
-                        private boolean shouldRecycle = true;
-
-                        @Override
-                        public void run() {
-                            // make sure this method is reentrant
-                            if (shouldRecycle) {
-                                pool.recycler().recycle(reuse);
-                                shouldRecycle = false;
-                            }
-                        }
-                    });
+                    () -> pool.recycler().recycle(reuse));
         }
 
         private boolean readNextBlock() throws IOException {

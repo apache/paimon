@@ -30,6 +30,7 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
+import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.function.SerializableFunction;
 import org.apache.flink.util.function.SerializableSupplier;
 
@@ -99,17 +100,27 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
         ListState<String> commitUserState =
                 context.getOperatorStateStore()
                         .getListState(new ListStateDescriptor<>("commit_user_state", String.class));
+        List<String> commitUsers = new ArrayList<>();
+        commitUserState.get().forEach(commitUsers::add);
+        if (context.isRestored()) {
+            Preconditions.checkState(
+                    commitUsers.size() == 1,
+                    "Expecting 1 commit user name when recovering from checkpoint but found "
+                            + commitUsers.size()
+                            + ". This is unexpected.");
+        } else {
+            Preconditions.checkState(
+                    commitUsers.isEmpty(),
+                    "Expecting 0 commit user name for a fresh sink state but found "
+                            + commitUsers.size()
+                            + ". This is unexpected.");
+            String commitUser = UUID.randomUUID().toString();
+            commitUserState.add(commitUser);
+            commitUsers.add(commitUser);
+        }
         // we cannot use job id as commit user name here because user may change job id by creating
         // a savepoint, stop the job and then resume from savepoint
-        while (true) {
-            for (String user : commitUserState.get()) {
-                committer = committerFactory.apply(user);
-            }
-            if (committer != null) {
-                break;
-            }
-            commitUserState.add(UUID.randomUUID().toString());
-        }
+        committer = committerFactory.apply(commitUsers.get(0));
 
         streamingCommitterState =
                 new SimpleVersionedListState<>(

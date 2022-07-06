@@ -22,7 +22,6 @@ import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ExecutionOptions;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
@@ -41,7 +40,6 @@ import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
-import java.time.Duration;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -72,17 +70,9 @@ public abstract class AbstractTableStoreFactory
 
     @Override
     public TableStoreSink createDynamicTableSink(Context context) {
-        boolean checkpointEnabled =
-                context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
-                                == RuntimeExecutionMode.STREAMING
-                        && context.getConfiguration()
-                                .getOptional(ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL)
-                                .map(d -> d.compareTo(Duration.ZERO) > 0)
-                                .orElse(false);
         return new TableStoreSink(
                 context.getObjectIdentifier(),
                 buildFileStoreTable(context),
-                checkpointEnabled,
                 context,
                 createOptionalLogStoreFactory(context).orElse(null));
     }
