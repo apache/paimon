@@ -28,6 +28,7 @@ import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -53,12 +54,13 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table =
                 createFileStoreTable(conf -> conf.set(CoreOptions.SEQUENCE_FIELD, "b"));
         TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
         write.write(GenericRowData.of(1, 10, 200L));
         write.write(GenericRowData.of(1, 10, 100L));
         write.write(GenericRowData.of(1, 11, 101L));
-        table.newCommit().commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit());
         write.write(GenericRowData.of(1, 11, 55L));
-        table.newCommit().commit("1", write.prepareCommit());
+        commit.commit("1", write.prepareCommit());
         write.close();
 
         List<Split> splits = table.newScan().plan().splits;
@@ -161,12 +163,13 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     public void testStreamingChangelog() throws Exception {
         FileStoreTable table = createFileStoreTable(true);
         TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
         write.write(GenericRowData.of(1, 10, 100L));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 1, 10, 100L));
         write.write(GenericRowData.of(1, 10, 101L));
         write.write(GenericRowData.ofKind(RowKind.UPDATE_BEFORE, 1, 10, 101L));
         write.write(GenericRowData.ofKind(RowKind.UPDATE_AFTER, 1, 10, 102L));
-        table.newCommit().commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit());
         write.close();
 
         List<Split> splits = table.newScan().withIncremental(true).plan().splits;
@@ -184,23 +187,24 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     private void writeData() throws Exception {
         FileStoreTable table = createFileStoreTable();
         TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
 
         write.write(GenericRowData.of(1, 10, 100L));
         write.write(GenericRowData.of(2, 20, 200L));
         write.write(GenericRowData.of(1, 11, 101L));
-        table.newCommit().commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit());
 
         write.write(GenericRowData.of(1, 10, 1000L));
         write.write(GenericRowData.of(2, 21, 201L));
         write.write(GenericRowData.of(2, 21, 2001L));
-        table.newCommit().commit("1", write.prepareCommit());
+        commit.commit("1", write.prepareCommit());
 
         write.write(GenericRowData.of(1, 11, 1001L));
         write.write(GenericRowData.of(2, 21, 20001L));
         write.write(GenericRowData.of(2, 22, 202L));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 1, 11, 1001L));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 2, 20, 200L));
-        table.newCommit().commit("2", write.prepareCommit());
+        commit.commit("2", write.prepareCommit());
 
         write.close();
     }
@@ -231,6 +235,6 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 Arrays.asList("pt", "a"),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogWithKeyFileStoreTable(tablePath, schemaManager, tableSchema, "user");
+        return new ChangelogWithKeyFileStoreTable(tablePath, schemaManager, tableSchema);
     }
 }

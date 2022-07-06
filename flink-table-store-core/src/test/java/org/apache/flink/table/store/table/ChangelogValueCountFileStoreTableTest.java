@@ -28,6 +28,7 @@ import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -140,24 +141,25 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
     private void writeData() throws Exception {
         FileStoreTable table = createFileStoreTable();
         TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
 
         write.write(GenericRowData.of(1, 10, 100L));
         write.write(GenericRowData.of(2, 20, 200L));
         write.write(GenericRowData.of(1, 11, 101L));
-        table.newCommit().commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit());
 
         write.write(GenericRowData.of(2, 21, 201L));
         write.write(GenericRowData.of(1, 12, 102L));
         write.write(GenericRowData.of(2, 21, 201L));
         write.write(GenericRowData.of(2, 21, 201L));
-        table.newCommit().commit("1", write.prepareCommit());
+        commit.commit("1", write.prepareCommit());
 
         write.write(GenericRowData.of(1, 11, 101L));
         write.write(GenericRowData.of(2, 22, 202L));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 2, 21, 201L));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 1, 10, 100L));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 2, 21, 201L));
-        table.newCommit().commit("2", write.prepareCommit());
+        commit.commit("2", write.prepareCommit());
 
         write.close();
     }
@@ -178,6 +180,6 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
                                 Collections.emptyList(),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogValueCountFileStoreTable(tablePath, schemaManager, tableSchema, "user");
+        return new ChangelogValueCountFileStoreTable(tablePath, schemaManager, tableSchema);
     }
 }

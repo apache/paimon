@@ -40,6 +40,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -65,8 +66,9 @@ public class SchemaManagerTest {
     @BeforeEach
     public void beforeEach() throws IOException {
         // for failure tests
-        FailingAtomicRenameFileSystem.get().reset(100, 5000);
-        String root = FailingAtomicRenameFileSystem.getFailingPath(tempDir.toString());
+        String failingName = UUID.randomUUID().toString();
+        FailingAtomicRenameFileSystem.reset(failingName, 100, 100);
+        String root = FailingAtomicRenameFileSystem.getFailingPath(failingName, tempDir.toString());
         manager = new SchemaManager(new Path(root));
     }
 

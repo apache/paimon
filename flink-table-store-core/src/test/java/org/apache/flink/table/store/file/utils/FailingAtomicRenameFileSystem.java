@@ -18,15 +18,21 @@
 
 package org.apache.flink.table.store.file.utils;
 
+import org.apache.flink.core.fs.BlockLocation;
 import org.apache.flink.core.fs.FSDataInputStream;
 import org.apache.flink.core.fs.FSDataInputStreamWrapper;
 import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FSDataOutputStreamWrapper;
+import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.FileSystemFactory;
+import org.apache.flink.core.fs.LocatedFileStatus;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.core.fs.local.LocalBlockLocation;
 import org.apache.flink.util.ExceptionUtils;
 
+import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.URI;
 import java.util.concurrent.Callable;
@@ -41,29 +47,30 @@ public class FailingAtomicRenameFileSystem extends TestAtomicRenameFileSystem {
 
     public static final String SCHEME = "fail";
 
-    private final String threadName;
+    private final String name;
     private final AtomicInteger failCounter = new AtomicInteger();
     private int failPossibility;
 
-    public FailingAtomicRenameFileSystem(String threadName) {
-        this.threadName = threadName;
+    private FailingAtomicRenameFileSystem(String name) {
+        this.name = name;
     }
 
-    public static FailingAtomicRenameFileSystem get() {
+    public static String getFailingPath(String name, String path) {
+        // set authority as given name so that different tests use different instances
+        // for more information see FileSystem#getUnguardedFileSystem for the caching strategy
+        return SCHEME + "://" + name + path;
+    }
+
+    public static void reset(String name, int maxFails, int failPossibility) {
         try {
-            return (FailingAtomicRenameFileSystem) new Path(getFailingPath("/")).getFileSystem();
+            ((FailingAtomicRenameFileSystem) new Path(getFailingPath(name, "/")).getFileSystem())
+                    .reset(maxFails, failPossibility);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
-    public static String getFailingPath(String path) {
-        // set authority as thread name so that different testing threads use different instances
-        // for more information see FileSystem#getUnguardedFileSystem for the caching strategy
-        return SCHEME + "://" + Thread.currentThread().getName() + path;
-    }
-
-    public void reset(int maxFails, int failPossibility) {
+    private void reset(int maxFails, int failPossibility) {
         failCounter.set(maxFails);
         this.failPossibility = failPossibility;
     }
@@ -86,7 +93,22 @@ public class FailingAtomicRenameFileSystem extends TestAtomicRenameFileSystem {
 
     @Override
     public URI getUri() {
-        return URI.create(SCHEME + "://" + threadName + "/");
+        return URI.create(SCHEME + "://" + name + "/");
+    }
+
+    @Override
+    public FileStatus getFileStatus(Path path) throws IOException {
+        File file = this.pathToFile(path);
+        if (file.exists()) {
+            return new FailingLocalFileStatus(file, path);
+        } else {
+            throw new FileNotFoundException(
+                    "File "
+                            + path
+                            + " does not exist or the user running Flink ('"
+                            + System.getProperty("user.name")
+                            + "') has insufficient permissions to access it.");
+        }
     }
 
     /** {@link FileSystemFactory} for {@link FailingAtomicRenameFileSystem}. */
@@ -118,17 +140,10 @@ public class FailingAtomicRenameFileSystem extends TestAtomicRenameFileSystem {
         }
 
         @Override
-        public int read() throws IOException {
-            if (ThreadLocalRandom.current().nextInt(failPossibility) == 0
-                    && failCounter.getAndDecrement() > 0) {
-                throw new ArtificialException();
-            }
-            return super.read();
-        }
-
-        @Override
         public int read(byte[] b, int off, int len) throws IOException {
-            if (ThreadLocalRandom.current().nextInt(failPossibility) == 0
+            // only fail when reading more than 1 byte so that we won't fail too often
+            if (b.length > 1
+                    && ThreadLocalRandom.current().nextInt(failPossibility) == 0
                     && failCounter.getAndDecrement() > 0) {
                 throw new ArtificialException();
             }
@@ -143,21 +158,72 @@ public class FailingAtomicRenameFileSystem extends TestAtomicRenameFileSystem {
         }
 
         @Override
-        public void write(int b) throws IOException {
-            if (ThreadLocalRandom.current().nextInt(failPossibility) == 0
-                    && failCounter.getAndDecrement() > 0) {
-                throw new ArtificialException();
-            }
-            super.write(b);
-        }
-
-        @Override
         public void write(byte[] b, int off, int len) throws IOException {
-            if (ThreadLocalRandom.current().nextInt(failPossibility) == 0
+            // only fail when writing more than 1 byte so that we won't fail too often
+            if (b.length > 1
+                    && ThreadLocalRandom.current().nextInt(failPossibility) == 0
                     && failCounter.getAndDecrement() > 0) {
                 throw new ArtificialException();
             }
             super.write(b, off, len);
+        }
+    }
+
+    private static class FailingLocalFileStatus implements LocatedFileStatus {
+
+        private final File file;
+        private final Path path;
+        private final long len;
+
+        private FailingLocalFileStatus(File file, Path path) {
+            this.file = file;
+            this.path = path;
+            this.len = file.length();
+        }
+
+        @Override
+        public BlockLocation[] getBlockLocations() {
+            return new BlockLocation[] {new LocalBlockLocation(len)};
+        }
+
+        @Override
+        public long getLen() {
+            return len;
+        }
+
+        @Override
+        public long getBlockSize() {
+            return len;
+        }
+
+        @Override
+        public short getReplication() {
+            return 1;
+        }
+
+        @Override
+        public long getModificationTime() {
+            return file.lastModified();
+        }
+
+        @Override
+        public long getAccessTime() {
+            return 0;
+        }
+
+        @Override
+        public boolean isDir() {
+            return file.isDirectory();
+        }
+
+        @Override
+        public Path getPath() {
+            return path;
+        }
+
+        @Override
+        public String toString() {
+            return "FailingLocalFileStatus{file=" + this.file + ", path=" + this.path + '}';
         }
     }
 

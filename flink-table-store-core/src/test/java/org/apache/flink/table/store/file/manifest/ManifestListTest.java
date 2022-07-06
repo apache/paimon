@@ -34,6 +34,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -57,11 +58,13 @@ public class ManifestListTest {
 
     @RepeatedTest(10)
     public void testCleanUpForException() throws IOException {
-        FailingAtomicRenameFileSystem.get().reset(1, 3);
+        String failingName = UUID.randomUUID().toString();
+        FailingAtomicRenameFileSystem.reset(failingName, 1, 3);
         List<ManifestFileMeta> metas = generateData();
         ManifestList manifestList =
                 createManifestList(
-                        FailingAtomicRenameFileSystem.getFailingPath(tempDir.toString()));
+                        FailingAtomicRenameFileSystem.getFailingPath(
+                                failingName, tempDir.toString()));
 
         try {
             manifestList.write(metas);

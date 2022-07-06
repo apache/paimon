@@ -66,6 +66,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -390,8 +391,11 @@ public class FileStoreITCase extends AbstractTestBase {
         if (noFail) {
             options.set(PATH, folder.toURI().toString());
         } else {
-            FailingAtomicRenameFileSystem.get().reset(3, 100);
-            options.set(PATH, FailingAtomicRenameFileSystem.getFailingPath(folder.getPath()));
+            String failingName = UUID.randomUUID().toString();
+            FailingAtomicRenameFileSystem.reset(failingName, 3, 100);
+            options.set(
+                    PATH,
+                    FailingAtomicRenameFileSystem.getFailingPath(failingName, folder.getPath()));
         }
         options.set(FILE_FORMAT, "avro");
         return options;

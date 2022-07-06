@@ -82,6 +82,7 @@ public class TestFileStore extends KeyValueFileStore {
     private final String root;
     private final RowDataSerializer keySerializer;
     private final RowDataSerializer valueSerializer;
+    private final String user;
 
     public static TestFileStore create(
             String format,
@@ -121,7 +122,6 @@ public class TestFileStore extends KeyValueFileStore {
                 new SchemaManager(options.path()),
                 0L,
                 options,
-                UUID.randomUUID().toString(),
                 partitionType,
                 keyType,
                 valueType,
@@ -129,6 +129,7 @@ public class TestFileStore extends KeyValueFileStore {
         this.root = root;
         this.keySerializer = new RowDataSerializer(keyType);
         this.valueSerializer = new RowDataSerializer(valueType);
+        this.user = UUID.randomUUID().toString();
     }
 
     public FileStoreExpireImpl newExpire(
@@ -220,7 +221,7 @@ public class TestFileStore extends KeyValueFileStore {
                     .write(kv);
         }
 
-        FileStoreCommit commit = newCommit();
+        FileStoreCommit commit = newCommit(user);
         ManifestCommittable committable =
                 new ManifestCommittable(String.valueOf(new Random().nextLong()));
         for (Map.Entry<BinaryRowData, Map<Integer, RecordWriter<KeyValue>>> entryWithPartition :

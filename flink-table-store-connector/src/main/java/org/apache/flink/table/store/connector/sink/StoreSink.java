@@ -49,6 +49,8 @@ public class StoreSink implements Serializable {
 
     private final FileStoreTable table;
 
+    private final boolean checkpointEnabled;
+
     private final boolean compactionTask;
 
     @Nullable private final Map<String, String> compactPartitionSpec;
@@ -62,6 +64,7 @@ public class StoreSink implements Serializable {
     public StoreSink(
             ObjectIdentifier tableIdentifier,
             FileStoreTable table,
+            boolean checkpointEnabled,
             boolean compactionTask,
             @Nullable Map<String, String> compactPartitionSpec,
             @Nullable CatalogLock.Factory lockFactory,
@@ -69,6 +72,7 @@ public class StoreSink implements Serializable {
             @Nullable LogSinkFunction logSinkFunction) {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
+        this.checkpointEnabled = checkpointEnabled;
         this.compactionTask = compactionTask;
         this.compactPartitionSpec = compactPartitionSpec;
         this.lockFactory = lockFactory;
@@ -83,7 +87,7 @@ public class StoreSink implements Serializable {
         return new StoreWriteOperator(table, overwritePartition, logSinkFunction);
     }
 
-    private StoreCommitter createCommitter() {
+    private StoreCommitter createCommitter(String user) {
         CatalogLock catalogLock;
         Lock lock;
         if (lockFactory == null) {
@@ -104,7 +108,7 @@ public class StoreSink implements Serializable {
         }
 
         return new StoreCommitter(
-                table.newCommit().withOverwritePartition(overwritePartition).withLock(lock),
+                table.newCommit(user).withOverwritePartition(overwritePartition).withLock(lock),
                 catalogLock);
     }
 
@@ -119,7 +123,9 @@ public class StoreSink implements Serializable {
                                 GLOBAL_COMMITTER_NAME,
                                 typeInfo,
                                 new CommitterOperator(
-                                        this::createCommitter, ManifestCommittableSerializer::new))
+                                        checkpointEnabled,
+                                        this::createCommitter,
+                                        ManifestCommittableSerializer::new))
                         .setParallelism(1)
                         .setMaxParallelism(1);
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);

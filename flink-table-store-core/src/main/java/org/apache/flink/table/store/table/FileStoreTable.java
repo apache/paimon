@@ -47,7 +47,7 @@ public interface FileStoreTable extends Serializable {
 
     TableWrite newWrite();
 
-    TableCommit newCommit();
+    TableCommit newCommit(String user);
 
     TableCompact newCompact();
 }

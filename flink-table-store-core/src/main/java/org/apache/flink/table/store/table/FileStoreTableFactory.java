@@ -25,8 +25,6 @@ import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 
-import java.util.UUID;
-
 import static org.apache.flink.table.store.CoreOptions.PATH;
 
 /** Factory to create {@link FileStoreTable}. */
@@ -39,10 +37,6 @@ public class FileStoreTableFactory {
     }
 
     public static FileStoreTable create(Configuration conf) {
-        return create(conf, UUID.randomUUID().toString());
-    }
-
-    public static FileStoreTable create(Configuration conf, String user) {
         Path tablePath = CoreOptions.path(conf);
         TableSchema tableSchema =
                 new SchemaManager(tablePath)
@@ -53,15 +47,15 @@ public class FileStoreTableFactory {
                                                 "Schema file not found in location "
                                                         + tablePath
                                                         + ". Please create table first."));
-        return create(tablePath, tableSchema, conf, user);
+        return create(tablePath, tableSchema, conf);
     }
 
     public static FileStoreTable create(Path tablePath, TableSchema tableSchema) {
-        return create(tablePath, tableSchema, new Configuration(), UUID.randomUUID().toString());
+        return create(tablePath, tableSchema, new Configuration());
     }
 
     public static FileStoreTable create(
-            Path tablePath, TableSchema tableSchema, Configuration dynamicOptions, String user) {
+            Path tablePath, TableSchema tableSchema, Configuration dynamicOptions) {
         // merge dynamic options into schema.options
         Configuration newOptions = Configuration.fromMap(tableSchema.options());
         dynamicOptions.toMap().forEach(newOptions::setString);
@@ -70,14 +64,12 @@ public class FileStoreTableFactory {
 
         SchemaManager schemaManager = new SchemaManager(tablePath);
         if (newOptions.get(CoreOptions.WRITE_MODE) == WriteMode.APPEND_ONLY) {
-            return new AppendOnlyFileStoreTable(tablePath, schemaManager, tableSchema, user);
+            return new AppendOnlyFileStoreTable(tablePath, schemaManager, tableSchema);
         } else {
             if (tableSchema.primaryKeys().isEmpty()) {
-                return new ChangelogValueCountFileStoreTable(
-                        tablePath, schemaManager, tableSchema, user);
+                return new ChangelogValueCountFileStoreTable(tablePath, schemaManager, tableSchema);
             } else {
-                return new ChangelogWithKeyFileStoreTable(
-                        tablePath, schemaManager, tableSchema, user);
+                return new ChangelogWithKeyFileStoreTable(tablePath, schemaManager, tableSchema);
             }
         }
     }

@@ -21,6 +21,7 @@ package org.apache.flink.table.store.connector.sink;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
@@ -99,15 +100,17 @@ public class FlinkSinkBuilder {
             partitioned.setParallelism(parallelism);
         }
 
+        StreamExecutionEnvironment env = input.getExecutionEnvironment();
         StoreSink sink =
                 new StoreSink(
                         tableIdentifier,
                         table,
+                        env.getCheckpointConfig().isCheckpointingEnabled(),
                         conf.get(FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED),
                         getCompactPartSpec(),
                         lockFactory,
                         overwritePartition,
                         logSinkFunction);
-        return sink.sinkTo(new DataStream<>(input.getExecutionEnvironment(), partitioned));
+        return sink.sinkTo(new DataStream<>(env, partitioned));
     }
 }
