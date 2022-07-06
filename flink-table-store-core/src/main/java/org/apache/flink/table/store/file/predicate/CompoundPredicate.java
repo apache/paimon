@@ -72,12 +72,26 @@ public class CompoundPredicate implements Predicate {
     }
 
     /** Evaluate the predicate result based on multiple {@link Predicate}s. */
-    public interface Function extends Serializable {
+    public abstract static class Function implements Serializable {
 
-        boolean test(Object[] values, List<Predicate> children);
+        public abstract boolean test(Object[] values, List<Predicate> children);
 
-        boolean test(long rowCount, FieldStats[] fieldStats, List<Predicate> children);
+        public abstract boolean test(
+                long rowCount, FieldStats[] fieldStats, List<Predicate> children);
 
-        Optional<Predicate> negate(List<Predicate> children);
+        public abstract Optional<Predicate> negate(List<Predicate> children);
+
+        @Override
+        public int hashCode() {
+            return this.getClass().getName().hashCode();
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            return o != null && getClass() == o.getClass();
+        }
     }
 }

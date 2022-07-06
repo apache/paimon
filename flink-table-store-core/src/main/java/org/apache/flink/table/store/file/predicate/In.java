@@ -27,7 +27,7 @@ import java.util.Optional;
 import static org.apache.flink.table.store.file.predicate.CompareUtils.compareLiteral;
 
 /** A {@link LeafFunction} to eval in. */
-public class In implements LeafFunction {
+public class In extends LeafFunction {
 
     private static final long serialVersionUID = 1L;
 

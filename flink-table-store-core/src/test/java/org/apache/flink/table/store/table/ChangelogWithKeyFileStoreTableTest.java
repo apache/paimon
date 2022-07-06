@@ -209,15 +209,11 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.close();
     }
 
-    @Override
-    protected FileStoreTable createFileStoreTable() throws Exception {
-        return createFileStoreTable(false);
-    }
-
     protected FileStoreTable createFileStoreTable(boolean changelogFile) throws Exception {
         return createFileStoreTable(conf -> conf.set(CoreOptions.CHANGELOG_FILE, changelogFile));
     }
 
+    @Override
     protected FileStoreTable createFileStoreTable(Consumer<Configuration> configure)
             throws Exception {
         Path tablePath = new Path(tempDir.toString());

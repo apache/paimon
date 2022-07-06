@@ -24,7 +24,7 @@ import org.apache.flink.table.types.logical.LogicalType;
 import java.util.List;
 
 /** Function to test a field with a literal. */
-public abstract class NullFalseLeafBinaryFunction implements LeafFunction {
+public abstract class NullFalseLeafBinaryFunction extends LeafFunction {
 
     private static final long serialVersionUID = 1L;
 

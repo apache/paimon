@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.Optional;
 
 /** A {@link CompoundPredicate.Function} to eval and. */
-public class And implements CompoundPredicate.Function {
+public class And extends CompoundPredicate.Function {
 
     private static final long serialVersionUID = 1L;
 

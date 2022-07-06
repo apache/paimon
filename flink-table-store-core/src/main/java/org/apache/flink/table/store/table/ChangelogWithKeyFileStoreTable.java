@@ -50,13 +50,16 @@ import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterat
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.stream.Collectors;
+
+import static org.apache.flink.table.store.file.predicate.PredicateBuilder.pickTransformFieldMapping;
+import static org.apache.flink.table.store.file.predicate.PredicateBuilder.splitAnd;
 
 /** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode with primary keys. */
 public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
+
+    private static final String KEY_FIELD_PREFIX = "_KEY_";
 
     private static final long serialVersionUID = 1L;
 
@@ -66,21 +69,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
             Path path, SchemaManager schemaManager, TableSchema tableSchema) {
         super(path, tableSchema);
         RowType rowType = tableSchema.logicalRowType();
-
-        // add _KEY_ prefix to avoid conflict with value
-        RowType keyType =
-                new RowType(
-                        tableSchema.logicalTrimmedPrimaryKeysType().getFields().stream()
-                                .map(
-                                        f ->
-                                                new RowType.RowField(
-                                                        "_KEY_" + f.getName(),
-                                                        f.getType(),
-                                                        f.getDescription().orElse(null)))
-                                .collect(Collectors.toList()));
-
         Configuration conf = Configuration.fromMap(tableSchema.options());
-
         CoreOptions.MergeEngine mergeEngine = conf.get(CoreOptions.MERGE_ENGINE);
         MergeFunction mergeFunction;
         switch (mergeEngine) {
@@ -105,9 +94,23 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                         tableSchema.id(),
                         new CoreOptions(conf),
                         tableSchema.logicalPartitionType(),
-                        keyType,
+                        addKeyNamePrefix(tableSchema.logicalBucketKeyType()),
+                        addKeyNamePrefix(tableSchema.logicalTrimmedPrimaryKeysType()),
                         rowType,
                         mergeFunction);
+    }
+
+    private RowType addKeyNamePrefix(RowType type) {
+        // add prefix to avoid conflict with value
+        return new RowType(
+                type.getFields().stream()
+                        .map(
+                                f ->
+                                        new RowType.RowField(
+                                                KEY_FIELD_PREFIX + f.getName(),
+                                                f.getType(),
+                                                f.getDescription().orElse(null)))
+                        .collect(Collectors.toList()));
     }
 
     @Override
@@ -133,16 +136,11 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                 // file 2 will be ignored, and the final result will be key = a, value = 1 while the
                 // correct result is an empty set
                 // TODO support value filter
-                List<String> trimmedPrimaryKeys = tableSchema.trimmedPrimaryKeys();
-                int[] fieldIdxToKeyIdx =
-                        tableSchema.fields().stream()
-                                .mapToInt(f -> trimmedPrimaryKeys.indexOf(f.name()))
-                                .toArray();
-                List<Predicate> keyFilters = new ArrayList<>();
-                for (Predicate p : PredicateBuilder.splitAnd(predicate)) {
-                    Optional<Predicate> mapped = mapFilterFields(p, fieldIdxToKeyIdx);
-                    mapped.ifPresent(keyFilters::add);
-                }
+                List<Predicate> keyFilters =
+                        pickTransformFieldMapping(
+                                splitAnd(predicate),
+                                tableSchema.fieldNames(),
+                                tableSchema.trimmedPrimaryKeys());
                 if (keyFilters.size() > 0) {
                     scan.withKeyFilter(PredicateBuilder.and(keyFilters));
                 }

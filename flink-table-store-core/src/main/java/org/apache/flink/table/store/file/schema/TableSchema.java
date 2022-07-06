@@ -134,7 +134,8 @@ public class TableSchema implements Serializable {
         return options;
     }
 
-    public List<String> bucketKeys() {
+    /** Original bucket keys, maybe empty. */
+    public List<String> originalBucketKeys() {
         String key = options.get(BUCKET_KEY.key());
         if (StringUtils.isNullOrWhitespaceOnly(key)) {
             return Collections.emptyList();
@@ -145,6 +146,12 @@ public class TableSchema implements Serializable {
                     String.format(
                             "Field names %s should contains all bucket keys %s.",
                             fieldNames(), bucketKeys));
+        }
+        if (bucketKeys.stream().anyMatch(partitionKeys::contains)) {
+            throw new RuntimeException(
+                    String.format(
+                            "Bucket keys %s should not in partition keys %s.",
+                            bucketKeys, partitionKeys));
         }
         if (primaryKeys.size() > 0) {
             if (!containsAll(primaryKeys, bucketKeys)) {
@@ -171,6 +178,17 @@ public class TableSchema implements Serializable {
 
     public RowType logicalPartitionType() {
         return projectedLogicalRowType(partitionKeys);
+    }
+
+    public RowType logicalBucketKeyType() {
+        List<String> bucketKeys = originalBucketKeys();
+        if (bucketKeys.isEmpty()) {
+            bucketKeys = trimmedPrimaryKeys();
+        }
+        if (bucketKeys.isEmpty()) {
+            bucketKeys = fieldNames();
+        }
+        return projectedLogicalRowType(bucketKeys);
     }
 
     public RowType logicalTrimmedPrimaryKeysType() {
