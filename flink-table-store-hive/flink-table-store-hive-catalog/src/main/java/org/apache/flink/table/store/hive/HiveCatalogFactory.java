@@ -18,10 +18,12 @@
 
 package org.apache.flink.table.store.hive;
 
-import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.util.Preconditions;
+
+import org.apache.hadoop.hive.conf.HiveConf;
 
 import static org.apache.flink.table.store.CatalogOptions.URI;
 
@@ -36,11 +38,16 @@ public class HiveCatalogFactory implements CatalogFactory {
     }
 
     @Override
-    public Catalog create(String warehouse, ReadableConfig options) {
+    public Catalog create(String warehouse, Configuration options) {
         String uri =
                 Preconditions.checkNotNull(
                         options.get(URI),
                         URI.key() + " must be set for table store " + IDENTIFIER + " catalog");
-        return new HiveCatalog(uri, warehouse);
+        org.apache.hadoop.conf.Configuration hadoopConfig =
+                new org.apache.hadoop.conf.Configuration();
+        options.toMap().forEach(hadoopConfig::set);
+        hadoopConfig.set(HiveConf.ConfVars.METASTOREURIS.varname, uri);
+        hadoopConfig.set(HiveConf.ConfVars.METASTOREWAREHOUSE.varname, warehouse);
+        return new HiveCatalog(hadoopConfig);
     }
 }

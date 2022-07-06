@@ -28,6 +28,7 @@ import org.apache.flink.table.store.file.schema.UpdateSchema;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 
 import static org.apache.flink.table.store.file.utils.FileUtils.safelyListFileStatus;
@@ -41,6 +42,11 @@ public class FileSystemCatalog extends AbstractCatalog {
     public FileSystemCatalog(Path warehouse) {
         this.warehouse = warehouse;
         this.fs = uncheck(warehouse::getFileSystem);
+    }
+
+    @Override
+    public Optional<CatalogLock.Factory> lockFactory() {
+        return Optional.empty();
     }
 
     @Override

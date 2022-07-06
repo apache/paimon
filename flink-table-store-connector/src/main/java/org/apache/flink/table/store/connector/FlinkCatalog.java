@@ -39,9 +39,7 @@ import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
 import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.expressions.Expression;
-import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.Factory;
-import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
@@ -53,7 +51,6 @@ import java.util.Optional;
 
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.flink.table.store.CoreOptions.PATH;
-import static org.apache.flink.table.store.connector.FlinkCatalogFactory.IDENTIFIER;
 
 /** Catalog for table store. */
 public class FlinkCatalog extends AbstractCatalog {
@@ -70,14 +67,13 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     @VisibleForTesting
-    Catalog catalog() {
+    public Catalog catalog() {
         return catalog;
     }
 
     @Override
     public Optional<Factory> getFactory() {
-        return Optional.of(
-                FactoryUtil.discoverFactory(classLoader(), DynamicTableFactory.class, IDENTIFIER));
+        return Optional.of(new TableStoreConnectorFactory(catalog.lockFactory().orElse(null)));
     }
 
     @Override

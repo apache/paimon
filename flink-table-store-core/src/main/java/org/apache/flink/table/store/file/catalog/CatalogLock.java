@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.connector.sink;
+package org.apache.flink.table.store.file.catalog;
 
 import org.apache.flink.annotation.Internal;
 

@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.catalog;
 
-import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 
 /** Factory to create {@link FileSystemCatalog}. */
@@ -32,7 +32,7 @@ public class FileSystemCatalogFactory implements CatalogFactory {
     }
 
     @Override
-    public Catalog create(String warehouse, ReadableConfig options) {
+    public Catalog create(String warehouse, Configuration options) {
         return new FileSystemCatalog(new Path(warehouse));
     }
 }

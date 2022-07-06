@@ -19,14 +19,35 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.table.store.connector.sink.TableStoreSink;
+import org.apache.flink.table.store.file.catalog.CatalogLock;
+
+import javax.annotation.Nullable;
 
 import static org.apache.flink.table.store.connector.FlinkCatalogFactory.IDENTIFIER;
 
 /** A table store {@link DynamicTableFactory} to create source and sink. */
 public class TableStoreConnectorFactory extends AbstractTableStoreFactory {
 
+    @Nullable private final CatalogLock.Factory lockFactory;
+
+    public TableStoreConnectorFactory() {
+        this(null);
+    }
+
+    public TableStoreConnectorFactory(@Nullable CatalogLock.Factory lockFactory) {
+        this.lockFactory = lockFactory;
+    }
+
     @Override
     public String factoryIdentifier() {
         return IDENTIFIER;
+    }
+
+    @Override
+    public TableStoreSink createDynamicTableSink(Context context) {
+        TableStoreSink sink = super.createDynamicTableSink(context);
+        sink.setLockFactory(lockFactory);
+        return sink;
     }
 }
