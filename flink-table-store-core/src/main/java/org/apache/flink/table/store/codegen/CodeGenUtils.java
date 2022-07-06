@@ -47,7 +47,7 @@ public class CodeGenUtils {
                 CodeGenLoader.getInstance()
                         .discover(CodeGenerator.class)
                         .generateProjection("Projection", inputType, mapping)
-                        .newInstance(Thread.currentThread().getContextClassLoader());
+                        .newInstance(CodeGenUtils.class.getClassLoader());
         return projection;
     }
 
@@ -56,7 +56,7 @@ public class CodeGenUtils {
         return CodeGenLoader.getInstance()
                 .discover(CodeGenerator.class)
                 .generateNormalizedKeyComputer(fieldTypes, name)
-                .newInstance(Thread.currentThread().getContextClassLoader());
+                .newInstance(CodeGenUtils.class.getClassLoader());
     }
 
     public static GeneratedRecordComparator generateRecordComparator(
@@ -68,6 +68,6 @@ public class CodeGenUtils {
 
     public static RecordComparator newRecordComparator(List<LogicalType> fieldTypes, String name) {
         return generateRecordComparator(fieldTypes, name)
-                .newInstance(Thread.currentThread().getContextClassLoader());
+                .newInstance(CodeGenUtils.class.getClassLoader());
     }
 }
