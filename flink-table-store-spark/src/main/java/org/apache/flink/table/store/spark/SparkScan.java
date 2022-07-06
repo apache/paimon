@@ -33,6 +33,7 @@ import org.apache.spark.sql.connector.read.SupportsReportStatistics;
 import org.apache.spark.sql.types.StructType;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.OptionalLong;
 
 /**
@@ -114,5 +115,26 @@ public class SparkScan implements Scan, SupportsReportStatistics {
                 return OptionalLong.of(numRows);
             }
         };
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        SparkScan that = (SparkScan) o;
+        return table.location().equals(that.table.location())
+                && readSchema().equals(that.readSchema())
+                && predicates.equals(that.predicates);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(table.location(), readSchema(), predicates);
     }
 }
