@@ -52,6 +52,14 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     /** Record all the inputs until commit. */
     private final Deque<Committable> inputs = new ArrayDeque<>();
 
+    /**
+     * If checkpoint is enabled we should do nothing in {@link CommitterOperator#endInput}.
+     * Remaining data will be committed in {@link CommitterOperator#notifyCheckpointComplete}. If
+     * checkpoint is not enabled we need to commit remaining data in {@link
+     * CommitterOperator#endInput}.
+     */
+    private final boolean checkpointEnabled;
+
     /** Group the committable by the checkpoint id. */
     private final NavigableMap<Long, ManifestCommittable> committablesPerCheckpoint;
 
@@ -71,9 +79,11 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     private Committer committer;
 
     public CommitterOperator(
+            boolean checkpointEnabled,
             SerializableFunction<String, Committer> committerFactory,
             SerializableSupplier<SimpleVersionedSerializer<ManifestCommittable>>
                     committableSerializer) {
+        this.checkpointEnabled = checkpointEnabled;
         this.committableSerializer = committableSerializer;
         this.committablesPerCheckpoint = new TreeMap<>();
         this.committerFactory = checkNotNull(committerFactory);
@@ -143,7 +153,18 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     }
 
     @Override
-    public void endInput() throws Exception {}
+    public void endInput() throws Exception {
+        if (checkpointEnabled) {
+            return;
+        }
+
+        long checkpointId = Long.MAX_VALUE;
+        List<Committable> poll = pollInputs();
+        if (!poll.isEmpty()) {
+            committablesPerCheckpoint.put(checkpointId, toCommittables(checkpointId, poll));
+        }
+        commitUpToCheckpoint(checkpointId);
+    }
 
     @Override
     public void notifyCheckpointComplete(long checkpointId) throws Exception {

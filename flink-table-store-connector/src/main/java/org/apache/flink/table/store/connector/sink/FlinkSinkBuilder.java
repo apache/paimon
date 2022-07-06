@@ -41,6 +41,7 @@ public class FlinkSinkBuilder {
     private final FileStoreTable table;
     private final Configuration conf;
 
+    private boolean checkpointEnabled = false;
     private DataStream<RowData> input;
     @Nullable private CatalogLock.Factory lockFactory;
     @Nullable private Map<String, String> overwritePartition;
@@ -51,6 +52,11 @@ public class FlinkSinkBuilder {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
         this.conf = Configuration.fromMap(table.schema().options());
+    }
+
+    public FlinkSinkBuilder withCheckpointEnabled(boolean checkpointEnabled) {
+        this.checkpointEnabled = checkpointEnabled;
+        return this;
     }
 
     public FlinkSinkBuilder withInput(DataStream<RowData> input) {
@@ -103,6 +109,7 @@ public class FlinkSinkBuilder {
                 new StoreSink(
                         tableIdentifier,
                         table,
+                        checkpointEnabled,
                         conf.get(FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED),
                         getCompactPartSpec(),
                         lockFactory,
