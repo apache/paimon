@@ -109,7 +109,7 @@ public abstract class FileFormat {
     private static Optional<FileFormat> fromIdentifier(
             String formatIdentifier, Configuration formatOptions, ClassLoader classLoader) {
         ServiceLoader<FileFormatFactory> serviceLoader =
-                ServiceLoader.load(FileFormatFactory.class, FileFormat.class.getClassLoader());
+                ServiceLoader.load(FileFormatFactory.class, classLoader);
         for (FileFormatFactory factory : serviceLoader) {
             if (factory.identifier().equals(formatIdentifier.toLowerCase())) {
                 return Optional.of(factory.create(formatOptions));
