@@ -42,6 +42,6 @@ public class KeyComparatorSupplier implements SerializableSupplier<Comparator<Ro
 
     @Override
     public RecordComparator get() {
-        return genRecordComparator.newInstance(Thread.currentThread().getContextClassLoader());
+        return genRecordComparator.newInstance(KeyComparatorSupplier.class.getClassLoader());
     }
 }
