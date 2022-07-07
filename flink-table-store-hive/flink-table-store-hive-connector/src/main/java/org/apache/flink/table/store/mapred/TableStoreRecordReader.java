@@ -35,6 +35,10 @@ import java.util.List;
 /**
  * Base {@link RecordReader} for table store. Reads {@link KeyValue}s from data files and picks out
  * {@link RowData} for Hive to consume.
+ *
+ * <p>NOTE: To support projection push down, when {@code selectedColumns} does not match {@code
+ * columnNames} this reader will still produce records of the original schema. However, columns not
+ * in {@code selectedColumns} will be null.
  */
 public class TableStoreRecordReader implements RecordReader<Void, RowDataContainer> {
 
@@ -74,8 +78,7 @@ public class TableStoreRecordReader implements RecordReader<Void, RowDataContain
             return false;
         } else {
             if (reusedProjectedRow != null) {
-                reusedProjectedRow.replaceRow(rowData);
-                value.set(reusedProjectedRow);
+                value.set(reusedProjectedRow.replaceRow(rowData));
             } else {
                 value.set(rowData);
             }
