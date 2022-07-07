@@ -80,6 +80,9 @@ public class ProjectedRowData implements RowData {
 
     @Override
     public boolean isNullAt(int pos) {
+        if (indexMapping[pos] < 0) {
+            return true;
+        }
         return row.isNullAt(indexMapping[pos]);
     }
 

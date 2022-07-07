@@ -34,6 +34,7 @@ import org.apache.hadoop.hive.ql.io.sarg.ConvertAstToSearchArg;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
 import org.apache.hadoop.hive.ql.plan.ExprNodeGenericFuncDesc;
 import org.apache.hadoop.hive.ql.plan.TableScanDesc;
+import org.apache.hadoop.hive.serde2.ColumnProjectionUtils;
 import org.apache.hadoop.mapred.InputFormat;
 import org.apache.hadoop.mapred.InputSplit;
 import org.apache.hadoop.mapred.JobConf;
@@ -41,6 +42,7 @@ import org.apache.hadoop.mapred.RecordReader;
 import org.apache.hadoop.mapred.Reporter;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Optional;
 
 /**
@@ -55,7 +57,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
         TableScan scan = table.newScan();
         createPredicate(table.schema(), jobConf).ifPresent(scan::withFilter);
         return scan.plan().splits.stream()
-                .map(split -> TableStoreInputSplit.create(table.location().toString(), split))
+                .map(split -> new TableStoreInputSplit(table.location().toString(), split))
                 .toArray(TableStoreInputSplit[]::new);
     }
 
@@ -64,8 +66,11 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
             InputSplit inputSplit, JobConf jobConf, Reporter reporter) throws IOException {
         FileStoreTable table = createFileStoreTable(jobConf);
         TableStoreInputSplit split = (TableStoreInputSplit) inputSplit;
-        long splitLength = split.getLength();
-        return new TableStoreRecordReader(table.newRead().createReader(split.split()), splitLength);
+        return new TableStoreRecordReader(
+                table.newRead(),
+                split,
+                table.schema().fieldNames(),
+                Arrays.asList(ColumnProjectionUtils.getReadColumnNames(jobConf)));
     }
 
     private FileStoreTable createFileStoreTable(JobConf jobConf) {

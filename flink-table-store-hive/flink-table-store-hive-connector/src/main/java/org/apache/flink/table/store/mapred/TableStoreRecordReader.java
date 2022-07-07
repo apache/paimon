@@ -22,38 +22,66 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.RowDataContainer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
+import org.apache.flink.table.store.table.source.TableRead;
+import org.apache.flink.table.store.utils.ProjectedRowData;
 
 import org.apache.hadoop.mapred.RecordReader;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
+import java.util.List;
 
 /**
  * Base {@link RecordReader} for table store. Reads {@link KeyValue}s from data files and picks out
  * {@link RowData} for Hive to consume.
+ *
+ * <p>NOTE: To support projection push down, when {@code selectedColumns} does not match {@code
+ * columnNames} this reader will still produce records of the original schema. However, columns not
+ * in {@code selectedColumns} will be null.
  */
 public class TableStoreRecordReader implements RecordReader<Void, RowDataContainer> {
 
     private final RecordReaderIterator<RowData> iterator;
     private final long splitLength;
 
+    @Nullable private final ProjectedRowData reusedProjectedRow;
+
     private float progress;
 
     public TableStoreRecordReader(
-            org.apache.flink.table.store.file.utils.RecordReader<RowData> wrapped,
-            long splitLength) {
-        this.iterator = new RecordReaderIterator<>(wrapped);
-        this.splitLength = splitLength;
+            TableRead read,
+            TableStoreInputSplit split,
+            List<String> columnNames,
+            List<String> selectedColumns)
+            throws IOException {
+        if (columnNames.equals(selectedColumns)) {
+            reusedProjectedRow = null;
+        } else {
+            read.withProjection(selectedColumns.stream().mapToInt(columnNames::indexOf).toArray());
+            reusedProjectedRow =
+                    ProjectedRowData.from(
+                            columnNames.stream().mapToInt(selectedColumns::indexOf).toArray());
+        }
+
+        this.iterator = new RecordReaderIterator<>(read.createReader(split.split()));
+        this.splitLength = split.getLength();
         this.progress = 0;
     }
 
     @Override
     public boolean next(Void key, RowDataContainer value) throws IOException {
         RowData rowData = iterator.next();
+
         if (rowData == null) {
             progress = 1;
             return false;
         } else {
-            value.set(rowData);
+            if (reusedProjectedRow != null) {
+                value.set(reusedProjectedRow.replaceRow(rowData));
+            } else {
+                value.set(rowData);
+            }
             return true;
         }
     }
