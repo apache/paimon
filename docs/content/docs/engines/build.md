@@ -24,11 +24,9 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Build
+# Build From Source
 
-In order to build Table Store engine jars you need the source code.
-
-To clone from git, enter:
+Clone from git, enter:
 
 ```bash
 git clone {{< github_repo >}}
