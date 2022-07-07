@@ -22,12 +22,13 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.RowDataContainer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
-
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.utils.ProjectedRowData;
+
 import org.apache.hadoop.mapred.RecordReader;
 
 import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.List;
 
