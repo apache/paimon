@@ -32,13 +32,13 @@ Apache Hive and Apache Spark.
 
 ## Engine Matrix
 
-| Engine    | Version  | Feature                                              |
-|:----------|:---------|:-----------------------------------------------------|
-| Flink     | 1.14     | read, write, create/drop table, create/drop database |
-| Flink     | 1.15     | read, write, create/drop table, create/drop database |
-| Hive      | 2.3      | read                                                 |
-| Spark     | 3.0      | read                                                 |
-| Spark     | 3.1      | read                                                 |
-| Spark     | 3.2      | read                                                 |
-| Trino     | 358      | read                                                 |
-| Trino     | 388      | read                                                 |
+| Engine    | Version  | Feature                                              |    Read Pushdown   |
+|:----------|:---------|:-----------------------------------------------------|--------------------|
+| Flink     | 1.14     | read, write, create/drop table, create/drop database | Projection, Filter |
+| Flink     | 1.15     | read, write, create/drop table, create/drop database | Projection, Filter |
+| Hive      | 2.3      | read                                                 | Projection, Filter |
+| Spark     | 3.0      | read                                                 | Projection, Filter |
+| Spark     | 3.1      | read                                                 | Projection, Filter |
+| Spark     | 3.2      | read                                                 | Projection, Filter |
+| Trino     | 358      | read                                                 | Projection, Filter |
+| Trino     | 388      | read                                                 | Projection, Filter |
