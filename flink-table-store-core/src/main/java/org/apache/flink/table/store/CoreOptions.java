@@ -214,14 +214,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(200)
                     .withDescription(
                             "The size amplification is defined as the amount (in percentage) of additional storage "
-                                    + "needed to store a single byte of data in the merge tree.");
+                                    + "needed to store a single byte of data in the merge tree for changelog mode table.");
 
-    public static final ConfigOption<Integer> COMPACTION_SORTED_RUN_SIZE_RATIO =
-            ConfigOptions.key("compaction.sorted-run.size-ratio")
+    public static final ConfigOption<Integer> COMPACTION_SIZE_RATIO =
+            ConfigOptions.key("compaction.size-ratio")
                     .intType()
                     .defaultValue(1)
                     .withDescription(
-                            "Percentage flexibility while comparing sorted run size. If the candidate sorted run(s) "
+                            "Percentage flexibility while comparing sorted run size for changelog mode table. If the candidate sorted run(s) "
                                     + "size is 1% smaller than the next sorted run's size, then include next sorted run "
                                     + "into this candidate set.");
 
@@ -418,7 +418,7 @@ public class CoreOptions implements Serializable {
     }
 
     public int sortedRunSizeRatio() {
-        return options.get(COMPACTION_SORTED_RUN_SIZE_RATIO);
+        return options.get(COMPACTION_SIZE_RATIO);
     }
 
     public int minFileNum() {
