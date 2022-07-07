@@ -50,10 +50,6 @@ public class TableStoreInputSplit extends FileSplit {
         this.split = split;
     }
 
-    public static TableStoreInputSplit create(String path, Split split) {
-        return new TableStoreInputSplit(path, split);
-    }
-
     public Split split() {
         return split;
     }

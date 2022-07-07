@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.mapred;
 
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.GenericRowData;
@@ -29,8 +28,6 @@ import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.FileStoreTestUtils;
 import org.apache.flink.table.store.RowDataContainer;
-import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
@@ -42,9 +39,11 @@ import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -81,8 +80,7 @@ public class TableStoreRecordReaderTest {
         write.write(GenericRowData.ofKind(RowKind.DELETE, 2L, StringData.fromString("Hello")));
         commit.commit("0", write.prepareCommit());
 
-        Tuple2<RecordReader<RowData>, Long> tuple = read(table, BinaryRowDataUtil.EMPTY_ROW, 0);
-        TableStoreRecordReader reader = new TableStoreRecordReader(tuple.f0, tuple.f1);
+        TableStoreRecordReader reader = read(table, BinaryRowDataUtil.EMPTY_ROW, 0);
         RowDataContainer container = reader.createValue();
         Set<String> actual = new HashSet<>();
         while (reader.next(null, container)) {
@@ -124,8 +122,7 @@ public class TableStoreRecordReaderTest {
         write.write(GenericRowData.of(1, StringData.fromString("Hi")));
         commit.commit("0", write.prepareCommit());
 
-        Tuple2<RecordReader<RowData>, Long> tuple = read(table, BinaryRowDataUtil.EMPTY_ROW, 0);
-        TableStoreRecordReader reader = new TableStoreRecordReader(tuple.f0, tuple.f1);
+        TableStoreRecordReader reader = read(table, BinaryRowDataUtil.EMPTY_ROW, 0);
         RowDataContainer container = reader.createValue();
         Map<String, Integer> actual = new HashMap<>();
         while (reader.next(null, container)) {
@@ -140,14 +137,62 @@ public class TableStoreRecordReaderTest {
         assertThat(actual).isEqualTo(expected);
     }
 
-    private Tuple2<RecordReader<RowData>, Long> read(
-            FileStoreTable table, BinaryRowData partition, int bucket) throws Exception {
+    @Test
+    public void testProjectionPushdown() throws Exception {
+        Configuration conf = new Configuration();
+        conf.setString(CoreOptions.PATH, tempDir.toString());
+        conf.setString(CoreOptions.FILE_FORMAT, "avro");
+        FileStoreTable table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf,
+                        RowType.of(
+                                new LogicalType[] {
+                                    DataTypes.INT().getLogicalType(),
+                                    DataTypes.BIGINT().getLogicalType(),
+                                    DataTypes.STRING().getLogicalType()
+                                },
+                                new String[] {"a", "b", "c"}),
+                        Collections.emptyList(),
+                        Collections.emptyList());
+
+        TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
+        write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi")));
+        write.write(GenericRowData.of(2, 20L, StringData.fromString("Hello")));
+        write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi")));
+        commit.commit("0", write.prepareCommit());
+
+        TableStoreRecordReader reader =
+                read(table, BinaryRowDataUtil.EMPTY_ROW, 0, Arrays.asList("c", "a"));
+        RowDataContainer container = reader.createValue();
+        Map<String, Integer> actual = new HashMap<>();
+        while (reader.next(null, container)) {
+            RowData rowData = container.get();
+            String key = rowData.getInt(0) + "|" + rowData.getString(2).toString();
+            actual.compute(key, (k, v) -> (v == null ? 0 : v) + 1);
+        }
+
+        Map<String, Integer> expected = new HashMap<>();
+        expected.put("1|Hi", 2);
+        expected.put("2|Hello", 1);
+        assertThat(actual).isEqualTo(expected);
+    }
+
+    private TableStoreRecordReader read(FileStoreTable table, BinaryRowData partition, int bucket)
+            throws Exception {
+        return read(table, partition, bucket, table.schema().fieldNames());
+    }
+
+    private TableStoreRecordReader read(
+            FileStoreTable table, BinaryRowData partition, int bucket, List<String> selectedColumns)
+            throws Exception {
         for (Split split : table.newScan().plan().splits) {
             if (split.partition().equals(partition) && split.bucket() == bucket) {
-                return Tuple2.of(
-                        table.newRead()
-                                .createReader(new Split(partition, bucket, split.files(), false)),
-                        split.files().stream().mapToLong(DataFileMeta::fileSize).sum());
+                return new TableStoreRecordReader(
+                        table.newRead(),
+                        new TableStoreInputSplit(tempDir.toString(), split),
+                        table.schema().fieldNames(),
+                        selectedColumns);
             }
         }
         throw new IllegalArgumentException(
