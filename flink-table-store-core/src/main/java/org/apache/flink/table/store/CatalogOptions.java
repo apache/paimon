@@ -22,6 +22,10 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.table.store.file.catalog.FileSystemCatalogFactory;
 
+import java.time.Duration;
+
+import static org.apache.flink.configuration.ConfigOptions.key;
+
 /** Catalog options for table store. */
 public class CatalogOptions {
     private CatalogOptions() {}
@@ -44,4 +48,22 @@ public class CatalogOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("Uri of metastore server.");
+
+    public static final ConfigOption<Boolean> LOCK_ENABLED =
+            ConfigOptions.key("lock.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Enable Catalog Lock.");
+
+    public static final ConfigOption<Duration> LOCK_CHECK_MAX_SLEEP =
+            key("lock-check-max-sleep")
+                    .durationType()
+                    .defaultValue(Duration.ofSeconds(8))
+                    .withDescription("The maximum sleep time when retrying to check the lock.");
+
+    public static final ConfigOption<Duration> LOCK_ACQUIRE_TIMEOUT =
+            key("lock-acquire-timeout")
+                    .durationType()
+                    .defaultValue(Duration.ofMinutes(8))
+                    .withDescription("The maximum time to wait for acquiring the lock.");
 }

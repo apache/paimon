@@ -26,12 +26,19 @@ import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * This interface is responsible for reading and writing metadata such as database/table from a
  * table store catalog.
  */
 public interface Catalog extends AutoCloseable {
+
+    /**
+     * Get lock factory from catalog. Lock is used to support multiple concurrent writes on the
+     * object store.
+     */
+    Optional<CatalogLock.Factory> lockFactory();
 
     /**
      * Get the names of all databases in this catalog.

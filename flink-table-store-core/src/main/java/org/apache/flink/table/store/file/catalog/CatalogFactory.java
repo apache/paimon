@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.catalog;
 
-import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
@@ -34,9 +34,9 @@ public interface CatalogFactory {
 
     String identifier();
 
-    Catalog create(String warehouse, ReadableConfig options);
+    Catalog create(String warehouse, Configuration options);
 
-    static Catalog createCatalog(ReadableConfig options) {
+    static Catalog createCatalog(Configuration options) {
         // manual validation
         // because different catalog types may have different options
         // we can't list them all in the optionalOptions() method

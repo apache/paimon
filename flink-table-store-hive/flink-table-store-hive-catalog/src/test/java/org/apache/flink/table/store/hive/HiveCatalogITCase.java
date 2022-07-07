@@ -23,12 +23,17 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
+import org.apache.flink.table.store.connector.FlinkCatalog;
+import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.util.ExceptionUtils;
 
 import com.klarna.hiverunner.HiveShell;
+import com.klarna.hiverunner.annotations.HiveRunnerSetup;
 import com.klarna.hiverunner.annotations.HiveSQL;
+import com.klarna.hiverunner.config.HiveRunnerConfig;
+import org.apache.hadoop.hive.ql.lockmgr.DbTxnManager;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -40,6 +45,13 @@ import org.junit.runner.RunWith;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_IN_TEST;
+import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_SUPPORT_CONCURRENCY;
+import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_TXN_MANAGER;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 /** IT cases for {@link HiveCatalog}. */
 @RunWith(FlinkEmbeddedHiveRunner.class)
@@ -52,6 +64,20 @@ public class HiveCatalogITCase {
 
     @HiveSQL(files = {})
     private static HiveShell hiveShell;
+
+    @HiveRunnerSetup
+    private static final HiveRunnerConfig CONFIG =
+            new HiveRunnerConfig() {
+                {
+                    // catalog lock needs txn manager
+                    // hive-3.x requires a proper txn manager to create ACID table
+                    getHiveConfSystemOverride()
+                            .put(HIVE_TXN_MANAGER.varname, DbTxnManager.class.getName());
+                    getHiveConfSystemOverride().put(HIVE_SUPPORT_CONCURRENCY.varname, "true");
+                    // tell TxnHandler to prepare txn DB
+                    getHiveConfSystemOverride().put(HIVE_IN_TEST.varname, "true");
+                }
+            };
 
     @Before
     public void before() throws Exception {
@@ -70,7 +96,8 @@ public class HiveCatalogITCase {
                                 "  'type' = 'table-store',",
                                 "  'metastore' = 'hive',",
                                 "  'uri' = '',",
-                                "  'warehouse' = '" + path + "'",
+                                "  'warehouse' = '" + path + "',",
+                                "  'lock.enabled' = 'true'",
                                 ")"))
                 .await();
         tEnv.executeSql("USE CATALOG my_hive").await();
@@ -221,6 +248,48 @@ public class HiveCatalogITCase {
             ExceptionUtils.assertThrowableWithMessage(
                     t, "Table test_db.hive_table is not a table store table");
         }
+    }
+
+    @Test
+    public void testHiveLock() throws InterruptedException {
+        tEnv.executeSql("CREATE TABLE T (a INT)");
+        CatalogLock.Factory lockFactory =
+                ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get())
+                        .catalog()
+                        .lockFactory()
+                        .get();
+
+        AtomicInteger count = new AtomicInteger(0);
+        List<Thread> threads = new ArrayList<>();
+        Callable<Void> unsafeIncrement =
+                () -> {
+                    int nextCount = count.get() + 1;
+                    Thread.sleep(1);
+                    count.set(nextCount);
+                    return null;
+                };
+        for (int i = 0; i < 10; i++) {
+            Thread thread =
+                    new Thread(
+                            () -> {
+                                CatalogLock lock = lockFactory.create();
+                                for (int j = 0; j < 10; j++) {
+                                    try {
+                                        lock.runWithLock("test_db", "T", unsafeIncrement);
+                                    } catch (Exception e) {
+                                        throw new RuntimeException(e);
+                                    }
+                                }
+                            });
+            thread.start();
+            threads.add(thread);
+        }
+
+        for (Thread thread : threads) {
+            thread.join();
+        }
+
+        assertThat(count.get()).isEqualTo(100);
     }
 
     private List<Row> collect(String sql) throws Exception {

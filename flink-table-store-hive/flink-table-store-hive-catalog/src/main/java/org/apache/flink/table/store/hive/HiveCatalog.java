@@ -21,6 +21,7 @@ package org.apache.flink.table.store.hive;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.catalog.AbstractCatalog;
+import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -36,6 +37,7 @@ import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.api.AlreadyExistsException;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
+import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
@@ -47,7 +49,10 @@ import org.apache.thrift.TException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
+
+import static org.apache.flink.table.store.CatalogOptions.LOCK_ENABLED;
 
 /** A catalog implementation for Hive. */
 public class HiveCatalog extends AbstractCatalog {
@@ -66,22 +71,19 @@ public class HiveCatalog extends AbstractCatalog {
     private final HiveConf hiveConf;
     private final IMetaStoreClient client;
 
-    public HiveCatalog(String thriftUri, String warehousePath) {
-        Configuration conf = new Configuration();
-        conf.set(HiveConf.ConfVars.METASTOREURIS.varname, thriftUri);
-        conf.set(HiveConf.ConfVars.METASTOREWAREHOUSE.varname, warehousePath);
-        this.hiveConf = new HiveConf(conf, HiveConf.class);
-        try {
-            IMetaStoreClient client =
-                    RetryingMetaStoreClient.getProxy(
-                            hiveConf, tbl -> null, HiveMetaStoreClient.class.getName());
-            this.client =
-                    StringUtils.isNullOrWhitespaceOnly(thriftUri)
-                            ? client
-                            : HiveMetaStoreClient.newSynchronizedClient(client);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+    public HiveCatalog(Configuration hadoopConfig) {
+        this.hiveConf = new HiveConf(hadoopConfig, HiveConf.class);
+        this.client = createClient(hiveConf);
+    }
+
+    @Override
+    public Optional<CatalogLock.Factory> lockFactory() {
+        boolean lockEnabled =
+                Boolean.parseBoolean(
+                        hiveConf.get(LOCK_ENABLED.key(), LOCK_ENABLED.defaultValue().toString()));
+        return lockEnabled
+                ? Optional.of(HiveCatalogLock.createFactory(hiveConf))
+                : Optional.empty();
     }
 
     @Override
@@ -352,5 +354,20 @@ public class HiveCatalog extends AbstractCatalog {
                             + " to underlying files",
                     e);
         }
+    }
+
+    static IMetaStoreClient createClient(HiveConf hiveConf) {
+        IMetaStoreClient client;
+        try {
+            client =
+                    RetryingMetaStoreClient.getProxy(
+                            hiveConf, tbl -> null, HiveMetaStoreClient.class.getName());
+        } catch (MetaException e) {
+            throw new RuntimeException(e);
+        }
+        return StringUtils.isNullOrWhitespaceOnly(
+                        hiveConf.get(HiveConf.ConfVars.METASTOREURIS.varname))
+                ? client
+                : HiveMetaStoreClient.newSynchronizedClient(client);
     }
 }
