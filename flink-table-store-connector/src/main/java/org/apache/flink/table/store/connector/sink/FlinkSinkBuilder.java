@@ -18,7 +18,9 @@
 
 package org.apache.flink.table.store.connector.sink;
 
+import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -106,7 +108,9 @@ public class FlinkSinkBuilder {
                 new StoreSink(
                         tableIdentifier,
                         table,
-                        env.getCheckpointConfig().isCheckpointingEnabled(),
+                        env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
+                                        == RuntimeExecutionMode.STREAMING
+                                && env.getCheckpointConfig().isCheckpointingEnabled(),
                         conf.get(FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED),
                         getCompactPartSpec(),
                         lockFactory,

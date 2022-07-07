@@ -50,7 +50,7 @@ public class StoreSink implements Serializable {
 
     private final FileStoreTable table;
 
-    private final boolean checkpointEnabled;
+    private final boolean streamingCheckpointEnabled;
 
     private final boolean compactionTask;
 
@@ -65,7 +65,7 @@ public class StoreSink implements Serializable {
     public StoreSink(
             ObjectIdentifier tableIdentifier,
             FileStoreTable table,
-            boolean checkpointEnabled,
+            boolean streamingCheckpointEnabled,
             boolean compactionTask,
             @Nullable Map<String, String> compactPartitionSpec,
             @Nullable CatalogLock.Factory lockFactory,
@@ -73,7 +73,7 @@ public class StoreSink implements Serializable {
             @Nullable LogSinkFunction logSinkFunction) {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
-        this.checkpointEnabled = checkpointEnabled;
+        this.streamingCheckpointEnabled = streamingCheckpointEnabled;
         this.compactionTask = compactionTask;
         this.compactPartitionSpec = compactPartitionSpec;
         this.lockFactory = lockFactory;
@@ -124,7 +124,7 @@ public class StoreSink implements Serializable {
                                 GLOBAL_COMMITTER_NAME,
                                 typeInfo,
                                 new CommitterOperator(
-                                        checkpointEnabled,
+                                        streamingCheckpointEnabled,
                                         this::createCommitter,
                                         ManifestCommittableSerializer::new))
                         .setParallelism(1)
