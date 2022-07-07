@@ -433,4 +433,44 @@ public class TableStoreHiveStorageHandlerITCase {
                 hiveShell.executeQuery(
                         "SELECT * FROM test_table WHERE ts = '2022-06-18 08:30:00'"));
     }
+
+    @Test
+    public void testProjectionPushdown() throws Exception {
+        String path = folder.newFolder().toURI().toString();
+        Configuration conf = new Configuration();
+        conf.setString(CoreOptions.PATH, path);
+        conf.setInteger(CoreOptions.BUCKET, 2);
+        conf.setString(CoreOptions.FILE_FORMAT, "avro");
+        FileStoreTable table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf,
+                        RowType.of(
+                                new LogicalType[] {
+                                    DataTypes.INT().getLogicalType(),
+                                    DataTypes.BIGINT().getLogicalType(),
+                                    DataTypes.STRING().getLogicalType()
+                                },
+                                new String[] {"a", "b", "c"}),
+                        Collections.emptyList(),
+                        Collections.emptyList());
+
+        TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
+        write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi")));
+        write.write(GenericRowData.of(2, 20L, StringData.fromString("Hello")));
+        write.write(GenericRowData.of(3, 30L, StringData.fromString("World")));
+        commit.commit("0", write.prepareCommit());
+        write.close();
+
+        hiveShell.execute(
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE EXTERNAL TABLE test_table",
+                                "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
+                                "LOCATION '" + path + "'")));
+        List<String> actual = hiveShell.executeQuery("SELECT c, a FROM test_table ORDER BY a");
+        List<String> expected = Arrays.asList("Hi\t1", "Hello\t2", "World\t3");
+        Assert.assertEquals(expected, actual);
+    }
 }
