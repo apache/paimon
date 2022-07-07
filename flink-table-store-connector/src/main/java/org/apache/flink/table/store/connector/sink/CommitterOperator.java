@@ -59,7 +59,7 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
      * checkpoint is not enabled we need to commit remaining data in {@link
      * CommitterOperator#endInput}.
      */
-    private final boolean checkpointEnabled;
+    private final boolean streamingCheckpointEnabled;
 
     /** Group the committable by the checkpoint id. */
     private final NavigableMap<Long, ManifestCommittable> committablesPerCheckpoint;
@@ -80,11 +80,11 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     private Committer committer;
 
     public CommitterOperator(
-            boolean checkpointEnabled,
+            boolean streamingCheckpointEnabled,
             SerializableFunction<String, Committer> committerFactory,
             SerializableSupplier<SimpleVersionedSerializer<ManifestCommittable>>
                     committableSerializer) {
-        this.checkpointEnabled = checkpointEnabled;
+        this.streamingCheckpointEnabled = streamingCheckpointEnabled;
         this.committableSerializer = committableSerializer;
         this.committablesPerCheckpoint = new TreeMap<>();
         this.committerFactory = checkNotNull(committerFactory);
@@ -165,7 +165,7 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
 
     @Override
     public void endInput() throws Exception {
-        if (checkpointEnabled) {
+        if (streamingCheckpointEnabled) {
             return;
         }
 

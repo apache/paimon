@@ -18,9 +18,12 @@
 
 package org.apache.flink.table.store.connector.sink;
 
+import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -50,8 +53,6 @@ public class StoreSink implements Serializable {
 
     private final FileStoreTable table;
 
-    private final boolean checkpointEnabled;
-
     private final boolean compactionTask;
 
     @Nullable private final Map<String, String> compactPartitionSpec;
@@ -65,7 +66,6 @@ public class StoreSink implements Serializable {
     public StoreSink(
             ObjectIdentifier tableIdentifier,
             FileStoreTable table,
-            boolean checkpointEnabled,
             boolean compactionTask,
             @Nullable Map<String, String> compactPartitionSpec,
             @Nullable CatalogLock.Factory lockFactory,
@@ -73,7 +73,6 @@ public class StoreSink implements Serializable {
             @Nullable LogSinkFunction logSinkFunction) {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
-        this.checkpointEnabled = checkpointEnabled;
         this.compactionTask = compactionTask;
         this.compactPartitionSpec = compactPartitionSpec;
         this.lockFactory = lockFactory;
@@ -119,12 +118,17 @@ public class StoreSink implements Serializable {
                 input.transform(WRITER_NAME, typeInfo, createWriteOperator())
                         .setParallelism(input.getParallelism());
 
+        StreamExecutionEnvironment env = input.getExecutionEnvironment();
+        boolean streamingCheckpointEnabled =
+                env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
+                                == RuntimeExecutionMode.STREAMING
+                        && env.getCheckpointConfig().isCheckpointingEnabled();
         SingleOutputStreamOperator<?> committed =
                 written.transform(
                                 GLOBAL_COMMITTER_NAME,
                                 typeInfo,
                                 new CommitterOperator(
-                                        checkpointEnabled,
+                                        streamingCheckpointEnabled,
                                         this::createCommitter,
                                         ManifestCommittableSerializer::new))
                         .setParallelism(1)

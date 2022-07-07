@@ -106,7 +106,6 @@ public class FlinkSinkBuilder {
                 new StoreSink(
                         tableIdentifier,
                         table,
-                        env.getCheckpointConfig().isCheckpointingEnabled(),
                         conf.get(FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED),
                         getCompactPartSpec(),
                         lockFactory,
