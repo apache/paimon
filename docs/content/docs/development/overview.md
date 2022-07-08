@@ -37,7 +37,7 @@ As shown in the architecture above:
 
 **Read/Write:** Table Store supports a versatile way to read/write data and perform OLAP queries.
 - For reads, it supports consuming data <1> from historical snapshots (in batch mode), <2>from the
-  latest offset (in continuous mode), or <3> reading incremental snapshots in a hybrid way.
+  latest offset (in streaming mode), or <3> reading incremental snapshots in a hybrid way.
 - For writes, it supports streaming synchronization from the changelog of databases (CDC) or batch
   insert/overwrite from offline data.
 
@@ -70,7 +70,7 @@ The steps to set up are:
 - Setting the HADOOP_CLASSPATH environment variable or copy the
   [Pre-bundled Hadoop Jar](https://flink.apache.org/downloads.html) to `flink/lib`.
 
-## Unified Table
+## Unified Storage
 
 There are three types of connectors in Flink SQL.
 - Message queue, such as Apache Kafka, it is used in both source and 
@@ -89,26 +89,3 @@ does not differ from the traditional database:
 - In Flink `streaming` execution mode, it acts like a message queue.
   Query it acts like querying a stream changelog from a message queue
   where historical data never expires.
-
-Different `log.scan` mode will result in different consuming behavior under streaming mode.
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style="width: 20%">Scan Mode</th>
-      <th class="text-center" style="width: 5%">Default</th>
-      <th class="text-center" style="width: 60%">Description</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><h5>FULL</h5></td>
-      <td>Yes</td>
-      <td>FULL scan mode performs a hybrid reading with a snapshot scan and the continuous incremental scan.</td>
-    </tr>
-    <tr>
-      <td><h5>LATEST</h5></td>
-      <td>No</td>
-      <td>LATEST scan mode only reads incremental data from the latest offset.</td>
-    </tr>
-    </tbody>
-</table>
