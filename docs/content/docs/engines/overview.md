@@ -30,7 +30,7 @@ Table Store not only supports Flink SQL writes and queries natively,
 but also provides queries from other popular engines, such as
 Apache Hive and Apache Spark.
 
-## Engine Matrix
+## Compatibility Matrix
 
 | Engine    | Version  | Feature                                              |    Read Pushdown   |
 |:----------|:---------|:-----------------------------------------------------|--------------------|
