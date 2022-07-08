@@ -62,7 +62,7 @@ public abstract class CompactTask implements Callable<CompactResult> {
     }
 
     /**
-     * Perform compaction
+     * Perform compaction.
      *
      * @param toCompact the candidate files to be compacted
      * @return {@link CompactResult} of compact before and compact after files.
