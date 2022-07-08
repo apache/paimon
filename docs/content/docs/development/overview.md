@@ -52,12 +52,15 @@ and high-performance queries. The latter uses Apache Kafka to capture data in re
 ## Setup Table Store
 
 {{< hint info >}}
-__Note:__ Table Store is only supported since Flink 1.15.
+__Note:__ Table Store is only supported since Flink 1.14.
 {{< /hint >}}
 
-You can get the bundle jar for the Table Store in one of the following ways:
-- Download [flink-table-store-dist-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/flink/flink-table-store-dist/{{< version >}}/flink-table-store-dist-{{< version >}}.jar).
-- Build bundle jar under submodule `flink-table-store-dist` from source code.
+{{< stable >}}
+Download [flink-table-store-dist-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/flink/flink-table-store-dist/{{< version >}}/flink-table-store-dist-{{< version >}}.jar).
+{{< /stable >}}
+{{< unstable >}}
+You are using an unreleased version of Table Store, you need to manually [Build Bundled Jar]({{< ref "docs/engines/build" >}}) from the source code.
+{{< /unstable >}}
 
 Flink Table Store has shaded all the dependencies in the package, so you don't have
 to worry about conflicts with other connector dependencies.

@@ -186,9 +186,8 @@ The following parameters determine when to stop writing:
 ## Memory
 
 There are three main places in the Table Store's sink writer that take up memory:
-- MemTable's write buffer, which is individually occupied by each partition, each
-  bucket, and this memory value can be adjustable by the `write-buffer-size`
-  option (default 64 MB).
-- The memory consumed by compaction for reading files, it can be adjusted by the
+- MemTable's write buffer, shared and preempted by all writers of a single task.
+  This memory value can be adjusted by the `write-buffer-size` option.
+- The memory consumed by compaction for reading files, can be adjusted by the
   `num-sorted-run.compaction-trigger` option to change the maximum number of files to be merged.
-- The memory consumed by writing file, which is not adjustable.
+- The memory consumed by writing columnar (ORC) file, which is not adjustable.
