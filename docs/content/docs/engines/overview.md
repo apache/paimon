@@ -29,3 +29,16 @@ under the License.
 Table Store not only supports Flink SQL writes and queries natively,
 but also provides queries from other popular engines, such as
 Apache Hive and Apache Spark.
+
+## Compatibility Matrix
+
+| Engine    | Version  | Feature                                              |    Read Pushdown   |
+|:----------|:---------|:-----------------------------------------------------|--------------------|
+| Flink     | 1.14     | read, write, create/drop table, create/drop database | Projection, Filter |
+| Flink     | 1.15     | read, write, create/drop table, create/drop database | Projection, Filter |
+| Hive      | 2.3      | read                                                 | Projection, Filter |
+| Spark     | 3.0      | read                                                 | Projection, Filter |
+| Spark     | 3.1      | read                                                 | Projection, Filter |
+| Spark     | 3.2      | read                                                 | Projection, Filter |
+| Trino     | 358      | read                                                 | Projection, Filter |
+| Trino     | 388      | read                                                 | Projection, Filter |
