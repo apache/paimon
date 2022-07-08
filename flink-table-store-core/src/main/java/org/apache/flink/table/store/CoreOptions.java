@@ -228,7 +228,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> COMPACTION_MIN_FILE_NUM =
             ConfigOptions.key("compaction.min.file-num")
                     .intType()
-                    .defaultValue(4)
+                    .defaultValue(5)
                     .withDescription(
                             "For file set [f_0,...,f_N], the minimum file number which satisfies "
                                     + "sum(size(f_i)) >= targetFileSize to trigger a compaction for "
@@ -236,7 +236,7 @@ public class CoreOptions implements Serializable {
                                     + "which is not cost-effective.");
 
     public static final ConfigOption<Integer> COMPACTION_MAX_FILE_NUM =
-            ConfigOptions.key("compaction.max.file-num")
+            ConfigOptions.key("compaction.early-max.file-num")
                     .intType()
                     .defaultValue(50)
                     .withDescription(

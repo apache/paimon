@@ -98,7 +98,7 @@ public class AppendOnlyCompactManagerTest {
                 Collections.emptyList(),
                 Collections.singletonList(newFile(7001L, 7600L)));
 
-        // ignore single small file (in the middle), skip large file at last, and release all
+        // ignore single small file (in the middle)
         innerTest(
                 Arrays.asList(
                         newFile(1L, 1024L),
@@ -107,7 +107,7 @@ public class AppendOnlyCompactManagerTest {
                         newFile(2501L, 4096L)),
                 false,
                 Collections.emptyList(),
-                Collections.emptyList());
+                Collections.singletonList(newFile(2501L, 4096L)));
 
         innerTest(
                 Arrays.asList(
@@ -118,7 +118,7 @@ public class AppendOnlyCompactManagerTest {
                         newFile(4097L, 6000L)),
                 false,
                 Collections.emptyList(),
-                Collections.emptyList());
+                Collections.singletonList(newFile(4097L, 6000L)));
 
         // wait for more file
         innerTest(
@@ -141,10 +141,11 @@ public class AppendOnlyCompactManagerTest {
     }
 
     @Test
-    public void testPickAndNotRelease() {
+    public void testPick() {
         // fileNum is 13 (which > 12) and totalFileSize is 130 (which < 1024)
         List<DataFileMeta> toCompact1 =
                 Arrays.asList(
+                        // 1~10, 11~20, ..., 111~120
                         newFile(1L, 10L),
                         newFile(11L, 20L),
                         newFile(21L, 30L),
@@ -158,7 +159,11 @@ public class AppendOnlyCompactManagerTest {
                         newFile(101L, 110L),
                         newFile(111L, 120L),
                         newFile(121L, 130L));
-        innerTest(toCompact1, true, toCompact1.subList(0, toCompact1.size() - 1), toCompact1);
+        innerTest(
+                toCompact1,
+                true,
+                toCompact1.subList(0, toCompact1.size() - 1),
+                Collections.singletonList(newFile(121L, 130L)));
 
         // fileNum is 4 (which > 3) and totalFileSize is 1026 (which > 1024)
         List<DataFileMeta> toCompact2 =
@@ -169,17 +174,19 @@ public class AppendOnlyCompactManagerTest {
                         newFile(501L, 1000L),
                         newFile(1001L, 1025L),
                         newFile(1026L, 1050L));
-        innerTest(toCompact2, true, toCompact2.subList(0, 4), toCompact2);
-    }
+        innerTest(
+                toCompact2,
+                true,
+                toCompact2.subList(0, 4),
+                Collections.singletonList(newFile(1026L, 1050L)));
 
-    @Test
-    public void testPickAndRelease() {
         // fileNum is 13 (which > 12) and totalFileSize is 130 (which < 1024)
-        List<DataFileMeta> toCompact1 =
+        List<DataFileMeta> toCompact3 =
                 Arrays.asList(
                         newFile(1L, 1022L),
                         newFile(1023L, 1024L),
                         newFile(1025L, 2050L),
+                        // 2051~2510, ..., 2611~2620
                         newFile(2051L, 2510L),
                         newFile(2511L, 2520L),
                         newFile(2521L, 2530L),
@@ -194,10 +201,10 @@ public class AppendOnlyCompactManagerTest {
                         newFile(2611L, 2620L),
                         newFile(2621L, 2630L));
         innerTest(
-                toCompact1,
+                toCompact3,
                 true,
-                toCompact1.subList(3, toCompact1.size() - 1),
-                toCompact1.subList(3, toCompact1.size()));
+                toCompact3.subList(3, toCompact3.size() - 1),
+                Collections.singletonList(newFile(2621L, 2630L)));
     }
 
     private void innerTest(

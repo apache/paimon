@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test case for append-only managed table. */
-public class AppendOnlyTableTest extends FileStoreTableITCase {
+public class AppendOnlyTableITCase extends FileStoreTableITCase {
 
     @Test
     public void testCreateTableWithPrimaryKey() {
@@ -128,7 +128,7 @@ public class AppendOnlyTableTest extends FileStoreTableITCase {
     @Test
     public void testAutoCompaction() {
         batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '2')");
-        batchSql("ALTER TABLE append_table SET ('compaction.max.file-num' = '4')");
+        batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
 
         batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')");
         Snapshot snapshot = findLatestSnapshot("append_table", true);

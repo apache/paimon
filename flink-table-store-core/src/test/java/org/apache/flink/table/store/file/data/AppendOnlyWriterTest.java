@@ -121,7 +121,7 @@ public class AppendOnlyWriterTest {
 
     @Test
     public void testMultipleCommits() throws Exception {
-        RecordWriter<RowData> writer = createEmptyWriter(1024 * 1024L);
+        RecordWriter<RowData> writer = createWriter(1024 * 1024L, true, Collections.emptyList());
 
         // Commit 5 continues txn.
         for (int txn = 0; txn < 5; txn += 1) {

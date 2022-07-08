@@ -22,7 +22,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.data.AppendOnlyCompactManager;
-import org.apache.flink.table.store.file.data.AppendOnlyRollingFileWriter;
 import org.apache.flink.table.store.file.data.AppendOnlyWriter;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
@@ -41,6 +40,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** {@link FileStoreWrite} for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
@@ -131,14 +131,14 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
             if (toCompact.isEmpty()) {
                 return Collections.emptyList();
             }
-            AppendOnlyRollingFileWriter rewriter =
-                    new AppendOnlyRollingFileWriter(
+            AppendOnlyWriter.RowRollingWriter rewriter =
+                    AppendOnlyWriter.RowRollingWriter.createRollingRowWriter(
                             schemaId,
                             fileFormat,
                             targetFileSize,
                             rowType,
-                            toCompact.get(0).minSequenceNumber(),
-                            pathFactory.createDataFilePathFactory(partition, bucket));
+                            pathFactory.createDataFilePathFactory(partition, bucket),
+                            new AtomicLong(toCompact.get(0).minSequenceNumber()));
             return rewriter.write(
                     new RecordReaderIterator<>(
                             read.createReader(new Split(partition, bucket, toCompact, false))));

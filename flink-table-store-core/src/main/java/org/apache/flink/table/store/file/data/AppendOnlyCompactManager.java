@@ -20,17 +20,21 @@ package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.compact.CompactManager;
-import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactTask;
 
-import java.util.ArrayList;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
+import java.util.stream.Collectors;
 
 /** Compact manager for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyCompactManager extends CompactManager {
+
+    private static final Logger LOG = LoggerFactory.getLogger(AppendOnlyCompactManager.class);
 
     private final int minFileNum;
     private final int maxFileNum;
@@ -61,57 +65,56 @@ public class AppendOnlyCompactManager extends CompactManager {
         }
         pickCompactBefore()
                 .ifPresent(
-                        (compactBefore) ->
-                                taskFuture =
-                                        executor.submit(
-                                                new CompactTask() {
-                                                    @Override
-                                                    protected CompactResult compact()
-                                                            throws Exception {
-                                                        collectBeforeStats(compactBefore);
-                                                        List<DataFileMeta> compactAfter =
-                                                                rewriter.rewrite(compactBefore);
-                                                        collectAfterStats(compactAfter);
-                                                        return result(compactBefore, compactAfter);
-                                                    }
-                                                }));
+                        (before) -> {
+                            if (LOG.isDebugEnabled()) {
+                                LOG.debug(
+                                        "Submit compaction with files (name, level, size): "
+                                                + before.stream()
+                                                        .map(
+                                                                file ->
+                                                                        String.format(
+                                                                                "(%s, %d, %d)",
+                                                                                file.fileName(),
+                                                                                file.level(),
+                                                                                file.fileSize()))
+                                                        .collect(Collectors.joining(", ")));
+                            }
+                            taskFuture =
+                                    executor.submit(
+                                            new CompactTask() {
+                                                @Override
+                                                protected void doCompact() throws Exception {
+                                                    compactBefore.addAll(before);
+                                                    compactAfter.addAll(rewriter.rewrite(before));
+                                                }
+                                            });
+                        });
     }
 
     @VisibleForTesting
     Optional<List<DataFileMeta>> pickCompactBefore() {
         long totalFileSize = 0L;
         int fileNum = 0;
-        int releaseCtr = 0;
-        for (int i = 0; i < toCompact.size(); i++) {
-            DataFileMeta file = toCompact.get(i);
+        LinkedList<DataFileMeta> compactBefore = new LinkedList<>();
+
+        while (!toCompact.isEmpty()) {
+            DataFileMeta file = toCompact.pollFirst();
+            compactBefore.add(file);
             totalFileSize += file.fileSize();
             fileNum++;
-            int pos = i - fileNum + 1;
             if ((totalFileSize >= targetFileSize && fileNum >= minFileNum)
                     || fileNum >= maxFileNum) {
-                // trigger compaction for [pos, i]
-                List<DataFileMeta> compactBefore = new ArrayList<>(toCompact.subList(pos, i + 1));
-                // files in [0, pos - 1] can be released immediately
-                // [pos, i] should be released after compaction finished
-                for (int j = 0; j <= pos - 1; j++) {
-                    toCompact.pollFirst();
-                }
                 return Optional.of(compactBefore);
             } else if (totalFileSize >= targetFileSize) {
-                // this is equivalent to shift one pos to right
+                // left pointer shift one pos to right
+                DataFileMeta removed = compactBefore.pollFirst();
+                assert removed != null;
+                totalFileSize -= removed.fileSize();
                 fileNum--;
-                totalFileSize -= toCompact.get(pos).fileSize();
-                releaseCtr++;
             }
         }
-        while (releaseCtr > 0) {
-            toCompact.pollFirst();
-            releaseCtr--;
-        }
-        // optimize when the last file size >= targetFileSize
-        DataFileMeta head = toCompact.peekFirst();
-        if (head != null && head.fileSize() >= targetFileSize) {
-            toCompact.pollFirst();
+        for (DataFileMeta file : compactBefore) {
+            toCompact.offerLast(file);
         }
         return Optional.empty();
     }
@@ -123,6 +126,6 @@ public class AppendOnlyCompactManager extends CompactManager {
 
     /** Compact rewriter for append-only table. */
     public interface CompactRewriter {
-        List<DataFileMeta> rewrite(List<DataFileMeta> toCompact) throws Exception;
+        List<DataFileMeta> rewrite(List<DataFileMeta> compactBefore) throws Exception;
     }
 }
