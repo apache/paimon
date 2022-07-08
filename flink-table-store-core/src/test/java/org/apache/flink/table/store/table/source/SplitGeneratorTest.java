@@ -48,21 +48,22 @@ public class SplitGeneratorTest {
     public void testAppend() {
         assertThat(toNames(new AppendOnlySplitGenerator(40, 2).split(files)))
                 .containsExactlyInAnyOrder(
-                        Arrays.asList("1", "2", "5"),
+                        Arrays.asList("1", "2"),
+                        Collections.singletonList("3"),
+                        Arrays.asList("4", "5"),
+                        Collections.singletonList("6"));
+
+        assertThat(toNames(new AppendOnlySplitGenerator(70, 2).split(files)))
+                .containsExactlyInAnyOrder(
+                        Arrays.asList("1", "2", "3"),
+                        Arrays.asList("4", "5"),
+                        Collections.singletonList("6"));
+
+        assertThat(toNames(new AppendOnlySplitGenerator(40, 20).split(files)))
+                .containsExactlyInAnyOrder(
+                        Arrays.asList("1", "2"),
                         Collections.singletonList("3"),
                         Collections.singletonList("4"),
-                        Collections.singletonList("6"));
-
-        assertThat(toNames(new AppendOnlySplitGenerator(50, 2).split(files)))
-                .containsExactlyInAnyOrder(
-                        Arrays.asList("1", "2", "4"),
-                        Arrays.asList("3", "5"),
-                        Collections.singletonList("6"));
-
-        assertThat(toNames(new AppendOnlySplitGenerator(50, 10).split(files)))
-                .containsExactlyInAnyOrder(
-                        Arrays.asList("1", "2", "4"),
-                        Collections.singletonList("3"),
                         Collections.singletonList("5"),
                         Collections.singletonList("6"));
     }
@@ -70,16 +71,13 @@ public class SplitGeneratorTest {
     @Test
     public void testMergeTree() {
         Comparator<RowData> comparator = Comparator.comparingInt(o -> o.getInt(0));
-        assertThat(toNames(new MergeTreeSplitGenerator(comparator, 40, 2).split(files)))
+        assertThat(toNames(new MergeTreeSplitGenerator(comparator, 100, 2).split(files)))
                 .containsExactlyInAnyOrder(
-                        Arrays.asList("1", "2", "5"),
-                        Arrays.asList("4", "3"),
-                        Collections.singletonList("6"));
+                        Arrays.asList("1", "2", "4", "3", "5"), Collections.singletonList("6"));
 
-        assertThat(toNames(new MergeTreeSplitGenerator(comparator, 40, 20).split(files)))
+        assertThat(toNames(new MergeTreeSplitGenerator(comparator, 100, 30).split(files)))
                 .containsExactlyInAnyOrder(
-                        Arrays.asList("1", "2"),
-                        Arrays.asList("4", "3"),
+                        Arrays.asList("1", "2", "4", "3"),
                         Collections.singletonList("5"),
                         Collections.singletonList("6"));
     }
