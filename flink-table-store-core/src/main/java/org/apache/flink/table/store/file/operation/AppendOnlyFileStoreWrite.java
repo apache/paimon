@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.api.common.accumulators.LongCounter;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.compact.CompactResult;
@@ -40,7 +41,6 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.atomic.AtomicLong;
 
 /** {@link FileStoreWrite} for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
@@ -138,7 +138,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
                             targetFileSize,
                             rowType,
                             pathFactory.createDataFilePathFactory(partition, bucket),
-                            new AtomicLong(toCompact.get(0).minSequenceNumber()));
+                            new LongCounter(toCompact.get(0).minSequenceNumber()));
             return rewriter.write(
                     new RecordReaderIterator<>(
                             read.createReader(new Split(partition, bucket, toCompact, false))));

@@ -127,36 +127,41 @@ public class AppendOnlyTableITCase extends FileStoreTableITCase {
 
     @Test
     public void testAutoCompaction() {
+        batchSql("ALTER TABLE append_table SET ('commit.force-compact' = 'true')");
         batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '2')");
         batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
 
-        batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')");
-        Snapshot snapshot = findLatestSnapshot("append_table", true);
-        assertThat(snapshot.id()).isEqualTo(1L);
-        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
-
-        batchSql("INSERT INTO append_table VALUES (3, 'CCC'), (4, 'DDD')");
-        snapshot = findLatestSnapshot("append_table", true);
-        assertThat(snapshot.id()).isEqualTo(2L);
-        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
-
-        batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB'), (3, 'CCC'), (4, 'DDD')");
-        snapshot = findLatestSnapshot("append_table", true);
-        assertThat(snapshot.id()).isEqualTo(3L);
-        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
-
-        batchSql("INSERT INTO append_table VALUES (5, 'EEE'), (6, 'FFF')");
-        snapshot = findLatestSnapshot("append_table", true);
-        assertThat(snapshot.id()).isEqualTo(4L);
-        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
-
-        batchSql("INSERT INTO append_table VALUES (7, 'HHH'), (8, 'III')");
-        snapshot = findLatestSnapshot("append_table", true);
-        assertThat(snapshot.id()).isEqualTo(6L);
-        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertAutoCompaction(
+                "INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')",
+                1L,
+                Snapshot.CommitKind.APPEND);
+        assertAutoCompaction(
+                "INSERT INTO append_table VALUES (3, 'CCC'), (4, 'DDD')",
+                2L,
+                Snapshot.CommitKind.APPEND);
+        assertAutoCompaction(
+                "INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB'), (3, 'CCC'), (4, 'DDD')",
+                3L,
+                Snapshot.CommitKind.APPEND);
+        assertAutoCompaction(
+                "INSERT INTO append_table VALUES (5, 'EEE'), (6, 'FFF')",
+                5L,
+                Snapshot.CommitKind.COMPACT);
+        assertAutoCompaction(
+                "INSERT INTO append_table VALUES (7, 'HHH'), (8, 'III')",
+                6L,
+                Snapshot.CommitKind.APPEND);
+        assertAutoCompaction(
+                "INSERT INTO append_table VALUES (9, 'JJJ'), (10, 'KKK')",
+                7L,
+                Snapshot.CommitKind.APPEND);
+        assertAutoCompaction(
+                "INSERT INTO append_table VALUES (11, 'LLL'), (12, 'MMM')",
+                9L,
+                Snapshot.CommitKind.COMPACT);
 
         List<Row> rows = batchSql("SELECT * FROM append_table");
-        assertThat(rows.size()).isEqualTo(12);
+        assertThat(rows.size()).isEqualTo(16);
         assertThat(rows)
                 .containsExactlyInAnyOrder(
                         Row.of(1, "AAA"),
@@ -170,7 +175,11 @@ public class AppendOnlyTableITCase extends FileStoreTableITCase {
                         Row.of(5, "EEE"),
                         Row.of(6, "FFF"),
                         Row.of(7, "HHH"),
-                        Row.of(8, "III"));
+                        Row.of(8, "III"),
+                        Row.of(9, "JJJ"),
+                        Row.of(10, "KKK"),
+                        Row.of(11, "LLL"),
+                        Row.of(12, "MMM"));
     }
 
     @Test
@@ -205,5 +214,13 @@ public class AppendOnlyTableITCase extends FileStoreTableITCase {
         assertThatThrownBy(() -> batchSql("INSERT INTO append_table SELECT * FROM source"))
                 .hasRootCauseInstanceOf(IllegalStateException.class)
                 .hasRootCauseMessage("Append only writer can not accept row with RowKind %s", kind);
+    }
+
+    private void assertAutoCompaction(
+            String sql, long expectedSnapshotId, Snapshot.CommitKind expectedCommitKind) {
+        batchSql(sql);
+        Snapshot snapshot = findLatestSnapshot("append_table", true);
+        assertThat(snapshot.id()).isEqualTo(expectedSnapshotId);
+        assertThat(snapshot.commitKind()).isEqualTo(expectedCommitKind);
     }
 }

@@ -135,7 +135,7 @@ public class AppendOnlyWriterTest {
 
             writer.sync();
             Increment inc = writer.prepareCommit();
-            if (txn > 0 && txn % 4 == 0) {
+            if (txn > 0 && txn % 3 == 0) {
                 assertThat(inc.compactBefore()).hasSize(4);
                 assertThat(inc.compactAfter()).hasSize(1);
                 DataFileMeta compactAfter = inc.compactAfter().get(0);

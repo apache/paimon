@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.data;
 
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -27,27 +25,15 @@ import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 import static org.apache.flink.table.store.file.data.DataFileTestUtils.newFile;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link AppendOnlyCompactManager}. */
-public class AppendOnlyCompactManagerTest {
-
-    private static ExecutorService service;
-
-    @BeforeAll
-    public static void before() {
-        service = Executors.newSingleThreadExecutor();
-    }
-
-    @AfterAll
-    public static void after() {
-        service.shutdownNow();
-        service = null;
-    }
+/**
+ * Test for {@link
+ * org.apache.flink.table.store.file.data.AppendOnlyCompactManager.AppendOnlyCompactTask}.
+ */
+public class AppendOnlyCompactTaskTest {
 
     @Test
     public void testPickEmptyAndNotRelease() {
@@ -215,19 +201,18 @@ public class AppendOnlyCompactManagerTest {
         int minFileNum = 4;
         int maxFileNum = 12;
         long targetFileSize = 1024;
-        AppendOnlyCompactManager compactManager =
-                new AppendOnlyCompactManager(
-                        service,
+        AppendOnlyCompactManager.AppendOnlyCompactTask task =
+                new AppendOnlyCompactManager.AppendOnlyCompactTask(
                         new LinkedList<>(toCompactBeforePick),
                         minFileNum,
                         maxFileNum,
                         targetFileSize,
                         null);
-        Optional<List<DataFileMeta>> actual = compactManager.pickCompactBefore();
+        Optional<List<DataFileMeta>> actual = task.pickCompactBefore();
         assertThat(actual.isPresent()).isEqualTo(expectedPresent);
         if (expectedPresent) {
             assertThat(actual.get()).containsExactlyElementsOf(expectedCompactBefore);
         }
-        assertThat(compactManager.getToCompact()).containsExactlyElementsOf(toCompactAfterPick);
+        assertThat(task.getToCompact()).containsExactlyElementsOf(toCompactAfterPick);
     }
 }

@@ -23,7 +23,6 @@ import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 
@@ -32,61 +31,45 @@ public abstract class CompactTask implements Callable<CompactResult> {
 
     private static final Logger LOG = LoggerFactory.getLogger(CompactTask.class);
 
-    protected final List<DataFileMeta> compactBefore;
+    protected final List<DataFileMeta> toCompact;
 
-    protected final List<DataFileMeta> compactAfter;
-
-    // metrics
-    private long rewriteInputSize;
-    private long rewriteOutputSize;
-
-    public CompactTask() {
-        this.compactBefore = new ArrayList<>();
-        this.compactAfter = new ArrayList<>();
-        this.rewriteInputSize = 0;
-        this.rewriteOutputSize = 0;
+    public CompactTask(List<DataFileMeta> toCompact) {
+        this.toCompact = toCompact;
     }
 
     @Override
     public CompactResult call() throws Exception {
         long startMillis = System.currentTimeMillis();
-        doCompact();
-        if (LOG.isDebugEnabled()) {
-            collectBeforeStats();
-            collectAfterStats();
-            LOG.debug(logMetric(startMillis));
-        }
-        return new CompactResult() {
-            @Override
-            public List<DataFileMeta> before() {
-                return compactBefore;
-            }
+        CompactResult result = doCompact(toCompact);
 
-            @Override
-            public List<DataFileMeta> after() {
-                return compactAfter;
-            }
-        };
+        if (LOG.isDebugEnabled()) {
+            logMetric(startMillis, result.before(), result.after());
+        }
+
+        return result;
     }
 
-    protected String logMetric(long startMillis) {
+    protected String logMetric(
+            long startMillis, List<DataFileMeta> compactBefore, List<DataFileMeta> compactAfter) {
         return String.format(
                 "Done compacting %d files to %d files in %dms. "
                         + "Rewrite input file size = %d, output file size = %d",
                 compactBefore.size(),
                 compactAfter.size(),
                 System.currentTimeMillis() - startMillis,
-                rewriteInputSize,
-                rewriteOutputSize);
+                collectRewriteSize(compactBefore),
+                collectRewriteSize(compactAfter));
     }
 
-    protected abstract void doCompact() throws Exception;
+    /**
+     * Perform compaction
+     *
+     * @param toCompact the candidate files to be compacted
+     * @return {@link CompactResult} of compact before and compact after files.
+     */
+    protected abstract CompactResult doCompact(List<DataFileMeta> toCompact) throws Exception;
 
-    private void collectBeforeStats() {
-        compactBefore.forEach(file -> rewriteInputSize += file.fileSize());
-    }
-
-    private void collectAfterStats() {
-        rewriteOutputSize += compactAfter.stream().mapToLong(DataFileMeta::fileSize).sum();
+    private long collectRewriteSize(List<DataFileMeta> files) {
+        return files.stream().mapToLong(DataFileMeta::fileSize).sum();
     }
 }
