@@ -24,7 +24,6 @@ import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.types.Row;
 
-import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -881,7 +880,6 @@ public class CompositePkAndMultiPartitionedTableITCase extends ReadWriteTableTes
                         changelogRow("+I", "US Dollar", "Yen")));
     }
 
-    @Ignore
     @Test
     public void testEnableLogAndStreamingReadWriteMultiPartitionedRecordsWithoutPk()
             throws Exception {
