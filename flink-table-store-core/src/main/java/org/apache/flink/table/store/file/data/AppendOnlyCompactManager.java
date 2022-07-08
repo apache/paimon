@@ -23,7 +23,6 @@ import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactTask;
 
-import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
@@ -59,41 +58,62 @@ public class AppendOnlyCompactManager extends CompactManager {
             throw new IllegalStateException(
                     "Please finish the previous compaction before submitting new one.");
         }
-        taskFuture =
-                executor.submit(
-                        new AppendOnlyCompactTask(
-                                toCompact, minFileNum, maxFileNum, targetFileSize, rewriter));
+        pickCompactBefore()
+                .ifPresent(
+                        (inputs) ->
+                                taskFuture =
+                                        executor.submit(
+                                                new AppendOnlyCompactTask(inputs, rewriter)));
+    }
+
+    @VisibleForTesting
+    Optional<List<DataFileMeta>> pickCompactBefore() {
+        long totalFileSize = 0L;
+        int fileNum = 0;
+        LinkedList<DataFileMeta> candidates = new LinkedList<>();
+
+        while (!toCompact.isEmpty()) {
+            DataFileMeta file = toCompact.pollFirst();
+            candidates.add(file);
+            totalFileSize += file.fileSize();
+            fileNum++;
+            if ((totalFileSize >= targetFileSize && fileNum >= minFileNum)
+                    || fileNum >= maxFileNum) {
+                return Optional.of(candidates);
+            } else if (totalFileSize >= targetFileSize) {
+                // left pointer shift one pos to right
+                DataFileMeta removed = candidates.pollFirst();
+                assert removed != null;
+                totalFileSize -= removed.fileSize();
+                fileNum--;
+            }
+        }
+        toCompact.addAll(candidates);
+        return Optional.empty();
+    }
+
+    @VisibleForTesting
+    LinkedList<DataFileMeta> getToCompact() {
+        return toCompact;
     }
 
     /** A {@link CompactTask} impl for append-only table. */
     public static class AppendOnlyCompactTask extends CompactTask {
 
-        private final int minFileNum;
-        private final int maxFileNum;
-        private final long targetFileSize;
         private final CompactRewriter rewriter;
 
-        public AppendOnlyCompactTask(
-                LinkedList<DataFileMeta> toCompact,
-                int minFileNum,
-                int maxFileNum,
-                long targetFileSize,
-                CompactRewriter rewriter) {
+        public AppendOnlyCompactTask(List<DataFileMeta> toCompact, CompactRewriter rewriter) {
             super(toCompact);
-            this.minFileNum = minFileNum;
-            this.maxFileNum = maxFileNum;
-            this.targetFileSize = targetFileSize;
             this.rewriter = rewriter;
         }
 
         @Override
-        protected CompactResult doCompact(List<DataFileMeta> toCompact) throws Exception {
-            List<DataFileMeta> compactBefore = pickCompactBefore().orElse(Collections.emptyList());
-            List<DataFileMeta> compactAfter = rewriter.rewrite(compactBefore);
+        protected CompactResult doCompact(List<DataFileMeta> inputs) throws Exception {
+            List<DataFileMeta> compactAfter = rewriter.rewrite(inputs);
             return new CompactResult() {
                 @Override
                 public List<DataFileMeta> before() {
-                    return compactBefore;
+                    return inputs;
                 }
 
                 @Override
@@ -101,37 +121,6 @@ public class AppendOnlyCompactManager extends CompactManager {
                     return compactAfter;
                 }
             };
-        }
-
-        @VisibleForTesting
-        Optional<List<DataFileMeta>> pickCompactBefore() {
-            long totalFileSize = 0L;
-            int fileNum = 0;
-            LinkedList<DataFileMeta> candidates = new LinkedList<>();
-
-            while (!toCompact.isEmpty()) {
-                DataFileMeta file = ((LinkedList<DataFileMeta>) toCompact).pollFirst();
-                candidates.add(file);
-                totalFileSize += file.fileSize();
-                fileNum++;
-                if ((totalFileSize >= targetFileSize && fileNum >= minFileNum)
-                        || fileNum >= maxFileNum) {
-                    return Optional.of(candidates);
-                } else if (totalFileSize >= targetFileSize) {
-                    // left pointer shift one pos to right
-                    DataFileMeta removed = candidates.pollFirst();
-                    assert removed != null;
-                    totalFileSize -= removed.fileSize();
-                    fileNum--;
-                }
-            }
-            toCompact.addAll(candidates);
-            return Optional.empty();
-        }
-
-        @VisibleForTesting
-        LinkedList<DataFileMeta> getToCompact() {
-            return (LinkedList<DataFileMeta>) toCompact;
         }
     }
 

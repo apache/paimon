@@ -300,7 +300,11 @@ public class AppendOnlyWriterTest {
                         MIN_FILE_NUM,
                         MAX_FILE_NUM,
                         targetFileSize,
-                        compact -> Collections.singletonList(generateCompactAfter(compact))),
+                        compactBefore ->
+                                compactBefore.isEmpty()
+                                        ? Collections.emptyList()
+                                        : Collections.singletonList(
+                                                generateCompactAfter(compactBefore))),
                 forceCompact,
                 pathFactory);
     }

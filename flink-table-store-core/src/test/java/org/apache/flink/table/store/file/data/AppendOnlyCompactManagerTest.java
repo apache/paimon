@@ -29,11 +29,8 @@ import java.util.Optional;
 import static org.apache.flink.table.store.file.data.DataFileTestUtils.newFile;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * Test for {@link
- * org.apache.flink.table.store.file.data.AppendOnlyCompactManager.AppendOnlyCompactTask}.
- */
-public class AppendOnlyCompactTaskTest {
+/** Test for {@link org.apache.flink.table.store.file.data.AppendOnlyCompactManager}. */
+public class AppendOnlyCompactManagerTest {
 
     @Test
     public void testPickEmptyAndNotRelease() {
@@ -201,18 +198,19 @@ public class AppendOnlyCompactTaskTest {
         int minFileNum = 4;
         int maxFileNum = 12;
         long targetFileSize = 1024;
-        AppendOnlyCompactManager.AppendOnlyCompactTask task =
-                new AppendOnlyCompactManager.AppendOnlyCompactTask(
+        AppendOnlyCompactManager manager =
+                new AppendOnlyCompactManager(
+                        null,
                         new LinkedList<>(toCompactBeforePick),
                         minFileNum,
                         maxFileNum,
                         targetFileSize,
                         null);
-        Optional<List<DataFileMeta>> actual = task.pickCompactBefore();
+        Optional<List<DataFileMeta>> actual = manager.pickCompactBefore();
         assertThat(actual.isPresent()).isEqualTo(expectedPresent);
         if (expectedPresent) {
             assertThat(actual.get()).containsExactlyElementsOf(expectedCompactBefore);
         }
-        assertThat(task.getToCompact()).containsExactlyElementsOf(toCompactAfterPick);
+        assertThat(manager.getToCompact()).containsExactlyElementsOf(toCompactAfterPick);
     }
 }

@@ -62,7 +62,7 @@ public class MergeTreeCompactTask extends CompactTask {
     }
 
     @Override
-    protected CompactResult doCompact(List<DataFileMeta> toCompact) throws Exception {
+    protected CompactResult doCompact(List<DataFileMeta> inputs) throws Exception {
         List<List<SortedRun>> candidate = new ArrayList<>();
         List<DataFileMeta> compactBefore = new ArrayList<>();
         List<DataFileMeta> compactAfter = new ArrayList<>();
