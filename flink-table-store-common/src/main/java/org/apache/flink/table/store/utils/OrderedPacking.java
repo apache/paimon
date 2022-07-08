@@ -16,28 +16,38 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.table.source;
+package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.utils.OrderedPacking;
-
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 
-/** Append only implementation of {@link SplitGenerator}. */
-public class AppendOnlySplitGenerator implements SplitGenerator {
+/** Ordered packing for input items. */
+public class OrderedPacking {
+    private OrderedPacking() {}
 
-    private final long targetSplitSize;
-    private final long openFileCost;
+    public static <T> List<List<T>> pack(
+            Iterable<T> items, Function<T, Long> weightFunc, long targetWeight) {
+        List<List<T>> packed = new ArrayList<>();
 
-    public AppendOnlySplitGenerator(long targetSplitSize, long openFileCost) {
-        this.targetSplitSize = targetSplitSize;
-        this.openFileCost = openFileCost;
-    }
+        List<T> binItems = new ArrayList<>();
+        long binWeight = 0L;
 
-    @Override
-    public List<List<DataFileMeta>> split(List<DataFileMeta> files) {
-        Function<DataFileMeta, Long> weightFunc = file -> Math.max(file.fileSize(), openFileCost);
-        return OrderedPacking.pack(files, weightFunc, targetSplitSize);
+        for (T item : items) {
+            long weight = weightFunc.apply(item);
+            if (binWeight + weight > targetWeight) {
+                packed.add(binItems);
+                binItems = new ArrayList<>();
+                binWeight = 0;
+            }
+
+            binWeight += weight;
+            binItems.add(item);
+        }
+
+        if (binItems.size() > 0) {
+            packed.add(binItems);
+        }
+        return packed;
     }
 }

@@ -22,7 +22,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
-import org.apache.flink.table.store.utils.BinPacking;
+import org.apache.flink.table.store.utils.OrderedPacking;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -53,7 +53,7 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
          * into multiple splits. The generation has one constraint: files with intersected key
          * ranges (within one section) must go to the same split. Therefore, the files are first to go
          * through the interval partition algorithm to generate sections and then through the
-         * BinPack algorithm. Note that the item to be packed here is each section, the bin capacity
+         * OrderedPack algorithm. Note that the item to be packed here is each section, the capacity
          * is denoted as the targetSplitSize, and the final number of the bins is the number of
          * splits generated.
          *
@@ -64,7 +64,7 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
          * - section3: [5, 180], [5, 190]
          * - section4: [200, 600], [210, 700]
          *
-         * After BinPack, section1 and section2 will be put into one bin (split), so the final result will be:
+         * After OrderedPack, section1 and section2 will be put into one bin (split), so the final result will be:
          * - split1: [1, 2] [3, 4]
          * - split2: [5, 180] [5,190]
          * - split3: [200, 600] [210, 700]
@@ -73,13 +73,13 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
                 new IntervalPartition(files, keyComparator)
                         .partition().stream().map(this::flatRun).collect(Collectors.toList());
 
-        return binPackSplits(sections);
+        return packSplits(sections);
     }
 
-    private List<List<DataFileMeta>> binPackSplits(List<List<DataFileMeta>> sections) {
+    private List<List<DataFileMeta>> packSplits(List<List<DataFileMeta>> sections) {
         Function<List<DataFileMeta>, Long> weightFunc =
                 file -> Math.max(totalSize(file), openFileCost);
-        return BinPacking.pack(sections, weightFunc, targetSplitSize).stream()
+        return OrderedPacking.pack(sections, weightFunc, targetSplitSize).stream()
                 .map(this::flatFiles)
                 .collect(Collectors.toList());
     }
