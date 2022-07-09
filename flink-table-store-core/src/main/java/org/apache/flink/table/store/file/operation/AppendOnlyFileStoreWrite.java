@@ -95,8 +95,15 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
     @Override
     public Callable<CompactResult> createCompactWriter(
             BinaryRowData partition, int bucket, @Nullable List<DataFileMeta> compactFiles) {
-        throw new UnsupportedOperationException(
-                "Currently append only write mode does not support compaction.");
+        if (compactFiles == null) {
+            compactFiles = scanExistingFileMetas(partition, bucket);
+        }
+        return new AppendOnlyCompactManager.RollingCompactTask(
+                compactFiles,
+                targetFileSize,
+                minFileNum,
+                maxFileNum,
+                compactRewriter(partition, bucket));
     }
 
     private RecordWriter<RowData> createWriter(

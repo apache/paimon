@@ -23,9 +23,13 @@ import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactTask;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 
 /** Compact manager for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
@@ -62,12 +66,19 @@ public class AppendOnlyCompactManager extends CompactManager {
                 .ifPresent(
                         (inputs) ->
                                 taskFuture =
-                                        executor.submit(
-                                                new AppendOnlyCompactTask(inputs, rewriter)));
+                                        executor.submit(new AutoCompactTask(inputs, rewriter)));
     }
 
     @VisibleForTesting
     Optional<List<DataFileMeta>> pickCompactBefore() {
+        return pick(toCompact, targetFileSize, minFileNum, maxFileNum);
+    }
+
+    private static Optional<List<DataFileMeta>> pick(
+            LinkedList<DataFileMeta> toCompact,
+            long targetFileSize,
+            int minFileNum,
+            int maxFileNum) {
         long totalFileSize = 0L;
         int fileNum = 0;
         LinkedList<DataFileMeta> candidates = new LinkedList<>();
@@ -81,7 +92,7 @@ public class AppendOnlyCompactManager extends CompactManager {
                     || fileNum >= maxFileNum) {
                 return Optional.of(candidates);
             } else if (totalFileSize >= targetFileSize) {
-                // left pointer shift one pos to right
+                // let pointer shift one pos to right
                 DataFileMeta removed = candidates.pollFirst();
                 assert removed != null;
                 totalFileSize -= removed.fileSize();
@@ -97,31 +108,90 @@ public class AppendOnlyCompactManager extends CompactManager {
         return toCompact;
     }
 
-    /** A {@link CompactTask} impl for append-only table. */
-    public static class AppendOnlyCompactTask extends CompactTask {
+    /** A {@link CompactTask} impl for ALTER TABLE COMPACT of append-only table. */
+    public static class RollingCompactTask extends CompactTask {
+
+        private final long targetFileSize;
+        private final int minFileNum;
+        private final int maxFileNum;
+        private final CompactRewriter rewriter;
+
+        public RollingCompactTask(
+                List<DataFileMeta> inputs,
+                long targetFileSize,
+                int minFileNum,
+                int maxFileNum,
+                CompactRewriter rewriter) {
+            super(inputs);
+            this.targetFileSize = targetFileSize;
+            this.minFileNum = minFileNum;
+            this.maxFileNum = maxFileNum;
+            this.rewriter = rewriter;
+        }
+
+        @Override
+        protected CompactResult doCompact(List<DataFileMeta> inputs) throws Exception {
+            LinkedList<DataFileMeta> toCompact = new LinkedList<>(inputs);
+            Set<DataFileMeta> compactBefore = new HashSet<>();
+            List<DataFileMeta> compactAfter = new ArrayList<>();
+            while (!toCompact.isEmpty()) {
+                Optional<List<DataFileMeta>> candidates =
+                        AppendOnlyCompactManager.pick(
+                                toCompact, targetFileSize, minFileNum, maxFileNum);
+                if (candidates.isPresent()) {
+                    List<DataFileMeta> before = candidates.get();
+                    compactBefore.addAll(before);
+                    List<DataFileMeta> after = rewriter.rewrite(before);
+                    compactAfter.addAll(after);
+                    DataFileMeta lastFile = after.get(after.size() - 1);
+                    if (lastFile.fileSize() < targetFileSize) {
+                        toCompact.offerFirst(lastFile);
+                    }
+                } else {
+                    break;
+                }
+            }
+            // remove intermediate files
+            Iterator<DataFileMeta> iterator = compactAfter.iterator();
+            while (iterator.hasNext()) {
+                DataFileMeta file = iterator.next();
+                if (compactBefore.contains(file)) {
+                    compactBefore.remove(file);
+                    iterator.remove();
+                }
+            }
+            return result(new ArrayList<>(compactBefore), compactAfter);
+        }
+    }
+
+    /** A {@link CompactTask} impl for append-only table auto-compaction. */
+    public static class AutoCompactTask extends CompactTask {
 
         private final CompactRewriter rewriter;
 
-        public AppendOnlyCompactTask(List<DataFileMeta> toCompact, CompactRewriter rewriter) {
+        public AutoCompactTask(List<DataFileMeta> toCompact, CompactRewriter rewriter) {
             super(toCompact);
             this.rewriter = rewriter;
         }
 
         @Override
         protected CompactResult doCompact(List<DataFileMeta> inputs) throws Exception {
-            List<DataFileMeta> compactAfter = rewriter.rewrite(inputs);
-            return new CompactResult() {
-                @Override
-                public List<DataFileMeta> before() {
-                    return inputs;
-                }
-
-                @Override
-                public List<DataFileMeta> after() {
-                    return compactAfter;
-                }
-            };
+            return result(inputs, rewriter.rewrite(inputs));
         }
+    }
+
+    private static CompactResult result(List<DataFileMeta> before, List<DataFileMeta> after) {
+        return new CompactResult() {
+            @Override
+            public List<DataFileMeta> before() {
+                return before;
+            }
+
+            @Override
+            public List<DataFileMeta> after() {
+                return after;
+            }
+        };
     }
 
     /** Compact rewriter for append-only table. */
