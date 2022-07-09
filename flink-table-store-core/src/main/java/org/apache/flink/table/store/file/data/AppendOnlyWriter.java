@@ -159,7 +159,7 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     }
 
     private void submitCompaction() throws ExecutionException, InterruptedException {
-        compactManager.finishCompaction(forceCompact);
+        finishCompaction(false);
         if (compactManager.isCompactionFinished() && !toCompact.isEmpty()) {
             compactManager.submitCompaction();
         }
@@ -243,7 +243,10 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
         }
     }
 
-    /** */
+    /**
+     * A {@link BaseFileWriter} impl with a counter with an initial value to record each row's
+     * sequence number.
+     */
     public static class RowFileWriter extends BaseFileWriter<RowData, DataFileMeta> {
 
         private final FieldStatsArraySerializer statsArraySerializer;
