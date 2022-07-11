@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.spark;
 
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.FileStoreTable;
 
 import org.apache.spark.sql.catalog.Table;
@@ -60,5 +61,9 @@ public class SparkTable implements org.apache.spark.sql.connector.catalog.Table,
         Set<TableCapability> capabilities = new HashSet<>();
         capabilities.add(TableCapability.BATCH_READ);
         return capabilities;
+    }
+
+    public TableSchema tableSchema() {
+        return table.schema();
     }
 }

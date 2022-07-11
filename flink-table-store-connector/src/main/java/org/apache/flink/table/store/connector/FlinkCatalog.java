@@ -41,12 +41,15 @@ import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
 import org.apache.flink.table.store.file.catalog.Catalog;
+import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
@@ -132,7 +135,7 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     @Override
-    public CatalogBaseTable getTable(ObjectPath tablePath)
+    public CatalogTable getTable(ObjectPath tablePath)
             throws TableNotExistException, CatalogException {
         TableSchema schema;
         try {
@@ -165,33 +168,11 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public void createTable(ObjectPath tablePath, CatalogBaseTable table, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException, CatalogException {
-        try {
-            catalog.createTable(tablePath, convertTableToSchema(tablePath, table), ignoreIfExists);
-        } catch (Catalog.TableAlreadyExistException e) {
-            throw new TableAlreadyExistException(getName(), e.tablePath());
-        } catch (Catalog.DatabaseNotExistException e) {
-            throw new DatabaseNotExistException(getName(), e.database());
-        }
-    }
-
-    @Override
-    public void alterTable(
-            ObjectPath tablePath, CatalogBaseTable newTable, boolean ignoreIfNotExists)
-            throws TableNotExistException, CatalogException {
-        try {
-            catalog.alterTable(
-                    tablePath, convertTableToSchema(tablePath, newTable), ignoreIfNotExists);
-        } catch (Catalog.TableNotExistException e) {
-            throw new TableNotExistException(getName(), e.tablePath());
-        }
-    }
-
-    private UpdateSchema convertTableToSchema(ObjectPath tablePath, CatalogBaseTable baseTable) {
-        if (!(baseTable instanceof CatalogTable)) {
+        if (!(table instanceof CatalogTable)) {
             throw new UnsupportedOperationException(
-                    "Only support CatalogTable, but is: " + baseTable.getClass());
+                    "Only support CatalogTable, but is: " + table.getClass());
         }
-        CatalogTable table = (CatalogTable) baseTable;
+        CatalogTable catalogTable = (CatalogTable) table;
         Map<String, String> options = table.getOptions();
         if (options.containsKey(CONNECTOR.key())) {
             throw new CatalogException(
@@ -208,10 +189,92 @@ public class FlinkCatalog extends AbstractCatalog {
                 throw new IllegalArgumentException(
                         "Illegal table path in table options: " + specific);
             }
-            table = table.copy(options);
+            catalogTable = catalogTable.copy(options);
         }
 
-        return UpdateSchema.fromCatalogTable(table);
+        try {
+            catalog.createTable(
+                    tablePath, UpdateSchema.fromCatalogTable(catalogTable), ignoreIfExists);
+        } catch (Catalog.TableAlreadyExistException e) {
+            throw new TableAlreadyExistException(getName(), e.tablePath());
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new DatabaseNotExistException(getName(), e.database());
+        }
+    }
+
+    @Override
+    public void alterTable(
+            ObjectPath tablePath, CatalogBaseTable newTable, boolean ignoreIfNotExists)
+            throws TableNotExistException, CatalogException {
+        if (ignoreIfNotExists && !tableExists(tablePath)) {
+            return;
+        }
+
+        CatalogTable table = getTable(tablePath);
+
+        // Currently, Flink SQL only support altering table properties.
+        validateAlterTable(table, (CatalogTable) newTable);
+
+        List<SchemaChange> changes = new ArrayList<>();
+        Map<String, String> oldProperties = table.getOptions();
+        for (Map.Entry<String, String> entry : newTable.getOptions().entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+
+            if (Objects.equals(value, oldProperties.get(key))) {
+                continue;
+            }
+
+            if (PATH.key().equalsIgnoreCase(key)) {
+                throw new IllegalArgumentException("Illegal table path in table options: " + value);
+            }
+
+            changes.add(SchemaChange.setOption(key, value));
+        }
+
+        oldProperties
+                .keySet()
+                .forEach(
+                        k -> {
+                            if (!newTable.getOptions().containsKey(k)) {
+                                changes.add(SchemaChange.removeOption(k));
+                            }
+                        });
+
+        try {
+            catalog.alterTable(tablePath, changes, ignoreIfNotExists);
+        } catch (Catalog.TableNotExistException e) {
+            throw new TableNotExistException(getName(), e.tablePath());
+        }
+    }
+
+    private static void validateAlterTable(CatalogTable ct1, CatalogTable ct2) {
+        org.apache.flink.table.api.TableSchema ts1 = ct1.getSchema();
+        org.apache.flink.table.api.TableSchema ts2 = ct2.getSchema();
+        boolean equalsPrimary = false;
+
+        if (ts1.getPrimaryKey().isPresent() && ts2.getPrimaryKey().isPresent()) {
+            equalsPrimary =
+                    Objects.equals(
+                                    ts1.getPrimaryKey().get().getType(),
+                                    ts2.getPrimaryKey().get().getType())
+                            && Objects.equals(
+                                    ts1.getPrimaryKey().get().getColumns(),
+                                    ts2.getPrimaryKey().get().getColumns());
+        } else if (!ts1.getPrimaryKey().isPresent() && !ts2.getPrimaryKey().isPresent()) {
+            equalsPrimary = true;
+        }
+
+        if (!(Objects.equals(ts1.getTableColumns(), ts2.getTableColumns())
+                && Objects.equals(ts1.getWatermarkSpecs(), ts2.getWatermarkSpecs())
+                && equalsPrimary)) {
+            throw new UnsupportedOperationException("Altering schema is not supported yet.");
+        }
+
+        if (!ct1.getPartitionKeys().equals(ct2.getPartitionKeys())) {
+            throw new UnsupportedOperationException(
+                    "Altering partition keys is not supported yet.");
+        }
     }
 
     @Override

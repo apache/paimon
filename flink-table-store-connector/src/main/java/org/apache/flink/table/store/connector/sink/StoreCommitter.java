@@ -18,12 +18,9 @@
 
 package org.apache.flink.table.store.connector.sink;
 
-import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.TableCommit;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
@@ -33,18 +30,8 @@ public class StoreCommitter implements Committer {
 
     private final TableCommit commit;
 
-    @Nullable private final CatalogLock lock;
-
-    public StoreCommitter(TableCommit commit, @Nullable CatalogLock lock) {
+    public StoreCommitter(TableCommit commit) {
         this.commit = commit;
-        this.lock = lock;
-    }
-
-    @Override
-    public void close() throws Exception {
-        if (lock != null) {
-            lock.close();
-        }
     }
 
     @Override
@@ -77,5 +64,10 @@ public class StoreCommitter implements Committer {
     public void commit(List<ManifestCommittable> committables)
             throws IOException, InterruptedException {
         commit.commit(committables);
+    }
+
+    @Override
+    public void close() throws Exception {
+        commit.close();
     }
 }

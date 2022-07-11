@@ -22,7 +22,9 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.catalog.AbstractCatalog;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
+import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.schema.DataField;
+import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
@@ -53,6 +55,8 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.CatalogOptions.LOCK_ENABLED;
+import static org.apache.flink.table.store.hive.HiveCatalogLock.acquireTimeout;
+import static org.apache.flink.table.store.hive.HiveCatalogLock.checkMaxSleep;
 
 /** A catalog implementation for Hive. */
 public class HiveCatalog extends AbstractCatalog {
@@ -78,12 +82,14 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public Optional<CatalogLock.Factory> lockFactory() {
-        boolean lockEnabled =
-                Boolean.parseBoolean(
-                        hiveConf.get(LOCK_ENABLED.key(), LOCK_ENABLED.defaultValue().toString()));
-        return lockEnabled
+        return lockEnabled()
                 ? Optional.of(HiveCatalogLock.createFactory(hiveConf))
                 : Optional.empty();
+    }
+
+    private boolean lockEnabled() {
+        return Boolean.parseBoolean(
+                hiveConf.get(LOCK_ENABLED.key(), LOCK_ENABLED.defaultValue().toString()));
     }
 
     @Override
@@ -211,7 +217,16 @@ public class HiveCatalog extends AbstractCatalog {
 
         // first commit changes to underlying files
         // if changes on Hive fails there is no harm to perform the same changes to files again
-        TableSchema schema = commitToUnderlyingFiles(tablePath, updateSchema);
+        TableSchema schema;
+        try {
+            schema = schemaManager(tablePath).commitNewVersion(updateSchema);
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Failed to commit changes of table "
+                            + tablePath.getFullName()
+                            + " to underlying files",
+                    e);
+        }
         Table table = newHmsTable(tablePath);
         updateHmsTable(table, tablePath, schema);
         try {
@@ -223,7 +238,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public void alterTable(
-            ObjectPath tablePath, UpdateSchema updateSchema, boolean ignoreIfNotExists)
+            ObjectPath tablePath, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException {
         if (isTableStoreTableNotExisted(tablePath)) {
             if (ignoreIfNotExists) {
@@ -233,20 +248,21 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
 
-        // first commit changes to underlying files
-        // if changes on Hive fails there is no harm to perform the same changes to files again
-        TableSchema schema = commitToUnderlyingFiles(tablePath, updateSchema);
         try {
+            // first commit changes to underlying files
+            TableSchema schema = schemaManager(tablePath).commitChanges(changes);
+
+            // sync to hive hms
             Table table = client.getTable(tablePath.getDatabaseName(), tablePath.getObjectName());
             updateHmsTable(table, tablePath, schema);
             client.alter_table(tablePath.getDatabaseName(), tablePath.getObjectName(), table);
-        } catch (TException e) {
-            throw new RuntimeException("Failed to alter table " + tablePath.getFullName(), e);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 
     @Override
-    public void close() throws Exception {
+    public void close() {
         client.close();
     }
 
@@ -343,17 +359,18 @@ public class HiveCatalog extends AbstractCatalog {
         return false;
     }
 
-    private TableSchema commitToUnderlyingFiles(ObjectPath tablePath, UpdateSchema schema) {
-        Path path = getTableLocation(tablePath);
-        try {
-            return new SchemaManager(path).commitNewVersion(schema);
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Failed to commit changes of table "
-                            + tablePath.getFullName()
-                            + " to underlying files",
-                    e);
+    private SchemaManager schemaManager(ObjectPath tablePath) {
+        return new SchemaManager(getTableLocation(tablePath)).withLock(lock(tablePath));
+    }
+
+    private Lock lock(ObjectPath tablePath) {
+        if (!lockEnabled()) {
+            return null;
         }
+
+        HiveCatalogLock lock =
+                new HiveCatalogLock(client, checkMaxSleep(hiveConf), acquireTimeout(hiveConf));
+        return Lock.fromCatalog(lock, tablePath);
     }
 
     static IMetaStoreClient createClient(HiveConf hiveConf) {

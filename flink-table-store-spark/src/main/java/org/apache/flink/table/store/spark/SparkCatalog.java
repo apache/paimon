@@ -22,6 +22,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
+import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
@@ -32,6 +33,10 @@ import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 import org.apache.spark.sql.connector.catalog.Table;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.connector.catalog.TableChange;
+import org.apache.spark.sql.connector.catalog.TableChange.AddColumn;
+import org.apache.spark.sql.connector.catalog.TableChange.RemoveProperty;
+import org.apache.spark.sql.connector.catalog.TableChange.SetProperty;
+import org.apache.spark.sql.connector.catalog.TableChange.UpdateColumnType;
 import org.apache.spark.sql.connector.expressions.Transform;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -40,6 +45,9 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+
+import static org.apache.flink.table.store.spark.SparkTypeUtils.toFlinkType;
 
 /** Spark {@link TableCatalog} for table store. */
 public class SparkCatalog implements TableCatalog, SupportsNamespaces {
@@ -101,26 +109,68 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
     }
 
     @Override
-    public Table loadTable(Identifier ident) throws NoSuchTableException {
-        if (!isValidateNamespace(ident.namespace())) {
-            throw new NoSuchTableException(ident);
-        }
-
+    public SparkTable loadTable(Identifier ident) throws NoSuchTableException {
         try {
-            return new SparkTable(
-                    catalog.getTable(new ObjectPath(ident.namespace()[0], ident.name())));
+            return new SparkTable(catalog.getTable(objectPath(ident)));
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
         }
     }
 
     @Override
-    public void renameTable(Identifier oldIdent, Identifier newIdent) {
-        throw new UnsupportedOperationException();
+    public Table alterTable(Identifier ident, TableChange... changes) throws NoSuchTableException {
+        List<SchemaChange> schemaChanges =
+                Arrays.stream(changes).map(this::toSchemaChange).collect(Collectors.toList());
+        try {
+            catalog.alterTable(objectPath(ident), schemaChanges, false);
+            return loadTable(ident);
+        } catch (Catalog.TableNotExistException e) {
+            throw new NoSuchTableException(ident);
+        }
+    }
+
+    private SchemaChange toSchemaChange(TableChange change) {
+        if (change instanceof SetProperty) {
+            SetProperty set = (SetProperty) change;
+            return SchemaChange.setOption(set.property(), set.value());
+        } else if (change instanceof RemoveProperty) {
+            return SchemaChange.removeOption(((RemoveProperty) change).property());
+        } else if (change instanceof AddColumn) {
+            AddColumn add = (AddColumn) change;
+            validateAlterNestedField(add.fieldNames());
+            return SchemaChange.addColumn(
+                    add.fieldNames()[0],
+                    toFlinkType(add.dataType()),
+                    add.isNullable(),
+                    add.comment());
+        } else if (change instanceof UpdateColumnType) {
+            UpdateColumnType update = (UpdateColumnType) change;
+            validateAlterNestedField(update.fieldNames());
+            return SchemaChange.updateColumnType(
+                    update.fieldNames()[0], toFlinkType(update.newDataType()));
+        } else {
+            throw new UnsupportedOperationException(
+                    "Change is not supported: " + change.getClass());
+        }
+    }
+
+    private void validateAlterNestedField(String[] fieldNames) {
+        if (fieldNames.length > 1) {
+            throw new UnsupportedOperationException(
+                    "Alter nested column is not supported: " + Arrays.toString(fieldNames));
+        }
     }
 
     private boolean isValidateNamespace(String[] namespace) {
         return namespace.length == 1;
+    }
+
+    private ObjectPath objectPath(Identifier ident) throws NoSuchTableException {
+        if (!isValidateNamespace(ident.namespace())) {
+            throw new NoSuchTableException(ident);
+        }
+
+        return new ObjectPath(ident.namespace()[0], ident.name());
     }
 
     // --------------------- unsupported methods ----------------------------
@@ -150,12 +200,12 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
     }
 
     @Override
-    public Table alterTable(Identifier ident, TableChange... changes) {
-        throw new UnsupportedOperationException("Alter table in Spark is not supported yet.");
+    public boolean dropTable(Identifier ident) {
+        throw new UnsupportedOperationException("Drop table in Spark is not supported yet.");
     }
 
     @Override
-    public boolean dropTable(Identifier ident) {
-        throw new UnsupportedOperationException("Drop table in Spark is not supported yet.");
+    public void renameTable(Identifier oldIdent, Identifier newIdent) {
+        throw new UnsupportedOperationException();
     }
 }
