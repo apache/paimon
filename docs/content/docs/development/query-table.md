@@ -54,9 +54,9 @@ The filter functions that can accelerate data skipping are:
 - `LIKE '%abc'`
 - `IS NULL`
 
-Table Store will sort the data by primary key, which is good for point queries
-and range queries to speed up. When using a composite primary key, it is best
-for the query filters to form a [leftmost prefix](https://dev.mysql.com/doc/refman/5.7/en/multiple-column-indexes.html)
+Table Store will sort the data by primary key, which speeds up the point queries
+and range queries. When using a composite primary key, it is best for the query
+filters to form a [leftmost prefix](https://dev.mysql.com/doc/refman/5.7/en/multiple-column-indexes.html)
 of the primary key for good acceleration.
 
 Suppose that a table has the following specification:
@@ -66,12 +66,12 @@ CREATE TABLE orders (
     catalog_id BIGINT,
     order_id BIGINT,
     .....,
-    PRIMARY KEY (catalog_id, order_id) NOT ENFORCED
+    PRIMARY KEY (catalog_id, order_id) NOT ENFORCED -- composite primary key
 )
 ```
 
-The primary key is catalog_id + order_id. Good acceleration is obtained
-by specifying a range filter for the leftmost prefix of the primary key.
+The query obtains a good acceleration by specifying a range filter for
+the leftmost prefix of the primary key.
 
 ```sql
 SELECT * FROM orders WHERE catalog_id=1025;
@@ -83,7 +83,7 @@ SELECT * FROM orders
   AND order_id>2035 AND order_id<6000;
 ```
 
-However, there will not be a good acceleration in the following query.
+However, the following filter cannot accelerate the query well.
 
 ```sql
 SELECT * FROM orders WHERE order_id=29495;

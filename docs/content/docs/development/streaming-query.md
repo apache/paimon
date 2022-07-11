@@ -26,7 +26,7 @@ under the License.
 
 # Streaming Query
 
-Currently, only Flink supports streaming query.
+Currently, Table Store only supports Flink streaming queries.
 
 The Table Store is streaming batch unified, you can read full
 and incremental data depending on the runtime execution mode:
@@ -70,11 +70,11 @@ Different `log.scan` mode will result in different consuming behavior under stre
 
 ## Streaming Query on Files
 
-You can incrementally consume tables directly on the lake store files. This mode has
-a lower cost compared to Kafka, but the latency will be bigger, depending on the
-checkpoint interval of the writing stream job.
+You can choose to consume incremental changes directly from the lake store files under
+streaming mode. This mode has a lower cost compared to Kafka but has a higher latency,
+depending on the checkpoint interval of the writing job.
 
-By default, the downstream streaming consumption is a disordered (ordered within the key)
+By default, the downstream streaming consumption is disordered (ordered within the key)
 stream of upsert data. If you expect an ordered CDC data stream, you can configure it
 as follows (recommended):
 
@@ -88,9 +88,9 @@ WITH (
 
 ## Streaming Query on Kafka
 
-You can configure the Kafka topic for the table, and the data written will be
-double-written to Kafka, and streaming reads will be incremental snapshots
-reading on hybrid storage of files and Kafka.
+For a table configuring a log system like Kafka, data will be double written to the file
+storage and the Kafka topic under streaming mode. For queries, there will be hybrid reads
+will from incremental snapshots.
 
 ```sql
 CREATE TABLE T (...)
