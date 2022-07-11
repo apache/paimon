@@ -214,16 +214,35 @@ public class CoreOptions implements Serializable {
                     .defaultValue(200)
                     .withDescription(
                             "The size amplification is defined as the amount (in percentage) of additional storage "
-                                    + "needed to store a single byte of data in the merge tree.");
+                                    + "needed to store a single byte of data in the merge tree for changelog mode table.");
 
     public static final ConfigOption<Integer> COMPACTION_SIZE_RATIO =
             ConfigOptions.key("compaction.size-ratio")
                     .intType()
                     .defaultValue(1)
                     .withDescription(
-                            "Percentage flexibility while comparing sorted run size. If the candidate sorted run(s) "
+                            "Percentage flexibility while comparing sorted run size for changelog mode table. If the candidate sorted run(s) "
                                     + "size is 1% smaller than the next sorted run's size, then include next sorted run "
                                     + "into this candidate set.");
+
+    public static final ConfigOption<Integer> COMPACTION_MIN_FILE_NUM =
+            ConfigOptions.key("compaction.min.file-num")
+                    .intType()
+                    .defaultValue(5)
+                    .withDescription(
+                            "For file set [f_0,...,f_N], the minimum file number which satisfies "
+                                    + "sum(size(f_i)) >= targetFileSize to trigger a compaction for "
+                                    + "append-only table. This value avoids almost-full-file to be compacted, "
+                                    + "which is not cost-effective.");
+
+    public static final ConfigOption<Integer> COMPACTION_MAX_FILE_NUM =
+            ConfigOptions.key("compaction.early-max.file-num")
+                    .intType()
+                    .defaultValue(50)
+                    .withDescription(
+                            "For file set [f_0,...,f_N], the maximum file number to trigger a compaction "
+                                    + "for append-only table, even if sum(size(f_i)) < targetFileSize. This value "
+                                    + "avoids pending too much small files, which slows down the performance.");
 
     public static final ConfigOption<Boolean> CHANGELOG_FILE =
             ConfigOptions.key("changelog-file")
@@ -398,8 +417,16 @@ public class CoreOptions implements Serializable {
         return options.get(COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT);
     }
 
-    public int sizeRatio() {
+    public int sortedRunSizeRatio() {
         return options.get(COMPACTION_SIZE_RATIO);
+    }
+
+    public int minFileNum() {
+        return options.get(COMPACTION_MIN_FILE_NUM);
+    }
+
+    public int maxFileNum() {
+        return options.get(COMPACTION_MAX_FILE_NUM);
     }
 
     public boolean enableChangelogFile() {

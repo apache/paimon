@@ -22,6 +22,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.file.data.AppendOnlyCompactManager;
 import org.apache.flink.table.store.file.data.AppendOnlyWriter;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
@@ -37,6 +38,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.LinkedList;
 import java.util.List;
 
 /** test file format suffix. */
@@ -57,8 +59,17 @@ public class FileFormatSuffixTest extends DataFileTest {
         DataFilePathFactory dataFilePathFactory =
                 new DataFilePathFactory(new Path(tempDir.toString()), "dt=1", 1, format);
         FileFormat fileFormat = FileFormat.fromIdentifier(format, new Configuration());
+        LinkedList<DataFileMeta> toCompact = new LinkedList<>();
         AppendOnlyWriter appendOnlyWriter =
-                new AppendOnlyWriter(0, fileFormat, 10, SCHEMA, 10, dataFilePathFactory);
+                new AppendOnlyWriter(
+                        0,
+                        fileFormat,
+                        10,
+                        SCHEMA,
+                        toCompact,
+                        new AppendOnlyCompactManager(null, toCompact, 4, 10, 10, null), // not used
+                        false,
+                        dataFilePathFactory);
         appendOnlyWriter.write(
                 GenericRowData.of(1, StringData.fromString("aaa"), StringData.fromString("1")));
         List<DataFileMeta> result = appendOnlyWriter.close();

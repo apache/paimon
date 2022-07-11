@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.compact.CompactUnit;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileTestUtils;
 import org.apache.flink.table.store.file.mergetree.Levels;
@@ -44,8 +45,8 @@ import java.util.stream.Collectors;
 import static org.apache.flink.table.store.file.data.DataFileTestUtils.newFile;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link CompactManager}. */
-public class CompactManagerTest {
+/** Test for {@link MergeTreeCompactManager}. */
+public class MergeTreeCompactManagerTest {
 
     private final Comparator<RowData> comparator = Comparator.comparingInt(o -> o.getInt(0));
 
@@ -194,11 +195,11 @@ public class CompactManagerTest {
             files.add(minMax.toFile(i));
         }
         Levels levels = new Levels(comparator, files, 3);
-        CompactManager manager =
-                new CompactManager(
-                        service, strategy, comparator, 2, testRewriter(expectedDropDelete));
-        manager.submitCompaction(levels);
-        manager.finishCompaction(levels, true);
+        MergeTreeCompactManager manager =
+                new MergeTreeCompactManager(
+                        service, levels, strategy, comparator, 2, testRewriter(expectedDropDelete));
+        manager.submitCompaction();
+        manager.finishCompaction(true);
         List<LevelMinMax> outputs =
                 levels.allFiles().stream().map(LevelMinMax::new).collect(Collectors.toList());
         assertThat(outputs).isEqualTo(expected);

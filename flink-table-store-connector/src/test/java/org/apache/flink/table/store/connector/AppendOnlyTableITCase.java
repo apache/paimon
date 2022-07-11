@@ -20,6 +20,7 @@ package org.apache.flink.table.store.connector;
 
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
+import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 
@@ -33,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test case for append-only managed table. */
-public class AppendOnlyTableTest extends FileStoreTableITCase {
+public class AppendOnlyTableITCase extends FileStoreTableITCase {
 
     @Test
     public void testCreateTableWithPrimaryKey() {
@@ -124,17 +125,61 @@ public class AppendOnlyTableTest extends FileStoreTableITCase {
                         Row.of("AAA"), Row.of("AAA"), Row.of("BBB"), Row.of("AAA"));
     }
 
-    private void testRejectChanges(RowKind kind) {
-        List<Row> input = Collections.singletonList(Row.ofKind(kind, 1, "AAA"));
+    @Test
+    public void testAutoCompaction() {
+        batchSql("ALTER TABLE append_table SET ('commit.force-compact' = 'true')");
+        batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '2')");
+        batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
 
-        String id = TestValuesTableFactory.registerData(input);
-        batchSql(
-                "CREATE TABLE source (id INT, data STRING) WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
-                id);
+        assertAutoCompaction(
+                "INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')",
+                1L,
+                Snapshot.CommitKind.APPEND);
+        assertAutoCompaction(
+                "INSERT INTO append_table VALUES (3, 'CCC'), (4, 'DDD')",
+                2L,
+                Snapshot.CommitKind.APPEND);
+        assertAutoCompaction(
+                "INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB'), (3, 'CCC'), (4, 'DDD')",
+                3L,
+                Snapshot.CommitKind.APPEND);
+        assertAutoCompaction(
+                "INSERT INTO append_table VALUES (5, 'EEE'), (6, 'FFF')",
+                5L,
+                Snapshot.CommitKind.COMPACT);
+        assertAutoCompaction(
+                "INSERT INTO append_table VALUES (7, 'HHH'), (8, 'III')",
+                6L,
+                Snapshot.CommitKind.APPEND);
+        assertAutoCompaction(
+                "INSERT INTO append_table VALUES (9, 'JJJ'), (10, 'KKK')",
+                7L,
+                Snapshot.CommitKind.APPEND);
+        assertAutoCompaction(
+                "INSERT INTO append_table VALUES (11, 'LLL'), (12, 'MMM')",
+                9L,
+                Snapshot.CommitKind.COMPACT);
 
-        assertThatThrownBy(() -> batchSql("INSERT INTO append_table SELECT * FROM source"))
-                .hasRootCauseInstanceOf(IllegalStateException.class)
-                .hasRootCauseMessage("Append only writer can not accept row with RowKind %s", kind);
+        List<Row> rows = batchSql("SELECT * FROM append_table");
+        assertThat(rows.size()).isEqualTo(16);
+        assertThat(rows)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "AAA"),
+                        Row.of(2, "BBB"),
+                        Row.of(3, "CCC"),
+                        Row.of(4, "DDD"),
+                        Row.of(1, "AAA"),
+                        Row.of(2, "BBB"),
+                        Row.of(3, "CCC"),
+                        Row.of(4, "DDD"),
+                        Row.of(5, "EEE"),
+                        Row.of(6, "FFF"),
+                        Row.of(7, "HHH"),
+                        Row.of(8, "III"),
+                        Row.of(9, "JJJ"),
+                        Row.of(10, "KKK"),
+                        Row.of(11, "LLL"),
+                        Row.of(12, "MMM"));
     }
 
     @Test
@@ -155,6 +200,27 @@ public class AppendOnlyTableTest extends FileStoreTableITCase {
     @Override
     protected List<String> ddl() {
         return Collections.singletonList(
-                "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('write-mode'='append-only')");
+                "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('write-mode'='append-only', 'commit.force-compact' = 'true')");
+    }
+
+    private void testRejectChanges(RowKind kind) {
+        List<Row> input = Collections.singletonList(Row.ofKind(kind, 1, "AAA"));
+
+        String id = TestValuesTableFactory.registerData(input);
+        batchSql(
+                "CREATE TABLE source (id INT, data STRING) WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                id);
+
+        assertThatThrownBy(() -> batchSql("INSERT INTO append_table SELECT * FROM source"))
+                .hasRootCauseInstanceOf(IllegalStateException.class)
+                .hasRootCauseMessage("Append only writer can not accept row with RowKind %s", kind);
+    }
+
+    private void assertAutoCompaction(
+            String sql, long expectedSnapshotId, Snapshot.CommitKind expectedCommitKind) {
+        batchSql(sql);
+        Snapshot snapshot = findLatestSnapshot("append_table", true);
+        assertThat(snapshot.id()).isEqualTo(expectedSnapshotId);
+        assertThat(snapshot.commitKind()).isEqualTo(expectedCommitKind);
     }
 }

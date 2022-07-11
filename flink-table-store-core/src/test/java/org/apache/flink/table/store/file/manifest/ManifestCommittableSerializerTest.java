@@ -29,7 +29,7 @@ import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
+import static org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.apache.flink.table.store.file.stats.StatsTestUtils.newTableStats;
 import static org.assertj.core.api.Assertions.assertThat;
 
