@@ -51,7 +51,7 @@ The filter functions that can accelerate data skipping are:
 - `>`
 - `>=`
 - `IN (...)`
-- `LIKE '%abc'`
+- `LIKE 'abc%'`
 - `IS NULL`
 
 Table Store will sort the data by primary key, which speeds up the point queries
