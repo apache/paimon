@@ -186,10 +186,6 @@ public class FlinkCatalog extends AbstractCatalog {
         }
     }
 
-    private static ClassLoader classLoader() {
-        return FlinkCatalog.class.getClassLoader();
-    }
-
     private UpdateSchema convertTableToSchema(ObjectPath tablePath, CatalogBaseTable baseTable) {
         if (!(baseTable instanceof CatalogTable)) {
             throw new UnsupportedOperationException(
@@ -199,8 +195,10 @@ public class FlinkCatalog extends AbstractCatalog {
         Map<String, String> options = table.getOptions();
         if (options.containsKey(CONNECTOR.key())) {
             throw new CatalogException(
-                    "Table Store Catalog only supports table store tables, not Flink connector: "
-                            + options.get(CONNECTOR.key()));
+                    String.format(
+                            "Table Store Catalog only supports table store tables, not '%s' connector."
+                                    + " You can create TEMPORARY table instead.",
+                            options.get(CONNECTOR.key())));
         }
 
         // remove table path

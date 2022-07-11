@@ -205,7 +205,8 @@ public class FlinkCatalogTest {
         assertThatThrownBy(() -> catalog.createTable(this.path1, newTable, false))
                 .isInstanceOf(CatalogException.class)
                 .hasMessageContaining(
-                        "Table Store Catalog only supports table store tables, not Flink connector: filesystem");
+                        "Table Store Catalog only supports table store tables,"
+                                + " not 'filesystem' connector. You can create TEMPORARY table instead.");
     }
 
     @Test
