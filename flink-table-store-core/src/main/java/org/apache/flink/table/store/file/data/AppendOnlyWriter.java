@@ -65,6 +65,7 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     private final LinkedList<DataFileMeta> toCompact;
     private final List<DataFileMeta> compactBefore;
     private final List<DataFileMeta> compactAfter;
+    private final LongCounter seqNumCounter;
 
     private RowRollingWriter writer;
 
@@ -73,7 +74,7 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
             FileFormat fileFormat,
             long targetFileSize,
             RowType writeSchema,
-            LinkedList<DataFileMeta> toCompact,
+            LinkedList<DataFileMeta> restoredFiles,
             AppendOnlyCompactManager compactManager,
             boolean forceCompact,
             DataFilePathFactory pathFactory) {
@@ -84,9 +85,10 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
         this.pathFactory = pathFactory;
         this.compactManager = compactManager;
         this.forceCompact = forceCompact;
-        this.toCompact = toCompact;
+        this.toCompact = restoredFiles;
         this.compactBefore = new ArrayList<>();
         this.compactAfter = new ArrayList<>();
+        this.seqNumCounter = new LongCounter(getMaxSequenceNumber(restoredFiles) + 1);
         this.writer =
                 createRollingRowWriter(
                         schemaId,
@@ -94,7 +96,7 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
                         targetFileSize,
                         writeSchema,
                         pathFactory,
-                        new LongCounter(getMaxSequenceNumber(toCompact) + 1));
+                        seqNumCounter);
     }
 
     @Override
@@ -114,6 +116,8 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
             newFiles.addAll(writer.result());
 
             // Reopen the writer to accept further records.
+            seqNumCounter.resetLocal();
+            seqNumCounter.add(getMaxSequenceNumber(newFiles) + 1);
             writer =
                     createRollingRowWriter(
                             schemaId,
@@ -121,7 +125,7 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
                             targetFileSize,
                             writeSchema,
                             pathFactory,
-                            new LongCounter(getMaxSequenceNumber(newFiles) + 1));
+                            seqNumCounter);
         }
         // add new generated files
         toCompact.addAll(newFiles);

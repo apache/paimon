@@ -106,17 +106,17 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
             ExecutorService compactExecutor) {
         // let writer and compact manager hold the same reference
         // and make restore files mutable to update
-        LinkedList<DataFileMeta> toCompact = new LinkedList<>(restoredFiles);
+        LinkedList<DataFileMeta> restored = new LinkedList<>(restoredFiles);
         DataFilePathFactory factory = pathFactory.createDataFilePathFactory(partition, bucket);
         return new AppendOnlyWriter(
                 schemaId,
                 fileFormat,
                 targetFileSize,
                 rowType,
-                toCompact,
+                restored,
                 new AppendOnlyCompactManager(
                         compactExecutor,
-                        toCompact,
+                        restored,
                         minFileNum,
                         maxFileNum,
                         targetFileSize,
