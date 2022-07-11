@@ -94,15 +94,16 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                         tableSchema.id(),
                         new CoreOptions(conf),
                         tableSchema.logicalPartitionType(),
-                        addKeyNamePrefix(tableSchema.logicalBucketKeyType()),
-                        addKeyNamePrefix(tableSchema.logicalTrimmedPrimaryKeysType()),
+                        addKeyNamePrefix(false, tableSchema.logicalBucketKeyType()),
+                        addKeyNamePrefix(true, tableSchema.logicalTrimmedPrimaryKeysType()),
                         rowType,
                         mergeFunction);
     }
 
-    private RowType addKeyNamePrefix(RowType type) {
+    private RowType addKeyNamePrefix(boolean isNullable, RowType type) {
         // add prefix to avoid conflict with value
         return new RowType(
+                isNullable,
                 type.getFields().stream()
                         .map(
                                 f ->

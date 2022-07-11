@@ -66,7 +66,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         List<Split> splits = table.newScan().plan().splits;
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
-                .isEqualTo(Arrays.asList("1|10|200", "1|11|101"));
+                .isEqualTo(Arrays.asList("1|10|100", "1|11|101", "1|10|200", "1|11|55"));
     }
 
     @Test
@@ -79,7 +79,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .isEqualTo(Collections.singletonList("1|10|1000"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
-                .isEqualTo(Arrays.asList("2|21|20001", "2|22|202"));
+                .isEqualTo(Arrays.asList("2|20|200", "2|21|20001", "2|22|202", "2|21|2001"));
     }
 
     @Test
@@ -92,7 +92,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Collections.singletonList("1000|10"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_PROJECTED_ROW_TO_STRING))
-                .isEqualTo(Arrays.asList("20001|21", "202|22"));
+                .isEqualTo(Arrays.asList("200|20", "20001|21", "202|22", "2001|21"));
     }
 
     @Test
@@ -110,7 +110,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                         Arrays.asList(
                                 // only filter on key should be performed,
                                 // and records from the same file should also be selected
-                                "2|21|20001", "2|22|202"));
+                                "2|21|20001", "2|22|202", "2|21|2001"));
     }
 
     @Test
@@ -123,7 +123,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(Collections.singletonList("-1|11|1001"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
-                .isEqualTo(Arrays.asList("-2|20|200", "+2|21|20001", "+2|22|202"));
+                .isEqualTo(Arrays.asList("+2|21|20001", "+2|22|202", "-2|20|200"));
     }
 
     @Test
@@ -137,7 +137,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Collections.singletonList("-1001|11"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_PROJECTED_ROW_TO_STRING))
-                .isEqualTo(Arrays.asList("-200|20", "+20001|21", "+202|22"));
+                .isEqualTo(Arrays.asList("+20001|21", "+202|22", "-200|20"));
     }
 
     @Test
@@ -156,7 +156,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                         Arrays.asList(
                                 // only filter on key should be performed,
                                 // and records from the same file should also be selected
-                                "-2|20|200", "+2|21|20001", "+2|22|202"));
+                                "+2|21|20001", "+2|22|202", "-2|20|200"));
     }
 
     @Test

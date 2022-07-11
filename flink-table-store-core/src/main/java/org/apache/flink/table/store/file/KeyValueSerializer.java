@@ -21,10 +21,14 @@ package org.apache.flink.table.store.file;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.utils.JoinedRowData;
+import org.apache.flink.table.store.codegen.CodeGenUtils;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.ObjectSerializer;
 import org.apache.flink.table.store.file.utils.OffsetRowData;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
+
+import java.util.stream.IntStream;
 
 /**
  * Serializer for {@link KeyValue}.
@@ -44,6 +48,13 @@ public class KeyValueSerializer extends ObjectSerializer<KeyValue> {
     private final OffsetRowData reusedKey;
     private final OffsetRowData reusedValue;
     private final KeyValue reusedKv;
+
+    private TableSchema tableSchema;
+
+    public KeyValueSerializer(RowType keyType, RowType valueType, TableSchema tableSchema) {
+        this(keyType, valueType);
+        this.tableSchema = tableSchema;
+    }
 
     public KeyValueSerializer(RowType keyType, RowType valueType) {
         super(KeyValue.schema(keyType, valueType));
@@ -68,15 +79,28 @@ public class KeyValueSerializer extends ObjectSerializer<KeyValue> {
     public RowData toRow(RowData key, long sequenceNumber, RowKind valueKind, RowData value) {
         reusedMeta.setField(0, sequenceNumber);
         reusedMeta.setField(1, valueKind.toByteValue());
-        return reusedRow.replace(reusedKeyWithMeta.replace(key, reusedMeta), value);
+        RowData keyRow = key;
+        if (keyRow == null) {
+            keyRow = new GenericRowData(1);
+            keyRow.setRowKind(valueKind);
+        }
+        return reusedRow.replace(reusedKeyWithMeta.replace(keyRow, reusedMeta), value);
     }
 
     @Override
     public KeyValue fromRow(RowData row) {
-        reusedKey.replace(row);
         reusedValue.replace(row);
         long sequenceNumber = row.getLong(keyArity);
         RowKind valueKind = RowKind.fromByteValue(row.getByte(keyArity + 1));
+        if (IntStream.range(0, keyArity).allMatch(row::isNullAt)) {
+            reusedKey.replace(
+                    CodeGenUtils.newProjection(
+                                    tableSchema.logicalRowType(),
+                                    tableSchema.projection(tableSchema.trimmedPrimaryKeys()))
+                            .apply(reusedValue));
+        } else {
+            reusedKey.replace(row);
+        }
         reusedKv.replace(reusedKey, sequenceNumber, valueKind, reusedValue);
         return reusedKv;
     }

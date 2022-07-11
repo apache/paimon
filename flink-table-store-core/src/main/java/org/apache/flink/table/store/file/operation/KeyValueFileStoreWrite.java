@@ -37,6 +37,7 @@ import org.apache.flink.table.store.file.mergetree.compact.CompactUnit;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -61,6 +62,7 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
     private final Supplier<Comparator<RowData>> keyComparatorSupplier;
     private final MergeFunction mergeFunction;
     private final CoreOptions options;
+    private final TableSchema tableSchema;
 
     public KeyValueFileStoreWrite(
             SchemaManager schemaManager,
@@ -89,6 +91,7 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
         this.keyComparatorSupplier = keyComparatorSupplier;
         this.mergeFunction = mergeFunction;
         this.options = options;
+        this.tableSchema = schemaManager.schemaIfExists(schemaId);
     }
 
     @Override
@@ -143,7 +146,8 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
                 dataFileWriter,
                 options.commitForceCompact(),
                 options.numSortedRunStopTrigger(),
-                options.enableChangelogFile());
+                options.enableChangelogFile(),
+                tableSchema);
     }
 
     private CompactManager createCompactManager(

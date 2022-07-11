@@ -22,6 +22,8 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.types.RowKind;
 
+import javax.annotation.Nullable;
+
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 /** A sink record contains key, row and partition, bucket information. */
@@ -31,9 +33,18 @@ public class SinkRecord {
 
     private final int bucket;
 
-    private final BinaryRowData primaryKey;
+    private final @Nullable BinaryRowData primaryKey;
 
     private final RowData row;
+
+    public SinkRecord(BinaryRowData partition, int bucket, RowData row) {
+        checkArgument(partition.getRowKind() == RowKind.INSERT);
+        this.partition = partition;
+        this.bucket = bucket;
+        this.row = row;
+        // Avoid redundant storage for primary key.
+        this.primaryKey = null;
+    }
 
     public SinkRecord(BinaryRowData partition, int bucket, BinaryRowData primaryKey, RowData row) {
         checkArgument(partition.getRowKind() == RowKind.INSERT);

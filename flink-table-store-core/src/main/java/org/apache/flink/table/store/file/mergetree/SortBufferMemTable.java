@@ -32,11 +32,14 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionHelper;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.MutableObjectIterator;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -51,11 +54,17 @@ public class SortBufferMemTable implements MemTable {
     private final RowType valueType;
     private final KeyValueSerializer serializer;
     private final BinaryInMemorySortBuffer buffer;
+    private final @Nullable TableSchema tableSchema;
 
-    public SortBufferMemTable(RowType keyType, RowType valueType, MemorySegmentPool memoryPool) {
+    public SortBufferMemTable(
+            RowType keyType,
+            RowType valueType,
+            MemorySegmentPool memoryPool,
+            @Nullable TableSchema tableSchema) {
         this.keyType = keyType;
         this.valueType = valueType;
         this.serializer = new KeyValueSerializer(keyType, valueType);
+        this.tableSchema = tableSchema;
 
         // user key + sequenceNumber
         List<LogicalType> sortKeyTypes = new ArrayList<>(keyType.getChildren());
@@ -98,14 +107,14 @@ public class SortBufferMemTable implements MemTable {
 
     @Override
     public Iterator<KeyValue> rawIterator() {
-        return new RawIterator(buffer.getIterator());
+        return new RawIterator(buffer.getIterator(), tableSchema);
     }
 
     @Override
     public Iterator<KeyValue> mergeIterator(
             Comparator<RowData> keyComparator, MergeFunction mergeFunction) {
         new QuickSort().sort(buffer);
-        return new MergeIterator(buffer.getIterator(), keyComparator, mergeFunction);
+        return new MergeIterator(buffer.getIterator(), keyComparator, mergeFunction, tableSchema);
     }
 
     @Override
@@ -129,15 +138,16 @@ public class SortBufferMemTable implements MemTable {
         private MergeIterator(
                 MutableObjectIterator<BinaryRowData> kvIter,
                 Comparator<RowData> keyComparator,
-                MergeFunction mergeFunction) {
+                MergeFunction mergeFunction,
+                @Nullable TableSchema tableSchema) {
             this.kvIter = kvIter;
             this.keyComparator = keyComparator;
             this.mergeFunctionHelper = new MergeFunctionHelper(mergeFunction);
 
             int totalFieldCount = keyType.getFieldCount() + 2 + valueType.getFieldCount();
-            this.previous = new KeyValueSerializer(keyType, valueType);
+            this.previous = new KeyValueSerializer(keyType, valueType, tableSchema);
             this.previousRow = new BinaryRowData(totalFieldCount);
-            this.current = new KeyValueSerializer(keyType, valueType);
+            this.current = new KeyValueSerializer(keyType, valueType, tableSchema);
             this.currentRow = new BinaryRowData(totalFieldCount);
             readOnce();
             this.advanced = false;
@@ -217,9 +227,9 @@ public class SortBufferMemTable implements MemTable {
         private BinaryRowData currentRow;
         private boolean advanced;
 
-        private RawIterator(MutableObjectIterator<BinaryRowData> kvIter) {
+        private RawIterator(MutableObjectIterator<BinaryRowData> kvIter, TableSchema tableSchema) {
             this.kvIter = kvIter;
-            this.current = new KeyValueSerializer(keyType, valueType);
+            this.current = new KeyValueSerializer(keyType, valueType, tableSchema);
             this.currentRow =
                     new BinaryRowData(keyType.getFieldCount() + 2 + valueType.getFieldCount());
             this.advanced = false;

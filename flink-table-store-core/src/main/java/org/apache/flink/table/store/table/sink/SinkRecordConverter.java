@@ -78,9 +78,8 @@ public class SinkRecordConverter {
 
     public SinkRecord convert(RowData row) {
         BinaryRowData partition = partProjection.apply(row);
-        BinaryRowData primaryKey = primaryKey(row);
-        int bucket = bucket(row, bucketKey(row, primaryKey));
-        return new SinkRecord(partition, bucket, primaryKey, row);
+        int bucket = bucket(row, bucketKey(row, primaryKey(row)));
+        return new SinkRecord(partition, bucket, row);
     }
 
     public SinkRecord convertToLogSinkRecord(SinkRecord record) {

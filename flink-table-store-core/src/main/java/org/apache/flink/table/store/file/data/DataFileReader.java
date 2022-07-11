@@ -83,7 +83,9 @@ public class DataFileReader {
             long fileSize = FileUtils.getFileSize(path);
             FileSourceSplit split = new FileSourceSplit("ignore", path, 0, fileSize);
             this.reader = readerFactory.createReader(FileUtils.DEFAULT_READER_CONFIG, split);
-            this.serializer = new KeyValueSerializer(keyType, valueType);
+            this.serializer =
+                    new KeyValueSerializer(
+                            keyType, valueType, schemaManager.schemaIfExists(schemaId));
         }
 
         @Nullable

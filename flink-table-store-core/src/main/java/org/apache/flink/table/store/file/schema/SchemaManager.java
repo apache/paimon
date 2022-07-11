@@ -27,6 +27,7 @@ import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.Serializable;
 import java.io.UncheckedIOException;
@@ -156,6 +157,10 @@ public class SchemaManager implements Serializable {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    public TableSchema schemaIfExists(long id) {
+        return new File(toSchemaPath(id).getPath()).exists() ? schema(id) : null;
     }
 
     private Path schemaDirectory() {

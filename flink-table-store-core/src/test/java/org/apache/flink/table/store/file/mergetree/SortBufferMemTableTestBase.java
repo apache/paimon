@@ -55,7 +55,8 @@ public abstract class SortBufferMemTableTestBase {
                     new RowType(
                             Collections.singletonList(
                                     new RowType.RowField("value", new BigIntType()))),
-                    new HeapMemorySegmentPool(32 * 1024 * 3L, 32 * 1024));
+                    new HeapMemorySegmentPool(32 * 1024 * 3L, 32 * 1024),
+                    null);
 
     protected abstract boolean addOnly();
 

@@ -28,9 +28,12 @@ import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.CompactResult;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.CloseableIterator;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -71,6 +74,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private final LinkedHashSet<DataFileMeta> compactAfter;
 
+    private final @Nullable TableSchema tableSchema;
+
     private long newSequenceNumber;
 
     private MemTable memTable;
@@ -86,7 +91,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             DataFileWriter dataFileWriter,
             boolean commitForceCompact,
             int numSortedRunStopTrigger,
-            boolean enableChangelogFile) {
+            boolean enableChangelogFile,
+            @Nullable TableSchema tableSchema) {
         this.keyType = keyType;
         this.valueType = valueType;
         this.compactManager = compactManager;
@@ -101,6 +107,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.newFiles = new LinkedHashSet<>();
         this.compactBefore = new LinkedHashMap<>();
         this.compactAfter = new LinkedHashSet<>();
+        this.tableSchema = tableSchema;
     }
 
     private long newSequenceNumber() {
@@ -114,7 +121,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public void setMemoryPool(MemorySegmentPool memoryPool) {
-        this.memTable = new SortBufferMemTable(keyType, valueType, memoryPool);
+        this.memTable = new SortBufferMemTable(keyType, valueType, memoryPool, tableSchema);
     }
 
     @Override
