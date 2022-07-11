@@ -26,49 +26,67 @@ under the License.
 
 # Query Table
 
-The Table Store is streaming batch unified, you can read full
-and incremental data depending on the runtime execution mode:
+You can directly SELECT the table in batch runtime mode of Flink SQL.
 
 ```sql
 -- Batch mode, read latest snapshot
 SET 'execution.runtime-mode' = 'batch';
 SELECT * FROM MyTable;
-
--- Streaming mode, read incremental snapshot, read the snapshot first, then read the incremental
-SET 'execution.runtime-mode' = 'streaming';
-SELECT * FROM MyTable;
-
--- Streaming mode, read latest incremental
-SET 'execution.runtime-mode' = 'streaming';
-SELECT * FROM MyTable /*+ OPTIONS ('log.scan'='latest') */;
 ```
+
+## Query Engines
+
+Table Store not only supports Flink SQL queries natively but also provides
+queries from other popular engines. See [Engines]({{< ref "docs/engines/overview" >}})
 
 ## Query Optimization
 
 It is highly recommended to specify partition and primary key filters
 along with the query, which will speed up the data skipping of the query.
-along with the query, which will speed up the data skipping of the query.
 
-Supported filter functions are:
+The filter functions that can accelerate data skipping are:
 - `=`
-- `<>`
 - `<`
 - `<=`
 - `>`
 - `>=`
-- `in`
-- starts with `like`
+- `IN (...)`
+- `LIKE 'abc%'`
+- `IS NULL`
 
-## Real-time Streaming Consumption
+Table Store will sort the data by primary key, which speeds up the point queries
+and range queries. When using a composite primary key, it is best for the query
+filters to form a [leftmost prefix](https://dev.mysql.com/doc/refman/5.7/en/multiple-column-indexes.html)
+of the primary key for good acceleration.
 
-By default, data is only visible after the checkpoint, which means
-that the streaming reading has transactional consistency.
+Suppose that a table has the following specification:
 
-Immediate data visibility is configured via
-`log.consistency` = `eventual`.
+```sql
+CREATE TABLE orders (
+    catalog_id BIGINT,
+    order_id BIGINT,
+    .....,
+    PRIMARY KEY (catalog_id, order_id) NOT ENFORCED -- composite primary key
+)
+```
 
-Due to the tradeoff between data freshness and completeness, immediate data visibility is barely
-accomplished under exactly-once semantics. Nevertheless, users can relax the constraint to use
-at-least-once mode to achieve it. Note that records may be sent to downstream jobs ahead of the committing
-(since no barrier alignment is required), which may lead to duplicate data during job failover. As a result,
-users may need to manually de-duplicate data to achieve final consistency.
+The query obtains a good acceleration by specifying a range filter for
+the leftmost prefix of the primary key.
+
+```sql
+SELECT * FROM orders WHERE catalog_id=1025;
+
+SELECT * FROM orders WHERE catalog_id=1025 AND order_id=29495;
+
+SELECT * FROM orders
+  WHERE catalog_id=1025
+  AND order_id>2035 AND order_id<6000;
+```
+
+However, the following filter cannot accelerate the query well.
+
+```sql
+SELECT * FROM orders WHERE order_id=29495;
+
+SELECT * FROM orders WHERE catalog_id=1025 OR order_id=29495;
+```
