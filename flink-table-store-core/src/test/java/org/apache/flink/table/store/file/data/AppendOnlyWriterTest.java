@@ -35,13 +35,18 @@ import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.util.concurrent.ExecutorThreadFactory;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -61,6 +66,9 @@ public class AppendOnlyWriterTest {
 
     private static final String AVRO = "avro";
     private static final String PART = "2022-05-01";
+    private static final long SCHEMA_ID = 0L;
+    private static final int MIN_FILE_NUM = 3;
+    private static final int MAX_FILE_NUM = 4;
 
     @BeforeEach
     public void before() {
@@ -69,7 +77,7 @@ public class AppendOnlyWriterTest {
 
     @Test
     public void testEmptyCommits() throws Exception {
-        RecordWriter<RowData> writer = createWriter(1024 * 1024L, SCHEMA, 0);
+        RecordWriter<RowData> writer = createEmptyWriter(1024 * 1024L);
 
         for (int i = 0; i < 3; i++) {
             writer.sync();
@@ -83,7 +91,7 @@ public class AppendOnlyWriterTest {
 
     @Test
     public void testSingleWrite() throws Exception {
-        RecordWriter<RowData> writer = createWriter(1024 * 1024L, SCHEMA, 0);
+        RecordWriter<RowData> writer = createEmptyWriter(1024 * 1024L);
         writer.write(row(1, "AAA", PART));
 
         List<DataFileMeta> result = writer.close();
@@ -106,14 +114,14 @@ public class AppendOnlyWriterTest {
                 };
         assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinary(expected));
 
-        assertThat(meta.minSequenceNumber()).isEqualTo(1);
-        assertThat(meta.maxSequenceNumber()).isEqualTo(1);
+        assertThat(meta.minSequenceNumber()).isEqualTo(0);
+        assertThat(meta.maxSequenceNumber()).isEqualTo(0);
         assertThat(meta.level()).isEqualTo(DataFileMeta.DUMMY_LEVEL);
     }
 
     @Test
     public void testMultipleCommits() throws Exception {
-        RecordWriter<RowData> writer = createWriter(1024 * 1024L, SCHEMA, 0);
+        RecordWriter<RowData> writer = createWriter(1024 * 1024L, true, Collections.emptyList());
 
         // Commit 5 continues txn.
         for (int txn = 0; txn < 5; txn += 1) {
@@ -127,8 +135,25 @@ public class AppendOnlyWriterTest {
 
             writer.sync();
             Increment inc = writer.prepareCommit();
-            assertThat(inc.compactBefore()).isEqualTo(Collections.emptyList());
-            assertThat(inc.compactAfter()).isEqualTo(Collections.emptyList());
+            if (txn > 0 && txn % 3 == 0) {
+                assertThat(inc.compactBefore()).hasSize(4);
+                assertThat(inc.compactAfter()).hasSize(1);
+                DataFileMeta compactAfter = inc.compactAfter().get(0);
+                assertThat(compactAfter.fileName()).startsWith("compact-");
+                assertThat(compactAfter.fileSize())
+                        .isEqualTo(
+                                inc.compactBefore().stream()
+                                        .mapToLong(DataFileMeta::fileSize)
+                                        .sum());
+                assertThat(compactAfter.rowCount())
+                        .isEqualTo(
+                                inc.compactBefore().stream()
+                                        .mapToLong(DataFileMeta::rowCount)
+                                        .sum());
+            } else {
+                assertThat(inc.compactBefore()).isEqualTo(Collections.emptyList());
+                assertThat(inc.compactAfter()).isEqualTo(Collections.emptyList());
+            }
 
             assertThat(inc.newFiles().size()).isEqualTo(1);
             DataFileMeta meta = inc.newFiles().get(0);
@@ -149,8 +174,8 @@ public class AppendOnlyWriterTest {
                     };
             assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinary(expected));
 
-            assertThat(meta.minSequenceNumber()).isEqualTo(start + 1);
-            assertThat(meta.maxSequenceNumber()).isEqualTo(end);
+            assertThat(meta.minSequenceNumber()).isEqualTo(start);
+            assertThat(meta.maxSequenceNumber()).isEqualTo(end - 1);
             assertThat(meta.level()).isEqualTo(DataFileMeta.DUMMY_LEVEL);
         }
     }
@@ -159,21 +184,21 @@ public class AppendOnlyWriterTest {
     public void testRollingWrite() throws Exception {
         // Set a very small target file size, so that we will roll over to a new file even if
         // writing one record.
-        RecordWriter<RowData> writer = createWriter(10L, SCHEMA, 0);
+        AppendOnlyWriter writer = createEmptyWriter(10L);
 
         for (int i = 0; i < 10; i++) {
             writer.write(row(i, String.format("%03d", i), PART));
         }
 
         writer.sync();
-        Increment inc = writer.prepareCommit();
-        assertThat(inc.compactBefore()).isEqualTo(Collections.emptyList());
-        assertThat(inc.compactAfter()).isEqualTo(Collections.emptyList());
+        Increment firstInc = writer.prepareCommit();
+        assertThat(firstInc.compactBefore()).isEqualTo(Collections.emptyList());
+        assertThat(firstInc.compactAfter()).isEqualTo(Collections.emptyList());
 
-        assertThat(inc.newFiles().size()).isEqualTo(10);
+        assertThat(firstInc.newFiles().size()).isEqualTo(10);
 
         int id = 0;
-        for (DataFileMeta meta : inc.newFiles()) {
+        for (DataFileMeta meta : firstInc.newFiles()) {
             Path path = pathFactory.toPath(meta.fileName());
             assertThat(path.getFileSystem().exists(path)).isTrue();
 
@@ -190,12 +215,48 @@ public class AppendOnlyWriterTest {
                     };
             assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinary(expected));
 
-            assertThat(meta.minSequenceNumber()).isEqualTo(id + 1);
-            assertThat(meta.maxSequenceNumber()).isEqualTo(id + 1);
+            assertThat(meta.minSequenceNumber()).isEqualTo(id);
+            assertThat(meta.maxSequenceNumber()).isEqualTo(id);
             assertThat(meta.level()).isEqualTo(DataFileMeta.DUMMY_LEVEL);
 
             id += 1;
         }
+
+        // increase target file size to test compaction
+        long targetFileSize = 1024 * 1024L;
+        writer = createWriter(targetFileSize, true, firstInc.newFiles());
+        assertThat(writer.getToCompact()).containsExactlyElementsOf(firstInc.newFiles());
+        writer.write(row(id, String.format("%03d", id), PART));
+        writer.sync();
+        Increment secInc = writer.prepareCommit();
+
+        // check compact before and after
+        List<DataFileMeta> compactBefore = secInc.compactBefore();
+        List<DataFileMeta> compactAfter = secInc.compactAfter();
+        assertThat(compactBefore)
+                .containsExactlyInAnyOrderElementsOf(firstInc.newFiles().subList(0, 4));
+        assertThat(compactAfter).hasSize(1);
+        assertThat(compactBefore.stream().mapToLong(DataFileMeta::fileSize).sum())
+                .isEqualTo(compactAfter.stream().mapToLong(DataFileMeta::fileSize).sum());
+        assertThat(compactBefore.stream().mapToLong(DataFileMeta::rowCount).sum())
+                .isEqualTo(compactAfter.stream().mapToLong(DataFileMeta::rowCount).sum());
+        // check seq number
+        assertThat(compactBefore.get(0).minSequenceNumber())
+                .isEqualTo(compactAfter.get(0).minSequenceNumber());
+        assertThat(compactBefore.get(compactBefore.size() - 1).maxSequenceNumber())
+                .isEqualTo(compactAfter.get(compactAfter.size() - 1).maxSequenceNumber());
+        assertThat(secInc.newFiles()).hasSize(1);
+
+        /* check toCompact[round + 1] is composed of
+         * <1> the compactAfter[round] (due to small size)
+         * <2> the rest of toCompact[round]
+         * <3> the newFiles[round]
+         * with strict order
+         */
+        List<DataFileMeta> toCompact = new ArrayList<>(compactAfter);
+        toCompact.addAll(firstInc.newFiles().subList(4, firstInc.newFiles().size()));
+        toCompact.addAll(secInc.newFiles());
+        assertThat(writer.getToCompact()).containsExactlyElementsOf(toCompact);
     }
 
     private FieldStats initStats(Integer min, Integer max, long nullCount) {
@@ -214,15 +275,68 @@ public class AppendOnlyWriterTest {
         return new DataFilePathFactory(
                 new Path(tempDir.toString()),
                 "dt=" + PART,
-                1,
+                0,
                 CoreOptions.FILE_FORMAT.defaultValue());
     }
 
-    private RecordWriter<RowData> createWriter(
-            long targetFileSize, RowType writeSchema, long maxSeqNum) {
-        FileFormat fileFormat = FileFormat.fromIdentifier(AVRO, new Configuration());
+    private AppendOnlyWriter createEmptyWriter(long targetFileSize) {
+        return createWriter(targetFileSize, false, Collections.emptyList());
+    }
 
+    private AppendOnlyWriter createWriter(
+            long targetFileSize, boolean forceCompact, List<DataFileMeta> scannedFiles) {
+        FileFormat fileFormat = FileFormat.fromIdentifier(AVRO, new Configuration());
+        LinkedList<DataFileMeta> toCompact = new LinkedList<>(scannedFiles);
         return new AppendOnlyWriter(
-                0, fileFormat, targetFileSize, writeSchema, maxSeqNum, pathFactory);
+                SCHEMA_ID,
+                fileFormat,
+                targetFileSize,
+                AppendOnlyWriterTest.SCHEMA,
+                toCompact,
+                new AppendOnlyCompactManager(
+                        Executors.newSingleThreadScheduledExecutor(
+                                new ExecutorThreadFactory("compaction-thread")),
+                        toCompact,
+                        MIN_FILE_NUM,
+                        MAX_FILE_NUM,
+                        targetFileSize,
+                        compactBefore ->
+                                compactBefore.isEmpty()
+                                        ? Collections.emptyList()
+                                        : Collections.singletonList(
+                                                generateCompactAfter(compactBefore))),
+                forceCompact,
+                pathFactory);
+    }
+
+    private DataFileMeta generateCompactAfter(List<DataFileMeta> toCompact) {
+        int size = toCompact.size();
+        long minSeq = toCompact.get(0).minSequenceNumber();
+        long maxSeq = toCompact.get(size - 1).maxSequenceNumber();
+        String fileName = "compact-" + UUID.randomUUID();
+        return DataFileMeta.forAppend(
+                fileName,
+                toCompact.stream().mapToLong(DataFileMeta::fileSize).sum(),
+                toCompact.stream().mapToLong(DataFileMeta::rowCount).sum(),
+                STATS_SERIALIZER.toBinary(
+                        new FieldStats[] {
+                            initStats(
+                                    toCompact.get(0).valueStats().min().getInt(0),
+                                    toCompact.get(size - 1).valueStats().max().getInt(0),
+                                    0),
+                            initStats(
+                                    toCompact.get(0).valueStats().min().getString(1).toString(),
+                                    toCompact
+                                            .get(size - 1)
+                                            .valueStats()
+                                            .max()
+                                            .getString(1)
+                                            .toString(),
+                                    0),
+                            initStats(PART, PART, 0)
+                        }),
+                minSeq,
+                maxSeq,
+                toCompact.get(0).schemaId());
     }
 }

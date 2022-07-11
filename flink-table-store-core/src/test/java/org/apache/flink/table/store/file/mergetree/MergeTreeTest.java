@@ -32,11 +32,11 @@ import org.apache.flink.table.store.file.data.DataFileReader;
 import org.apache.flink.table.store.file.data.DataFileWriter;
 import org.apache.flink.table.store.file.format.FlushingFileFormat;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
-import org.apache.flink.table.store.file.mergetree.compact.CompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.CompactRewriter;
 import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
+import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -270,7 +270,7 @@ public class MergeTreeTest {
                 new MergeTreeWriter(
                         dataFileWriter.keyType(),
                         dataFileWriter.valueType(),
-                        createCompactManager(dataFileWriter, service),
+                        createCompactManager(dataFileWriter, service, files),
                         new Levels(comparator, files, options.numLevels()),
                         maxSequenceNumber,
                         comparator,
@@ -284,17 +284,19 @@ public class MergeTreeTest {
         return writer;
     }
 
-    private CompactManager createCompactManager(
-            DataFileWriter dataFileWriter, ExecutorService compactExecutor) {
-        CompactStrategy compactStrategy =
+    private MergeTreeCompactManager createCompactManager(
+            DataFileWriter dataFileWriter,
+            ExecutorService compactExecutor,
+            List<DataFileMeta> files) {
+        CompactStrategy strategy =
                 new UniversalCompaction(
                         options.maxSizeAmplificationPercent(),
-                        options.sizeRatio(),
+                        options.sortedRunSizeRatio(),
                         options.numSortedRunCompactionTrigger());
         CompactRewriter rewriter =
                 (outputLevel, dropDelete, sections) ->
                         dataFileWriter.write(
-                                new RecordReaderIterator<KeyValue>(
+                                new RecordReaderIterator<>(
                                         new MergeTreeReader(
                                                 sections,
                                                 dropDelete,
@@ -302,8 +304,13 @@ public class MergeTreeTest {
                                                 comparator,
                                                 new DeduplicateMergeFunction())),
                                 outputLevel);
-        return new CompactManager(
-                compactExecutor, compactStrategy, comparator, options.targetFileSize(), rewriter);
+        return new MergeTreeCompactManager(
+                compactExecutor,
+                new Levels(comparator, files, options.numLevels()),
+                strategy,
+                comparator,
+                options.targetFileSize(),
+                rewriter);
     }
 
     private void mergeCompacted(

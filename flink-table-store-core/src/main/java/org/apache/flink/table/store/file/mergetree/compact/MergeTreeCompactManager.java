@@ -19,6 +19,9 @@
 package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.compact.CompactManager;
+import org.apache.flink.table.store.file.compact.CompactResult;
+import org.apache.flink.table.store.file.compact.CompactUnit;
 import org.apache.flink.table.store.file.mergetree.Levels;
 
 import org.slf4j.Logger;
@@ -28,15 +31,14 @@ import java.util.Comparator;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
-/** Manager to submit compaction task. */
-public class CompactManager {
+/** Compact manager for {@link org.apache.flink.table.store.file.KeyValueFileStore}. */
+public class MergeTreeCompactManager extends CompactManager {
 
-    private static final Logger LOG = LoggerFactory.getLogger(CompactManager.class);
+    private static final Logger LOG = LoggerFactory.getLogger(MergeTreeCompactManager.class);
 
-    private final ExecutorService executor;
+    private final Levels levels;
 
     private final CompactStrategy strategy;
 
@@ -46,27 +48,23 @@ public class CompactManager {
 
     private final CompactRewriter rewriter;
 
-    private Future<CompactResult> taskFuture;
-
-    public CompactManager(
+    public MergeTreeCompactManager(
             ExecutorService executor,
+            Levels levels,
             CompactStrategy strategy,
             Comparator<RowData> keyComparator,
             long minFileSize,
             CompactRewriter rewriter) {
-        this.executor = executor;
+        super(executor);
+        this.levels = levels;
+        this.strategy = strategy;
         this.minFileSize = minFileSize;
         this.keyComparator = keyComparator;
-        this.strategy = strategy;
         this.rewriter = rewriter;
     }
 
-    public boolean isCompactionFinished() {
-        return taskFuture == null;
-    }
-
-    /** Submit a new compaction task. */
-    public void submitCompaction(Levels levels) {
+    @Override
+    public void submitCompaction() {
         if (taskFuture != null) {
             throw new IllegalStateException(
                     "Please finish the previous compaction before submitting new one.");
@@ -107,7 +105,8 @@ public class CompactManager {
     }
 
     private void submitCompaction(CompactUnit unit, boolean dropDelete) {
-        CompactTask task = new CompactTask(keyComparator, minFileSize, rewriter, unit, dropDelete);
+        MergeTreeCompactTask task =
+                new MergeTreeCompactTask(keyComparator, minFileSize, rewriter, unit, dropDelete);
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Pick these files (name, level, size) for compaction: {}",
@@ -123,22 +122,11 @@ public class CompactManager {
     }
 
     /** Finish current task, and update result files to {@link Levels}. */
-    public Optional<CompactResult> finishCompaction(Levels levels, boolean blocking)
+    @Override
+    public Optional<CompactResult> finishCompaction(boolean blocking)
             throws ExecutionException, InterruptedException {
-        Optional<CompactResult> result = finishCompaction(blocking);
+        Optional<CompactResult> result = super.finishCompaction(blocking);
         result.ifPresent(r -> levels.update(r.before(), r.after()));
         return result;
-    }
-
-    private Optional<CompactResult> finishCompaction(boolean blocking)
-            throws ExecutionException, InterruptedException {
-        if (taskFuture != null) {
-            if (blocking || taskFuture.isDone()) {
-                CompactResult result = taskFuture.get();
-                taskFuture = null;
-                return Optional.of(result);
-            }
-        }
-        return Optional.empty();
     }
 }

@@ -33,16 +33,28 @@
             <td>Whether to force a compaction before commit.</td>
         </tr>
         <tr>
+            <td><h5>compaction.early-max.file-num</h5></td>
+            <td style="word-wrap: break-word;">50</td>
+            <td>Integer</td>
+            <td>For file set [f_0,...,f_N], the maximum file number to trigger a compaction for append-only table, even if sum(size(f_i)) &lt; targetFileSize. This value avoids pending too much small files, which slows down the performance.</td>
+        </tr>
+        <tr>
             <td><h5>compaction.max-size-amplification-percent</h5></td>
             <td style="word-wrap: break-word;">200</td>
             <td>Integer</td>
-            <td>The size amplification is defined as the amount (in percentage) of additional storage needed to store a single byte of data in the merge tree.</td>
+            <td>The size amplification is defined as the amount (in percentage) of additional storage needed to store a single byte of data in the merge tree for changelog mode table.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.min.file-num</h5></td>
+            <td style="word-wrap: break-word;">5</td>
+            <td>Integer</td>
+            <td>For file set [f_0,...,f_N], the minimum file number which satisfies sum(size(f_i)) &gt;= targetFileSize to trigger a compaction for append-only table. This value avoids almost-full-file to be compacted, which is not cost-effective.</td>
         </tr>
         <tr>
             <td><h5>compaction.size-ratio</h5></td>
             <td style="word-wrap: break-word;">1</td>
             <td>Integer</td>
-            <td>Percentage flexibility while comparing sorted run size. If the candidate sorted run(s) size is 1% smaller than the next sorted run's size, then include next sorted run into this candidate set.</td>
+            <td>Percentage flexibility while comparing sorted run size for changelog mode table. If the candidate sorted run(s) size is 1% smaller than the next sorted run's size, then include next sorted run into this candidate set.</td>
         </tr>
         <tr>
             <td><h5>continuous.discovery-interval</h5></td>
@@ -196,7 +208,7 @@
         </tr>
         <tr>
             <td><h5>write-buffer-size</h5></td>
-            <td style="word-wrap: break-word;">256 mb</td>
+            <td style="word-wrap: break-word;">128 mb</td>
             <td>MemorySize</td>
             <td>Amount of data to build up in memory before converting to a sorted on-disk file.</td>
         </tr>

@@ -27,7 +27,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 
-import static org.apache.flink.table.store.file.mergetree.compact.CompactManagerTest.row;
+import static org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link Levels}. */

@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
+import org.apache.flink.table.store.file.compact.CompactUnit;
 import org.apache.flink.table.store.file.mergetree.LevelSortedRun;
 
 import java.util.List;

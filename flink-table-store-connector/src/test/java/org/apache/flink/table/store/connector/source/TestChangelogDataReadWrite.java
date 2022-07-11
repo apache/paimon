@@ -49,6 +49,7 @@ import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -139,7 +140,8 @@ public class TestChangelogDataReadWrite {
     }
 
     public RecordWriter<KeyValue> createMergeTreeWriter(BinaryRowData partition, int bucket) {
-        CoreOptions options = new CoreOptions(new Configuration());
+        CoreOptions options =
+                new CoreOptions(Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), "avro"));
         RecordWriter<KeyValue> writer =
                 new KeyValueFileStoreWrite(
                                 new SchemaManager(tablePath),
@@ -148,7 +150,6 @@ public class TestChangelogDataReadWrite {
                                 VALUE_TYPE,
                                 () -> COMPARATOR,
                                 new DeduplicateMergeFunction(),
-                                avro,
                                 pathFactory,
                                 snapshotManager,
                                 null, // not used, we only create an empty writer
