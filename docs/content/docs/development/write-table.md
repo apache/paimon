@@ -109,7 +109,7 @@ Please note that too short retain time or too small retain number may result in:
 - Batch query cannot find the file. For example, the table is relatively large and
   the batch query takes 10 minutes to read, but the snapshot from 10 minutes ago
   expires, at which point the batch query will read a deleted snapshot.
-- Continuous reading jobs on FileStore (Without Log System) fail to restart. At the
+- Streaming reading jobs on FileStore (Without Log System) fail to restart. At the
   time of the job failover, the snapshot it recorded has expired.
 
 ## Performance
