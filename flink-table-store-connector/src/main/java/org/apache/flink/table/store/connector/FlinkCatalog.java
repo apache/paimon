@@ -251,10 +251,10 @@ public class FlinkCatalog extends AbstractCatalog {
     private static void validateAlterTable(CatalogTable ct1, CatalogTable ct2) {
         org.apache.flink.table.api.TableSchema ts1 = ct1.getSchema();
         org.apache.flink.table.api.TableSchema ts2 = ct2.getSchema();
-        boolean equalsPrimary = false;
+        boolean pkEquality = false;
 
         if (ts1.getPrimaryKey().isPresent() && ts2.getPrimaryKey().isPresent()) {
-            equalsPrimary =
+            pkEquality =
                     Objects.equals(
                                     ts1.getPrimaryKey().get().getType(),
                                     ts2.getPrimaryKey().get().getType())
@@ -262,12 +262,12 @@ public class FlinkCatalog extends AbstractCatalog {
                                     ts1.getPrimaryKey().get().getColumns(),
                                     ts2.getPrimaryKey().get().getColumns());
         } else if (!ts1.getPrimaryKey().isPresent() && !ts2.getPrimaryKey().isPresent()) {
-            equalsPrimary = true;
+            pkEquality = true;
         }
 
         if (!(Objects.equals(ts1.getTableColumns(), ts2.getTableColumns())
                 && Objects.equals(ts1.getWatermarkSpecs(), ts2.getWatermarkSpecs())
-                && equalsPrimary)) {
+                && pkEquality)) {
             throw new UnsupportedOperationException("Altering schema is not supported yet.");
         }
 

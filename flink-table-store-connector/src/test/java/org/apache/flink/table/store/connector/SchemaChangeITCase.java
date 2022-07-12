@@ -27,6 +27,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** ITCase for schema changes. */
 public class SchemaChangeITCase extends CatalogITCaseBase {
 
+    // TODO cover more cases once Flink supports more ALTER operations.
+
     @Test
     public void testSetAndRemoveOption() throws Exception {
         sql("CREATE TABLE T (a STRING, b STRING, c STRING)");

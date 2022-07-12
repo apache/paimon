@@ -27,6 +27,8 @@ import java.util.Objects;
 /** Schema change to table. */
 public interface SchemaChange {
 
+    // TODO more change support like updateColumnNullability and updateColumnComment.
+
     static SchemaChange setOption(String key, String value) {
         return new SetOption(key, value);
     }
