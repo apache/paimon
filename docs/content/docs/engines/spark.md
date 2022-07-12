@@ -41,15 +41,31 @@ Download [flink-table-store-spark-{{< version >}}.jar](https://repo.maven.apache
 You are using an unreleased version of Table Store, you need to manually [Build Spark Bundled Jar]({{< ref "docs/engines/build" >}}) from the source code.
 {{< /unstable >}}
 
-Copy Table Store Spark bundle jar to `spark/jars`.
+Use `--jars` in spark-sql:
+```bash
+spark-sql ... --jars flink-table-store-spark-{{< version >}}.jar
+```
 
-## Table Store Catalog
+You can also copy `flink-table-store-spark-{{< version >}}.jar` to `spark/jars` in your Spark installation.
+
+## Catalog
 
 The following command registers the Table Store's Spark catalog with the name `table_store`:
 
 ```bash
-spark-sql --conf spark.sql.catalog.table_store=org.apache.flink.table.store.spark.SparkCatalog \
+spark-sql ... \
+    --conf spark.sql.catalog.table_store=org.apache.flink.table.store.spark.SparkCatalog \
     --conf spark.sql.catalog.table_store.warehouse=file:/tmp/warehouse
+```
+
+If you are using the Hive Metastore, you will need to add some configuration:
+
+```bash
+spark-sql ... \
+    --conf spark.sql.catalog.table_store=org.apache.flink.table.store.spark.SparkCatalog \
+    --conf spark.sql.catalog.table_store.warehouse=file:/tmp/warehouse \
+    --conf spark.sql.catalog.table_store.metastore=hive \
+    --conf spark.sql.catalog.table_store.uri=thrift://...
 ```
 
 ## Create Temporary View
