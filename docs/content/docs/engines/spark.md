@@ -70,3 +70,29 @@ OPTIONS (
 ```sql
 SELECT * FROM table_store.default.myTable;
 ```
+
+## DDL
+
+`ALTER TABLE ... SET TBLPROPERTIES`
+```sql
+ALTER TABLE table_store.default.myTable SET TBLPROPERTIES (
+    'write-buffer-size'='256 MB'
+)
+```
+
+`ALTER TABLE ... UNSET TBLPROPERTIES`
+```sql
+ALTER TABLE table_store.default.myTable UNSET TBLPROPERTIES ('write-buffer-size')
+```
+
+`ALTER TABLE ... ADD COLUMN`
+```sql
+ALTER TABLE table_store.default.myTable
+ADD COLUMNS (new_column STRING)
+```
+
+`ALTER TABLE ... ALTER COLUMN ... TYPE`
+```sql
+ALTER TABLE table_store.default.myTable
+ALTER COLUMN column_name TYPE BIGINT
+```

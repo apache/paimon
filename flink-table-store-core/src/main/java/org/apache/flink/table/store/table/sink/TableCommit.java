@@ -34,12 +34,13 @@ import java.util.Map;
  * An abstraction layer above {@link FileStoreCommit} and {@link FileStoreExpire} to provide
  * snapshot commit and expiration.
  */
-public class TableCommit {
+public class TableCommit implements AutoCloseable {
 
     private final FileStoreCommit commit;
     private final FileStoreExpire expire;
 
     @Nullable private Map<String, String> overwritePartition = null;
+    @Nullable private Lock lock;
 
     public TableCommit(FileStoreCommit commit, FileStoreExpire expire) {
         this.commit = commit;
@@ -54,6 +55,7 @@ public class TableCommit {
     public TableCommit withLock(Lock lock) {
         commit.withLock(lock);
         expire.withLock(lock);
+        this.lock = lock;
         return this;
     }
 
@@ -83,5 +85,12 @@ public class TableCommit {
             }
         }
         expire.expire();
+    }
+
+    @Override
+    public void close() throws Exception {
+        if (lock != null) {
+            lock.close();
+        }
     }
 }

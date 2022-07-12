@@ -129,22 +129,24 @@ public class HiveCatalogLock implements CatalogLock {
         @Override
         public CatalogLock create() {
             HiveConf conf = hiveConf.conf();
-            long checkMaxSleep =
-                    TimeUtils.parseDuration(
-                                    conf.get(
-                                            LOCK_CHECK_MAX_SLEEP.key(),
-                                            TimeUtils.getStringInMillis(
-                                                    LOCK_CHECK_MAX_SLEEP.defaultValue())))
-                            .toMillis();
-            long acquireTimeout =
-                    TimeUtils.parseDuration(
-                                    conf.get(
-                                            LOCK_ACQUIRE_TIMEOUT.key(),
-                                            TimeUtils.getStringInMillis(
-                                                    LOCK_ACQUIRE_TIMEOUT.defaultValue())))
-                            .toMillis();
             return new HiveCatalogLock(
-                    HiveCatalog.createClient(conf), checkMaxSleep, acquireTimeout);
+                    HiveCatalog.createClient(conf), checkMaxSleep(conf), acquireTimeout(conf));
         }
+    }
+
+    public static long checkMaxSleep(HiveConf conf) {
+        return TimeUtils.parseDuration(
+                        conf.get(
+                                LOCK_CHECK_MAX_SLEEP.key(),
+                                TimeUtils.getStringInMillis(LOCK_CHECK_MAX_SLEEP.defaultValue())))
+                .toMillis();
+    }
+
+    public static long acquireTimeout(HiveConf conf) {
+        return TimeUtils.parseDuration(
+                        conf.get(
+                                LOCK_ACQUIRE_TIMEOUT.key(),
+                                TimeUtils.getStringInMillis(LOCK_ACQUIRE_TIMEOUT.defaultValue())))
+                .toMillis();
     }
 }

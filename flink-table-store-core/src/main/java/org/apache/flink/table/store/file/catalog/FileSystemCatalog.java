@@ -22,6 +22,7 @@ import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
@@ -159,22 +160,17 @@ public class FileSystemCatalog extends AbstractCatalog {
             throw new TableAlreadyExistException(tablePath);
         }
 
-        commitTableChange(path, table);
+        uncheck(() -> new SchemaManager(path).commitNewVersion(table));
     }
 
     @Override
-    public void alterTable(ObjectPath tablePath, UpdateSchema newTable, boolean ignoreIfNotExists)
+    public void alterTable(
+            ObjectPath tablePath, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException {
-        Path path = getTableLocation(tablePath);
-        if (!tableExists(path)) {
-            if (ignoreIfNotExists) {
-                return;
-            }
-
+        if (!tableExists(tablePath)) {
             throw new TableNotExistException(tablePath);
         }
-
-        commitTableChange(path, newTable);
+        uncheck(() -> new SchemaManager(getTableLocation(tablePath)).commitChanges(changes));
     }
 
     private static <T> T uncheck(Callable<T> callable) {
@@ -192,10 +188,6 @@ public class FileSystemCatalog extends AbstractCatalog {
     private static String database(Path path) {
         String name = path.getName();
         return name.substring(0, name.length() - DB_SUFFIX.length());
-    }
-
-    private void commitTableChange(Path tablePath, UpdateSchema table) {
-        uncheck(() -> new SchemaManager(tablePath).commitNewVersion(table));
     }
 
     @Override

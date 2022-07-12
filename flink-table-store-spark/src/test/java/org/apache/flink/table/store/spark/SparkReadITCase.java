@@ -21,6 +21,8 @@ package org.apache.flink.table.store.spark;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -39,6 +41,8 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -49,6 +53,8 @@ public class SparkReadITCase {
 
     private static SparkSession spark = null;
 
+    private static Path warehousePath = null;
+
     private static Path tablePath1;
 
     private static Path tablePath2;
@@ -57,7 +63,7 @@ public class SparkReadITCase {
     public static void startMetastoreAndSpark() throws Exception {
         warehouse = File.createTempFile("warehouse", null);
         assertThat(warehouse.delete()).isTrue();
-        Path warehousePath = new Path("file:" + warehouse);
+        warehousePath = new Path("file:" + warehouse);
         spark = SparkSession.builder().master("local[2]").getOrCreate();
         spark.conf().set("spark.sql.catalog.table_store", SparkCatalog.class.getName());
         spark.conf().set("spark.sql.catalog.table_store.warehouse", warehousePath.toString());
@@ -120,6 +126,56 @@ public class SparkReadITCase {
     @Test
     public void testCatalogFilterPushDown() {
         innerTestFilterPushDown(spark.table("table_store.default.t2"));
+    }
+
+    @Test
+    public void testSetAndRemoveOption() {
+        spark.sql("ALTER TABLE table_store.default.t1 SET TBLPROPERTIES('xyc' 'unknown1')");
+
+        Map<String, String> options = schema1().options();
+        assertThat(options).containsEntry("xyc", "unknown1");
+
+        spark.sql("ALTER TABLE table_store.default.t1 UNSET TBLPROPERTIES('xyc')");
+
+        options = schema1().options();
+        assertThat(options).doesNotContainKey("xyc");
+    }
+
+    @Test
+    public void testAddColumn() throws Exception {
+        Path tablePath = new Path(warehousePath, "default.db/" + UUID.randomUUID());
+        SimpleTableTestHelper testHelper1 = createTestHelper(tablePath);
+        testHelper1.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
+        testHelper1.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
+        testHelper1.commit();
+
+        spark.sql("ALTER TABLE table_store.default.testAddColumn ADD COLUMN d STRING");
+
+        Dataset<Row> table = spark.table("table_store.default.testAddColumn");
+        List<Row> results = table.collectAsList();
+        assertThat(results.toString()).isEqualTo("[[1,2,1,null], [5,6,3,null]]");
+
+        results = table.select("a", "c").collectAsList();
+        assertThat(results.toString()).isEqualTo("[[1,1], [5,3]]");
+
+        results = table.groupBy().sum("b").collectAsList();
+        assertThat(results.toString()).isEqualTo("[[8]]");
+    }
+
+    @Test
+    public void testAlterColumnType() throws Exception {
+        Path tablePath = new Path(warehousePath, "default.db/testAddColumn");
+        SimpleTableTestHelper testHelper1 = createTestHelper(tablePath);
+        testHelper1.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
+        testHelper1.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
+        testHelper1.commit();
+
+        spark.sql("ALTER TABLE table_store.default.testAddColumn ALTER COLUMN a TYPE BIGINT");
+        innerTestNormal(spark.table("table_store.default.testAddColumn"));
+    }
+
+    private TableSchema schema1() {
+        return FileStoreTableFactory.create(tablePath1).schema();
     }
 
     private void innerTestNormal(Dataset<Row> dataset) {
