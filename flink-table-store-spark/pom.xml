@@ -49,6 +49,12 @@ under the License.
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-table-store-hive-catalog</artifactId>
             <version>${project.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>

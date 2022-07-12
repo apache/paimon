@@ -102,8 +102,10 @@ public class SparkReadITCase {
         if (warehouse != null && warehouse.exists()) {
             FileUtils.deleteDirectory(warehouse);
         }
-        spark.stop();
-        spark = null;
+        if (spark != null) {
+            spark.stop();
+            spark = null;
+        }
     }
 
     @Test
