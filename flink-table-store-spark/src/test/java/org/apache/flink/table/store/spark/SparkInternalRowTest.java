@@ -28,7 +28,6 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.AbstractMap;
@@ -57,24 +56,16 @@ public class SparkInternalRowTest {
                                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)),
                         new String[] {"v1", "v5"},
                         new Integer[] {10, 30},
-                        "char_v",
-                        "varchar_v",
                         true,
                         (byte) 22,
                         (short) 356,
                         23567222L,
-                        "binary_v".getBytes(StandardCharsets.UTF_8),
                         "varbinary_v".getBytes(StandardCharsets.UTF_8),
                         LocalDateTime.parse("2007-12-03T10:15:30"),
-                        Instant.parse("2007-12-03T10:15:30.00Z"),
                         LocalDate.parse("2022-05-02"),
                         BigDecimal.valueOf(0.21),
                         BigDecimal.valueOf(65782123123.01),
-                        BigDecimal.valueOf(62123123.5),
-                        Stream.of(
-                                        new AbstractMap.SimpleEntry<>("key1", 5),
-                                        new AbstractMap.SimpleEntry<>("key2", 2))
-                                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)));
+                        BigDecimal.valueOf(62123123.5));
 
         RowRowConverter flinkConverter =
                 RowRowConverter.create(TypeConversions.fromLogicalToDataType(ALL_TYPES));
@@ -96,21 +87,17 @@ public class SparkInternalRowTest {
                         + "\"locations\":{\"key1\":{\"posX\":1.2,\"posY\":2.3},\"key2\":{\"posX\":2.4,\"posY\":3.5}},"
                         + "\"strArray\":[\"v1\",\"v5\"],"
                         + "\"intArray\":[10,30],"
-                        + "\"char\":\"char_v\","
-                        + "\"varchar\":\"varchar_v\","
                         + "\"boolean\":true,"
                         + "\"tinyint\":22,"
                         + "\"smallint\":356,"
                         + "\"bigint\":23567222,"
-                        + "\"varbinary\":\"YmluYXJ5X3Y=\","
-                        + "\"binary\":\"dmFyYmluYXJ5X3Y=\","
-                        + "\"timestampWithoutZone\":\"2007-12-03 10:15:30\","
-                        + "\"timestampWithZone\":\"2007-12-03 10:15:30\","
+                        + "\"bytes\":\"dmFyYmluYXJ5X3Y=\","
+                        + "\"timestamp\":\"2007-12-03 10:15:30\","
                         + "\"date\":\"2022-05-02\","
                         + "\"decimal\":0.21,"
                         + "\"decimal2\":65782123123.01,"
-                        + "\"decimal3\":62123123.5,"
-                        + "\"multiset\":{\"key1\":5,\"key2\":2}}";
+                        + "\"decimal3\":62123123.5"
+                        + "}";
         assertThat(sparkRow.json()).isEqualTo(expected);
     }
 }

@@ -249,7 +249,7 @@ public class TableSchema implements Serializable {
         return ((RowDataType) toDataType(rowType, new AtomicInteger(-1))).fields();
     }
 
-    private static DataType toDataType(LogicalType type, AtomicInteger currentHighestFieldId) {
+    public static DataType toDataType(LogicalType type, AtomicInteger currentHighestFieldId) {
         if (type instanceof ArrayType) {
             DataType element =
                     toDataType(((ArrayType) type).getElementType(), currentHighestFieldId);

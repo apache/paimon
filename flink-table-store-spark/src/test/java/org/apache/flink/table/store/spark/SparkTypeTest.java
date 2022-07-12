@@ -22,8 +22,11 @@ import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.types.logical.RowType;
 
+import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.Test;
 
+import static org.apache.flink.table.store.spark.SparkTypeUtils.fromFlinkRowType;
+import static org.apache.flink.table.store.spark.SparkTypeUtils.toFlinkType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link SparkTypeUtils}. */
@@ -38,7 +41,7 @@ public class SparkTypeTest {
                             .field(
                                     "locations",
                                     DataTypes.MAP(
-                                            DataTypes.STRING(),
+                                            DataTypes.STRING().notNull(),
                                             DataTypes.ROW(
                                                     DataTypes.FIELD(
                                                             "posX",
@@ -50,24 +53,20 @@ public class SparkTypeTest {
                                                             "Y field"))))
                             .field("strArray", DataTypes.ARRAY(DataTypes.STRING()).nullable())
                             .field("intArray", DataTypes.ARRAY(DataTypes.INT()).nullable())
-                            .field("char", DataTypes.CHAR(10).notNull())
-                            .field("varchar", DataTypes.VARCHAR(10).notNull())
                             .field("boolean", DataTypes.BOOLEAN().nullable())
                             .field("tinyint", DataTypes.TINYINT())
                             .field("smallint", DataTypes.SMALLINT())
                             .field("bigint", DataTypes.BIGINT())
-                            .field("varbinary", DataTypes.VARBINARY(10))
-                            .field("binary", DataTypes.BINARY(10))
-                            .field("timestampWithoutZone", DataTypes.TIMESTAMP())
-                            .field("timestampWithZone", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
+                            .field("bytes", DataTypes.BYTES())
+                            .field("timestamp", DataTypes.TIMESTAMP())
                             .field("date", DataTypes.DATE())
                             .field("decimal", DataTypes.DECIMAL(2, 2))
                             .field("decimal2", DataTypes.DECIMAL(38, 2))
                             .field("decimal3", DataTypes.DECIMAL(10, 1))
-                            .field("multiset", DataTypes.MULTISET(DataTypes.STRING().notNull()))
                             .build()
                             .toRowDataType()
-                            .getLogicalType();
+                            .getLogicalType()
+                            .copy(true);
 
     @Test
     public void testAllTypes() {
@@ -84,22 +83,20 @@ public class SparkTypeTest {
                         + ", "
                         + "StructField(strArray,ArrayType(StringType,true),true), "
                         + "StructField(intArray,ArrayType(IntegerType,true),true), "
-                        + "StructField(char,StringType,false), "
-                        + "StructField(varchar,StringType,false), "
                         + "StructField(boolean,BooleanType,true), "
                         + "StructField(tinyint,ByteType,true), "
                         + "StructField(smallint,ShortType,true), "
                         + "StructField(bigint,LongType,true), "
-                        + "StructField(varbinary,BinaryType,true), "
-                        + "StructField(binary,BinaryType,true), "
-                        + "StructField(timestampWithoutZone,TimestampType,true), "
-                        + "StructField(timestampWithZone,TimestampType,true), "
+                        + "StructField(bytes,BinaryType,true), "
+                        + "StructField(timestamp,TimestampType,true), "
                         + "StructField(date,DateType,true), "
                         + "StructField(decimal,DecimalType(2,2),true), "
                         + "StructField(decimal2,DecimalType(38,2),true), "
-                        + "StructField(decimal3,DecimalType(10,1),true), "
-                        + "StructField(multiset,MapType(StringType,IntegerType,false),true))";
+                        + "StructField(decimal3,DecimalType(10,1),true))";
 
-        assertThat(SparkTypeUtils.fromFlinkRowType(ALL_TYPES).toString()).isEqualTo(expected);
+        StructType sparkType = fromFlinkRowType(ALL_TYPES);
+        assertThat(sparkType.toString()).isEqualTo(expected);
+
+        assertThat(toFlinkType(sparkType)).isEqualTo(ALL_TYPES);
     }
 }

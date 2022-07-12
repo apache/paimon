@@ -38,7 +38,6 @@ import javax.annotation.Nullable;
 
 import java.io.Serializable;
 import java.util.Map;
-import java.util.concurrent.Callable;
 
 /** Sink of dynamic store. */
 public class StoreSink implements Serializable {
@@ -88,28 +87,9 @@ public class StoreSink implements Serializable {
     }
 
     private StoreCommitter createCommitter(String user) {
-        CatalogLock catalogLock;
-        Lock lock;
-        if (lockFactory == null) {
-            catalogLock = null;
-            lock = null;
-        } else {
-            catalogLock = lockFactory.create();
-            lock =
-                    new Lock() {
-                        @Override
-                        public <T> T runWithLock(Callable<T> callable) throws Exception {
-                            return catalogLock.runWithLock(
-                                    tableIdentifier.getDatabaseName(),
-                                    tableIdentifier.getObjectName(),
-                                    callable);
-                        }
-                    };
-        }
-
+        Lock lock = Lock.fromCatalog(lockFactory, tableIdentifier.toObjectPath());
         return new StoreCommitter(
-                table.newCommit(user).withOverwritePartition(overwritePartition).withLock(lock),
-                catalogLock);
+                table.newCommit(user).withOverwritePartition(overwritePartition).withLock(lock));
     }
 
     public DataStreamSink<?> sinkTo(DataStream<RowData> input) {

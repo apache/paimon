@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.catalog;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.table.FileStoreTable;
@@ -150,15 +151,15 @@ public interface Catalog extends AutoCloseable {
             throws TableAlreadyExistException, DatabaseNotExistException;
 
     /**
-     * Modify an existing table.
+     * Modify an existing table from {@link SchemaChange}s.
      *
      * @param tablePath path of the table to be modified
-     * @param newTableSchema the new table definition
+     * @param changes the schema changes
      * @param ignoreIfNotExists flag to specify behavior when the table does not exist: if set to
      *     false, throw an exception, if set to true, do nothing.
      * @throws TableNotExistException if the table does not exist
      */
-    void alterTable(ObjectPath tablePath, UpdateSchema newTableSchema, boolean ignoreIfNotExists)
+    void alterTable(ObjectPath tablePath, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException;
 
     /** Exception for trying to drop on a database that is not empty. */
