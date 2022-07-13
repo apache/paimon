@@ -58,7 +58,8 @@ spark-sql ... \
     --conf spark.sql.catalog.table_store.warehouse=file:/tmp/warehouse
 ```
 
-Some extra configurations are needed if your Spark application uses the Hive Metastore to manage metadata.
+Some extra configurations are needed if your Table Store Catalog uses the Hive
+Metastore (No extra configuration is required for read-only).
 
 ```bash
 spark-sql ... \
