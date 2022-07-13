@@ -219,15 +219,15 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         write.write(GenericRowData.of(1, 10, 100L));
         write.write(GenericRowData.of(1, 20, 200L));
-        commit.commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit(true));
 
         write.write(GenericRowData.of(1, 30, 300L));
         write.write(GenericRowData.of(1, 40, 400L));
-        commit.commit("1", write.prepareCommit());
+        commit.commit("1", write.prepareCommit(true));
 
         write.write(GenericRowData.of(1, 50, 500L));
         write.write(GenericRowData.of(1, 60, 600L));
-        commit.commit("2", write.prepareCommit());
+        commit.commit("2", write.prepareCommit(true));
 
         write.close();
 
