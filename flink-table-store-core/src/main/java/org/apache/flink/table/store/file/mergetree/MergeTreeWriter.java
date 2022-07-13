@@ -179,11 +179,10 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @Override
-    public Increment prepareCommit() throws Exception {
+    public Increment prepareCommit(boolean endOfInput) throws Exception {
         flushMemory();
-        if (commitForceCompact) {
-            finishCompaction(true);
-        }
+        boolean blocking = endOfInput || commitForceCompact;
+        finishCompaction(blocking);
         return drainIncrement();
     }
 

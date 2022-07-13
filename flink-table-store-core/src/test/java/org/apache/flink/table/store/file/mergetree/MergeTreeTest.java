@@ -166,10 +166,10 @@ public class MergeTreeTest {
     @Test
     public void testRestore() throws Exception {
         List<TestRecord> expected = new ArrayList<>(writeBatch());
-        List<DataFileMeta> newFiles = writer.prepareCommit().newFiles();
+        List<DataFileMeta> newFiles = writer.prepareCommit(true).newFiles();
         writer = createMergeTreeWriter(newFiles);
         expected.addAll(writeBatch());
-        writer.prepareCommit();
+        writer.prepareCommit(true);
         writer.sync();
         assertRecords(expected);
     }
@@ -206,7 +206,7 @@ public class MergeTreeTest {
             }
             writeAll(records);
             expected.addAll(records);
-            Increment increment = writer.prepareCommit();
+            Increment increment = writer.prepareCommit(true);
             mergeCompacted(newFileNames, compactedFiles, increment);
         }
         writer.close();
@@ -237,7 +237,7 @@ public class MergeTreeTest {
                 writer.sync();
             }
 
-            Increment increment = writer.prepareCommit();
+            Increment increment = writer.prepareCommit(true);
             newFiles.addAll(increment.newFiles());
             mergeCompacted(newFileNames, compactedFiles, increment);
         }

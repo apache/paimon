@@ -92,8 +92,7 @@ public class AlterTableCompactITCase extends FileStoreTableITCase {
 
     @Test
     public void testChangeNumOfSortedRunTrigger() {
-        // force auto-compaction and increase trigger
-        batchSql("ALTER TABLE T0 SET ('commit.force-compact' = 'true')");
+        // increase trigger
         batchSql("ALTER TABLE T0 SET ('num-sorted-run.compaction-trigger' = '5')");
 
         // write duplicates

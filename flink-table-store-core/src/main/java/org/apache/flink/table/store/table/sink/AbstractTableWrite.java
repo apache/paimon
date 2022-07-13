@@ -78,7 +78,7 @@ public abstract class AbstractTableWrite<T> implements TableWrite {
     }
 
     @Override
-    public List<FileCommittable> prepareCommit() throws Exception {
+    public List<FileCommittable> prepareCommit(boolean endOfInput) throws Exception {
         List<FileCommittable> result = new ArrayList<>();
 
         Iterator<Map.Entry<BinaryRowData, Map<Integer, RecordWriter<T>>>> partIter =
@@ -93,7 +93,7 @@ public abstract class AbstractTableWrite<T> implements TableWrite {
                 int bucket = entry.getKey();
                 RecordWriter<T> writer = entry.getValue();
                 FileCommittable committable =
-                        new FileCommittable(partition, bucket, writer.prepareCommit());
+                        new FileCommittable(partition, bucket, writer.prepareCommit(endOfInput));
                 result.add(committable);
 
                 // clear if no update

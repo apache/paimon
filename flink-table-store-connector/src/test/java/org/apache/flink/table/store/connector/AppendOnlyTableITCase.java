@@ -127,7 +127,6 @@ public class AppendOnlyTableITCase extends FileStoreTableITCase {
 
     @Test
     public void testAutoCompaction() {
-        batchSql("ALTER TABLE append_table SET ('commit.force-compact' = 'true')");
         batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '2')");
         batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
 
@@ -200,7 +199,7 @@ public class AppendOnlyTableITCase extends FileStoreTableITCase {
     @Override
     protected List<String> ddl() {
         return Collections.singletonList(
-                "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('write-mode'='append-only', 'commit.force-compact' = 'true')");
+                "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('write-mode'='append-only')");
     }
 
     private void testRejectChanges(RowKind kind) {

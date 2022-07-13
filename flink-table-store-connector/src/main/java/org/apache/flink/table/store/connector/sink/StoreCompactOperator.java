@@ -58,7 +58,7 @@ public class StoreCompactOperator extends PrepareCommitOperator {
     }
 
     @Override
-    protected List<Committable> prepareCommit() throws IOException {
+    protected List<Committable> prepareCommit(boolean endOfInput) throws IOException {
         return compact.compact().stream()
                 .map(c -> new Committable(Committable.Kind.FILE, c))
                 .collect(Collectors.toList());
