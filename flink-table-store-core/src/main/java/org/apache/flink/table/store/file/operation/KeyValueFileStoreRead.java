@@ -26,6 +26,7 @@ import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.ProjectKeyRecordReader;
@@ -41,6 +42,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.apache.flink.table.store.file.data.DataFilePathFactory.CHANGELOG_FILE_PREFIX;
+import static org.apache.flink.table.store.file.predicate.PredicateBuilder.splitAnd;
 
 /**
  * {@link FileStoreRead} implementation for {@link
@@ -53,6 +55,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     private final MergeFunction mergeFunction;
 
     private int[][] keyProjectedFields;
+
+    private List<Predicate> filters;
 
     public KeyValueFileStoreRead(
             SchemaManager schemaManager,
@@ -82,10 +86,16 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     }
 
     @Override
+    public FileStoreRead<KeyValue> withFilter(Predicate predicate) {
+        this.filters = splitAnd(predicate);
+        return this;
+    }
+
+    @Override
     public RecordReader<KeyValue> createReader(Split split) throws IOException {
         if (split.isIncremental()) {
             DataFileReader dataFileReader =
-                    dataFileReaderFactory.create(split.partition(), split.bucket(), true);
+                    dataFileReaderFactory.create(split.partition(), split.bucket(), true, filters);
             // Return the raw file contents without merging
             List<ConcatRecordReader.ReaderSupplier<KeyValue>> suppliers = new ArrayList<>();
             for (DataFileMeta file : split.files()) {
@@ -97,7 +107,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             // in this case merge tree should merge records with same key
             // Do not project key in MergeTreeReader.
             DataFileReader dataFileReader =
-                    dataFileReaderFactory.create(split.partition(), split.bucket(), false);
+                    dataFileReaderFactory.create(split.partition(), split.bucket(), false, filters);
             MergeTreeReader reader =
                     new MergeTreeReader(
                             new IntervalPartition(split.files(), keyComparator).partition(),

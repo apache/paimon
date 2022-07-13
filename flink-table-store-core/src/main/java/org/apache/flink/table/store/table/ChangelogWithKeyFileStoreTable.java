@@ -30,7 +30,6 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -50,9 +49,13 @@ import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterat
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
+import static org.apache.flink.table.store.file.predicate.PredicateBuilder.containsFields;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.pickTransformFieldMapping;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.splitAnd;
 
@@ -142,7 +145,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                                 tableSchema.fieldNames(),
                                 tableSchema.trimmedPrimaryKeys());
                 if (keyFilters.size() > 0) {
-                    scan.withKeyFilter(PredicateBuilder.and(keyFilters));
+                    scan.withKeyFilter(and(keyFilters));
                 }
             }
         };
@@ -150,7 +153,32 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableRead newRead() {
+        List<String> primaryKeys = tableSchema.trimmedPrimaryKeys();
+        Set<String> nonPrimaryKeys =
+                tableSchema.fieldNames().stream()
+                        .filter(name -> !primaryKeys.contains(name))
+                        .collect(Collectors.toSet());
         return new KeyValueTableRead(store.newRead()) {
+
+            @Override
+            public TableRead withFilter(Predicate predicate) {
+                List<Predicate> predicates = new ArrayList<>();
+                for (Predicate sub : splitAnd(predicate)) {
+                    // TODO support value filter
+                    if (containsFields(sub, nonPrimaryKeys)) {
+                        continue;
+                    }
+
+                    // TODO Actually, the index is wrong, but it is OK. The orc filter
+                    // just use name instead of index.
+                    predicates.add(sub);
+                }
+                if (predicates.size() > 0) {
+                    read.withFilter(and(predicates));
+                }
+                return this;
+            }
+
             @Override
             public TableRead withProjection(int[][] projection) {
                 read.withValueProjection(projection);

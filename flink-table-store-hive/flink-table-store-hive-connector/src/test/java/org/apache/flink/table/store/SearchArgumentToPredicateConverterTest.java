@@ -94,7 +94,9 @@ public class SearchArgumentToPredicateConverterTest {
                 new SearchArgumentToPredicateConverter(
                         sarg, Collections.singletonList("a"), Collections.singletonList(flinkType));
 
-        Predicate expected = new PredicateBuilder(RowType.of(flinkType)).equal(0, flinkLiteral);
+        Predicate expected =
+                new PredicateBuilder(RowType.of(new LogicalType[] {flinkType}, new String[] {"a"}))
+                        .equal(0, flinkLiteral);
         Predicate actual = converter.convert().orElse(null);
         assertThat(actual).isEqualTo(expected);
     }
@@ -176,6 +178,15 @@ public class SearchArgumentToPredicateConverterTest {
                 builder.in("f_bigint", PredicateLeaf.Type.LONG, 100L, 200L, 300L).build();
         Predicate expected = BUILDER.in(1, Arrays.asList(100L, 200L, 300L));
         assertExpected(sarg, expected);
+
+        builder = SearchArgumentFactory.newBuilder();
+        Object[] literals = new Object[30];
+        for (int i = 0; i < literals.length; i++) {
+            literals[i] = i * 100L;
+        }
+        sarg = builder.in("f_bigint", PredicateLeaf.Type.LONG, literals).build();
+        expected = BUILDER.in(1, Arrays.asList(literals));
+        assertExpected(sarg, expected);
     }
 
     @Test
@@ -208,6 +219,33 @@ public class SearchArgumentToPredicateConverterTest {
                         .end()
                         .build();
         Predicate expected = BUILDER.notIn(1, Arrays.asList(100L, null, 300L));
+        assertExpected(sarg, expected);
+    }
+
+    @Test
+    public void testLargeIn() {
+        SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
+        Object[] literals = new Object[30];
+        literals[0] = null;
+        for (int i = 1; i < literals.length; i++) {
+            literals[i] = i * 100L;
+        }
+        SearchArgument sarg = builder.in("f_bigint", PredicateLeaf.Type.LONG, literals).build();
+        Predicate expected = BUILDER.in(1, Arrays.asList(literals));
+        assertExpected(sarg, expected);
+    }
+
+    @Test
+    public void testLargeNotIn() {
+        SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
+        Object[] literals = new Object[30];
+        literals[0] = null;
+        for (int i = 1; i < literals.length; i++) {
+            literals[i] = i * 100L;
+        }
+        SearchArgument sarg =
+                builder.startNot().in("f_bigint", PredicateLeaf.Type.LONG, literals).end().build();
+        Predicate expected = BUILDER.notIn(1, Arrays.asList(literals));
         assertExpected(sarg, expected);
     }
 

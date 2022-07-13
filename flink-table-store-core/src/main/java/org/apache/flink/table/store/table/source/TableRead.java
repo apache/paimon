@@ -20,6 +20,7 @@ package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
+import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.RecordReader;
 
 import java.io.IOException;
@@ -28,7 +29,7 @@ import java.util.Arrays;
 /** An abstraction layer above {@link FileStoreRead} to provide reading of {@link RowData}. */
 public interface TableRead {
 
-    // TODO support filter push down
+    TableRead withFilter(Predicate predicate);
 
     default TableRead withProjection(int[] projection) {
         int[][] nestedProjection =

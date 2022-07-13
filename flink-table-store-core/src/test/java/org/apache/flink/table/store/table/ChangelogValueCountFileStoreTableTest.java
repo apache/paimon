@@ -171,7 +171,6 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         Path tablePath = new Path(tempDir.toString());
         Configuration conf = new Configuration();
         conf.set(CoreOptions.PATH, tablePath.toString());
-        conf.set(CoreOptions.FILE_FORMAT, "avro");
         conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
         configure.accept(conf);
         SchemaManager schemaManager = new SchemaManager(tablePath);

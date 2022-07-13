@@ -84,6 +84,9 @@ public class FileStoreSource
         if (projectedFields != null) {
             read.withProjection(projectedFields);
         }
+        if (predicate != null) {
+            read.withFilter(predicate);
+        }
         return new FileStoreSourceReader(context, read);
     }
 

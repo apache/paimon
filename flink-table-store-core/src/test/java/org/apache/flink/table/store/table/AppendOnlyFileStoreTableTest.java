@@ -168,7 +168,6 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         Path tablePath = new Path(tempDir.toString());
         Configuration conf = new Configuration();
         conf.set(CoreOptions.PATH, tablePath.toString());
-        conf.set(CoreOptions.FILE_FORMAT, "avro");
         conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
         configure.accept(conf);
         SchemaManager schemaManager = new SchemaManager(tablePath);

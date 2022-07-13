@@ -26,7 +26,7 @@ import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.expressions.ResolvedExpression;
+import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.ArrayList;
@@ -59,7 +59,7 @@ public abstract class FileFormat {
      * @param filters A list of filters in conjunctive form for filtering on a best-effort basis.
      */
     public abstract BulkFormat<RowData, FileSourceSplit> createReaderFactory(
-            RowType type, int[][] projection, List<ResolvedExpression> filters);
+            RowType type, int[][] projection, List<Predicate> filters);
 
     /** Create a {@link BulkWriter.Factory} from the type. */
     public abstract BulkWriter.Factory<RowData> createWriterFactory(RowType type);

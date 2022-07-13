@@ -60,6 +60,10 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
         testWritePreemptMemory(true);
     }
 
+    @Override
+    @Test
+    public void testReadFilter() {}
+
     private void testWritePreemptMemory(boolean singlePartition) throws Exception {
         // write
         FileStoreTable table = createFileStoreTable();
@@ -93,7 +97,6 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
         Path tablePath = new Path(tempDir.toString());
         Configuration conf = new Configuration();
         conf.set(CoreOptions.PATH, tablePath.toString());
-        conf.set(CoreOptions.FILE_FORMAT, "avro");
         conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
         conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(30 * 1024));
         conf.set(CoreOptions.PAGE_SIZE, new MemorySize(1024));

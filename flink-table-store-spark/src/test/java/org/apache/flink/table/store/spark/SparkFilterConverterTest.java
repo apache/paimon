@@ -122,6 +122,16 @@ public class SparkFilterConverterTest {
         Predicate expectedIn = builder.in(0, Arrays.asList(1, null, 2));
         Predicate actualIn = converter.convert(in);
         assertThat(actualIn).isEqualTo(expectedIn);
+
+        Object[] literals = new Object[30];
+        literals[0] = null;
+        for (int i = 1; i < literals.length; i++) {
+            literals[i] = i * 100;
+        }
+        In largeIn = In.apply(field, literals);
+        Predicate expectedLargeIn = builder.in(0, Arrays.asList(literals));
+        Predicate actualLargeIn = converter.convert(largeIn);
+        assertThat(actualLargeIn).isEqualTo(expectedLargeIn);
     }
 
     @Test
