@@ -46,7 +46,7 @@ Use `--jars` in spark-sql:
 spark-sql ... --jars flink-table-store-spark-{{< version >}}.jar
 ```
 
-You can also copy `flink-table-store-spark-{{< version >}}.jar` to `spark/jars` in your Spark installation.
+Alternatively, you can copy `flink-table-store-spark-{{< version >}}.jar` under `spark/jars` in your Spark installation.
 
 ## Catalog
 
