@@ -65,6 +65,7 @@ under the License.
         <module>flink-table-store-hive</module>
         <module>flink-table-store-kafka</module>
         <module>flink-table-store-spark</module>
+        <module>flink-table-store-spark2</module>
     </modules>
 
     <properties>
@@ -514,7 +515,7 @@ under the License.
                             <rules>
                                 <bannedDependencies>
                                     <excludes>
-                                        <exclude>com.fasterxml.jackson*:*:(,2.9.0]</exclude>
+                                        <exclude>com.fasterxml.jackson*:*:(,2.5.0]</exclude>
                                     </excludes>
                                 </bannedDependencies>
                             </rules>
