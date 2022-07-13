@@ -87,7 +87,7 @@ public abstract class FileStoreTableTestBase {
         TableCommit commit = table.newCommit("user");
         write.write(GenericRowData.of(1, 10, 100L));
         write.write(GenericRowData.of(2, 20, 200L));
-        commit.commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit(true));
         write.close();
 
         write = table.newWrite().withOverwrite(true);
@@ -95,7 +95,7 @@ public abstract class FileStoreTableTestBase {
         write.write(GenericRowData.of(2, 21, 201L));
         Map<String, String> overwritePartition = new HashMap<>();
         overwritePartition.put("pt", "2");
-        commit.withOverwritePartition(overwritePartition).commit("1", write.prepareCommit());
+        commit.withOverwritePartition(overwritePartition).commit("1", write.prepareCommit(true));
         write.close();
 
         List<Split> splits = table.newScan().plan().splits;
@@ -121,7 +121,7 @@ public abstract class FileStoreTableTestBase {
         write.write(GenericRowData.of(1, 5, 6L));
         write.write(GenericRowData.of(1, 7, 8L));
         write.write(GenericRowData.of(1, 9, 10L));
-        table.newCommit("user").commit("0", write.prepareCommit());
+        table.newCommit("user").commit("0", write.prepareCommit(true));
         write.close();
 
         List<Split> splits =

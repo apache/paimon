@@ -109,7 +109,7 @@ public class TableStoreHiveStorageHandlerITCase {
         write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi Again")));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 2, 30L, StringData.fromString("World")));
         write.write(GenericRowData.of(2, 40L, StringData.fromString("Test")));
-        commit.commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit(true));
         write.close();
 
         hiveShell.execute(
@@ -152,7 +152,7 @@ public class TableStoreHiveStorageHandlerITCase {
         write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi")));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 2, 30L, StringData.fromString("World")));
         write.write(GenericRowData.of(2, 40L, StringData.fromString("Test")));
-        commit.commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit(true));
         write.close();
 
         hiveShell.execute(
@@ -199,7 +199,7 @@ public class TableStoreHiveStorageHandlerITCase {
         for (GenericRowData rowData : input) {
             write.write(rowData);
         }
-        commit.commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit(true));
         write.close();
 
         hiveShell.execute(
@@ -304,17 +304,17 @@ public class TableStoreHiveStorageHandlerITCase {
         TableWrite write = table.newWrite();
         TableCommit commit = table.newCommit("user");
         write.write(GenericRowData.of(1));
-        commit.commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit(true));
         write.write(GenericRowData.of((Object) null));
-        commit.commit("1", write.prepareCommit());
+        commit.commit("1", write.prepareCommit(true));
         write.write(GenericRowData.of(2));
         write.write(GenericRowData.of(3));
         write.write(GenericRowData.of((Object) null));
-        commit.commit("2", write.prepareCommit());
+        commit.commit("2", write.prepareCommit(true));
         write.write(GenericRowData.of(4));
         write.write(GenericRowData.of(5));
         write.write(GenericRowData.of(6));
-        commit.commit("3", write.prepareCommit());
+        commit.commit("3", write.prepareCommit(true));
         write.close();
 
         hiveShell.execute(
@@ -400,15 +400,15 @@ public class TableStoreHiveStorageHandlerITCase {
                         375, /* 1971-01-11 */
                         TimestampData.fromLocalDateTime(
                                 LocalDateTime.of(2022, 5, 17, 17, 29, 20))));
-        commit.commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit(true));
         write.write(GenericRowData.of(null, null));
-        commit.commit("1", write.prepareCommit());
+        commit.commit("1", write.prepareCommit(true));
         write.write(GenericRowData.of(376 /* 1971-01-12 */, null));
         write.write(
                 GenericRowData.of(
                         null,
                         TimestampData.fromLocalDateTime(LocalDateTime.of(2022, 6, 18, 8, 30, 0))));
-        commit.commit("2", write.prepareCommit());
+        commit.commit("2", write.prepareCommit(true));
         write.close();
 
         hiveShell.execute(
@@ -459,7 +459,7 @@ public class TableStoreHiveStorageHandlerITCase {
         write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi")));
         write.write(GenericRowData.of(2, 20L, StringData.fromString("Hello")));
         write.write(GenericRowData.of(3, 30L, StringData.fromString("World")));
-        commit.commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit(true));
         write.close();
 
         hiveShell.execute(

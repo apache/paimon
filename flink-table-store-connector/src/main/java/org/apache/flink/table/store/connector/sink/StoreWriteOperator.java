@@ -181,10 +181,10 @@ public class StoreWriteOperator extends PrepareCommitOperator {
     }
 
     @Override
-    protected List<Committable> prepareCommit() throws IOException {
+    protected List<Committable> prepareCommit(boolean endOfInput) throws IOException {
         List<Committable> committables = new ArrayList<>();
         try {
-            for (FileCommittable committable : write.prepareCommit()) {
+            for (FileCommittable committable : write.prepareCommit(endOfInput)) {
                 committables.add(new Committable(Committable.Kind.FILE, committable));
             }
         } catch (Exception e) {

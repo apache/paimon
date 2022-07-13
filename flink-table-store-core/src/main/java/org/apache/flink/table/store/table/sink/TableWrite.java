@@ -34,7 +34,7 @@ public interface TableWrite {
 
     SinkRecord write(RowData rowData) throws Exception;
 
-    List<FileCommittable> prepareCommit() throws Exception;
+    List<FileCommittable> prepareCommit(boolean endOfInput) throws Exception;
 
     void close() throws Exception;
 }

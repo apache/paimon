@@ -134,7 +134,7 @@ public class TestChangelogDataReadWrite {
                                     RowKind.INSERT,
                                     GenericRowData.of(tuple2.f1)));
         }
-        List<DataFileMeta> files = writer.prepareCommit().newFiles();
+        List<DataFileMeta> files = writer.prepareCommit(true).newFiles();
         writer.close();
         return new ArrayList<>(files);
     }

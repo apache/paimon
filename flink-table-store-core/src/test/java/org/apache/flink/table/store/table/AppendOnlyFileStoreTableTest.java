@@ -147,17 +147,17 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(GenericRowData.of(1, 10, 100L));
         write.write(GenericRowData.of(2, 20, 200L));
         write.write(GenericRowData.of(1, 11, 101L));
-        commit.commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit(true));
 
         write.write(GenericRowData.of(1, 12, 102L));
         write.write(GenericRowData.of(2, 21, 201L));
         write.write(GenericRowData.of(2, 22, 202L));
-        commit.commit("1", write.prepareCommit());
+        commit.commit("1", write.prepareCommit(true));
 
         write.write(GenericRowData.of(1, 11, 101L));
         write.write(GenericRowData.of(2, 21, 201L));
         write.write(GenericRowData.of(1, 12, 102L));
-        commit.commit("2", write.prepareCommit());
+        commit.commit("2", write.prepareCommit(true));
 
         write.close();
     }

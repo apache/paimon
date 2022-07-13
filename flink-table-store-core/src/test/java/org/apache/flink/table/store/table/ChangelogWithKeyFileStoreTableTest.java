@@ -58,9 +58,9 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(GenericRowData.of(1, 10, 200L));
         write.write(GenericRowData.of(1, 10, 100L));
         write.write(GenericRowData.of(1, 11, 101L));
-        commit.commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit(true));
         write.write(GenericRowData.of(1, 11, 55L));
-        commit.commit("1", write.prepareCommit());
+        commit.commit("1", write.prepareCommit(true));
         write.close();
 
         List<Split> splits = table.newScan().plan().splits;
@@ -169,7 +169,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(GenericRowData.of(1, 10, 101L));
         write.write(GenericRowData.ofKind(RowKind.UPDATE_BEFORE, 1, 10, 101L));
         write.write(GenericRowData.ofKind(RowKind.UPDATE_AFTER, 1, 10, 102L));
-        commit.commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit(true));
         write.close();
 
         List<Split> splits = table.newScan().withIncremental(true).plan().splits;
@@ -192,19 +192,19 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(GenericRowData.of(1, 10, 100L));
         write.write(GenericRowData.of(2, 20, 200L));
         write.write(GenericRowData.of(1, 11, 101L));
-        commit.commit("0", write.prepareCommit());
+        commit.commit("0", write.prepareCommit(true));
 
         write.write(GenericRowData.of(1, 10, 1000L));
         write.write(GenericRowData.of(2, 21, 201L));
         write.write(GenericRowData.of(2, 21, 2001L));
-        commit.commit("1", write.prepareCommit());
+        commit.commit("1", write.prepareCommit(true));
 
         write.write(GenericRowData.of(1, 11, 1001L));
         write.write(GenericRowData.of(2, 21, 20001L));
         write.write(GenericRowData.of(2, 22, 202L));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 1, 11, 1001L));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 2, 20, 200L));
-        commit.commit("2", write.prepareCommit());
+        commit.commit("2", write.prepareCommit(true));
 
         write.close();
     }
