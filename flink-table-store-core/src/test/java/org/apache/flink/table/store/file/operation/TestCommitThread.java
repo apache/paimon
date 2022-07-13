@@ -104,7 +104,7 @@ public class TestCommitThread extends Thread {
         ManifestCommittable committable =
                 new ManifestCommittable(String.valueOf(new Random().nextLong()));
         for (Map.Entry<BinaryRowData, MergeTreeWriter> entry : writers.entrySet()) {
-            committable.addFileCommittable(entry.getKey(), 0, entry.getValue().prepareCommit());
+            committable.addFileCommittable(entry.getKey(), 0, entry.getValue().prepareCommit(true));
         }
 
         runWithRetry(committable, () -> commit.commit(committable, Collections.emptyMap()));
@@ -114,7 +114,7 @@ public class TestCommitThread extends Thread {
         BinaryRowData partition = overwriteData();
         ManifestCommittable committable =
                 new ManifestCommittable(String.valueOf(new Random().nextLong()));
-        committable.addFileCommittable(partition, 0, writers.get(partition).prepareCommit());
+        committable.addFileCommittable(partition, 0, writers.get(partition).prepareCommit(true));
 
         runWithRetry(
                 committable,

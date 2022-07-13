@@ -229,7 +229,7 @@ public class TestFileStore extends KeyValueFileStore {
                 writers.entrySet()) {
             for (Map.Entry<Integer, RecordWriter<KeyValue>> entryWithBucket :
                     entryWithPartition.getValue().entrySet()) {
-                Increment increment = entryWithBucket.getValue().prepareCommit();
+                Increment increment = entryWithBucket.getValue().prepareCommit(emptyWriter);
                 committable.addFileCommittable(
                         entryWithPartition.getKey(), entryWithBucket.getKey(), increment);
             }

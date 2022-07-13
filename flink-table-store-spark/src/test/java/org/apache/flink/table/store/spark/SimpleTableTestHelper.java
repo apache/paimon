@@ -65,6 +65,6 @@ public class SimpleTableTestHelper {
     }
 
     public void commit() throws Exception {
-        commit.commit(UUID.randomUUID().toString(), writer.prepareCommit());
+        commit.commit(UUID.randomUUID().toString(), writer.prepareCommit(true));
     }
 }

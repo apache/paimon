@@ -109,7 +109,7 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     }
 
     @Override
-    public Increment prepareCommit() throws Exception {
+    public Increment prepareCommit(boolean endOnfInput) throws Exception {
         List<DataFileMeta> newFiles = new ArrayList<>();
         if (writer != null) {
             writer.close();
@@ -130,7 +130,10 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
         // add new generated files
         toCompact.addAll(newFiles);
         submitCompaction();
-        finishCompaction(forceCompact);
+
+        boolean blocking = endOnfInput || forceCompact;
+        finishCompaction(blocking);
+
         return drainIncrement(newFiles);
     }
 

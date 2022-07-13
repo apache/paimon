@@ -26,7 +26,7 @@ import java.util.List;
 /**
  * The {@code RecordWriter} is responsible for writing data and handling in-progress files used to
  * write yet un-staged data. The incremental files ready to commit is returned to the system by the
- * {@link #prepareCommit()}.
+ * {@link #prepareCommit(boolean)}.
  *
  * @param <T> type of record to write.
  */
@@ -38,9 +38,10 @@ public interface RecordWriter<T> {
     /**
      * Prepare for a commit.
      *
+     * @param endOfInput Signal that there is no committable anymore.
      * @return Incremental files in this snapshot cycle
      */
-    Increment prepareCommit() throws Exception;
+    Increment prepareCommit(boolean endOfInput) throws Exception;
 
     /**
      * Sync the writer. The structure related to file reading and writing is thread unsafe, there

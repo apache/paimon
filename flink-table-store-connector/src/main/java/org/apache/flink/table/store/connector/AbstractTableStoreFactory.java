@@ -41,7 +41,6 @@ import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -133,14 +132,9 @@ public abstract class AbstractTableStoreFactory
     }
 
     static FileStoreTable buildFileStoreTable(DynamicTableFactory.Context context) {
-        boolean batch =
-                context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
-                        == RuntimeExecutionMode.BATCH;
-        Map<String, String> options = new HashMap<>(context.getCatalogTable().getOptions());
-        if (batch) {
-            options.put(CoreOptions.COMMIT_FORCE_COMPACT.key(), String.valueOf(true));
-        }
-        FileStoreTable table = FileStoreTableFactory.create(Configuration.fromMap(options));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        Configuration.fromMap(context.getCatalogTable().getOptions()));
 
         TableSchema tableSchema = table.schema();
         UpdateSchema updateSchema = UpdateSchema.fromCatalogTable(context.getCatalogTable());

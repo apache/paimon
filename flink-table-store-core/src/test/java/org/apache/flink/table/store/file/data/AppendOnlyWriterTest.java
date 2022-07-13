@@ -81,7 +81,7 @@ public class AppendOnlyWriterTest {
 
         for (int i = 0; i < 3; i++) {
             writer.sync();
-            Increment inc = writer.prepareCommit();
+            Increment inc = writer.prepareCommit(true);
 
             assertThat(inc.newFiles()).isEqualTo(Collections.emptyList());
             assertThat(inc.compactBefore()).isEqualTo(Collections.emptyList());
@@ -134,7 +134,7 @@ public class AppendOnlyWriterTest {
             }
 
             writer.sync();
-            Increment inc = writer.prepareCommit();
+            Increment inc = writer.prepareCommit(true);
             if (txn > 0 && txn % 3 == 0) {
                 assertThat(inc.compactBefore()).hasSize(4);
                 assertThat(inc.compactAfter()).hasSize(1);
@@ -191,7 +191,7 @@ public class AppendOnlyWriterTest {
         }
 
         writer.sync();
-        Increment firstInc = writer.prepareCommit();
+        Increment firstInc = writer.prepareCommit(true);
         assertThat(firstInc.compactBefore()).isEqualTo(Collections.emptyList());
         assertThat(firstInc.compactAfter()).isEqualTo(Collections.emptyList());
 
@@ -228,7 +228,7 @@ public class AppendOnlyWriterTest {
         assertThat(writer.getToCompact()).containsExactlyElementsOf(firstInc.newFiles());
         writer.write(row(id, String.format("%03d", id), PART));
         writer.sync();
-        Increment secInc = writer.prepareCommit();
+        Increment secInc = writer.prepareCommit(true);
 
         // check compact before and after
         List<DataFileMeta> compactBefore = secInc.compactBefore();
