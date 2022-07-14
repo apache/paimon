@@ -26,6 +26,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
+import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
@@ -37,6 +38,8 @@ import org.apache.flink.table.types.logical.RowType;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Reads {@link KeyValue}s from data files.
@@ -173,10 +176,11 @@ public class DataFileReader {
         }
 
         public DataFileReader create(BinaryRowData partition, int bucket) {
-            return create(partition, bucket, true);
+            return create(partition, bucket, true, Collections.emptyList());
         }
 
-        public DataFileReader create(BinaryRowData partition, int bucket, boolean projectKeys) {
+        public DataFileReader create(
+                BinaryRowData partition, int bucket, boolean projectKeys, List<Predicate> filters) {
             int[][] keyProjection = projectKeys ? this.keyProjection : fullKeyProjection;
             RowType projectedKeyType = projectKeys ? this.projectedKeyType : keyType;
 
@@ -188,7 +192,7 @@ public class DataFileReader {
                     schemaId,
                     projectedKeyType,
                     projectedValueType,
-                    fileFormat.createReaderFactory(recordType, projection),
+                    fileFormat.createReaderFactory(recordType, projection, filters),
                     pathFactory.createDataFilePathFactory(partition, bucket));
         }
 

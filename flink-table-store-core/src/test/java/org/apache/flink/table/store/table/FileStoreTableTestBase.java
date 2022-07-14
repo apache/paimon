@@ -40,6 +40,7 @@ import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -131,6 +132,34 @@ public abstract class FileStoreTableTestBase {
                         .splits;
         assertThat(splits.size()).isEqualTo(1);
         assertThat(splits.get(0).bucket()).isEqualTo(1);
+    }
+
+    @Test
+    public void testReadFilter() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
+
+        write.write(GenericRowData.of(1, 10, 100L));
+        write.write(GenericRowData.of(1, 20, 200L));
+        commit.commit("0", write.prepareCommit(true));
+
+        write.write(GenericRowData.of(1, 30, 300L));
+        write.write(GenericRowData.of(1, 40, 400L));
+        commit.commit("1", write.prepareCommit(true));
+
+        write.write(GenericRowData.of(1, 50, 500L));
+        write.write(GenericRowData.of(1, 60, 600L));
+        commit.commit("2", write.prepareCommit(true));
+
+        write.close();
+
+        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
+        List<Split> splits = table.newScan().plan().splits;
+        TableRead read = table.newRead().withFilter(builder.equal(2, 300L));
+        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
+                .hasSameElementsAs(Arrays.asList("1|30|300", "1|40|400"));
     }
 
     protected List<String> getResult(

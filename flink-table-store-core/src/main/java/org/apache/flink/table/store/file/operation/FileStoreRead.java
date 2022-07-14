@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.table.source.Split;
 
@@ -29,6 +30,8 @@ import java.io.IOException;
  * @param <T> type of record to read.
  */
 public interface FileStoreRead<T> {
+
+    FileStoreRead<T> withFilter(Predicate predicate);
 
     /** Create a {@link RecordReader} from split. */
     RecordReader<T> createReader(Split split) throws IOException;

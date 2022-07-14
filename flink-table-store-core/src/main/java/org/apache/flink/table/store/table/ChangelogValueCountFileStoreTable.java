@@ -99,6 +99,12 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
         return new KeyValueTableRead(store.newRead()) {
 
             @Override
+            public TableRead withFilter(Predicate predicate) {
+                read.withFilter(predicate);
+                return this;
+            }
+
+            @Override
             public TableRead withProjection(int[][] projection) {
                 read.withKeyProjection(projection);
                 return this;

@@ -18,9 +18,11 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -31,6 +33,9 @@ import org.apache.spark.sql.connector.read.PartitionReaderFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.List;
+
+import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
 
 /** A Spark {@link PartitionReaderFactory} for table store. */
 public class SparkReaderFactory implements PartitionReaderFactory {
@@ -39,10 +44,13 @@ public class SparkReaderFactory implements PartitionReaderFactory {
 
     private final FileStoreTable table;
     private final int[] projectedFields;
+    private final List<Predicate> predicates;
 
-    public SparkReaderFactory(FileStoreTable table, int[] projectedFields) {
+    public SparkReaderFactory(
+            FileStoreTable table, int[] projectedFields, List<Predicate> predicates) {
         this.table = table;
         this.projectedFields = projectedFields;
+        this.predicates = predicates;
     }
 
     private RowType readRowType() {
@@ -52,11 +60,12 @@ public class SparkReaderFactory implements PartitionReaderFactory {
     @Override
     public PartitionReader<InternalRow> createReader(InputPartition partition) {
         RecordReader<RowData> reader;
+        TableRead read = table.newRead().withProjection(projectedFields);
+        if (predicates.size() > 0) {
+            read.withFilter(and(predicates));
+        }
         try {
-            reader =
-                    table.newRead()
-                            .withProjection(projectedFields)
-                            .createReader(((SparkInputPartition) partition).split());
+            reader = read.createReader(((SparkInputPartition) partition).split());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
