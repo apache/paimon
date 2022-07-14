@@ -91,7 +91,7 @@ public class SparkReadITCase {
         RowType rowType =
                 new RowType(
                         Arrays.asList(
-                                new RowType.RowField("a", new IntType()),
+                                new RowType.RowField("a", new IntType(false)),
                                 new RowType.RowField("b", new BigIntType()),
                                 new RowType.RowField("c", new VarCharType())));
         return new SimpleTableTestHelper(tablePath, rowType);
@@ -174,6 +174,27 @@ public class SparkReadITCase {
 
         spark.sql("ALTER TABLE table_store.default.testAddColumn ALTER COLUMN a TYPE BIGINT");
         innerTestNormal(spark.table("table_store.default.testAddColumn"));
+    }
+
+    @Test
+    public void testAlterTableColumnNullability() {
+        assertThat(schema1().fields().get(0).type().logicalType().isNullable()).isFalse();
+
+        // note: for Spark, it is illegal to change nullable column to non-nullable
+        spark.sql("ALTER TABLE table_store.default.t1 ALTER COLUMN a DROP NOT NULL");
+        assertThat(schema1().fields().get(0).type().logicalType().isNullable()).isTrue();
+    }
+
+    @Test
+    public void testAlterTableColumnComment() {
+        assertThat(schema1().fields().get(0).description()).isNull();
+
+        spark.sql("ALTER TABLE table_store.default.t1 ALTER COLUMN a COMMENT 'a new comment'");
+        assertThat(schema1().fields().get(0).description()).isEqualTo("a new comment");
+
+        spark.sql(
+                "ALTER TABLE table_store.default.t1 ALTER COLUMN a COMMENT 'yet another comment'");
+        assertThat(schema1().fields().get(0).description()).isEqualTo("yet another comment");
     }
 
     private TableSchema schema1() {

@@ -27,8 +27,6 @@ import java.util.Objects;
 /** Schema change to table. */
 public interface SchemaChange {
 
-    // TODO more change support like updateColumnNullability and updateColumnComment.
-
     static SchemaChange setOption(String key, String value) {
         return new SetOption(key, value);
     }
@@ -44,6 +42,14 @@ public interface SchemaChange {
 
     static SchemaChange updateColumnType(String fieldName, LogicalType newLogicalType) {
         return new UpdateColumnType(fieldName, newLogicalType);
+    }
+
+    static SchemaChange updateColumnNullability(String fieldName, boolean newNullability) {
+        return new UpdateColumnNullability(fieldName, newNullability);
+    }
+
+    static SchemaChange updateColumnComment(String fieldName, String comment) {
+        return new UpdateColumnComment(fieldName, comment);
     }
 
     /** A SchemaChange to set a table option. */
@@ -203,6 +209,78 @@ public interface SchemaChange {
             int result = Objects.hash(newLogicalType);
             result = 31 * result + Objects.hashCode(fieldName);
             return result;
+        }
+    }
+
+    /** A SchemaChange to update the field nullability. */
+    final class UpdateColumnNullability implements SchemaChange {
+        private final String fieldName;
+        private final boolean newNullability;
+
+        public UpdateColumnNullability(String fieldName, boolean newNullability) {
+            this.fieldName = fieldName;
+            this.newNullability = newNullability;
+        }
+
+        public String fieldName() {
+            return fieldName;
+        }
+
+        public boolean newNullability() {
+            return newNullability;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof UpdateColumnNullability)) {
+                return false;
+            }
+            UpdateColumnNullability that = (UpdateColumnNullability) o;
+            return newNullability == that.newNullability && fieldName.equals(that.fieldName);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(fieldName, newNullability);
+        }
+    }
+
+    /** A SchemaChange to update the field comment. */
+    final class UpdateColumnComment implements SchemaChange {
+        private final String fieldName;
+        private final String newDescription;
+
+        public UpdateColumnComment(String fieldName, String newDescription) {
+            this.fieldName = fieldName;
+            this.newDescription = newDescription;
+        }
+
+        public String fieldName() {
+            return fieldName;
+        }
+
+        public String newDescription() {
+            return newDescription;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof UpdateColumnComment)) {
+                return false;
+            }
+            UpdateColumnComment that = (UpdateColumnComment) o;
+            return fieldName.equals(that.fieldName) && newDescription.equals(that.newDescription);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(fieldName, newDescription);
         }
     }
 }

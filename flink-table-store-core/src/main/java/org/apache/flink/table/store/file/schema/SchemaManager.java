@@ -24,6 +24,8 @@ import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.schema.SchemaChange.AddColumn;
 import org.apache.flink.table.store.file.schema.SchemaChange.RemoveOption;
 import org.apache.flink.table.store.file.schema.SchemaChange.SetOption;
+import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnComment;
+import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnNullability;
 import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnType;
 import org.apache.flink.table.store.file.utils.AtomicFileWriter;
 import org.apache.flink.table.store.file.utils.FileUtils;
@@ -43,6 +45,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.utils.FileUtils.listVersionedFiles;
@@ -172,34 +175,48 @@ public class SchemaManager implements Serializable {
                                     id, addColumn.fieldName(), dataType, addColumn.description()));
                 } else if (change instanceof UpdateColumnType) {
                     UpdateColumnType update = (UpdateColumnType) change;
-                    boolean found = false;
-                    for (int i = 0; i < newFields.size(); i++) {
-                        DataField field = newFields.get(i);
-                        if (field.name().equals(update.fieldName())) {
-                            AtomicInteger dummyId = new AtomicInteger(0);
-                            DataType newType =
-                                    TableSchema.toDataType(update.newLogicalType(), dummyId);
-                            if (dummyId.get() != 0) {
-                                throw new RuntimeException(
-                                        String.format(
-                                                "Update column to nested row type '%s' is not supported.",
-                                                update.newLogicalType()));
-                            }
-                            newFields.set(
-                                    i,
+                    updateColumn(
+                            newFields,
+                            update.fieldName(),
+                            (field) -> {
+                                AtomicInteger dummyId = new AtomicInteger(0);
+                                DataType newType =
+                                        TableSchema.toDataType(
+                                                update.newLogicalType(), new AtomicInteger(0));
+                                if (dummyId.get() != 0) {
+                                    throw new RuntimeException(
+                                            String.format(
+                                                    "Update column to nested row type '%s' is not supported.",
+                                                    update.newLogicalType()));
+                                }
+                                return new DataField(field.id(), field.name(), newType);
+                            });
+                } else if (change instanceof UpdateColumnNullability) {
+                    UpdateColumnNullability update = (UpdateColumnNullability) change;
+                    updateColumn(
+                            newFields,
+                            update.fieldName(),
+                            (field) -> {
+                                DataType newType =
+                                        TableSchema.toDataType(
+                                                field.type()
+                                                        .logicalType()
+                                                        .copy(update.newNullability()),
+                                                new AtomicInteger(0));
+                                return new DataField(
+                                        field.id(), field.name(), newType, field.description());
+                            });
+                } else if (change instanceof UpdateColumnComment) {
+                    UpdateColumnComment update = (UpdateColumnComment) change;
+                    updateColumn(
+                            newFields,
+                            update.fieldName(),
+                            (field) ->
                                     new DataField(
                                             field.id(),
                                             field.name(),
-                                            newType,
-                                            field.description()));
-                            found = true;
-                            break;
-                        }
-                    }
-
-                    if (!found) {
-                        throw new RuntimeException("Can not find column: " + update.fieldName());
-                    }
+                                            field.type(),
+                                            update.newDescription()));
                 } else {
                     throw new UnsupportedOperationException(
                             "Unsupported change: " + change.getClass());
@@ -220,6 +237,24 @@ public class SchemaManager implements Serializable {
             if (success) {
                 return newSchema;
             }
+        }
+    }
+
+    private void updateColumn(
+            List<DataField> newFields,
+            String updateFieldName,
+            Function<DataField, DataField> updateFunc) {
+        boolean found = false;
+        for (int i = 0; i < newFields.size(); i++) {
+            DataField field = newFields.get(i);
+            if (field.name().equals(updateFieldName)) {
+                newFields.set(i, updateFunc.apply(field));
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            throw new RuntimeException("Can not find column: " + updateFieldName);
         }
     }
 
