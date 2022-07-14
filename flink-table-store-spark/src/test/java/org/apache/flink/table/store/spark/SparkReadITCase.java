@@ -22,6 +22,9 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.data.binary.BinaryStringData;
+import org.apache.flink.table.store.file.schema.ArrayDataType;
+import org.apache.flink.table.store.file.schema.AtomicDataType;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -39,6 +42,9 @@ import org.apache.commons.io.FileUtils;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
+import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
+import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -50,6 +56,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for spark reader. */
 public class SparkReadITCase {
@@ -335,6 +342,106 @@ public class SparkReadITCase {
                 .isEqualTo("a double type");
         assertThat(getNestedField(getNestedField(getField(schema2(), 2), 0), 1).description())
                 .isEqualTo("a boolean array");
+    }
+
+    @Test
+    public void testCreateTable() throws Exception {
+        String ddl =
+                "CREATE TABLE table_store.default.MyTable (\n"
+                        + "order_id BIGINT NOT NULL comment 'biz order id',\n"
+                        + "buyer_id BIGINT NOT NULL COMMENT 'buyer id',\n"
+                        + "coupon_info ARRAY<STRING> NOT NULL COMMENT 'coupon info',\n"
+                        + "order_amount DOUBLE NOT NULL COMMENT 'order amount',\n"
+                        + "dt STRING NOT NULL COMMENT 'yyyy-MM-dd',\n"
+                        + "hh STRING NOT NULL COMMENT 'HH')\n"
+                        + "COMMENT 'my table'\n"
+                        + "PARTITIONED BY (dt, hh)\n"
+                        + "TBLPROPERTIES ('foo' = 'bar')";
+        spark.sql(ddl);
+        assertThatThrownBy(() -> spark.sql(ddl))
+                .isInstanceOf(TableAlreadyExistsException.class)
+                .hasMessage("Table default.MyTable already exists");
+        assertThatThrownBy(() -> spark.sql(ddl.replace("default", "foo")))
+                .isInstanceOf(NoSuchNamespaceException.class)
+                .hasMessage("Namespace 'foo' not found");
+
+        Path tablePath = new Path(warehousePath, "default.db/MyTable");
+        TableSchema schema = FileStoreTableFactory.create(tablePath).schema();
+        assertThat(schema.fields())
+                .containsExactly(
+                        new DataField(
+                                0,
+                                "order_id",
+                                new AtomicDataType(new BigIntType(false)),
+                                "biz order id"),
+                        new DataField(
+                                1,
+                                "buyer_id",
+                                new AtomicDataType(new BigIntType(false)),
+                                "buyer id"),
+                        new DataField(
+                                2,
+                                "coupon_info",
+                                new ArrayDataType(
+                                        false,
+                                        new AtomicDataType(
+                                                new VarCharType(true, VarCharType.MAX_LENGTH))),
+                                "coupon info"),
+                        new DataField(
+                                3,
+                                "order_amount",
+                                new AtomicDataType(new DoubleType(false)),
+                                "order amount"),
+                        new DataField(
+                                4,
+                                "dt",
+                                new AtomicDataType(new VarCharType(false, VarCharType.MAX_LENGTH)),
+                                "yyyy-MM-dd"),
+                        new DataField(
+                                5,
+                                "hh",
+                                new AtomicDataType(new VarCharType(false, VarCharType.MAX_LENGTH)),
+                                "HH"));
+        assertThat(schema.options()).containsEntry("foo", "bar");
+        assertThat(schema.partitionKeys()).containsExactly("dt", "hh");
+        assertThat(schema.comment()).isEqualTo("my table");
+
+        SimpleTableTestHelper testHelper =
+                new SimpleTableTestHelper(
+                        tablePath, schema.logicalRowType(), Arrays.asList("dt", "hh"));
+        testHelper.write(
+                GenericRowData.of(
+                        1L,
+                        10L,
+                        new GenericArrayData(
+                                new BinaryStringData[] {
+                                    BinaryStringData.fromString("loyalty_discount"),
+                                    BinaryStringData.fromString("shipping_discount")
+                                }),
+                        199.0d,
+                        BinaryStringData.fromString("2022-07-20"),
+                        BinaryStringData.fromString("12")));
+        testHelper.commit();
+
+        Dataset<Row> dataset =
+                spark.read().format("tablestore").option("path", tablePath.toString()).load();
+        assertThat(dataset.select("order_id", "buyer_id", "dt").collectAsList().toString())
+                .isEqualTo("[[1,10,2022-07-20]]");
+        assertThat(dataset.select("coupon_info").collectAsList().toString())
+                .isEqualTo("[[WrappedArray(loyalty_discount, shipping_discount)]]");
+    }
+
+    @Test
+    public void testCreateNamespace() {
+        spark.sql("USE table_store");
+        spark.sql("CREATE NAMESPACE bar");
+
+        assertThatThrownBy(() -> spark.sql("CREATE NAMESPACE bar"))
+                .isInstanceOf(NamespaceAlreadyExistsException.class)
+                .hasMessage("Namespace 'bar' already exists");
+
+        assertThat(spark.sql("SHOW NAMESPACES").collectAsList().toString())
+                .isEqualTo("[[bar], [default]]");
     }
 
     private TableSchema schema1() {

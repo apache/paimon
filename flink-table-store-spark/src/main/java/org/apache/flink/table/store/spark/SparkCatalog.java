@@ -23,10 +23,15 @@ import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.table.store.file.schema.SchemaChange;
+import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
+import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
+import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException;
+import org.apache.spark.sql.connector.catalog.CatalogV2Implicits;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
@@ -69,6 +74,20 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
     }
 
     @Override
+    public void createNamespace(String[] namespace, Map<String, String> metadata)
+            throws NamespaceAlreadyExistsException {
+        Preconditions.checkArgument(
+                isValidateNamespace(namespace),
+                "Namespace %s is not valid",
+                CatalogV2Implicits.NamespaceHelper(namespace).quoted());
+        try {
+            catalog.createDatabase(namespace[0], false);
+        } catch (Catalog.DatabaseAlreadyExistException e) {
+            throw new NamespaceAlreadyExistsException(namespace);
+        }
+    }
+
+    @Override
     public String[][] listNamespaces() {
         List<String> databases = catalog.listDatabases();
         String[][] namespaces = new String[databases.size()][];
@@ -86,11 +105,18 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         if (!isValidateNamespace(namespace)) {
             throw new NoSuchNamespaceException(namespace);
         }
-        return new String[0][];
+        List<String> databases = catalog.listDatabases();
+        if (databases.contains(namespace[0])) {
+            return new String[][] {namespace};
+        }
+        throw new NoSuchNamespaceException(namespace);
     }
 
     @Override
-    public Map<String, String> loadNamespaceMetadata(String[] namespace) {
+    public Map<String, String> loadNamespaceMetadata(String[] namespace)
+            throws NoSuchNamespaceException {
+        // should listNamespace first, because SupportsNamespace#namespaceExists relies on it
+        listNamespaces(namespace);
         return Collections.emptyMap();
     }
 
@@ -99,7 +125,7 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         Preconditions.checkArgument(
                 isValidateNamespace(namespace),
                 "Missing database in namespace: %s",
-                Arrays.toString(namespace));
+                CatalogV2Implicits.NamespaceHelper(namespace).quoted());
 
         try {
             return catalog.listTables(namespace[0]).stream()
@@ -128,6 +154,26 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
             return loadTable(ident);
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
+        }
+    }
+
+    @Override
+    public Table createTable(
+            Identifier ident,
+            StructType schema,
+            Transform[] partitions,
+            Map<String, String> properties)
+            throws TableAlreadyExistsException, NoSuchNamespaceException {
+        try {
+            catalog.createTable(
+                    objectPath(ident), toUpdateSchema(schema, partitions, properties), false);
+            return loadTable(ident);
+        } catch (Catalog.TableAlreadyExistException e) {
+            throw new TableAlreadyExistsException(ident);
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new NoSuchNamespaceException(ident.namespace());
+        } catch (NoSuchTableException e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -162,6 +208,18 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         }
     }
 
+    private UpdateSchema toUpdateSchema(
+            StructType schema, Transform[] partitions, Map<String, String> properties) {
+        return new UpdateSchema(
+                (RowType) toFlinkType(schema),
+                Arrays.stream(partitions)
+                        .map(partition -> partition.references()[0].describe())
+                        .collect(Collectors.toList()),
+                Collections.emptyList(),
+                properties,
+                properties.getOrDefault(TableCatalog.PROP_COMMENT, ""));
+    }
+
     private void validateAlterNestedField(String[] fieldNames) {
         if (fieldNames.length > 1) {
             throw new UnsupportedOperationException(
@@ -182,11 +240,6 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
     }
 
     // --------------------- unsupported methods ----------------------------
-
-    @Override
-    public void createNamespace(String[] namespace, Map<String, String> metadata) {
-        throw new UnsupportedOperationException("Create namespace in Spark is not supported yet.");
-    }
 
     @Override
     public void alterNamespace(String[] namespace, NamespaceChange... changes) {
@@ -222,15 +275,6 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
      */
     public boolean dropNamespace(String[] namespace, boolean cascade) {
         throw new UnsupportedOperationException("Drop namespace in Spark is not supported yet.");
-    }
-
-    @Override
-    public Table createTable(
-            Identifier ident,
-            StructType schema,
-            Transform[] partitions,
-            Map<String, String> properties) {
-        throw new UnsupportedOperationException("Create table in Spark is not supported yet.");
     }
 
     @Override
