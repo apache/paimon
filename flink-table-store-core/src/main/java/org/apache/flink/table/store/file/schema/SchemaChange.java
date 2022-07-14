@@ -22,6 +22,7 @@ import org.apache.flink.table.types.logical.LogicalType;
 
 import javax.annotation.Nullable;
 
+import java.util.Arrays;
 import java.util.Objects;
 
 /** Schema change to table. */
@@ -44,12 +45,12 @@ public interface SchemaChange {
         return new UpdateColumnType(fieldName, newLogicalType);
     }
 
-    static SchemaChange updateColumnNullability(String fieldName, boolean newNullability) {
-        return new UpdateColumnNullability(fieldName, newNullability);
+    static SchemaChange updateColumnNullability(String[] fieldNames, boolean newNullability) {
+        return new UpdateColumnNullability(fieldNames, newNullability);
     }
 
-    static SchemaChange updateColumnComment(String fieldName, String comment) {
-        return new UpdateColumnComment(fieldName, comment);
+    static SchemaChange updateColumnComment(String[] fieldNames, String comment) {
+        return new UpdateColumnComment(fieldNames, comment);
     }
 
     /** A SchemaChange to set a table option. */
@@ -212,18 +213,18 @@ public interface SchemaChange {
         }
     }
 
-    /** A SchemaChange to update the field nullability. */
+    /** A SchemaChange to update the (nested) field nullability. */
     final class UpdateColumnNullability implements SchemaChange {
-        private final String fieldName;
+        private final String[] fieldNames;
         private final boolean newNullability;
 
-        public UpdateColumnNullability(String fieldName, boolean newNullability) {
-            this.fieldName = fieldName;
+        public UpdateColumnNullability(String[] fieldNames, boolean newNullability) {
+            this.fieldNames = fieldNames;
             this.newNullability = newNullability;
         }
 
-        public String fieldName() {
-            return fieldName;
+        public String[] fieldNames() {
+            return fieldNames;
         }
 
         public boolean newNullability() {
@@ -239,27 +240,30 @@ public interface SchemaChange {
                 return false;
             }
             UpdateColumnNullability that = (UpdateColumnNullability) o;
-            return newNullability == that.newNullability && fieldName.equals(that.fieldName);
+            return newNullability == that.newNullability
+                    && Arrays.equals(fieldNames, that.fieldNames);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(fieldName, newNullability);
+            int result = Objects.hash(newNullability);
+            result = 31 * result + Arrays.hashCode(fieldNames);
+            return result;
         }
     }
 
-    /** A SchemaChange to update the field comment. */
+    /** A SchemaChange to update the (nested) field comment. */
     final class UpdateColumnComment implements SchemaChange {
-        private final String fieldName;
+        private final String[] fieldNames;
         private final String newDescription;
 
-        public UpdateColumnComment(String fieldName, String newDescription) {
-            this.fieldName = fieldName;
+        public UpdateColumnComment(String[] fieldNames, String newDescription) {
+            this.fieldNames = fieldNames;
             this.newDescription = newDescription;
         }
 
-        public String fieldName() {
-            return fieldName;
+        public String[] fieldNames() {
+            return fieldNames;
         }
 
         public String newDescription() {
@@ -275,12 +279,15 @@ public interface SchemaChange {
                 return false;
             }
             UpdateColumnComment that = (UpdateColumnComment) o;
-            return fieldName.equals(that.fieldName) && newDescription.equals(that.newDescription);
+            return Arrays.equals(fieldNames, that.fieldNames)
+                    && newDescription.equals(that.newDescription);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(fieldName, newDescription);
+            int result = Objects.hash(newDescription);
+            result = 31 * result + Arrays.hashCode(fieldNames);
+            return result;
         }
     }
 }

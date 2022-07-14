@@ -39,6 +39,7 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -193,24 +194,22 @@ public class SchemaManager implements Serializable {
                             });
                 } else if (change instanceof UpdateColumnNullability) {
                     UpdateColumnNullability update = (UpdateColumnNullability) change;
-                    updateColumn(
+                    updateNestedColumn(
                             newFields,
-                            update.fieldName(),
-                            (field) -> {
-                                DataType newType =
-                                        TableSchema.toDataType(
-                                                field.type()
-                                                        .logicalType()
-                                                        .copy(update.newNullability()),
-                                                new AtomicInteger(0));
-                                return new DataField(
-                                        field.id(), field.name(), newType, field.description());
-                            });
+                            update.fieldNames(),
+                            0,
+                            (field) ->
+                                    new DataField(
+                                            field.id(),
+                                            field.name(),
+                                            DataType.copy(field.type(), update.newNullability()),
+                                            field.description()));
                 } else if (change instanceof UpdateColumnComment) {
                     UpdateColumnComment update = (UpdateColumnComment) change;
-                    updateColumn(
+                    updateNestedColumn(
                             newFields,
-                            update.fieldName(),
+                            update.fieldNames(),
+                            0,
                             (field) ->
                                     new DataField(
                                             field.id(),
@@ -240,22 +239,39 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    private void updateColumn(
+    private void updateNestedColumn(
             List<DataField> newFields,
-            String updateFieldName,
+            String[] updateFieldNames,
+            int index,
             Function<DataField, DataField> updateFunc) {
         boolean found = false;
         for (int i = 0; i < newFields.size(); i++) {
             DataField field = newFields.get(i);
-            if (field.name().equals(updateFieldName)) {
-                newFields.set(i, updateFunc.apply(field));
+            if (field.name().equals(updateFieldNames[index])) {
                 found = true;
-                break;
+                if (index == updateFieldNames.length - 1) {
+                    newFields.set(i, updateFunc.apply(field));
+                    break;
+                } else {
+                    assert field.type() instanceof RowDataType;
+                    updateNestedColumn(
+                            ((RowDataType) field.type()).fields(),
+                            updateFieldNames,
+                            index + 1,
+                            updateFunc);
+                }
             }
         }
         if (!found) {
-            throw new RuntimeException("Can not find column: " + updateFieldName);
+            throw new RuntimeException("Can not find column: " + Arrays.asList(updateFieldNames));
         }
+    }
+
+    private void updateColumn(
+            List<DataField> newFields,
+            String updateFieldName,
+            Function<DataField, DataField> updateFunc) {
+        updateNestedColumn(newFields, new String[] {updateFieldName}, 0, updateFunc);
     }
 
     private boolean commit(TableSchema newSchema) throws Exception {

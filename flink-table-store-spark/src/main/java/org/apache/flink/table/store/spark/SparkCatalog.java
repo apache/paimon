@@ -152,12 +152,10 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
                     update.fieldNames()[0], toFlinkType(update.newDataType()));
         } else if (change instanceof UpdateColumnNullability) {
             UpdateColumnNullability update = (UpdateColumnNullability) change;
-            validateAlterNestedField(update.fieldNames());
-            return SchemaChange.updateColumnNullability(update.fieldNames()[0], update.nullable());
+            return SchemaChange.updateColumnNullability(update.fieldNames(), update.nullable());
         } else if (change instanceof UpdateColumnComment) {
             UpdateColumnComment update = (UpdateColumnComment) change;
-            validateAlterNestedField(update.fieldNames());
-            return SchemaChange.updateColumnComment(update.fieldNames()[0], update.newComment());
+            return SchemaChange.updateColumnComment(update.fieldNames(), update.newComment());
         } else {
             throw new UnsupportedOperationException(
                     "Change is not supported: " + change.getClass());

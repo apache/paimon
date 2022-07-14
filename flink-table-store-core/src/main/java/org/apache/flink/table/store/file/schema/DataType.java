@@ -45,6 +45,22 @@ public abstract class DataType implements Serializable {
         return logicalType;
     }
 
+    public static DataType copy(DataType type, boolean isNullable) {
+        if (type instanceof AtomicDataType) {
+            return new AtomicDataType(type.logicalType.copy(isNullable));
+        } else if (type instanceof ArrayDataType) {
+            return new ArrayDataType(isNullable, ((ArrayDataType) type).elementType());
+        } else if (type instanceof MultisetDataType) {
+            return new MultisetDataType(isNullable, ((MultisetDataType) type).elementType());
+        } else if (type instanceof MapDataType) {
+            return new MapDataType(
+                    isNullable, ((MapDataType) type).keyType(), ((MapDataType) type).valueType());
+        } else if (type instanceof RowDataType) {
+            return new RowDataType(isNullable, ((RowDataType) type).fields());
+        }
+        throw new UnsupportedOperationException("Unknown type: " + type.logicalType.getClass());
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
