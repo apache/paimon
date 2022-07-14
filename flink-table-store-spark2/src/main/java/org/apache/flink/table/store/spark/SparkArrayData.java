@@ -166,6 +166,6 @@ public class SparkArrayData extends ArrayData {
 
     @Override
     public Object get(int ordinal, DataType dataType) {
-        return SpecializedGettersReader.read(this, ordinal, dataType, true, true);
+        return SpecializedGettersReader.read(this, ordinal, dataType);
     }
 }

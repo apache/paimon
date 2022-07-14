@@ -34,7 +34,8 @@ under the License.
     <packaging>jar</packaging>
 
     <properties>
-        <spark.version>2.4.8</spark.version>
+        <spark2.version>2.4.8</spark2.version>
+        <jackson.version>2.13.3</jackson.version>
     </properties>
 
     <dependencies>
@@ -46,25 +47,21 @@ under the License.
         </dependency>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-hive-catalog</artifactId>
-            <version>${project.version}</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>*</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-sql_2.12</artifactId>
-            <version>${spark.version}</version>
+            <version>${spark2.version}</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.apache.avro</groupId>
                     <artifactId>avro</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.module</groupId>
+                    <artifactId>*</artifactId>
                 </exclusion>
                 <exclusion>
                     <groupId>log4j</groupId>
@@ -76,39 +73,17 @@ under the License.
                 </exclusion>
             </exclusions>
         </dependency>
-    </dependencies>
 
-    <!-- Activate these profiles with -Pspark-x.x to build and test against different Spark versions -->
-    <profiles>
-        <profile>
-            <id>spark-2.4</id>
-            <properties>
-                <spark.version>2.4.8</spark.version>
-            </properties>
-        </profile>
-    </profiles>
+        <dependency>
+            <groupId>com.fasterxml.jackson.module</groupId>
+            <artifactId>jackson-module-scala_2.12</artifactId>
+            <version>${jackson.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 
     <build>
         <plugins>
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>build-helper-maven-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <id>add-sources</id>
-                        <phase>generate-sources</phase>
-                        <goals>
-                            <goal>add-source</goal>
-                        </goals>
-                        <configuration>
-                            <sources>
-                                <source>src/main/${spark.version}</source>
-                            </sources>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
@@ -123,7 +98,6 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                     <include>org.apache.flink:flink-table-store-shade</include>
-                                    <include>org.apache.flink:flink-table-store-hive-catalog</include>
                                 </includes>
                             </artifactSet>
                         </configuration>

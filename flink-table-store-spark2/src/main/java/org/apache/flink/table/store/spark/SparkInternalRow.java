@@ -166,7 +166,7 @@ public class SparkInternalRow extends InternalRow {
 
     @Override
     public Object get(int ordinal, DataType dataType) {
-        return SpecializedGettersReader.read(this, ordinal, dataType, true, true);
+        return SpecializedGettersReader.read(this, ordinal, dataType);
     }
 
     public static Object fromFlink(Object o, LogicalType type) {

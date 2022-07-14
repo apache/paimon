@@ -26,7 +26,6 @@ import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.Test;
 
 import static org.apache.flink.table.store.spark.SparkTypeUtils.fromFlinkRowType;
-import static org.apache.flink.table.store.spark.SparkTypeUtils.toFlinkType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link SparkTypeUtils}. */
@@ -96,7 +95,5 @@ public class SparkTypeTest {
 
         StructType sparkType = fromFlinkRowType(ALL_TYPES);
         assertThat(sparkType.toString()).isEqualTo(expected);
-
-        assertThat(toFlinkType(sparkType)).isEqualTo(ALL_TYPES);
     }
 }

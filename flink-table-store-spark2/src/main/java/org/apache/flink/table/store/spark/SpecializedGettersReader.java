@@ -44,13 +44,8 @@ public final class SpecializedGettersReader {
 
     private SpecializedGettersReader() {}
 
-    public static Object read(
-            SpecializedGetters obj,
-            int ordinal,
-            DataType dataType,
-            boolean handleNull,
-            boolean handleUserDefinedType) {
-        if (handleNull && (obj.isNullAt(ordinal) || dataType instanceof NullType)) {
+    public static Object read(SpecializedGetters obj, int ordinal, DataType dataType) {
+        if (obj.isNullAt(ordinal) || dataType instanceof NullType) {
             return null;
         }
         if (dataType instanceof BooleanType) {
@@ -102,7 +97,7 @@ public final class SpecializedGettersReader {
         if (dataType instanceof MapType) {
             return obj.getMap(ordinal);
         }
-        if (handleUserDefinedType && dataType instanceof UserDefinedType) {
+        if (dataType instanceof UserDefinedType) {
             return obj.get(ordinal, ((UserDefinedType) dataType).sqlType());
         }
 

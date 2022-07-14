@@ -126,7 +126,7 @@ public class SparkDataSourceReader
     @Override
     public List<InputPartition<InternalRow>> planInputPartitions() {
         return splits().stream()
-                .map(split -> new SparkInputPartition(table, projectedFields, split))
+                .map(split -> new SparkInputPartition(table, projectedFields, predicates, split))
                 .collect(Collectors.toList());
     }
 

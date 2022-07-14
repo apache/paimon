@@ -515,7 +515,7 @@ under the License.
                             <rules>
                                 <bannedDependencies>
                                     <excludes>
-                                        <exclude>com.fasterxml.jackson*:*:(,2.5.0]</exclude>
+                                        <exclude>com.fasterxml.jackson*:*:(,2.9.0]</exclude>
                                     </excludes>
                                 </bannedDependencies>
                             </rules>

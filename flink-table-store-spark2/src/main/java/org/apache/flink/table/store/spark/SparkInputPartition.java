@@ -21,6 +21,7 @@ package org.apache.flink.table.store.spark;
 import org.apache.flink.core.memory.DataInputViewStreamWrapper;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.table.FileStoreTable;
@@ -37,6 +38,9 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.UncheckedIOException;
+import java.util.List;
+
+import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
 
 /** A Spark {@link InputPartition} for table store. */
 public class SparkInputPartition implements InputPartition<InternalRow> {
@@ -45,12 +49,15 @@ public class SparkInputPartition implements InputPartition<InternalRow> {
 
     private final FileStoreTable table;
     private final int[] projectedFields;
+    private final List<Predicate> predicates;
 
     private transient Split split;
 
-    public SparkInputPartition(FileStoreTable table, int[] projectedFields, Split split) {
+    public SparkInputPartition(
+            FileStoreTable table, int[] projectedFields, List<Predicate> predicates, Split split) {
         this.table = table;
         this.projectedFields = projectedFields;
+        this.predicates = predicates;
         this.split = split;
     }
 
@@ -60,7 +67,10 @@ public class SparkInputPartition implements InputPartition<InternalRow> {
         try {
             TableRead tableRead = table.newRead();
             if (projectedFields != null) {
-                tableRead = tableRead.withProjection(projectedFields);
+                tableRead.withProjection(projectedFields);
+            }
+            if (predicates.size() > 0) {
+                tableRead.withFilter(and(predicates));
             }
             recordReader = tableRead.createReader(split);
         } catch (IOException e) {
