@@ -50,6 +50,10 @@ You can find Hive bundled jar in `./flink-table-store-hive/flink-table-store-hiv
 
 You can find Spark bundled jar in `./flink-table-store-spark/target/flink-table-store-spark-{{< version >}}.jar`.
 
+## Spark2
+
+You can find Spark2 bundled jar in `./flink-table-store-spark2/target/flink-table-store-spark2-{{< version >}}.jar`.
+
 ## Flink 1.14
 
 Running:
