@@ -79,7 +79,7 @@ public class SparkScan implements Scan, SupportsReportStatistics {
 
             @Override
             public PartitionReaderFactory createReaderFactory() {
-                return new SparkReaderFactory(table, projectedFields);
+                return new SparkReaderFactory(table, projectedFields, predicates);
             }
         };
     }

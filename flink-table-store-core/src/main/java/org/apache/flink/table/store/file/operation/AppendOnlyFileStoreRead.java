@@ -25,6 +25,7 @@ import org.apache.flink.table.store.file.data.AppendOnlyReader;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
+import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
@@ -37,6 +38,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.apache.flink.table.store.file.predicate.PredicateBuilder.splitAnd;
+
 /** {@link FileStoreRead} for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
 
@@ -47,6 +50,8 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
     private final FileStorePathFactory pathFactory;
 
     private int[][] projection;
+
+    private List<Predicate> filters;
 
     public AppendOnlyFileStoreRead(
             SchemaManager schemaManager,
@@ -69,9 +74,15 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
     }
 
     @Override
+    public FileStoreRead<RowData> withFilter(Predicate predicate) {
+        this.filters = splitAnd(predicate);
+        return this;
+    }
+
+    @Override
     public RecordReader<RowData> createReader(Split split) throws IOException {
         BulkFormat<RowData, FileSourceSplit> readerFactory =
-                fileFormat.createReaderFactory(rowType, projection);
+                fileFormat.createReaderFactory(rowType, projection, filters);
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(split.partition(), split.bucket());
         List<ConcatRecordReader.ReaderSupplier<RowData>> suppliers = new ArrayList<>();

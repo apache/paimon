@@ -27,6 +27,7 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
+import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
 
 import org.apache.hadoop.hive.ql.exec.SerializationUtilities;
@@ -52,7 +53,7 @@ import java.util.Optional;
 public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer> {
 
     @Override
-    public InputSplit[] getSplits(JobConf jobConf, int numSplits) throws IOException {
+    public InputSplit[] getSplits(JobConf jobConf, int numSplits) {
         FileStoreTable table = createFileStoreTable(jobConf);
         TableScan scan = table.newScan();
         createPredicate(table.schema(), jobConf).ifPresent(scan::withFilter);
@@ -66,8 +67,10 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
             InputSplit inputSplit, JobConf jobConf, Reporter reporter) throws IOException {
         FileStoreTable table = createFileStoreTable(jobConf);
         TableStoreInputSplit split = (TableStoreInputSplit) inputSplit;
+        TableRead read = table.newRead();
+        createPredicate(table.schema(), jobConf).ifPresent(read::withFilter);
         return new TableStoreRecordReader(
-                table.newRead(),
+                read,
                 split,
                 table.schema().fieldNames(),
                 Arrays.asList(ColumnProjectionUtils.getReadColumnNames(jobConf)));

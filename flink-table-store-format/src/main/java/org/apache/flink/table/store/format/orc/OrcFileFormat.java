@@ -29,8 +29,7 @@ import org.apache.flink.orc.OrcSplitReaderUtil;
 import org.apache.flink.orc.vector.RowDataVectorizer;
 import org.apache.flink.orc.writer.OrcBulkWriterFactory;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.expressions.Expression;
-import org.apache.flink.table.expressions.ResolvedExpression;
+import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.store.utils.Projection;
@@ -68,12 +67,12 @@ public class OrcFileFormat extends FileFormat {
 
     @Override
     public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
-            RowType type, int[][] projection, List<ResolvedExpression> filters) {
+            RowType type, int[][] projection, List<Predicate> filters) {
         List<OrcFilters.Predicate> orcPredicates = new ArrayList<>();
 
         if (filters != null) {
-            for (Expression pred : filters) {
-                OrcFilters.Predicate orcPred = OrcFilters.toOrcPredicate(pred);
+            for (Predicate pred : filters) {
+                OrcFilters.Predicate orcPred = OrcFilterConverter.toOrcPredicate(pred);
                 if (orcPred != null) {
                     orcPredicates.add(orcPred);
                 }

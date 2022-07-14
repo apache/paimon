@@ -86,6 +86,12 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         AppendOnlyFileStoreRead read = store.newRead();
         return new TableRead() {
             @Override
+            public TableRead withFilter(Predicate predicate) {
+                read.withFilter(predicate);
+                return this;
+            }
+
+            @Override
             public TableRead withProjection(int[][] projection) {
                 read.withProjection(projection);
                 return this;

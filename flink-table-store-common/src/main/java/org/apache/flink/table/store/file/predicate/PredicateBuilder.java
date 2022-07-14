@@ -26,6 +26,8 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
+import javax.annotation.Nullable;
+
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.sql.Timestamp;
@@ -39,6 +41,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static java.util.Collections.singletonList;
 
@@ -88,19 +91,32 @@ public class PredicateBuilder {
     }
 
     public Predicate leaf(NullFalseLeafBinaryFunction function, int idx, Object literal) {
-        return new LeafPredicate(function, rowType.getTypeAt(idx), idx, singletonList(literal));
+        RowType.RowField field = rowType.getFields().get(idx);
+        return new LeafPredicate(
+                function, field.getType(), idx, field.getName(), singletonList(literal));
     }
 
     public Predicate leaf(LeafUnaryFunction function, int idx) {
-        return new LeafPredicate(function, rowType.getTypeAt(idx), idx, Collections.emptyList());
+        RowType.RowField field = rowType.getFields().get(idx);
+        return new LeafPredicate(
+                function, field.getType(), idx, field.getName(), Collections.emptyList());
     }
 
     public Predicate in(int idx, List<Object> literals) {
-        return new LeafPredicate(In.INSTANCE, rowType.getTypeAt(idx), idx, literals);
+        if (literals.size() > 20) {
+            RowType.RowField field = rowType.getFields().get(idx);
+            return new LeafPredicate(In.INSTANCE, field.getType(), idx, field.getName(), literals);
+        }
+
+        List<Predicate> equals = new ArrayList<>(literals.size());
+        for (Object literal : literals) {
+            equals.add(equal(idx, literal));
+        }
+        return or(equals);
     }
 
     public Predicate notIn(int idx, List<Object> literals) {
-        return new LeafPredicate(NotIn.INSTANCE, rowType.getTypeAt(idx), idx, literals);
+        return in(idx, literals).negate().get();
     }
 
     public Predicate between(int idx, Object includedLowerBound, Object includedUpperBound) {
@@ -140,13 +156,19 @@ public class PredicateBuilder {
                 .get();
     }
 
-    public static List<Predicate> splitAnd(Predicate predicate) {
+    public static List<Predicate> splitAnd(@Nullable Predicate predicate) {
+        if (predicate == null) {
+            return Collections.emptyList();
+        }
         List<Predicate> result = new ArrayList<>();
         splitCompound(And.INSTANCE, predicate, result);
         return result;
     }
 
-    public static List<Predicate> splitOr(Predicate predicate) {
+    public static List<Predicate> splitOr(@Nullable Predicate predicate) {
+        if (predicate == null) {
+            return Collections.emptyList();
+        }
         List<Predicate> result = new ArrayList<>();
         splitCompound(Or.INSTANCE, predicate, result);
         return result;
@@ -268,10 +290,25 @@ public class PredicateBuilder {
                                 leafPredicate.function(),
                                 leafPredicate.type(),
                                 mapped,
+                                leafPredicate.fieldName(),
                                 leafPredicate.literals()));
             } else {
                 return Optional.empty();
             }
+        }
+    }
+
+    public static boolean containsFields(Predicate predicate, Set<String> fields) {
+        if (predicate instanceof CompoundPredicate) {
+            for (Predicate child : ((CompoundPredicate) predicate).children()) {
+                if (containsFields(child, fields)) {
+                    return true;
+                }
+            }
+            return false;
+        } else {
+            LeafPredicate leafPredicate = (LeafPredicate) predicate;
+            return fields.contains(leafPredicate.fieldName());
         }
     }
 }

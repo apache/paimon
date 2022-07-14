@@ -26,8 +26,6 @@ import org.apache.flink.table.runtime.typeutils.InternalSerializers;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.types.logical.LogicalType;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
@@ -42,15 +40,21 @@ public class LeafPredicate implements Predicate {
 
     private final LeafFunction function;
     private final LogicalType type;
-    private final int index;
+    private final int fieldIndex;
+    private final String fieldName;
 
     private transient List<Object> literals;
 
     public LeafPredicate(
-            LeafFunction function, LogicalType type, int index, List<Object> literals) {
+            LeafFunction function,
+            LogicalType type,
+            int fieldIndex,
+            String fieldName,
+            List<Object> literals) {
         this.function = function;
         this.type = type;
-        this.index = index;
+        this.fieldIndex = fieldIndex;
+        this.fieldName = fieldName;
         this.literals = literals;
     }
 
@@ -58,13 +62,16 @@ public class LeafPredicate implements Predicate {
         return function;
     }
 
-    @Nullable
     public LogicalType type() {
         return type;
     }
 
     public int index() {
-        return index;
+        return fieldIndex;
+    }
+
+    public String fieldName() {
+        return fieldName;
     }
 
     public List<Object> literals() {
@@ -73,17 +80,18 @@ public class LeafPredicate implements Predicate {
 
     @Override
     public boolean test(Object[] values) {
-        return function.test(type, values[index], literals);
+        return function.test(type, values[fieldIndex], literals);
     }
 
     @Override
     public boolean test(long rowCount, FieldStats[] fieldStats) {
-        return function.test(type, rowCount, fieldStats[index], literals);
+        return function.test(type, rowCount, fieldStats[fieldIndex], literals);
     }
 
     @Override
     public Optional<Predicate> negate() {
-        return function.negate().map(negate -> new LeafPredicate(negate, type, index, literals));
+        return function.negate()
+                .map(negate -> new LeafPredicate(negate, type, fieldIndex, fieldName, literals));
     }
 
     @Override
@@ -95,7 +103,8 @@ public class LeafPredicate implements Predicate {
             return false;
         }
         LeafPredicate that = (LeafPredicate) o;
-        return index == that.index
+        return fieldIndex == that.fieldIndex
+                && Objects.equals(fieldName, that.fieldName)
                 && Objects.equals(function, that.function)
                 && Objects.equals(type, that.type)
                 && Objects.equals(literals, that.literals);
@@ -103,7 +112,7 @@ public class LeafPredicate implements Predicate {
 
     @Override
     public int hashCode() {
-        return Objects.hash(function, type, index, literals);
+        return Objects.hash(function, type, fieldIndex, fieldName, literals);
     }
 
     private ListSerializer<Object> objectsSerializer() {

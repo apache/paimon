@@ -32,6 +32,7 @@ import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreRead;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreWrite;
+import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
@@ -108,6 +109,11 @@ public class TestChangelogDataReadWrite {
                         avro,
                         pathFactory);
         return new KeyValueTableRead(read) {
+            @Override
+            public TableRead withFilter(Predicate predicate) {
+                throw new UnsupportedOperationException();
+            }
+
             @Override
             public TableRead withProjection(int[][] projection) {
                 throw new UnsupportedOperationException();
