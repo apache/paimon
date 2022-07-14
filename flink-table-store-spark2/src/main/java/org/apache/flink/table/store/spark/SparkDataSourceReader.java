@@ -1,0 +1,139 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.flink.table.store.spark;
+
+import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.utils.TypeUtils;
+import org.apache.flink.table.types.logical.RowType;
+
+import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.sources.Filter;
+import org.apache.spark.sql.sources.v2.reader.DataSourceReader;
+import org.apache.spark.sql.sources.v2.reader.InputPartition;
+import org.apache.spark.sql.sources.v2.reader.Statistics;
+import org.apache.spark.sql.sources.v2.reader.SupportsPushDownFilters;
+import org.apache.spark.sql.sources.v2.reader.SupportsPushDownRequiredColumns;
+import org.apache.spark.sql.sources.v2.reader.SupportsReportStatistics;
+import org.apache.spark.sql.types.StructType;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.OptionalLong;
+import java.util.stream.Collectors;
+
+/** A Spark {@link DataSourceReader} for table store. */
+public class SparkDataSourceReader
+        implements SupportsPushDownFilters,
+                SupportsPushDownRequiredColumns,
+                SupportsReportStatistics {
+
+    private final FileStoreTable table;
+
+    private List<Predicate> predicates = new ArrayList<>();
+    private Filter[] pushedFilters;
+    private int[] projectedFields;
+    private List<Split> splits;
+
+    public SparkDataSourceReader(FileStoreTable table) {
+        this.table = table;
+    }
+
+    @Override
+    public Filter[] pushFilters(Filter[] filters) {
+        SparkFilterConverter converter = new SparkFilterConverter(table.schema().logicalRowType());
+        List<Predicate> predicates = new ArrayList<>();
+        List<Filter> pushed = new ArrayList<>();
+        for (Filter filter : filters) {
+            try {
+                predicates.add(converter.convert(filter));
+                pushed.add(filter);
+            } catch (UnsupportedOperationException ignore) {
+            }
+        }
+        this.predicates = predicates;
+        this.pushedFilters = pushed.toArray(new Filter[0]);
+        return filters;
+    }
+
+    @Override
+    public Filter[] pushedFilters() {
+        return pushedFilters;
+    }
+
+    @Override
+    public void pruneColumns(StructType requiredSchema) {
+        String[] pruneFields = requiredSchema.fieldNames();
+        List<String> fieldNames = table.schema().fieldNames();
+        int[] projected = new int[pruneFields.length];
+        for (int i = 0; i < projected.length; i++) {
+            projected[i] = fieldNames.indexOf(pruneFields[i]);
+        }
+        this.projectedFields = projected;
+    }
+
+    @Override
+    public Statistics estimateStatistics() {
+        long rowCount = 0L;
+
+        for (Split split : splits()) {
+            for (DataFileMeta file : split.files()) {
+                rowCount += file.rowCount();
+            }
+        }
+
+        final long numRows = rowCount;
+        final long sizeInBytes = readSchema().defaultSize() * numRows;
+
+        return new Statistics() {
+            @Override
+            public OptionalLong sizeInBytes() {
+                return OptionalLong.of(sizeInBytes);
+            }
+
+            @Override
+            public OptionalLong numRows() {
+                return OptionalLong.of(numRows);
+            }
+        };
+    }
+
+    @Override
+    public StructType readSchema() {
+        RowType rowType = table.schema().logicalRowType();
+        return SparkTypeUtils.fromFlinkRowType(
+                projectedFields == null ? rowType : TypeUtils.project(rowType, projectedFields));
+    }
+
+    @Override
+    public List<InputPartition<InternalRow>> planInputPartitions() {
+        return splits().stream()
+                .map(split -> new SparkInputPartition(table, projectedFields, predicates, split))
+                .collect(Collectors.toList());
+    }
+
+    protected List<Split> splits() {
+        if (splits == null) {
+            this.splits = table.newScan().withFilter(predicates).plan().splits;
+        }
+        return splits;
+    }
+}

@@ -1,6 +1,6 @@
 ---
 title: "Trino"
-weight: 4
+weight: 5
 type: docs
 aliases:
 - /engines/trino.html
