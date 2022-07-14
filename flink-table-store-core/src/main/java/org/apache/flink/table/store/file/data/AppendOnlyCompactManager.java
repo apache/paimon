@@ -22,10 +22,11 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactTask;
+import org.apache.flink.table.store.file.utils.FileUtils;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
@@ -108,31 +109,40 @@ public class AppendOnlyCompactManager extends CompactManager {
         return toCompact;
     }
 
-    /** A {@link CompactTask} impl for ALTER TABLE COMPACT of append-only table. */
-    public static class RollingCompactTask extends CompactTask {
+    /**
+     * A {@link CompactTask} impl for ALTER TABLE COMPACT of append-only table.
+     *
+     * <p>This task accepts a pre-scanned file list as input and pick the candidate files to compact
+     * iteratively until reach the end of the input. There might be multiple times of rewrite
+     * happens during one task.
+     */
+    public static class IterativeCompactTask extends CompactTask {
 
         private final long targetFileSize;
         private final int minFileNum;
         private final int maxFileNum;
         private final CompactRewriter rewriter;
+        private final DataFilePathFactory factory;
 
-        public RollingCompactTask(
+        public IterativeCompactTask(
                 List<DataFileMeta> inputs,
                 long targetFileSize,
                 int minFileNum,
                 int maxFileNum,
-                CompactRewriter rewriter) {
+                CompactRewriter rewriter,
+                DataFilePathFactory factory) {
             super(inputs);
             this.targetFileSize = targetFileSize;
             this.minFileNum = minFileNum;
             this.maxFileNum = maxFileNum;
             this.rewriter = rewriter;
+            this.factory = factory;
         }
 
         @Override
         protected CompactResult doCompact(List<DataFileMeta> inputs) throws Exception {
             LinkedList<DataFileMeta> toCompact = new LinkedList<>(inputs);
-            Set<DataFileMeta> compactBefore = new HashSet<>();
+            Set<DataFileMeta> compactBefore = new LinkedHashSet<>();
             List<DataFileMeta> compactAfter = new ArrayList<>();
             while (!toCompact.isEmpty()) {
                 Optional<List<DataFileMeta>> candidates =
@@ -151,20 +161,32 @@ public class AppendOnlyCompactManager extends CompactManager {
                     break;
                 }
             }
-            // remove intermediate files
-            Iterator<DataFileMeta> iterator = compactAfter.iterator();
-            while (iterator.hasNext()) {
-                DataFileMeta file = iterator.next();
+            // remove and delete intermediate files
+            Iterator<DataFileMeta> afterIterator = compactAfter.iterator();
+            while (afterIterator.hasNext()) {
+                DataFileMeta file = afterIterator.next();
                 if (compactBefore.contains(file)) {
                     compactBefore.remove(file);
-                    iterator.remove();
+                    afterIterator.remove();
+                    delete(file);
                 }
             }
             return result(new ArrayList<>(compactBefore), compactAfter);
         }
+
+        @VisibleForTesting
+        void delete(DataFileMeta tmpFile) {
+            FileUtils.deleteOrWarn(factory.toPath(tmpFile.fileName()));
+        }
     }
 
-    /** A {@link CompactTask} impl for append-only table auto-compaction. */
+    /**
+     * A {@link CompactTask} impl for append-only table auto-compaction.
+     *
+     * <p>This task accepts an already-picked candidate to perform one-time rewrite. And for the
+     * rest of input files, it is the duty of {@link AppendOnlyWriter} to invoke the next time
+     * compaction.
+     */
     public static class AutoCompactTask extends CompactTask {
 
         private final CompactRewriter rewriter;

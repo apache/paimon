@@ -98,12 +98,13 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
         if (compactFiles == null) {
             compactFiles = scanExistingFileMetas(partition, bucket);
         }
-        return new AppendOnlyCompactManager.RollingCompactTask(
+        return new AppendOnlyCompactManager.IterativeCompactTask(
                 compactFiles,
                 targetFileSize,
                 minFileNum,
                 maxFileNum,
-                compactRewriter(partition, bucket));
+                compactRewriter(partition, bucket),
+                pathFactory.createDataFilePathFactory(partition, bucket));
     }
 
     private RecordWriter<RowData> createWriter(

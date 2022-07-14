@@ -25,14 +25,16 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.apache.flink.table.store.file.data.DataFileTestUtils.newFile;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.fail;
 
-/** Test for {@link RollingCompactTaskTest}. */
-public class RollingCompactTaskTest {
+/** Test for {@link IterativeCompactTaskTest}. */
+public class IterativeCompactTaskTest {
 
     private static final long TARGET_FILE_SIZE = 1024L;
     private static final int MIN_FILE_NUM = 3;
@@ -41,11 +43,16 @@ public class RollingCompactTaskTest {
     @Test
     public void testNoCompact() {
         // empty
-        innerTest(Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
+        innerTest(
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.emptyList());
 
         // single small file
         innerTest(
                 Collections.singletonList(newFile(1L, 10L)),
+                Collections.emptyList(),
                 Collections.emptyList(),
                 Collections.emptyList());
 
@@ -53,17 +60,20 @@ public class RollingCompactTaskTest {
         innerTest(
                 Collections.singletonList(newFile(1L, 1024L)),
                 Collections.emptyList(),
+                Collections.emptyList(),
                 Collections.emptyList());
 
         // almost-full files
         innerTest(
                 Arrays.asList(newFile(1L, 1024L), newFile(2L, 2048L)),
                 Collections.emptyList(),
+                Collections.emptyList(),
                 Collections.emptyList());
 
         // large files
         innerTest(
                 Arrays.asList(newFile(1L, 1000L), newFile(1001L, 1100L)),
+                Collections.emptyList(),
                 Collections.emptyList(),
                 Collections.emptyList());
     }
@@ -83,7 +93,8 @@ public class RollingCompactTaskTest {
                         newFile(501L, 1000L),
                         newFile(1001L, 1010L),
                         newFile(1011L, 1024L)),
-                Collections.singletonList(newFile(1L, 1024L)));
+                Collections.singletonList(newFile(1L, 1024L)),
+                Collections.emptyList());
 
         innerTest(
                 Arrays.asList(
@@ -97,7 +108,8 @@ public class RollingCompactTaskTest {
                         newFile(501L, 1000L),
                         newFile(1001L, 1010L),
                         newFile(1011L, 2000L)),
-                Arrays.asList(newFile(1L, 1024L), newFile(1025L, 2000L)));
+                Arrays.asList(newFile(1L, 1024L), newFile(1025L, 2000L)),
+                Collections.emptyList());
 
         // small files in the middle
         innerTest(
@@ -114,7 +126,8 @@ public class RollingCompactTaskTest {
                         newFile(4501L, 4600L),
                         newFile(4601L, 4700L),
                         newFile(4701L, 5024L)),
-                Collections.singletonList(newFile(4001L, 5024L)));
+                Collections.singletonList(newFile(4001L, 5024L)),
+                Collections.emptyList());
 
         // small files on the tail
         innerTest(
@@ -142,7 +155,8 @@ public class RollingCompactTaskTest {
                         newFile(4071L, 4080L),
                         newFile(4081L, 4090L),
                         newFile(4091L, 4110L)),
-                Collections.singletonList(newFile(4001L, 4110L)));
+                Collections.singletonList(newFile(4001L, 4110L)),
+                Collections.emptyList());
     }
 
     @Test
@@ -181,7 +195,8 @@ public class RollingCompactTaskTest {
                         newFile(4111L, 5000L),
                         newFile(5001L, 5014L),
                         newFile(5015L, 5024L)),
-                Collections.singletonList(newFile(4001L, 5024L)));
+                Collections.singletonList(newFile(4001L, 5024L)),
+                Collections.singletonList(newFile(4001L, 4110L)));
 
         // alternate compact
         innerTest(
@@ -211,22 +226,49 @@ public class RollingCompactTaskTest {
                         newFile(4001L, 5024L),
                         newFile(5025L, 6000L),
                         newFile(7501L, 8524L),
-                        newFile(8525L, 8900L)));
+                        newFile(8525L, 8900L)),
+                Collections.emptyList());
     }
 
     private void innerTest(
             List<DataFileMeta> compactFiles,
             List<DataFileMeta> expectBefore,
-            List<DataFileMeta> expectAfter) {
-        AppendOnlyCompactManager.RollingCompactTask task =
-                new AppendOnlyCompactManager.RollingCompactTask(
+            List<DataFileMeta> expectAfter,
+            List<DataFileMeta> expectDeleted) {
+        MockIterativeCompactTask task =
+                new MockIterativeCompactTask(
                         compactFiles, TARGET_FILE_SIZE, MIN_FILE_NUM, MAX_FILE_NUM, rewriter());
         try {
             CompactResult actual = task.doCompact(compactFiles);
             assertThat(actual.before()).containsExactlyInAnyOrderElementsOf(expectBefore);
             assertThat(actual.after()).containsExactlyInAnyOrderElementsOf(expectAfter);
+
+            // assert the temporary files are deleted
+            assertThat(task.deleted).containsExactlyInAnyOrderElementsOf(expectDeleted);
         } catch (Exception e) {
             fail("This should not happen");
+        }
+    }
+
+    /** A Mock {@link AppendOnlyCompactManager.IterativeCompactTask} to test. */
+    private static class MockIterativeCompactTask
+            extends AppendOnlyCompactManager.IterativeCompactTask {
+
+        private final Set<DataFileMeta> deleted;
+
+        public MockIterativeCompactTask(
+                List<DataFileMeta> inputs,
+                long targetFileSize,
+                int minFileNum,
+                int maxFileNum,
+                AppendOnlyCompactManager.CompactRewriter rewriter) {
+            super(inputs, targetFileSize, minFileNum, maxFileNum, rewriter, null);
+            deleted = new HashSet<>();
+        }
+
+        @Override
+        void delete(DataFileMeta tmpFile) {
+            deleted.add(tmpFile);
         }
     }
 
