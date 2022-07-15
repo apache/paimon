@@ -166,6 +166,7 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
                 levels,
                 compactStrategy,
                 keyComparator,
+                options.maxSortedRunNum(),
                 options.targetFileSize(),
                 rewriter);
     }

@@ -309,6 +309,7 @@ public class MergeTreeTest {
                 new Levels(comparator, files, options.numLevels()),
                 strategy,
                 comparator,
+                options.maxSortedRunNum(),
                 options.targetFileSize(),
                 rewriter);
     }

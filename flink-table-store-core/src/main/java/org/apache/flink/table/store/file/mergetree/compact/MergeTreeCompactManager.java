@@ -22,12 +22,14 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactUnit;
+import org.apache.flink.table.store.file.mergetree.LevelSortedRun;
 import org.apache.flink.table.store.file.mergetree.Levels;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -44,6 +46,8 @@ public class MergeTreeCompactManager extends CompactManager {
 
     private final Comparator<RowData> keyComparator;
 
+    private final Integer maxSortedRunNum;
+
     private final long minFileSize;
 
     private final CompactRewriter rewriter;
@@ -53,11 +57,13 @@ public class MergeTreeCompactManager extends CompactManager {
             Levels levels,
             CompactStrategy strategy,
             Comparator<RowData> keyComparator,
+            Integer maxSortedRunNum,
             long minFileSize,
             CompactRewriter rewriter) {
         super(executor);
         this.levels = levels;
         this.strategy = strategy;
+        this.maxSortedRunNum = maxSortedRunNum;
         this.minFileSize = minFileSize;
         this.keyComparator = keyComparator;
         this.rewriter = rewriter;
@@ -69,7 +75,17 @@ public class MergeTreeCompactManager extends CompactManager {
             throw new IllegalStateException(
                     "Please finish the previous compaction before submitting new one.");
         }
-        strategy.pick(levels.numberOfLevels(), levels.levelSortedRuns())
+        List<LevelSortedRun> sortedRuns = levels.levelSortedRuns();
+        if (maxSortedRunNum != null && maxSortedRunNum < sortedRuns.size()) {
+            pickSortedRuns(sortedRuns.subList(0, maxSortedRunNum));
+            pickSortedRuns(sortedRuns.subList(maxSortedRunNum, sortedRuns.size()));
+        } else {
+            pickSortedRuns(sortedRuns);
+        }
+    }
+
+    private void pickSortedRuns(List<LevelSortedRun> sortedRuns) {
+        strategy.pick(levels.numberOfLevels(), sortedRuns)
                 .ifPresent(
                         unit -> {
                             if (unit.files().size() < 2) {
@@ -89,7 +105,7 @@ public class MergeTreeCompactManager extends CompactManager {
                             if (LOG.isDebugEnabled()) {
                                 LOG.debug(
                                         "Submit compaction with files (name, level, size): "
-                                                + levels.levelSortedRuns().stream()
+                                                + sortedRuns.stream()
                                                         .flatMap(lsr -> lsr.run().files().stream())
                                                         .map(
                                                                 file ->
