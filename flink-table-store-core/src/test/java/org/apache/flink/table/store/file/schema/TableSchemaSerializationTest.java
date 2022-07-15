@@ -40,10 +40,13 @@ public class TableSchemaSerializationTest {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", new AtomicDataType(new IntType())),
-                        new DataField(1, "f1", newRowType(2)),
-                        new DataField(3, "f2", new ArrayDataType(newRowType(4))),
-                        new DataField(5, "f3", new MultisetDataType(newRowType(6))),
-                        new DataField(7, "f4", new MapDataType(newRowType(8), newRowType(9))));
+                        new DataField(1, "f1", newRowType(false, 2)),
+                        new DataField(3, "f2", new ArrayDataType(false, newRowType(true, 4))),
+                        new DataField(5, "f3", new MultisetDataType(true, newRowType(false, 6))),
+                        new DataField(
+                                7,
+                                "f4",
+                                new MapDataType(true, newRowType(true, 8), newRowType(false, 9))));
         List<String> partitionKeys = Collections.singletonList("f0");
         List<String> primaryKeys = Arrays.asList("f0", "f1");
         Map<String, String> options = new HashMap<>();
