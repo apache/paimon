@@ -41,5 +41,6 @@ Apache Hive and Apache Spark.
 | Spark     | 3.0      | read                                                 | Projection, Filter |
 | Spark     | 3.1      | read                                                 | Projection, Filter |
 | Spark     | 3.2      | read                                                 | Projection, Filter |
+| Spark     | 3.3      | read                                                 | Projection, Filter |
 | Trino     | 358      | read                                                 | Projection, Filter |
 | Trino     | 388      | read                                                 | Projection, Filter |

@@ -73,29 +73,29 @@ public class SparkTypeTest {
         String nestedRowMapType =
                 "StructField(locations,MapType("
                         + "StringType,"
-                        + "StructType(StructField(posX,DoubleType,false), StructField(posY,DoubleType,false)),true),true)";
+                        + "StructType(StructField(posX,DoubleType,false),StructField(posY,DoubleType,false)),true),true)";
         String expected =
                 "StructType("
-                        + "StructField(id,IntegerType,false), "
-                        + "StructField(name,StringType,true), "
-                        + "StructField(salary,DoubleType,false), "
+                        + "StructField(id,IntegerType,false),"
+                        + "StructField(name,StringType,true),"
+                        + "StructField(salary,DoubleType,false),"
                         + nestedRowMapType
-                        + ", "
-                        + "StructField(strArray,ArrayType(StringType,true),true), "
-                        + "StructField(intArray,ArrayType(IntegerType,true),true), "
-                        + "StructField(boolean,BooleanType,true), "
-                        + "StructField(tinyint,ByteType,true), "
-                        + "StructField(smallint,ShortType,true), "
-                        + "StructField(bigint,LongType,true), "
-                        + "StructField(bytes,BinaryType,true), "
-                        + "StructField(timestamp,TimestampType,true), "
-                        + "StructField(date,DateType,true), "
-                        + "StructField(decimal,DecimalType(2,2),true), "
-                        + "StructField(decimal2,DecimalType(38,2),true), "
+                        + ","
+                        + "StructField(strArray,ArrayType(StringType,true),true),"
+                        + "StructField(intArray,ArrayType(IntegerType,true),true),"
+                        + "StructField(boolean,BooleanType,true),"
+                        + "StructField(tinyint,ByteType,true),"
+                        + "StructField(smallint,ShortType,true),"
+                        + "StructField(bigint,LongType,true),"
+                        + "StructField(bytes,BinaryType,true),"
+                        + "StructField(timestamp,TimestampType,true),"
+                        + "StructField(date,DateType,true),"
+                        + "StructField(decimal,DecimalType(2,2),true),"
+                        + "StructField(decimal2,DecimalType(38,2),true),"
                         + "StructField(decimal3,DecimalType(10,1),true))";
 
         StructType sparkType = fromFlinkRowType(ALL_TYPES);
-        assertThat(sparkType.toString()).isEqualTo(expected);
+        assertThat(sparkType.toString().replace(", ", ",")).isEqualTo(expected);
 
         assertThat(toFlinkType(sparkType)).isEqualTo(ALL_TYPES);
     }
