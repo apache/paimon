@@ -22,7 +22,6 @@ import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.orc.OrcFilters;
-import org.apache.flink.orc.shim.OrcShim;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.utils.ReflectionUtils;
@@ -65,7 +64,7 @@ public class OrcInputFormatFactory {
             return ReflectionUtils.invokeStaticMethod(
                     formatClass,
                     "createPartitionedFormat",
-                    OrcShim.defaultShim(),
+                    new OrcShimImpl(),
                     conf,
                     type,
                     Collections.emptyList(),
@@ -90,7 +89,7 @@ public class OrcInputFormatFactory {
             return ReflectionUtils.invokeStaticMethod(
                     formatClass,
                     "createPartitionedFormat",
-                    OrcShim.defaultShim(),
+                    new OrcShimImpl(),
                     conf,
                     type,
                     Collections.emptyList(),
