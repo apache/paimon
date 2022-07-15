@@ -185,8 +185,34 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         throw new UnsupportedOperationException("Alter namespace in Spark is not supported yet.");
     }
 
-    @Override
+    /**
+     * Drop a namespace from the catalog, recursively dropping all objects within the namespace.
+     * This interface implementation only supports the Spark 3.0, 3.1 and 3.2.
+     *
+     * <p>If the catalog implementation does not support this operation, it may throw {@link
+     * UnsupportedOperationException}.
+     *
+     * @param namespace a multi-part namespace
+     * @return true if the namespace was dropped
+     * @throws UnsupportedOperationException If drop is not a supported operation
+     */
     public boolean dropNamespace(String[] namespace) {
+        return dropNamespace(namespace, true);
+    }
+
+    /**
+     * Drop a namespace from the catalog with cascade mode, recursively dropping all objects within
+     * the namespace if cascade is true. This interface implementation supports the Spark 3.3+.
+     *
+     * <p>If the catalog implementation does not support this operation, it may throw {@link
+     * UnsupportedOperationException}.
+     *
+     * @param namespace a multi-part namespace
+     * @param cascade When true, deletes all objects under the namespace
+     * @return true if the namespace was dropped
+     * @throws UnsupportedOperationException If drop is not a supported operation
+     */
+    public boolean dropNamespace(String[] namespace, boolean cascade) {
         throw new UnsupportedOperationException("Drop namespace in Spark is not supported yet.");
     }
 

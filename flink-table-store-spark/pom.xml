@@ -77,6 +77,12 @@ under the License.
     <!-- Activate these profiles with -Pspark-x.x to build and test against different Spark versions -->
     <profiles>
         <profile>
+            <id>spark-3.3</id>
+            <properties>
+                <spark.version>3.3.0</spark.version>
+            </properties>
+        </profile>
+        <profile>
             <id>spark-3.2</id>
             <properties>
                 <spark.version>3.2.1</spark.version>
