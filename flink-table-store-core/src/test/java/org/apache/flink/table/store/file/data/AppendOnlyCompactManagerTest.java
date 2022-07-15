@@ -200,12 +200,13 @@ public class AppendOnlyCompactManagerTest {
         long targetFileSize = 1024;
         AppendOnlyCompactManager manager =
                 new AppendOnlyCompactManager(
-                        null,
+                        null, // not used
                         new LinkedList<>(toCompactBeforePick),
                         minFileNum,
                         maxFileNum,
                         targetFileSize,
-                        null);
+                        null // not used
+                        );
         Optional<List<DataFileMeta>> actual = manager.pickCompactBefore();
         assertThat(actual.isPresent()).isEqualTo(expectedPresent);
         if (expectedPresent) {

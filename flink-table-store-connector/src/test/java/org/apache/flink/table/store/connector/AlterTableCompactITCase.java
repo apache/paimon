@@ -66,7 +66,13 @@ public class AlterTableCompactITCase extends FileStoreTableITCase {
                         + "shopId INT\n, "
                         + "orderId BIGINT NOT NULL\n, "
                         + "itemId BIGINT)"
-                        + "PARTITIONED BY (dt, hr)");
+                        + "PARTITIONED BY (dt, hr)",
+                "CREATE TABLE IF NOT EXISTS T3 (\n"
+                        + "f0 INT\n, "
+                        + "f1 STRING NOT NULL\n"
+                        + ") WITH (\n"
+                        + "'write-mode' = 'append-only'\n"
+                        + ")");
     }
 
     @Test
@@ -111,6 +117,34 @@ public class AlterTableCompactITCase extends FileStoreTableITCase {
         assertThat(findLatestSnapshot("T0", true))
                 .usingComparator(Comparator.comparing(Snapshot::id))
                 .isEqualTo(snapshot);
+    }
+
+    @Test
+    public void testAppendOnlyTable() {
+        innerTest("INSERT INTO T3 VALUES(1, 'AAA')", 1L, Snapshot.CommitKind.APPEND);
+        innerTest("ALTER TABLE T3 COMPACT", 1L, Snapshot.CommitKind.APPEND);
+
+        innerTest("INSERT INTO T3 VALUES(2, 'BBB')", 2L, Snapshot.CommitKind.APPEND);
+        innerTest("ALTER TABLE T3 COMPACT", 2L, Snapshot.CommitKind.APPEND);
+
+        innerTest("INSERT INTO T3 VALUES(3, 'CCC')", 3L, Snapshot.CommitKind.APPEND);
+        innerTest("ALTER TABLE T3 COMPACT", 3L, Snapshot.CommitKind.APPEND);
+
+        innerTest("INSERT INTO T3 VALUES(4, 'DDD')", 4L, Snapshot.CommitKind.APPEND);
+        innerTest("ALTER TABLE T3 COMPACT", 4L, Snapshot.CommitKind.APPEND);
+
+        innerTest("INSERT INTO T3 VALUES(5, 'AAA')", 5L, Snapshot.CommitKind.APPEND);
+
+        batchSql("ALTER TABLE T3 SET ('compaction.early-max.file-num' = '5')");
+        innerTest("ALTER TABLE T3 COMPACT", 6L, Snapshot.CommitKind.COMPACT);
+    }
+
+    private void innerTest(
+            String sql, long expectedSnapshotId, Snapshot.CommitKind expectedCommitKind) {
+        batchSql(sql);
+        Snapshot snapshot = findLatestSnapshot("T3", true);
+        assertThat(snapshot.id()).isEqualTo(expectedSnapshotId);
+        assertThat(snapshot.commitKind()).isEqualTo(expectedCommitKind);
     }
 
     private void innerTest(
