@@ -29,7 +29,6 @@ import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.util.Preconditions;
 
-
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.HashMap;
@@ -84,7 +83,8 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
                 createOptionalLogStoreFactory(context.getClassLoader(), enrichedOptions);
         logFactory.ifPresent(
                 factory ->
-                        factory.enrichOptions(new TableStoreDynamicContext(context, enrichedOptions))
+                        factory.enrichOptions(
+                                        new TableStoreDynamicContext(context, enrichedOptions))
                                 .forEach(enrichedOptions::putIfAbsent));
 
         return enrichedOptions;
@@ -167,20 +167,13 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
             throw new UncheckedIOException(e);
         }
         createOptionalLogStoreFactory(context)
-                .ifPresent(
-                        factory ->
-                                factory.onDropTable(context, ignoreIfNotExists));
+                .ifPresent(factory -> factory.onDropTable(context, ignoreIfNotExists));
     }
 
     @Override
     public Map<String, String> onCompactTable(
             Context context, CatalogPartitionSpec catalogPartitionSpec) {
         Map<String, String> newOptions = new HashMap<>(context.getCatalogTable().getOptions());
-        if (APPEND_ONLY.toString().equals(newOptions.get(CoreOptions.WRITE_MODE.key()))) {
-            throw new UnsupportedOperationException(
-                    "ALTER TABLE COMPACT is not yet supported for append only table.");
-        }
-
         newOptions.put(COMPACTION_MANUAL_TRIGGERED.key(), String.valueOf(true));
         newOptions.put(
                 COMPACTION_PARTITION_SPEC.key(),
