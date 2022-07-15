@@ -39,7 +39,11 @@ import org.apache.orc.TypeDescription;
 import java.io.IOException;
 import java.util.List;
 
-/** A {@link OrcShim} for table store. */
+/**
+ * A {@link OrcShim} for table store.
+ *
+ * <p>This is copied from flink-orc except filesystem setting.
+ */
 public class OrcShimImpl implements OrcShim<VectorizedRowBatch> {
 
     private static final long serialVersionUID = 1L;
