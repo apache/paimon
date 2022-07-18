@@ -59,8 +59,8 @@ public class TableCommit implements AutoCloseable {
         return this;
     }
 
-    public TableCommit withCommitEmptyNewFiles(boolean commitEmptyNewFiles) {
-        commit.withCommitEmptyNewFiles(commitEmptyNewFiles);
+    public TableCommit withCreateEmptyCommit(boolean createEmptyCommit) {
+        commit.withCreateEmptyCommit(createEmptyCommit);
         return this;
     }
 

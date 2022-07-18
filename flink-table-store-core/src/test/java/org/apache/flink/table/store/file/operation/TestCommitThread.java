@@ -170,7 +170,7 @@ public class TestCommitThread extends Thread {
     private void writeData() throws Exception {
         List<KeyValue> changes = new ArrayList<>();
         BinaryRowData partition = pickData(changes);
-        result.compute(partition, (p, l) -> l == null ? new ArrayList<>() : l).addAll(changes);
+        result.computeIfAbsent(partition, p -> new ArrayList<>()).addAll(changes);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug(
@@ -180,8 +180,7 @@ public class TestCommitThread extends Thread {
                                     .collect(Collectors.joining("\n")));
         }
 
-        MergeTreeWriter writer =
-                writers.compute(partition, (p, w) -> w == null ? createWriter(p, false) : w);
+        MergeTreeWriter writer = writers.computeIfAbsent(partition, p -> createWriter(p, false));
         for (KeyValue kv : changes) {
             writer.write(kv);
         }
@@ -191,7 +190,7 @@ public class TestCommitThread extends Thread {
         List<KeyValue> changes = new ArrayList<>();
         BinaryRowData partition = pickData(changes);
         List<KeyValue> resultOfPartition =
-                result.compute(partition, (p, l) -> l == null ? new ArrayList<>() : l);
+                result.computeIfAbsent(partition, p -> new ArrayList<>());
         resultOfPartition.clear();
         resultOfPartition.addAll(changes);
 

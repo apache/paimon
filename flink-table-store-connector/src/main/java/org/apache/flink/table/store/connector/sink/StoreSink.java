@@ -91,7 +91,7 @@ public class StoreSink implements Serializable {
         return new StoreCommitter(
                 table.newCommit(user)
                         .withOverwritePartition(overwritePartition)
-                        .withCommitEmptyNewFiles(commitEmptyNewFiles)
+                        .withCreateEmptyCommit(commitEmptyNewFiles)
                         .withLock(lock));
     }
 

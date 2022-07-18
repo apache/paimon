@@ -163,9 +163,7 @@ public class FileStoreCommitTest {
             for (KeyValue kv : entry.getValue()) {
                 dataPerThread
                         .get(Math.abs(kv.key().hashCode()) % numThreads)
-                        .compute(
-                                entry.getKey(),
-                                (p, list) -> list == null ? new ArrayList<>() : list)
+                        .computeIfAbsent(entry.getKey(), p -> new ArrayList<>())
                         .add(kv);
             }
         }
@@ -335,7 +333,7 @@ public class FileStoreCommitTest {
                 kv -> 0,
                 false,
                 (commit, committable) -> {
-                    commit.withCommitEmptyNewFiles(true);
+                    commit.withCreateEmptyCommit(true);
                     commit.commit(committable, Collections.emptyMap());
                 });
         assertThat(store.snapshotManager().findLatest()).isEqualTo(snapshot.id() + 1);
@@ -371,7 +369,7 @@ public class FileStoreCommitTest {
         Map<BinaryRowData, List<KeyValue>> data = new HashMap<>();
         for (int i = 0; i < numRecords; i++) {
             KeyValue kv = gen.next();
-            data.compute(gen.getPartition(kv), (p, l) -> l == null ? new ArrayList<>() : l).add(kv);
+            data.computeIfAbsent(gen.getPartition(kv), p -> new ArrayList<>()).add(kv);
         }
         return data;
     }

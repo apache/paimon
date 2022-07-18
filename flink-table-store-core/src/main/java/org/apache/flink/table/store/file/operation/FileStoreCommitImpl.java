@@ -91,7 +91,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Nullable private final Comparator<RowData> keyComparator;
 
     @Nullable private Lock lock;
-    private boolean commitEmptyNewFiles;
+    private boolean createEmptyCommit;
 
     public FileStoreCommitImpl(
             long schemaId,
@@ -121,7 +121,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.keyComparator = keyComparator;
 
         this.lock = null;
-        this.commitEmptyNewFiles = false;
+        this.createEmptyCommit = false;
     }
 
     @Override
@@ -131,8 +131,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public FileStoreCommit withCommitEmptyNewFiles(boolean commitEmptyNewFiles) {
-        this.commitEmptyNewFiles = commitEmptyNewFiles;
+    public FileStoreCommit withCreateEmptyCommit(boolean createEmptyCommit) {
+        this.createEmptyCommit = createEmptyCommit;
         return this;
     }
 
@@ -182,7 +182,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         List<ManifestEntry> appendChanges = collectChanges(committable.newFiles(), FileKind.ADD);
-        if (commitEmptyNewFiles || !appendChanges.isEmpty()) {
+        if (createEmptyCommit || !appendChanges.isEmpty()) {
             tryCommit(
                     appendChanges,
                     committable.identifier(),
@@ -537,9 +537,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         for (ManifestEntry entry : ManifestEntry.mergeManifestEntries(allEntries)) {
             int level = entry.file().level();
             if (level >= 1) {
-                levels.compute(
+                levels.computeIfAbsent(
                                 new LevelIdentifier(entry.partition(), entry.bucket(), level),
-                                (lv, list) -> list == null ? new ArrayList<>() : list)
+                                lv -> new ArrayList<>())
                         .add(entry);
             }
         }
