@@ -58,15 +58,7 @@ public class OrcShimImpl implements OrcShim<VectorizedRowBatch> {
             long splitStart,
             long splitLength)
             throws IOException {
-        // open ORC file and create reader
-        Path hPath = new Path(path.toUri());
-
-        OrcFile.ReaderOptions readerOptions = OrcFile.readerOptions(conf);
-
-        // configure filesystem from Flink filesystem
-        readerOptions.filesystem(new HadoopReadOnlyFileSystem(path.getFileSystem()));
-
-        Reader orcReader = OrcFile.createReader(hPath, readerOptions);
+        Reader orcReader = createReader(conf, path);
 
         // get offset and length for the stripes that start in the split
         Tuple2<Long, Long> offsetAndLength =
@@ -154,5 +146,18 @@ public class OrcShimImpl implements OrcShim<VectorizedRowBatch> {
             }
         }
         return projectionMask;
+    }
+
+    public static Reader createReader(Configuration conf, org.apache.flink.core.fs.Path path)
+            throws IOException {
+        // open ORC file and create reader
+        Path hPath = new Path(path.toUri());
+
+        OrcFile.ReaderOptions readerOptions = OrcFile.readerOptions(conf);
+
+        // configure filesystem from Flink filesystem
+        readerOptions.filesystem(new HadoopReadOnlyFileSystem(path.getFileSystem()));
+
+        return OrcFile.createReader(hPath, readerOptions);
     }
 }
