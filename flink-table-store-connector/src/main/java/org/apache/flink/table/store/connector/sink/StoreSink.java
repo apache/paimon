@@ -86,10 +86,13 @@ public class StoreSink implements Serializable {
         return new StoreWriteOperator(table, overwritePartition, logSinkFunction);
     }
 
-    private StoreCommitter createCommitter(String user) {
+    private StoreCommitter createCommitter(String user, boolean commitEmptyNewFiles) {
         Lock lock = Lock.fromCatalog(lockFactory, tableIdentifier.toObjectPath());
         return new StoreCommitter(
-                table.newCommit(user).withOverwritePartition(overwritePartition).withLock(lock));
+                table.newCommit(user)
+                        .withOverwritePartition(overwritePartition)
+                        .withCommitEmptyNewFiles(commitEmptyNewFiles)
+                        .withLock(lock));
     }
 
     public DataStreamSink<?> sinkTo(DataStream<RowData> input) {
@@ -109,7 +112,11 @@ public class StoreSink implements Serializable {
                                 typeInfo,
                                 new CommitterOperator(
                                         streamingCheckpointEnabled,
-                                        this::createCommitter,
+                                        // If checkpoint is enabled for streaming job, we have to
+                                        // commit new files list even if they're empty.
+                                        // Otherwise we can't tell if the commit is successful after
+                                        // a restart.
+                                        user -> createCommitter(user, streamingCheckpointEnabled),
                                         ManifestCommittableSerializer::new))
                         .setParallelism(1)
                         .setMaxParallelism(1);

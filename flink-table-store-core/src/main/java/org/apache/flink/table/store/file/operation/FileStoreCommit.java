@@ -29,6 +29,8 @@ public interface FileStoreCommit {
     /** With global lock. */
     FileStoreCommit withLock(Lock lock);
 
+    FileStoreCommit withCommitEmptyNewFiles(boolean commitEmptyNewFiles);
+
     /** Find out which manifest committable need to be retried when recovering from the failure. */
     List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committableList);
 

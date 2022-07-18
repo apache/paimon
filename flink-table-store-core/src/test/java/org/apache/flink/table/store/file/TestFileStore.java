@@ -185,7 +185,7 @@ public class TestFileStore extends KeyValueFileStore {
                         commit.overwrite(partition, committable, Collections.emptyMap()));
     }
 
-    private List<Snapshot> commitDataImpl(
+    public List<Snapshot> commitDataImpl(
             List<KeyValue> kvs,
             Function<KeyValue, BinaryRowData> partitionCalculator,
             Function<KeyValue, Integer> bucketCalculator,

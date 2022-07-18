@@ -91,6 +91,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Nullable private final Comparator<RowData> keyComparator;
 
     @Nullable private Lock lock;
+    private boolean commitEmptyNewFiles;
 
     public FileStoreCommitImpl(
             long schemaId,
@@ -120,11 +121,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.keyComparator = keyComparator;
 
         this.lock = null;
+        this.commitEmptyNewFiles = false;
     }
 
     @Override
     public FileStoreCommit withLock(Lock lock) {
         this.lock = lock;
+        return this;
+    }
+
+    @Override
+    public FileStoreCommit withCommitEmptyNewFiles(boolean commitEmptyNewFiles) {
+        this.commitEmptyNewFiles = commitEmptyNewFiles;
         return this;
     }
 
@@ -174,15 +182,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         List<ManifestEntry> appendChanges = collectChanges(committable.newFiles(), FileKind.ADD);
-        // Even if appendChanges is empty we still need to commit.
-        // Otherwise if we fail to commit compact changes, we cannot tell whether this commit is
-        // successful after the restart.
-        tryCommit(
-                appendChanges,
-                committable.identifier(),
-                committable.logOffsets(),
-                Snapshot.CommitKind.APPEND,
-                false);
+        if (commitEmptyNewFiles || !appendChanges.isEmpty()) {
+            tryCommit(
+                    appendChanges,
+                    committable.identifier(),
+                    committable.logOffsets(),
+                    Snapshot.CommitKind.APPEND,
+                    false);
+        }
 
         List<ManifestEntry> compactChanges = new ArrayList<>();
         compactChanges.addAll(collectChanges(committable.compactBefore(), FileKind.DELETE));

@@ -319,10 +319,26 @@ public class FileStoreCommitTest {
                                 Collections.emptyMap())
                         .get(0);
 
-        store.commitData(
-                Collections.emptyList(), gen::getPartition, kv -> 0, Collections.emptyMap());
+        // not commit empty new files
+        store.commitDataImpl(
+                Collections.emptyList(),
+                gen::getPartition,
+                kv -> 0,
+                false,
+                (commit, committable) -> commit.commit(committable, Collections.emptyMap()));
+        assertThat(store.snapshotManager().findLatest()).isEqualTo(snapshot.id());
 
-        assertThat(store.snapshotManager().findLatest()).isGreaterThan(snapshot.id());
+        // commit empty new files
+        store.commitDataImpl(
+                Collections.emptyList(),
+                gen::getPartition,
+                kv -> 0,
+                false,
+                (commit, committable) -> {
+                    commit.withCommitEmptyNewFiles(true);
+                    commit.commit(committable, Collections.emptyMap());
+                });
+        assertThat(store.snapshotManager().findLatest()).isEqualTo(snapshot.id() + 1);
     }
 
     private TestFileStore createStore(boolean failing) {
