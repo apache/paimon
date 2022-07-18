@@ -18,15 +18,20 @@
 
 package org.apache.flink.table.store.format.fs;
 
+import org.apache.flink.util.IOUtils;
+
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.PositionedReadable;
+import org.apache.hadoop.fs.Seekable;
 import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.util.Progressable;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 
 /**
@@ -48,12 +53,13 @@ public class HadoopReadOnlyFileSystem extends FileSystem {
 
     @Override
     public FSDataInputStream open(Path path) throws IOException {
-        return new FSDataInputStream(new FlinkInputStream(fs.open(toFlinkPath(path))));
+        return new FSDataInputStream(new FSDataWrappedInputStream(fs.open(toFlinkPath(path))));
     }
 
     @Override
     public FSDataInputStream open(Path path, int bufferSize) throws IOException {
-        return new FSDataInputStream(new FlinkInputStream(fs.open(toFlinkPath(path), bufferSize)));
+        return new FSDataInputStream(
+                new FSDataWrappedInputStream(fs.open(toFlinkPath(path), bufferSize)));
     }
 
     @Override
@@ -61,12 +67,12 @@ public class HadoopReadOnlyFileSystem extends FileSystem {
         return toHadoopStatus(fs.getFileStatus(toFlinkPath(path)));
     }
 
-    private static org.apache.flink.core.fs.Path toFlinkPath(org.apache.hadoop.fs.Path path) {
+    private static org.apache.flink.core.fs.Path toFlinkPath(Path path) {
         return new org.apache.flink.core.fs.Path(path.toUri());
     }
 
-    private static org.apache.hadoop.fs.Path toHadoopPath(org.apache.flink.core.fs.Path path) {
-        return new org.apache.hadoop.fs.Path(path.toUri());
+    private static Path toHadoopPath(org.apache.flink.core.fs.Path path) {
+        return new Path(path.toUri());
     }
 
     private static FileStatus toHadoopStatus(org.apache.flink.core.fs.FileStatus status) {
@@ -132,5 +138,58 @@ public class HadoopReadOnlyFileSystem extends FileSystem {
     @Override
     public boolean mkdirs(Path path, FsPermission fsPermission) {
         throw new UnsupportedOperationException();
+    }
+
+    /**
+     * A {@link InputStream} to wrap {@link org.apache.flink.core.fs.FSDataInputStream} for Flink's
+     * input streams.
+     */
+    private static class FSDataWrappedInputStream extends InputStream
+            implements Seekable, PositionedReadable {
+
+        private final org.apache.flink.core.fs.FSDataInputStream fsDataInputStream;
+
+        private FSDataWrappedInputStream(
+                org.apache.flink.core.fs.FSDataInputStream fsDataInputStream) {
+            this.fsDataInputStream = fsDataInputStream;
+        }
+
+        @Override
+        public int read() throws IOException {
+            return fsDataInputStream.read();
+        }
+
+        @Override
+        public int read(long position, byte[] buffer, int offset, int length) throws IOException {
+            fsDataInputStream.seek(position);
+            return fsDataInputStream.read(buffer, offset, length);
+        }
+
+        @Override
+        public void readFully(long position, byte[] buffer, int offset, int length)
+                throws IOException {
+            fsDataInputStream.seek(position);
+            IOUtils.readFully(fsDataInputStream, buffer, offset, length);
+        }
+
+        @Override
+        public void readFully(long position, byte[] buffer) throws IOException {
+            readFully(position, buffer, 0, buffer.length);
+        }
+
+        @Override
+        public void seek(long pos) throws IOException {
+            fsDataInputStream.seek(pos);
+        }
+
+        @Override
+        public long getPos() throws IOException {
+            return fsDataInputStream.getPos();
+        }
+
+        @Override
+        public boolean seekToNewSource(long targetPos) {
+            return false;
+        }
     }
 }
