@@ -22,6 +22,9 @@ import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.Snapshot;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -32,6 +35,8 @@ import static org.apache.flink.table.store.file.utils.FileUtils.listVersionedFil
 
 /** Manager for {@link Snapshot}, providing utility methods related to paths and snapshot hints. */
 public class SnapshotManager {
+
+    private static final Logger LOG = LoggerFactory.getLogger(SnapshotManager.class);
 
     private static final String SNAPSHOT_PREFIX = "snapshot-";
     public static final String EARLIEST = "EARLIEST";
@@ -109,11 +114,16 @@ public class SnapshotManager {
         return findByListFiles(Math::min);
     }
 
-    public Long readHint(String fileName) throws IOException {
+    public Long readHint(String fileName) {
         Path snapshotDir = snapshotDirectory();
         Path path = new Path(snapshotDir, fileName);
-        if (path.getFileSystem().exists(path)) {
-            return Long.parseLong(FileUtils.readFileUtf8(path));
+        try {
+            if (path.getFileSystem().exists(path)) {
+                return Long.parseLong(FileUtils.readFileUtf8(path));
+            }
+        } catch (Exception e) {
+            LOG.info(
+                    "Failed to read hint file " + fileName + ". Falling back to listing files.", e);
         }
         return null;
     }

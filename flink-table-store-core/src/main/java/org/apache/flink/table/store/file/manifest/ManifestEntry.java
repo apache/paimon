@@ -20,11 +20,15 @@ package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.TinyIntType;
+import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 
@@ -110,6 +114,35 @@ public class ManifestEntry {
         return String.format("{%s, %s, %d, %d, %s}", kind, partition, bucket, totalBuckets, file);
     }
 
+    public static Collection<ManifestEntry> mergeManifestEntries(List<ManifestEntry> entries) {
+        LinkedHashMap<Identifier, ManifestEntry> map = new LinkedHashMap<>();
+        for (ManifestEntry entry : entries) {
+            ManifestEntry.Identifier identifier = entry.identifier();
+            switch (entry.kind()) {
+                case ADD:
+                    Preconditions.checkState(
+                            !map.containsKey(identifier),
+                            "Trying to add file %s which is already added. "
+                                    + "Manifest might be corrupted.",
+                            identifier);
+                    map.put(identifier, entry);
+                    break;
+                case DELETE:
+                    Preconditions.checkState(
+                            map.containsKey(identifier),
+                            "Trying to delete file %s which is not previously added. "
+                                    + "Manifest might be corrupted.",
+                            identifier);
+                    map.remove(identifier);
+                    break;
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unknown value kind " + entry.kind().name());
+            }
+        }
+        return map.values();
+    }
+
     /**
      * The same {@link Identifier} indicates that the {@link ManifestEntry} refers to the same data
      * file.
@@ -147,6 +180,16 @@ public class ManifestEntry {
         @Override
         public String toString() {
             return String.format("{%s, %d, %d, %s}", partition, bucket, level, fileName);
+        }
+
+        public String toString(FileStorePathFactory pathFactory) {
+            return pathFactory.getPartitionString(partition)
+                    + ", bucket "
+                    + bucket
+                    + ", level "
+                    + level
+                    + ", file "
+                    + fileName;
         }
     }
 }

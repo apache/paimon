@@ -33,7 +33,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -134,12 +133,8 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             // No expire happens:
             // write the hint file in order to see the earliest snapshot directly next time
             // should avoid duplicate writes when the file exists
-            try {
-                if (snapshotManager.readHint(SnapshotManager.EARLIEST) == null) {
-                    writeEarliestHint(endExclusiveId);
-                }
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
+            if (snapshotManager.readHint(SnapshotManager.EARLIEST) == null) {
+                writeEarliestHint(endExclusiveId);
             }
 
             // fast exit

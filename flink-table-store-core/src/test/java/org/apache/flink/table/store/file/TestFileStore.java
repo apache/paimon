@@ -309,6 +309,18 @@ public class TestFileStore extends KeyValueFileStore {
     }
 
     public Map<BinaryRowData, BinaryRowData> toKvMap(List<KeyValue> kvs) {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Compacting list of key values to kv map\n"
+                            + kvs.stream()
+                                    .map(
+                                            kv ->
+                                                    kv.toString(
+                                                            TestKeyValueGenerator.KEY_TYPE,
+                                                            TestKeyValueGenerator.DEFAULT_ROW_TYPE))
+                                    .collect(Collectors.joining("\n")));
+        }
+
         Map<BinaryRowData, BinaryRowData> result = new HashMap<>();
         for (KeyValue kv : kvs) {
             BinaryRowData key = keySerializer.toBinaryRow(kv.key()).copy();

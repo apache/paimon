@@ -189,6 +189,10 @@ public class DataFileWriter {
 
             updateMinSeqNumber(kv);
             updateMaxSeqNumber(kv);
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Write key value " + kv.toString(keyType, valueType));
+            }
         }
 
         private void updateMinKey(KeyValue kv) {
@@ -211,6 +215,10 @@ public class DataFileWriter {
 
         @Override
         protected DataFileMeta createResult(Path path, Metric metric) throws IOException {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Closing data file " + path);
+            }
+
             FieldStats[] rowStats = metric.fieldStats();
             int numKeyFields = keyType.getFieldCount();
 
