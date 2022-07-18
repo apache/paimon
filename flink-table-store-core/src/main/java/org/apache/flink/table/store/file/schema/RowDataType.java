@@ -32,18 +32,22 @@ public class RowDataType extends DataType {
     private final List<DataField> fields;
 
     public RowDataType(List<DataField> fields) {
-        super(toRowType(fields));
+        this(true, fields);
+    }
+
+    public RowDataType(boolean isNullable, List<DataField> fields) {
+        super(toRowType(isNullable, fields));
         this.fields = fields;
     }
 
-    private static RowType toRowType(List<DataField> fields) {
+    private static RowType toRowType(boolean isNullable, List<DataField> fields) {
         List<RowType.RowField> typeFields = new ArrayList<>(fields.size());
         for (DataField field : fields) {
             typeFields.add(
                     new RowType.RowField(
                             field.name(), field.type().logicalType, field.description()));
         }
-        return new RowType(typeFields);
+        return new RowType(isNullable, typeFields);
     }
 
     public List<DataField> fields() {

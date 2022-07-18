@@ -29,8 +29,8 @@ public class ArrayDataType extends DataType {
 
     private final DataType elementType;
 
-    public ArrayDataType(DataType elementType) {
-        super(new ArrayType(elementType.logicalType));
+    public ArrayDataType(boolean isNullable, DataType elementType) {
+        super(new ArrayType(isNullable, elementType.logicalType));
         this.elementType = elementType;
     }
 

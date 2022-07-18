@@ -173,7 +173,7 @@ public class TableSchema implements Serializable {
     }
 
     public RowType logicalRowType() {
-        return (RowType) new RowDataType(fields).logicalType;
+        return (RowType) new RowDataType(false, fields).logicalType;
     }
 
     public RowType logicalPartitionType() {
@@ -204,6 +204,7 @@ public class TableSchema implements Serializable {
         List<String> fieldNames = fieldNames();
         return (RowType)
                 new RowDataType(
+                                false,
                                 projectedFieldNames.stream()
                                         .map(k -> fields.get(fieldNames.indexOf(k)))
                                         .collect(Collectors.toList()))
@@ -253,15 +254,15 @@ public class TableSchema implements Serializable {
         if (type instanceof ArrayType) {
             DataType element =
                     toDataType(((ArrayType) type).getElementType(), currentHighestFieldId);
-            return new ArrayDataType(element);
+            return new ArrayDataType(type.isNullable(), element);
         } else if (type instanceof MultisetType) {
             DataType element =
                     toDataType(((MultisetType) type).getElementType(), currentHighestFieldId);
-            return new MultisetDataType(element);
+            return new MultisetDataType(type.isNullable(), element);
         } else if (type instanceof MapType) {
             DataType key = toDataType(((MapType) type).getKeyType(), currentHighestFieldId);
             DataType value = toDataType(((MapType) type).getValueType(), currentHighestFieldId);
-            return new MapDataType(key, value);
+            return new MapDataType(type.isNullable(), key, value);
         } else if (type instanceof RowType) {
             List<DataField> fields = new ArrayList<>();
             for (RowType.RowField field : ((RowType) type).getFields()) {
@@ -274,7 +275,7 @@ public class TableSchema implements Serializable {
                                 fieldType,
                                 field.getDescription().orElse(null)));
             }
-            return new RowDataType(fields);
+            return new RowDataType(type.isNullable(), fields);
         } else {
             return new AtomicDataType(type);
         }

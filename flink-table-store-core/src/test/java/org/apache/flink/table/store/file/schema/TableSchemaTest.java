@@ -80,31 +80,36 @@ public class TableSchemaTest {
                 RowType.of(
                         new LogicalType[] {
                             new IntType(),
-                            newLogicalRowType(),
-                            new ArrayType(newLogicalRowType()),
-                            new MultisetType(newLogicalRowType()),
-                            new MapType(newLogicalRowType(), newLogicalRowType())
+                            newLogicalRowType(true),
+                            new ArrayType(false, newLogicalRowType(false)),
+                            new MultisetType(true, newLogicalRowType(false)),
+                            new MapType(false, newLogicalRowType(true), newLogicalRowType(false))
                         },
                         new String[] {"f0", "f1", "f2", "f3", "f4"});
 
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", new AtomicDataType(new IntType())),
-                        new DataField(1, "f1", newRowType(2)),
-                        new DataField(3, "f2", new ArrayDataType(newRowType(4))),
-                        new DataField(5, "f3", new MultisetDataType(newRowType(6))),
-                        new DataField(7, "f4", new MapDataType(newRowType(8), newRowType(9))));
+                        new DataField(1, "f1", newRowType(true, 2)),
+                        new DataField(3, "f2", new ArrayDataType(false, newRowType(false, 4))),
+                        new DataField(5, "f3", new MultisetDataType(true, newRowType(false, 6))),
+                        new DataField(
+                                7,
+                                "f4",
+                                new MapDataType(false, newRowType(true, 8), newRowType(false, 9))));
 
         assertThat(TableSchema.newFields(type)).isEqualTo(fields);
     }
 
-    static RowType newLogicalRowType() {
+    static RowType newLogicalRowType(boolean isNullable) {
         return new RowType(
+                isNullable,
                 Collections.singletonList(new RowType.RowField("nestedField", new IntType())));
     }
 
-    static RowDataType newRowType(int fieldId) {
+    static RowDataType newRowType(boolean isNullable, int fieldId) {
         return new RowDataType(
+                isNullable,
                 Collections.singletonList(
                         new DataField(fieldId, "nestedField", new AtomicDataType(new IntType()))));
     }

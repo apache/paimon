@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.types.logical.ArrayType;
+import org.apache.flink.table.types.logical.MultisetType;
 
 import java.util.Objects;
 
@@ -29,8 +29,8 @@ public class MultisetDataType extends DataType {
 
     private final DataType elementType;
 
-    public MultisetDataType(DataType elementType) {
-        super(new ArrayType(elementType.logicalType));
+    public MultisetDataType(boolean isNullable, DataType elementType) {
+        super(new MultisetType(isNullable, elementType.logicalType));
         this.elementType = elementType;
     }
 

@@ -65,19 +65,22 @@ public class DataFieldSerializer implements JsonSerializer<DataField> {
             generator.writeString(type.logicalType.asSerializableString());
         } else if (type instanceof ArrayDataType) {
             generator.writeStartObject();
-            generator.writeStringField("type", "array");
+            generator.writeStringField(
+                    "type", type.logicalType.isNullable() ? "ARRAY" : "ARRAY NOT NULL");
             generator.writeFieldName("element");
             typeToJson(((ArrayDataType) type).elementType(), generator);
             generator.writeEndObject();
         } else if (type instanceof MultisetDataType) {
             generator.writeStartObject();
-            generator.writeStringField("type", "multiset");
+            generator.writeStringField(
+                    "type", type.logicalType.isNullable() ? "MULTISET" : "MULTISET NOT NULL");
             generator.writeFieldName("element");
             typeToJson(((MultisetDataType) type).elementType(), generator);
             generator.writeEndObject();
         } else if (type instanceof MapDataType) {
             generator.writeStartObject();
-            generator.writeStringField("type", "map");
+            generator.writeStringField(
+                    "type", type.logicalType.isNullable() ? "MAP" : "MAP NOT NULL");
             generator.writeFieldName("key");
             typeToJson(((MapDataType) type).keyType(), generator);
             generator.writeFieldName("value");
@@ -85,7 +88,8 @@ public class DataFieldSerializer implements JsonSerializer<DataField> {
             generator.writeEndObject();
         } else if (type instanceof RowDataType) {
             generator.writeStartObject();
-            generator.writeStringField("type", "row");
+            generator.writeStringField(
+                    "type", type.logicalType.isNullable() ? "ROW" : "ROW NOT NULL");
             generator.writeArrayFieldStart("fields");
             for (DataField field : ((RowDataType) type).fields()) {
                 INSTANCE.serialize(field, generator);
@@ -102,24 +106,24 @@ public class DataFieldSerializer implements JsonSerializer<DataField> {
             return new AtomicDataType(LogicalTypeParser.parse(json.asText()));
         } else if (json.isObject()) {
             String typeString = json.get("type").asText();
-            if ("array".equals(typeString)) {
+            if (typeString.startsWith("ARRAY")) {
                 DataType element = typeFromJson(json.get("element"));
-                return new ArrayDataType(element);
-            } else if ("multiset".equals(typeString)) {
+                return new ArrayDataType(!typeString.contains("NOT NULL"), element);
+            } else if (typeString.startsWith("MULTISET")) {
                 DataType element = typeFromJson(json.get("element"));
-                return new MultisetDataType(element);
-            } else if ("map".equals(typeString)) {
+                return new MultisetDataType(!typeString.contains("NOT NULL"), element);
+            } else if (typeString.startsWith("MAP")) {
                 DataType key = typeFromJson(json.get("key"));
                 DataType value = typeFromJson(json.get("value"));
-                return new MapDataType(key, value);
-            } else if ("row".equals(typeString)) {
+                return new MapDataType(!typeString.contains("NOT NULL"), key, value);
+            } else if (typeString.startsWith("ROW")) {
                 JsonNode fieldArray = json.get("fields");
                 Iterator<JsonNode> iterator = fieldArray.elements();
                 List<DataField> fields = new ArrayList<>(fieldArray.size());
                 while (iterator.hasNext()) {
                     fields.add(INSTANCE.deserialize(iterator.next()));
                 }
-                return new RowDataType(fields);
+                return new RowDataType(!typeString.contains("NOT NULL"), fields);
             }
         }
 
