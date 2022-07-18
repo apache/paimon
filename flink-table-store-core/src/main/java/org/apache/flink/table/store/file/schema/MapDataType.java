@@ -31,8 +31,8 @@ public class MapDataType extends DataType {
 
     private final DataType valueType;
 
-    public MapDataType(DataType keyType, DataType valueType) {
-        super(new MapType(keyType.logicalType, valueType.logicalType));
+    public MapDataType(boolean isNullable, DataType keyType, DataType valueType) {
+        super(new MapType(isNullable, keyType.logicalType, valueType.logicalType));
         this.keyType = keyType;
         this.valueType = valueType;
     }
