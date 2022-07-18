@@ -59,8 +59,12 @@ public class BinaryTableStats {
     }
 
     public FieldStats[] fields(FieldStatsArraySerializer converter) {
+        return fields(converter, null);
+    }
+
+    public FieldStats[] fields(FieldStatsArraySerializer converter, @Nullable Long rowCount) {
         if (cacheArray == null) {
-            cacheArray = converter.fromBinary(this);
+            cacheArray = converter.fromBinary(this, rowCount);
         }
         return cacheArray;
     }
