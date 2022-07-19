@@ -46,6 +46,11 @@ public class MapDataType extends DataType {
     }
 
     @Override
+    public DataType copy(boolean isNullable) {
+        return new MapDataType(isNullable, keyType, valueType);
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (this == o) {
             return true;

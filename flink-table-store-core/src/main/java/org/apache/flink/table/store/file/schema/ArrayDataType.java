@@ -39,6 +39,11 @@ public class ArrayDataType extends DataType {
     }
 
     @Override
+    public DataType copy(boolean isNullable) {
+        return new ArrayDataType(isNullable, elementType);
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (this == o) {
             return true;

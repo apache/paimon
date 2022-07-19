@@ -19,11 +19,17 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.file.schema.DataField;
+import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
+import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
+import org.apache.flink.table.types.logical.BooleanType;
+import org.apache.flink.table.types.logical.DoubleType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
@@ -42,7 +48,6 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -70,20 +75,58 @@ public class SparkReadITCase {
 
         // flink sink
         tablePath1 = new Path(warehousePath, "default.db/t1");
-        SimpleTableTestHelper testHelper1 = createTestHelper(tablePath1);
+        SimpleTableTestHelper testHelper1 = new SimpleTableTestHelper(tablePath1, rowType1());
         testHelper1.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
         testHelper1.write(GenericRowData.of(3, 4L, StringData.fromString("2")));
         testHelper1.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
         testHelper1.write(GenericRowData.ofKind(RowKind.DELETE, 3, 4L, StringData.fromString("2")));
         testHelper1.commit();
 
+        // a int not null
+        // b array<varchar> not null
+        // c row<row<double, array<boolean> not null> not null, bigint> not null
         tablePath2 = new Path(warehousePath, "default.db/t2");
-        SimpleTableTestHelper testHelper2 = createTestHelper(tablePath2);
-        testHelper2.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
-        testHelper2.write(GenericRowData.of(3, 4L, StringData.fromString("2")));
+        SimpleTableTestHelper testHelper2 = new SimpleTableTestHelper(tablePath2, rowType2());
+        testHelper2.write(
+                GenericRowData.of(
+                        1,
+                        new GenericArrayData(
+                                new StringData[] {
+                                    StringData.fromString("AAA"), StringData.fromString("BBB")
+                                }),
+                        GenericRowData.of(
+                                GenericRowData.of(1.0d, new GenericArrayData(new Boolean[] {null})),
+                                1L)));
+        testHelper2.write(
+                GenericRowData.of(
+                        2,
+                        new GenericArrayData(
+                                new StringData[] {
+                                    StringData.fromString("CCC"), StringData.fromString("DDD")
+                                }),
+                        GenericRowData.of(
+                                GenericRowData.of(null, new GenericArrayData(new Boolean[] {true})),
+                                null)));
         testHelper2.commit();
-        testHelper2.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
-        testHelper2.write(GenericRowData.of(7, 8L, StringData.fromString("4")));
+
+        testHelper2.write(
+                GenericRowData.of(
+                        3,
+                        new GenericArrayData(new StringData[] {null, null}),
+                        GenericRowData.of(
+                                GenericRowData.of(
+                                        2.0d, new GenericArrayData(new boolean[] {true, false})),
+                                2L)));
+
+        testHelper2.write(
+                GenericRowData.of(
+                        4,
+                        new GenericArrayData(new StringData[] {null, StringData.fromString("EEE")}),
+                        GenericRowData.of(
+                                GenericRowData.of(
+                                        3.0d,
+                                        new GenericArrayData(new Boolean[] {true, false, true})),
+                                3L)));
         testHelper2.commit();
     }
 
@@ -91,10 +134,48 @@ public class SparkReadITCase {
         RowType rowType =
                 new RowType(
                         Arrays.asList(
-                                new RowType.RowField("a", new IntType()),
+                                new RowType.RowField("a", new IntType(false)),
                                 new RowType.RowField("b", new BigIntType()),
                                 new RowType.RowField("c", new VarCharType())));
         return new SimpleTableTestHelper(tablePath, rowType);
+    }
+
+    private static RowType rowType1() {
+        return new RowType(
+                Arrays.asList(
+                        new RowType.RowField("a", new IntType(false)),
+                        new RowType.RowField("b", new BigIntType()),
+                        new RowType.RowField("c", new VarCharType())));
+    }
+
+    private static RowType rowType2() {
+        return new RowType(
+                Arrays.asList(
+                        new RowType.RowField("a", new IntType(false), "comment about a"),
+                        new RowType.RowField("b", new ArrayType(false, new VarCharType())),
+                        new RowType.RowField(
+                                "c",
+                                new RowType(
+                                        false,
+                                        Arrays.asList(
+                                                new RowType.RowField(
+                                                        "c1",
+                                                        new RowType(
+                                                                false,
+                                                                Arrays.asList(
+                                                                        new RowType.RowField(
+                                                                                "c11",
+                                                                                new DoubleType()),
+                                                                        new RowType.RowField(
+                                                                                "c12",
+                                                                                new ArrayType(
+                                                                                        false,
+                                                                                        new BooleanType()))))),
+                                                new RowType.RowField(
+                                                        "c2",
+                                                        new BigIntType(),
+                                                        "comment about c2"))),
+                                "comment about c")));
     }
 
     @AfterAll
@@ -110,24 +191,34 @@ public class SparkReadITCase {
 
     @Test
     public void testNormal() {
-        innerTestNormal(
+        innerTestSimpleType(
                 spark.read().format("tablestore").option("path", tablePath1.toString()).load());
+
+        innerTestNestedType(
+                spark.read().format("tablestore").option("path", tablePath2.toString()).load());
     }
 
     @Test
     public void testFilterPushDown() {
-        innerTestFilterPushDown(
+        innerTestSimpleTypeFilterPushDown(
+                spark.read().format("tablestore").option("path", tablePath1.toString()).load());
+
+        innerTestNestedTypeFilterPushDown(
                 spark.read().format("tablestore").option("path", tablePath2.toString()).load());
     }
 
     @Test
     public void testCatalogNormal() {
-        innerTestNormal(spark.table("table_store.default.t1"));
+        innerTestSimpleType(spark.table("table_store.default.t1"));
+
+        innerTestNestedType(spark.table("table_store.default.t2"));
     }
 
     @Test
     public void testCatalogFilterPushDown() {
-        innerTestFilterPushDown(spark.table("table_store.default.t2"));
+        innerTestSimpleTypeFilterPushDown(spark.table("table_store.default.t1"));
+
+        innerTestNestedTypeFilterPushDown(spark.table("table_store.default.t2"));
     }
 
     @Test
@@ -145,7 +236,7 @@ public class SparkReadITCase {
 
     @Test
     public void testAddColumn() throws Exception {
-        Path tablePath = new Path(warehousePath, "default.db/" + UUID.randomUUID());
+        Path tablePath = new Path(warehousePath, "default.db/testAddColumn");
         SimpleTableTestHelper testHelper1 = createTestHelper(tablePath);
         testHelper1.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
         testHelper1.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
@@ -166,21 +257,95 @@ public class SparkReadITCase {
 
     @Test
     public void testAlterColumnType() throws Exception {
-        Path tablePath = new Path(warehousePath, "default.db/testAddColumn");
+        Path tablePath = new Path(warehousePath, "default.db/testAlterColumnType");
         SimpleTableTestHelper testHelper1 = createTestHelper(tablePath);
         testHelper1.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
         testHelper1.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
         testHelper1.commit();
 
-        spark.sql("ALTER TABLE table_store.default.testAddColumn ALTER COLUMN a TYPE BIGINT");
-        innerTestNormal(spark.table("table_store.default.testAddColumn"));
+        spark.sql("ALTER TABLE table_store.default.testAlterColumnType ALTER COLUMN a TYPE BIGINT");
+        innerTestSimpleType(spark.table("table_store.default.testAlterColumnType"));
+    }
+
+    @Test
+    public void testAlterTableColumnNullability() {
+        assertThat(fieldIsNullable(getField(schema2(), 0))).isFalse();
+        assertThat(fieldIsNullable(getField(schema2(), 1))).isFalse();
+        assertThat(fieldIsNullable(getField(schema2(), 2))).isFalse();
+        assertThat(fieldIsNullable(getNestedField(getField(schema2(), 2), 0))).isFalse();
+        assertThat(fieldIsNullable(getNestedField(getField(schema2(), 2), 1))).isTrue();
+        assertThat(fieldIsNullable(getNestedField(getNestedField(getField(schema2(), 2), 0), 0)))
+                .isTrue();
+        assertThat(fieldIsNullable(getNestedField(getNestedField(getField(schema2(), 2), 0), 1)))
+                .isFalse();
+
+        // note: for Spark, it is illegal to change nullable column to non-nullable
+        spark.sql("ALTER TABLE table_store.default.t2 ALTER COLUMN a DROP NOT NULL");
+        assertThat(fieldIsNullable(getField(schema2(), 0))).isTrue();
+
+        spark.sql("ALTER TABLE table_store.default.t2 ALTER COLUMN b DROP NOT NULL");
+        assertThat(fieldIsNullable(getField(schema2(), 1))).isTrue();
+
+        spark.sql("ALTER TABLE table_store.default.t2 ALTER COLUMN c DROP NOT NULL");
+        assertThat(fieldIsNullable(getField(schema2(), 2))).isTrue();
+
+        spark.sql("ALTER TABLE table_store.default.t2 ALTER COLUMN c.c1 DROP NOT NULL");
+        assertThat(fieldIsNullable(getNestedField(getField(schema2(), 2), 0))).isTrue();
+
+        spark.sql("ALTER TABLE table_store.default.t2 ALTER COLUMN c.c1.c12 DROP NOT NULL");
+        assertThat(fieldIsNullable(getNestedField(getNestedField(getField(schema2(), 2), 0), 1)))
+                .isTrue();
+    }
+
+    @Test
+    public void testAlterTableColumnComment() {
+        assertThat(getField(schema1(), 0).description()).isNull();
+
+        spark.sql("ALTER TABLE table_store.default.t1 ALTER COLUMN a COMMENT 'a new comment'");
+        assertThat(getField(schema1(), 0).description()).isEqualTo("a new comment");
+
+        spark.sql(
+                "ALTER TABLE table_store.default.t1 ALTER COLUMN a COMMENT 'yet another comment'");
+        assertThat(getField(schema1(), 0).description()).isEqualTo("yet another comment");
+
+        assertThat(getField(schema2(), 2).description()).isEqualTo("comment about c");
+        assertThat(getNestedField(getField(schema2(), 2), 0).description()).isNull();
+        assertThat(getNestedField(getField(schema2(), 2), 1).description())
+                .isEqualTo("comment about c2");
+        assertThat(getNestedField(getNestedField(getField(schema2(), 2), 0), 0).description())
+                .isNull();
+        assertThat(getNestedField(getNestedField(getField(schema2(), 2), 0), 1).description())
+                .isNull();
+
+        spark.sql(
+                "ALTER TABLE table_store.default.t2 ALTER COLUMN c COMMENT 'yet another comment about c'");
+        spark.sql("ALTER TABLE table_store.default.t2 ALTER COLUMN c.c1 COMMENT 'a nested type'");
+        spark.sql("ALTER TABLE table_store.default.t2 ALTER COLUMN c.c2 COMMENT 'a bigint type'");
+        spark.sql(
+                "ALTER TABLE table_store.default.t2 ALTER COLUMN c.c1.c11 COMMENT 'a double type'");
+        spark.sql(
+                "ALTER TABLE table_store.default.t2 ALTER COLUMN c.c1.c12 COMMENT 'a boolean array'");
+
+        assertThat(getField(schema2(), 2).description()).isEqualTo("yet another comment about c");
+        assertThat(getNestedField(getField(schema2(), 2), 0).description())
+                .isEqualTo("a nested type");
+        assertThat(getNestedField(getField(schema2(), 2), 1).description())
+                .isEqualTo("a bigint type");
+        assertThat(getNestedField(getNestedField(getField(schema2(), 2), 0), 0).description())
+                .isEqualTo("a double type");
+        assertThat(getNestedField(getNestedField(getField(schema2(), 2), 0), 1).description())
+                .isEqualTo("a boolean array");
     }
 
     private TableSchema schema1() {
         return FileStoreTableFactory.create(tablePath1).schema();
     }
 
-    private void innerTestNormal(Dataset<Row> dataset) {
+    private TableSchema schema2() {
+        return FileStoreTableFactory.create(tablePath2).schema();
+    }
+
+    private void innerTestSimpleType(Dataset<Row> dataset) {
         List<Row> results = dataset.collectAsList();
         assertThat(results.toString()).isEqualTo("[[1,2,1], [5,6,3]]");
 
@@ -191,8 +356,86 @@ public class SparkReadITCase {
         assertThat(results.toString()).isEqualTo("[[8]]");
     }
 
-    private void innerTestFilterPushDown(Dataset<Row> dataset) {
+    private void innerTestNestedType(Dataset<Row> dataset) {
+        List<Row> results = dataset.collectAsList();
+        assertThat(results.toString())
+                .isEqualTo(
+                        "[[1,WrappedArray(AAA, BBB),[[1.0,WrappedArray(null)],1]], "
+                                + "[2,WrappedArray(CCC, DDD),[[null,WrappedArray(true)],null]], "
+                                + "[3,WrappedArray(null, null),[[2.0,WrappedArray(true, false)],2]], "
+                                + "[4,WrappedArray(null, EEE),[[3.0,WrappedArray(true, false, true)],3]]]");
+
+        results = dataset.select("a").collectAsList();
+        assertThat(results.toString()).isEqualTo("[[1], [2], [3], [4]]");
+
+        results = dataset.select("c.c1").collectAsList();
+        assertThat(results.toString())
+                .isEqualTo(
+                        "[[[1.0,WrappedArray(null)]], [[null,WrappedArray(true)]], "
+                                + "[[2.0,WrappedArray(true, false)]], "
+                                + "[[3.0,WrappedArray(true, false, true)]]]");
+
+        results = dataset.select("c.c2").collectAsList();
+        assertThat(results.toString()).isEqualTo("[[1], [null], [2], [3]]");
+
+        results = dataset.select("c.c1.c11").collectAsList();
+        assertThat(results.toString()).isEqualTo("[[1.0], [null], [2.0], [3.0]]");
+
+        results = dataset.select("c.c1.c12").collectAsList();
+        assertThat(results.toString())
+                .isEqualTo(
+                        "[[WrappedArray(null)], "
+                                + "[WrappedArray(true)], "
+                                + "[WrappedArray(true, false)], "
+                                + "[WrappedArray(true, false, true)]]");
+    }
+
+    private void innerTestSimpleTypeFilterPushDown(Dataset<Row> dataset) {
         List<Row> results = dataset.filter("a < 4").select("a", "c").collectAsList();
-        assertThat(results.toString()).isEqualTo("[[1,1], [3,2]]");
+        assertThat(results.toString()).isEqualTo("[[1,1]]");
+
+        results = dataset.filter("b = 4").select("a", "c").collectAsList();
+        assertThat(results.toString()).isEqualTo("[]");
+    }
+
+    private void innerTestNestedTypeFilterPushDown(Dataset<Row> dataset) {
+        List<Row> results = dataset.filter("a < 4").select("a").collectAsList();
+        assertThat(results.toString()).isEqualTo("[[1], [2], [3]]");
+
+        results = dataset.filter("array_contains(b, 'AAA')").select("b").collectAsList();
+        assertThat(results.toString()).isEqualTo("[[WrappedArray(AAA, BBB)]]");
+
+        results = dataset.filter("c.c1.c11 is null").select("a", "c").collectAsList();
+        assertThat(results.toString()).isEqualTo("[[2,[[null,WrappedArray(true)],null]]]");
+
+        results = dataset.filter("c.c1.c11 = 1.0").select("a", "c.c1").collectAsList();
+        assertThat(results.toString()).isEqualTo("[[1,[1.0,WrappedArray(null)]]]");
+
+        results = dataset.filter("c.c2 is null").select("a", "c").collectAsList();
+        assertThat(results.toString()).isEqualTo("[[2,[[null,WrappedArray(true)],null]]]");
+
+        results =
+                dataset.filter("array_contains(c.c1.c12, false)")
+                        .select("a", "c.c1.c12", "c.c2")
+                        .collectAsList();
+        assertThat(results.toString())
+                .isEqualTo(
+                        "[[3,WrappedArray(true, false),2], [4,WrappedArray(true, false, true),3]]");
+    }
+
+    private boolean fieldIsNullable(DataField field) {
+        return field.type().logicalType().isNullable();
+    }
+
+    private DataField getField(TableSchema schema, int index) {
+        return schema.fields().get(index);
+    }
+
+    private DataField getNestedField(DataField field, int index) {
+        if (field.type() instanceof RowDataType) {
+            RowDataType rowDataType = (RowDataType) field.type();
+            return rowDataType.fields().get(index);
+        }
+        throw new IllegalArgumentException();
     }
 }

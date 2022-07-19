@@ -36,6 +36,8 @@ import org.apache.spark.sql.connector.catalog.TableChange;
 import org.apache.spark.sql.connector.catalog.TableChange.AddColumn;
 import org.apache.spark.sql.connector.catalog.TableChange.RemoveProperty;
 import org.apache.spark.sql.connector.catalog.TableChange.SetProperty;
+import org.apache.spark.sql.connector.catalog.TableChange.UpdateColumnComment;
+import org.apache.spark.sql.connector.catalog.TableChange.UpdateColumnNullability;
 import org.apache.spark.sql.connector.catalog.TableChange.UpdateColumnType;
 import org.apache.spark.sql.connector.expressions.Transform;
 import org.apache.spark.sql.types.StructType;
@@ -148,6 +150,12 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
             validateAlterNestedField(update.fieldNames());
             return SchemaChange.updateColumnType(
                     update.fieldNames()[0], toFlinkType(update.newDataType()));
+        } else if (change instanceof UpdateColumnNullability) {
+            UpdateColumnNullability update = (UpdateColumnNullability) change;
+            return SchemaChange.updateColumnNullability(update.fieldNames(), update.nullable());
+        } else if (change instanceof UpdateColumnComment) {
+            UpdateColumnComment update = (UpdateColumnComment) change;
+            return SchemaChange.updateColumnComment(update.fieldNames(), update.newComment());
         } else {
             throw new UnsupportedOperationException(
                     "Change is not supported: " + change.getClass());

@@ -294,7 +294,7 @@ public class TableSchema implements Serializable {
             collectFieldIds(((MultisetDataType) type).elementType(), fieldIds);
         } else if (type instanceof MapDataType) {
             collectFieldIds(((MapDataType) type).keyType(), fieldIds);
-            collectFieldIds(((MapDataType) type).keyType(), fieldIds);
+            collectFieldIds(((MapDataType) type).valueType(), fieldIds);
         } else if (type instanceof RowDataType) {
             for (DataField field : ((RowDataType) type).fields()) {
                 if (fieldIds.contains(field.id())) {

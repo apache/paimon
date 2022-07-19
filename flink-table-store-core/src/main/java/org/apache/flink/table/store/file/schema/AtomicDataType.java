@@ -28,4 +28,9 @@ public final class AtomicDataType extends DataType {
     public AtomicDataType(LogicalType logicalType) {
         super(logicalType);
     }
+
+    @Override
+    public DataType copy(boolean isNullable) {
+        return new AtomicDataType(logicalType.copy(isNullable));
+    }
 }
