@@ -506,4 +506,17 @@ public class PredicateTest {
         assertThat(predicate.negate().orElse(null))
                 .isEqualTo(PredicateBuilder.and(builder.notEqual(0, 3), builder.notEqual(1, 5)));
     }
+
+    @Test
+    public void testUnknownStats() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        Predicate predicate = builder.equal(0, 5);
+
+        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(null, null, 3)}))
+                .isEqualTo(false);
+
+        // unknown stats, we don't know, likely to hit
+        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(null, null, 4)}))
+                .isEqualTo(true);
+    }
 }

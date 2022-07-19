@@ -85,7 +85,16 @@ public class LeafPredicate implements Predicate {
 
     @Override
     public boolean test(long rowCount, FieldStats[] fieldStats) {
-        return function.test(type, rowCount, fieldStats[fieldIndex], literals);
+        FieldStats stats = fieldStats[fieldIndex];
+        if (rowCount != stats.nullCount()) {
+            // not all null
+            // min or max is null
+            // unknown stats
+            if (stats.minValue() == null || stats.maxValue() == null) {
+                return true;
+            }
+        }
+        return function.test(type, rowCount, stats, literals);
     }
 
     @Override
