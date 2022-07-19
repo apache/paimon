@@ -31,21 +31,6 @@ under the License.
     <artifactId>flink-table-store-benchmark</artifactId>
     <name>Flink Table Store : Benchmark</name>
 
-    <properties>
-        <flink.table.api.java.bridge.name>flink-table-api-java-bridge</flink.table.api.java.bridge.name>
-        <flink.streaming.java.name>flink-streaming-java</flink.streaming.java.name>
-    </properties>
-
-    <profiles>
-        <profile>
-            <id>flink-1.14</id>
-            <properties>
-                <flink.table.api.java.bridge.name>flink-table-api-java-bridge_${scala.binary.version}</flink.table.api.java.bridge.name>
-                <flink.streaming.java.name>flink-streaming-java_${scala.binary.version}</flink.streaming.java.name>
-            </properties>
-        </profile>
-    </profiles>
-
     <dependencies>
         <dependency>
             <groupId>commons-io</groupId>
@@ -76,7 +61,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>${flink.table.api.java.bridge.name}</artifactId>
+            <artifactId>${flink.table.api.java.bridge}</artifactId>
             <version>${flink.version}</version>
             <scope>provided</scope>
         </dependency>
@@ -90,7 +75,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>${flink.streaming.java.name}</artifactId>
+            <artifactId>${flink.streaming.java}</artifactId>
             <version>${flink.version}</version>
             <scope>provided</scope>
         </dependency>
