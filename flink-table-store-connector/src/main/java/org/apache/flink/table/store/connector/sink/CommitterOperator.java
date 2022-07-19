@@ -136,14 +136,24 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
         commit(true, restored);
     }
 
-    public void commit(boolean isRecover, List<ManifestCommittable> committables) throws Exception {
+    private void commit(boolean isRecover, List<ManifestCommittable> committables)
+            throws Exception {
         if (isRecover) {
             committables = committer.filterRecoveredCommittables(committables);
+            if (!committables.isEmpty()) {
+                committer.commit(committables);
+                throw new RuntimeException(
+                        "This exception is intentionally thrown "
+                                + "after committing the restored checkpoints. "
+                                + "By restarting the job we hope that "
+                                + "writers can start writing based on these new commits.");
+            }
+        } else {
+            committer.commit(committables);
         }
-        committer.commit(committables);
     }
 
-    public ManifestCommittable toCommittables(long checkpoint, List<Committable> inputs)
+    private ManifestCommittable toCommittables(long checkpoint, List<Committable> inputs)
             throws Exception {
         return committer.combine(checkpoint, inputs);
     }
