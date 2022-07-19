@@ -79,6 +79,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     protected boolean filterByStats(ManifestEntry entry) {
         return keyFilter == null
                 || keyFilter.test(
-                        entry.file().rowCount(), entry.file().keyStats().fields(keyStatsConverter));
+                        entry.file().rowCount(),
+                        entry.file().keyStats().fields(keyStatsConverter, entry.file().rowCount()));
     }
 }

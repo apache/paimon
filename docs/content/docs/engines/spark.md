@@ -107,9 +107,3 @@ ALTER TABLE table_store.default.myTable UNSET TBLPROPERTIES ('write-buffer-size'
 ALTER TABLE table_store.default.myTable
 ADD COLUMNS (new_column STRING)
 ```
-
-`ALTER TABLE ... ALTER COLUMN ... TYPE`
-```sql
-ALTER TABLE table_store.default.myTable
-ALTER COLUMN column_name TYPE BIGINT
-```
