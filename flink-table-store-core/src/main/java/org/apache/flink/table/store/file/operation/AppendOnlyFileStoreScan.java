@@ -80,6 +80,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
         return filter == null
                 || filter.test(
                         entry.file().rowCount(),
-                        entry.file().valueStats().fields(rowStatsConverter));
+                        entry.file()
+                                .valueStats()
+                                .fields(rowStatsConverter, entry.file().rowCount()));
     }
 }

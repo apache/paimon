@@ -19,16 +19,19 @@
 package org.apache.flink.table.store.file.stats;
 
 import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.format.FieldStats;
-import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.IntStream;
 
 import static org.apache.flink.table.store.file.utils.SerializationUtils.newBytesType;
 
@@ -37,11 +40,15 @@ public class FieldStatsArraySerializer {
 
     private final RowDataSerializer serializer;
 
-    private final RowDataToObjectArrayConverter converter;
+    private final RowData.FieldGetter[] fieldGetters;
 
     public FieldStatsArraySerializer(RowType type) {
-        this.serializer = new RowDataSerializer(type);
-        this.converter = new RowDataToObjectArrayConverter(toAllFieldsNullableRowType(type));
+        RowType safeType = toAllFieldsNullableRowType(type);
+        this.serializer = new RowDataSerializer(safeType);
+        this.fieldGetters =
+                IntStream.range(0, safeType.getFieldCount())
+                        .mapToObj(i -> RowData.createFieldGetter(safeType.getTypeAt(i), i))
+                        .toArray(RowData.FieldGetter[]::new);
     }
 
     public BinaryTableStats toBinary(FieldStats[] stats) {
@@ -62,15 +69,26 @@ public class FieldStatsArraySerializer {
     }
 
     public FieldStats[] fromBinary(BinaryTableStats array) {
-        int rowFieldCount = converter.getArity();
+        return fromBinary(array, null);
+    }
 
-        Object[] minValueObjects = converter.convert(array.min());
-        Object[] maxValueObjects = converter.convert(array.max());
-
-        FieldStats[] stats = new FieldStats[rowFieldCount];
-        for (int i = 0; i < rowFieldCount; i++) {
-            stats[i] =
-                    new FieldStats(minValueObjects[i], maxValueObjects[i], array.nullCounts()[i]);
+    public FieldStats[] fromBinary(BinaryTableStats array, @Nullable Long rowCount) {
+        int fieldCount = fieldGetters.length;
+        FieldStats[] stats = new FieldStats[fieldCount];
+        for (int i = 0; i < fieldCount; i++) {
+            if (i >= array.min().getArity()) {
+                // simple evolution for add column
+                if (rowCount == null) {
+                    throw new RuntimeException("Schema Evolution for stats needs row count.");
+                }
+                stats[i] = new FieldStats(null, null, rowCount);
+            } else {
+                stats[i] =
+                        new FieldStats(
+                                fieldGetters[i].getFieldOrNull(array.min()),
+                                fieldGetters[i].getFieldOrNull(array.max()),
+                                array.nullCounts()[i]);
+            }
         }
         return stats;
     }

@@ -36,6 +36,10 @@ public interface SchemaChange {
         return new RemoveOption(key);
     }
 
+    static SchemaChange addColumn(String fieldName, LogicalType logicalType) {
+        return addColumn(fieldName, logicalType, true, null);
+    }
+
     static SchemaChange addColumn(
             String fieldName, LogicalType logicalType, boolean isNullable, String comment) {
         return new AddColumn(fieldName, logicalType, isNullable, comment);
