@@ -248,3 +248,42 @@ __Note:__
 - Partial update is only supported for table with primary key.
 - Partial update is not supported for streaming consuming.
 - It is best not to have NULL values in the fields, NULL will not overwrite data.
+
+
+## Append-only Table
+
+Append-only tables are a performance feature that only accepts `INSERT_ONLY` data to append to the storage instead of 
+updating or de-duplicating the existing data, and hence suitable for use cases that do not require updates (such as log data synchronization).
+
+### Create Append-only Table
+
+By specifying the core option `'write-mode'` to `'append-only'`, users can create an append-only table as follows.
+
+```sql
+CREATE TABLE IF NOT EXISTS AppendOnlyTable (
+    f0 INT,
+    f1 DOUBLE,
+    f2 STRING
+) WITH (
+    'write-mode' = 'append-only'
+)
+```
+__Note:__
+- By definition, users cannot define primary keys on an append-only table.
+- Append-only table is different from a change-log table which does not define primary keys. 
+  For the latter, it accepts updating or deleting the whole row, although no primary key is present.
+
+### Query Append-only Table
+
+Table Store supports reading append-only table with preserved sequential order. 
+
+For example, with following write
+
+```sql
+INSERT INTO AppendOnlyTable VALUES
+(1, 1.0, 'AAA'), (2, 2.0, 'BBB'), 
+(3, 3.0, 'CCC'), (1, 1.0, 'AAA')
+```
+
+The query `SELECT * FROM AppendOnlyTable` will return exactly the order of `(1, 1.0, 'AAA'), (2, 2.0, 'BBB'), (3, 3.0, 'CCC'), (1, 1.0, 'AAA')`
+
