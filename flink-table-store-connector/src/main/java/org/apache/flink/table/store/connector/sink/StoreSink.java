@@ -86,12 +86,12 @@ public class StoreSink implements Serializable {
         return new StoreWriteOperator(table, overwritePartition, logSinkFunction);
     }
 
-    private StoreCommitter createCommitter(String user, boolean commitEmptyNewFiles) {
+    private StoreCommitter createCommitter(String user, boolean createEmptyCommit) {
         Lock lock = Lock.fromCatalog(lockFactory, tableIdentifier.toObjectPath());
         return new StoreCommitter(
                 table.newCommit(user)
                         .withOverwritePartition(overwritePartition)
-                        .withCreateEmptyCommit(commitEmptyNewFiles)
+                        .withCreateEmptyCommit(createEmptyCommit)
                         .withLock(lock));
     }
 
