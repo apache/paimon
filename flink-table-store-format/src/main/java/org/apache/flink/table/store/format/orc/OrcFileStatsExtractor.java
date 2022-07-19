@@ -36,7 +36,6 @@ import org.apache.orc.DateColumnStatistics;
 import org.apache.orc.DecimalColumnStatistics;
 import org.apache.orc.DoubleColumnStatistics;
 import org.apache.orc.IntegerColumnStatistics;
-import org.apache.orc.OrcFile;
 import org.apache.orc.Reader;
 import org.apache.orc.StringColumnStatistics;
 import org.apache.orc.TimestampColumnStatistics;
@@ -58,10 +57,7 @@ public class OrcFileStatsExtractor implements FileStatsExtractor {
 
     @Override
     public FieldStats[] extract(Path path) throws IOException {
-        org.apache.hadoop.fs.Path hadoopPath = new org.apache.hadoop.fs.Path(path.toUri());
-        Reader reader =
-                OrcFile.createReader(hadoopPath, OrcFile.readerOptions(new Configuration()));
-
+        Reader reader = OrcShimImpl.createReader(new Configuration(), path);
         long rowCount = reader.getNumberOfRows();
         ColumnStatistics[] columnStatistics = reader.getStatistics();
         TypeDescription schema = reader.getSchema();
