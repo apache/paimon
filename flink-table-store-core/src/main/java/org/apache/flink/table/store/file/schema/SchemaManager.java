@@ -202,7 +202,7 @@ public class SchemaManager implements Serializable {
                                     new DataField(
                                             field.id(),
                                             field.name(),
-                                            DataType.copy(field.type(), update.newNullability()),
+                                            field.type().copy(update.newNullability()),
                                             field.description()));
                 } else if (change instanceof UpdateColumnComment) {
                     UpdateColumnComment update = (UpdateColumnComment) change;

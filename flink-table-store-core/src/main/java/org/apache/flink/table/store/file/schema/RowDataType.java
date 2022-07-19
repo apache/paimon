@@ -55,6 +55,11 @@ public class RowDataType extends DataType {
     }
 
     @Override
+    public DataType copy(boolean isNullable) {
+        return new RowDataType(isNullable, fields);
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (this == o) {
             return true;
