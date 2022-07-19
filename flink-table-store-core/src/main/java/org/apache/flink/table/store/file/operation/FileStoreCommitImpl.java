@@ -45,6 +45,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -484,57 +485,36 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         .map(ManifestEntry::partition)
                         .distinct()
                         .collect(Collectors.toList());
-        List<ManifestEntry> currentEntries;
+        List<ManifestEntry> allEntries;
         try {
-            currentEntries =
-                    scan.withSnapshot(snapshotId)
-                            .withPartitionFilter(changedPartitions)
-                            .plan()
-                            .files();
+            allEntries =
+                    new ArrayList<>(
+                            scan.withSnapshot(snapshotId)
+                                    .withPartitionFilter(changedPartitions)
+                                    .plan()
+                                    .files());
         } catch (Throwable e) {
             throw new RuntimeException("Cannot determine if conflicts exist.", e);
         }
+        allEntries.addAll(changes);
 
-        noConflictsForDeletedFilesOrFail(currentEntries, changes);
-        noConflictsForLsmOrFail(currentEntries, changes);
-    }
-
-    private void noConflictsForDeletedFilesOrFail(
-            List<ManifestEntry> currentEntries, List<ManifestEntry> changes) {
-        Set<ManifestEntry.Identifier> removedFiles =
-                changes.stream()
-                        .filter(e -> e.kind().equals(FileKind.DELETE))
-                        .map(ManifestEntry::identifier)
-                        .collect(Collectors.toSet());
-        if (removedFiles.isEmpty()) {
-            // early exit for append only changes
-            return;
-        }
-
-        // check that files to be removed are not yet removed
-        for (ManifestEntry entry : currentEntries) {
-            removedFiles.remove(entry.identifier());
-        }
-        if (!removedFiles.isEmpty()) {
+        Collection<ManifestEntry> mergedEntries;
+        try {
+            // merge manifest entries and also check if the files we want to delete are still there
+            mergedEntries = ManifestEntry.mergeManifestEntries(allEntries);
+        } catch (Throwable e) {
             throw new RuntimeException(
-                    "File deletion conflicts detected! Give up committing compact changes. Conflict files are:\n"
-                            + removedFiles.stream()
-                                    .map(i -> i.toString(pathFactory))
-                                    .collect(Collectors.joining("\n")));
+                    "File deletion conflicts detected! Give up committing compact changes.", e);
         }
-    }
 
-    private void noConflictsForLsmOrFail(
-            List<ManifestEntry> currentEntries, List<ManifestEntry> changes) {
+        // fast exit for file store without keys
         if (keyComparator == null) {
             return;
         }
 
-        List<ManifestEntry> allEntries = new ArrayList<>();
-        allEntries.addAll(currentEntries);
-        allEntries.addAll(changes);
+        // group entries by partitions, buckets and levels
         Map<LevelIdentifier, List<ManifestEntry>> levels = new HashMap<>();
-        for (ManifestEntry entry : ManifestEntry.mergeManifestEntries(allEntries)) {
+        for (ManifestEntry entry : mergedEntries) {
             int level = entry.file().level();
             if (level >= 1) {
                 levels.computeIfAbsent(
