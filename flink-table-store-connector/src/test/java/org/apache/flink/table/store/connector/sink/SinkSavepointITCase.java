@@ -67,7 +67,7 @@ public class SinkSavepointITCase extends AbstractTestBase {
         FailingAtomicRenameFileSystem.reset(failingName, 100, 500);
     }
 
-    @Test(timeout = 60000)
+    @Test(timeout = 180000)
     public void testRecoverFromSavepoint() throws Exception {
         String failingPath = FailingAtomicRenameFileSystem.getFailingPath(failingName, path);
         String savepointPath = null;
