@@ -39,6 +39,11 @@ public class MultisetDataType extends DataType {
     }
 
     @Override
+    public DataType copy(boolean isNullable) {
+        return new MultisetDataType(isNullable, elementType);
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (this == o) {
             return true;

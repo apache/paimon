@@ -45,6 +45,14 @@ public abstract class DataType implements Serializable {
         return logicalType;
     }
 
+    /**
+     * Returns a copy of this data type with possibly different nullability.
+     *
+     * @param isNullable the intended nullability of the copied type
+     * @return a copied {@link DataType}
+     */
+    public abstract DataType copy(boolean isNullable);
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
