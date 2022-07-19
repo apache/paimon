@@ -27,8 +27,8 @@ under the License.
 # Hive
 
 Table Store currently supports the following features related with Hive:
-* Create, drop and insert into table store tables through table store Hive catalog. Tables created in this way can also be read directly from Hive.
-* Register existing table store tables as external tables in Hive.
+* Create, drop and insert into table store tables in Flink SQL through table store Hive catalog. Tables created in this way can also be read directly from Hive.
+* Register existing table store tables as external tables in Hive SQL.
 
 ## Version
 
@@ -41,17 +41,11 @@ Download [flink-table-store-hive-connector-{{< version >}}.jar](https://repo.mav
 {{< /stable >}}
 {{< unstable >}}
 
-You are using an unreleased version of Table Store. The simplest way of building Table Store is by running:
-
-```bash
-mvn clean install -DskipTests
-```
-
-You can find the bundle jar in `"./flink-table-store-hive/flink-table-store-hive-connector/target/flink-table-store-hive-connector-{{< version >}}.jar"`.
+You are using an unreleased version of Table Store. See [Build From Source]({{< ref "docs/engines/build" >}}) for how to build and find Hive connector jar file.
 
 {{< /unstable >}}
 
-Copy table store Hive connector bundle jar to a path accessible by Hive, then use `add jar /path/to/hive-connector.jar` to enable table store support in Hive.
+Copy table store Hive connector bundle jar to a path accessible by Hive, then use `add jar /path/to/flink-table-store-hive-connector-{{< version >}}.jar` to enable table store support in Hive.
 
 ## Using Table Store Hive Catalog
 
@@ -60,6 +54,7 @@ By using table store Hive catalog, you can create, drop and insert into table st
 Execute the following Flink SQL script in Flink SQL client to define a table store Hive catalog and create a table store table.
 
 ```sql
+-- Flink SQL CLI
 -- Define table store Hive catalog
 
 CREATE CATALOG my_hive WITH (
@@ -103,7 +98,7 @@ Run the following Hive SQL in Hive CLI to access the created table.
 ```sql
 -- Enable table store support in Hive
 
-ADD JAR /path/to/hive-connector.jar;
+ADD JAR /path/to/flink-table-store-hive-connector-{{< version >}}.jar;
 
 -- List tables in Hive
 -- (you might need to switch to "default" database if you're not there by default)
@@ -133,7 +128,7 @@ To access existing table store table, you can also register them as external tab
 ```sql
 -- Enable table store support in Hive
 
-ADD JAR /path/to/hive-connector.jar;
+ADD JAR /path/to/flink-table-store-hive-connector-{{< version >}}.jar;
 
 -- Let's use the test_table created in the above section.
 -- To create an external table, you don't need to specify any column or table properties.
