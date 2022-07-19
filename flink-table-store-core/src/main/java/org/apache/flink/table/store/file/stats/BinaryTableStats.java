@@ -51,7 +51,10 @@ public class BinaryTableStats {
     }
 
     public BinaryTableStats(
-            BinaryRowData min, BinaryRowData max, long[] nullCounts, FieldStats[] cacheArray) {
+            BinaryRowData min,
+            BinaryRowData max,
+            long[] nullCounts,
+            @Nullable FieldStats[] cacheArray) {
         this.min = min;
         this.max = max;
         this.nullCounts = nullCounts;
