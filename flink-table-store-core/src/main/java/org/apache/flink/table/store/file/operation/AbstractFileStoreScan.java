@@ -40,7 +40,6 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
@@ -191,33 +190,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             throw new RuntimeException("Failed to read ManifestEntry list concurrently", e);
         }
 
-        LinkedHashMap<ManifestEntry.Identifier, ManifestEntry> map = new LinkedHashMap<>();
-        for (ManifestEntry entry : entries) {
-            ManifestEntry.Identifier identifier = entry.identifier();
-            switch (entry.kind()) {
-                case ADD:
-                    Preconditions.checkState(
-                            !map.containsKey(identifier),
-                            "Trying to add file %s which is already added. "
-                                    + "Manifest might be corrupted.",
-                            identifier);
-                    map.put(identifier, entry);
-                    break;
-                case DELETE:
-                    Preconditions.checkState(
-                            map.containsKey(identifier),
-                            "Trying to delete file %s which is not previously added. "
-                                    + "Manifest might be corrupted.",
-                            identifier);
-                    map.remove(identifier);
-                    break;
-                default:
-                    throw new UnsupportedOperationException(
-                            "Unknown value kind " + entry.kind().name());
-            }
-        }
         List<ManifestEntry> files = new ArrayList<>();
-        for (ManifestEntry file : map.values()) {
+        for (ManifestEntry file : ManifestEntry.mergeManifestEntries(entries)) {
             if (checkNumOfBuckets && file.totalBuckets() != numOfBuckets) {
                 String partInfo =
                         partitionConverter.getArity() > 0

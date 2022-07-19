@@ -31,9 +31,9 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.DirectoryNotEmptyException;
-import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
@@ -59,13 +59,15 @@ public class TestAtomicRenameFileSystem extends LocalFileSystem {
         dstParent.mkdirs();
         try {
             renameLock.lock();
-            Files.move(srcFile.toPath(), dstFile.toPath());
+            if (dstFile.exists()) {
+                return false;
+            }
+            Files.move(srcFile.toPath(), dstFile.toPath(), StandardCopyOption.ATOMIC_MOVE);
             return true;
         } catch (NoSuchFileException
                 | AccessDeniedException
                 | DirectoryNotEmptyException
-                | SecurityException
-                | FileAlreadyExistsException e) {
+                | SecurityException e) {
             return false;
         } finally {
             renameLock.unlock();

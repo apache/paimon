@@ -104,6 +104,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 checkNumOfBuckets);
     }
 
+    @Override
     public Comparator<RowData> newKeyComparator() {
         return keyComparatorSupplier.get();
     }

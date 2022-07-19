@@ -26,6 +26,8 @@ import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreWrite;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.types.logical.RowType;
 
+import java.util.Comparator;
+
 /** {@link FileStore} for reading and writing {@link RowData}. */
 public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
 
@@ -81,5 +83,10 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
                 manifestListFactory(),
                 options.bucket(),
                 checkNumOfBuckets);
+    }
+
+    @Override
+    public Comparator<RowData> newKeyComparator() {
+        return null;
     }
 }

@@ -82,6 +82,12 @@ public class FileStoreCommitTest {
         testRandomConcurrentNoConflict(ThreadLocalRandom.current().nextInt(3) + 2, failing);
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testManyCommitUsersWithConflict(boolean failing) throws Exception {
+        testRandomConcurrentWithConflict(ThreadLocalRandom.current().nextInt(3) + 2, failing);
+    }
+
     @Test
     public void testLatestHint() throws Exception {
         testRandomConcurrentNoConflict(1, false);
@@ -134,12 +140,53 @@ public class FileStoreCommitTest {
                     .put(entry.getKey(), entry.getValue());
         }
 
+        testRandomConcurrent(dataPerThread, true, failing);
+    }
+
+    protected void testRandomConcurrentWithConflict(int numThreads, boolean failing)
+            throws Exception {
+        // prepare test data
+        Map<BinaryRowData, List<KeyValue>> data =
+                generateData(ThreadLocalRandom.current().nextInt(1000) + 1);
+        logData(
+                () ->
+                        data.values().stream()
+                                .flatMap(Collection::stream)
+                                .collect(Collectors.toList()),
+                "input");
+
+        List<Map<BinaryRowData, List<KeyValue>>> dataPerThread = new ArrayList<>();
+        for (int i = 0; i < numThreads; i++) {
+            dataPerThread.add(new HashMap<>());
+        }
+        for (Map.Entry<BinaryRowData, List<KeyValue>> entry : data.entrySet()) {
+            for (KeyValue kv : entry.getValue()) {
+                dataPerThread
+                        .get(Math.abs(kv.key().hashCode()) % numThreads)
+                        .computeIfAbsent(entry.getKey(), p -> new ArrayList<>())
+                        .add(kv);
+            }
+        }
+
+        testRandomConcurrent(dataPerThread, false, failing);
+    }
+
+    private void testRandomConcurrent(
+            List<Map<BinaryRowData, List<KeyValue>>> dataPerThread,
+            boolean enableOverwrite,
+            boolean failing)
+            throws Exception {
         // concurrent commits
         List<TestCommitThread> threads = new ArrayList<>();
-        for (int i = 0; i < numThreads; i++) {
+        for (Map<BinaryRowData, List<KeyValue>> data : dataPerThread) {
             TestCommitThread thread =
                     new TestCommitThread(
-                            dataPerThread.get(i), createStore(failing), createStore(false));
+                            TestKeyValueGenerator.KEY_TYPE,
+                            TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                            enableOverwrite,
+                            data,
+                            createStore(failing),
+                            createStore(false));
             thread.start();
             threads.add(thread);
         }
@@ -147,18 +194,12 @@ public class FileStoreCommitTest {
         TestFileStore store = createStore(false);
 
         // calculate expected results
-        Map<BinaryRowData, List<KeyValue>> threadResults = new HashMap<>();
+        List<KeyValue> threadResults = new ArrayList<>();
         for (TestCommitThread thread : threads) {
             thread.join();
-            for (Map.Entry<BinaryRowData, List<KeyValue>> entry : thread.getResult().entrySet()) {
-                threadResults.put(entry.getKey(), entry.getValue());
-            }
+            threadResults.addAll(thread.getResult());
         }
-        Map<BinaryRowData, BinaryRowData> expected =
-                store.toKvMap(
-                        threadResults.values().stream()
-                                .flatMap(Collection::stream)
-                                .collect(Collectors.toList()));
+        Map<BinaryRowData, BinaryRowData> expected = store.toKvMap(threadResults);
 
         // read actual data and compare
         Long snapshotId = store.snapshotManager().latestSnapshotId();
@@ -276,10 +317,26 @@ public class FileStoreCommitTest {
                                 Collections.emptyMap())
                         .get(0);
 
-        store.commitData(
-                Collections.emptyList(), gen::getPartition, kv -> 0, Collections.emptyMap());
-
+        // not commit empty new files
+        store.commitDataImpl(
+                Collections.emptyList(),
+                gen::getPartition,
+                kv -> 0,
+                false,
+                (commit, committable) -> commit.commit(committable, Collections.emptyMap()));
         assertThat(store.snapshotManager().findLatest()).isEqualTo(snapshot.id());
+
+        // commit empty new files
+        store.commitDataImpl(
+                Collections.emptyList(),
+                gen::getPartition,
+                kv -> 0,
+                false,
+                (commit, committable) -> {
+                    commit.withCreateEmptyCommit(true);
+                    commit.commit(committable, Collections.emptyMap());
+                });
+        assertThat(store.snapshotManager().findLatest()).isEqualTo(snapshot.id() + 1);
     }
 
     private TestFileStore createStore(boolean failing) {
@@ -312,7 +369,7 @@ public class FileStoreCommitTest {
         Map<BinaryRowData, List<KeyValue>> data = new HashMap<>();
         for (int i = 0; i < numRecords; i++) {
             KeyValue kv = gen.next();
-            data.compute(gen.getPartition(kv), (p, l) -> l == null ? new ArrayList<>() : l).add(kv);
+            data.computeIfAbsent(gen.getPartition(kv), p -> new ArrayList<>()).add(kv);
         }
         return data;
     }

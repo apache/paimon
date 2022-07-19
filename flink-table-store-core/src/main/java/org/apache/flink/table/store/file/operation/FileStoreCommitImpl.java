@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.operation;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.data.DataFileMeta;
@@ -44,10 +45,14 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
@@ -84,8 +89,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final int numBucket;
     private final MemorySize manifestTargetSize;
     private final int manifestMergeMinCount;
+    @Nullable private final Comparator<RowData> keyComparator;
 
     @Nullable private Lock lock;
+    private boolean createEmptyCommit;
 
     public FileStoreCommitImpl(
             long schemaId,
@@ -98,7 +105,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             FileStoreScan scan,
             int numBucket,
             MemorySize manifestTargetSize,
-            int manifestMergeMinCount) {
+            int manifestMergeMinCount,
+            @Nullable Comparator<RowData> keyComparator) {
         this.schemaId = schemaId;
         this.commitUser = commitUser;
         this.partitionType = partitionType;
@@ -111,13 +119,21 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.numBucket = numBucket;
         this.manifestTargetSize = manifestTargetSize;
         this.manifestMergeMinCount = manifestMergeMinCount;
+        this.keyComparator = keyComparator;
 
         this.lock = null;
+        this.createEmptyCommit = false;
     }
 
     @Override
     public FileStoreCommit withLock(Lock lock) {
         this.lock = lock;
+        return this;
+    }
+
+    @Override
+    public FileStoreCommit withCreateEmptyCommit(boolean createEmptyCommit) {
+        this.createEmptyCommit = createEmptyCommit;
         return this;
     }
 
@@ -167,7 +183,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         List<ManifestEntry> appendChanges = collectChanges(committable.newFiles(), FileKind.ADD);
-        if (!appendChanges.isEmpty()) {
+        if (createEmptyCommit || !appendChanges.isEmpty()) {
             tryCommit(
                     appendChanges,
                     committable.identifier(),
@@ -239,11 +255,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             String hash,
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
-            boolean checkDeletedFiles) {
+            boolean checkFileConflicts) {
         while (true) {
             Long latestSnapshotId = snapshotManager.latestSnapshotId();
             if (tryCommitOnce(
-                    changes, hash, logOffsets, commitKind, latestSnapshotId, checkDeletedFiles)) {
+                    changes, hash, logOffsets, commitKind, latestSnapshotId, checkFileConflicts)) {
                 break;
             }
         }
@@ -317,7 +333,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
             Long latestSnapshotId,
-            boolean checkDeletedFiles) {
+            boolean checkFileConflicts) {
         long newSnapshotId =
                 latestSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshotId + 1;
         Path newSnapshotPath = snapshotManager.snapshotPath(newSnapshotId);
@@ -331,7 +347,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         Snapshot latestSnapshot = null;
         if (latestSnapshotId != null) {
-            if (checkDeletedFiles) {
+            if (checkFileConflicts) {
                 noConflictsOrFail(latestSnapshotId, changes);
             }
             latestSnapshot = snapshotManager.snapshot(latestSnapshotId);
@@ -464,47 +480,64 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private void noConflictsOrFail(long snapshotId, List<ManifestEntry> changes) {
-        Set<ManifestEntry.Identifier> removedFiles =
-                changes.stream()
-                        .filter(e -> e.kind().equals(FileKind.DELETE))
-                        .map(ManifestEntry::identifier)
-                        .collect(Collectors.toSet());
-        if (removedFiles.isEmpty()) {
-            // early exit for append only changes
-            return;
-        }
-
         List<BinaryRowData> changedPartitions =
                 changes.stream()
                         .map(ManifestEntry::partition)
                         .distinct()
                         .collect(Collectors.toList());
+        List<ManifestEntry> allEntries;
         try {
-            for (ManifestEntry entry :
-                    scan.withSnapshot(snapshotId)
-                            .withPartitionFilter(changedPartitions)
-                            .plan()
-                            .files()) {
-                removedFiles.remove(entry.identifier());
-            }
+            allEntries =
+                    new ArrayList<>(
+                            scan.withSnapshot(snapshotId)
+                                    .withPartitionFilter(changedPartitions)
+                                    .plan()
+                                    .files());
         } catch (Throwable e) {
             throw new RuntimeException("Cannot determine if conflicts exist.", e);
         }
+        allEntries.addAll(changes);
 
-        if (!removedFiles.isEmpty()) {
+        Collection<ManifestEntry> mergedEntries;
+        try {
+            // merge manifest entries and also check if the files we want to delete are still there
+            mergedEntries = ManifestEntry.mergeManifestEntries(allEntries);
+        } catch (Throwable e) {
             throw new RuntimeException(
-                    "Conflicts detected on:\n"
-                            + removedFiles.stream()
-                                    .map(
-                                            i ->
-                                                    pathFactory.getPartitionString(i.partition)
-                                                            + ", bucket "
-                                                            + i.bucket
-                                                            + ", level "
-                                                            + i.level
-                                                            + ", file "
-                                                            + i.fileName)
-                                    .collect(Collectors.joining("\n")));
+                    "File deletion conflicts detected! Give up committing compact changes.", e);
+        }
+
+        // fast exit for file store without keys
+        if (keyComparator == null) {
+            return;
+        }
+
+        // group entries by partitions, buckets and levels
+        Map<LevelIdentifier, List<ManifestEntry>> levels = new HashMap<>();
+        for (ManifestEntry entry : mergedEntries) {
+            int level = entry.file().level();
+            if (level >= 1) {
+                levels.computeIfAbsent(
+                                new LevelIdentifier(entry.partition(), entry.bucket(), level),
+                                lv -> new ArrayList<>())
+                        .add(entry);
+            }
+        }
+
+        // check for all LSM level >= 1, key ranges of files do not intersect
+        for (List<ManifestEntry> entries : levels.values()) {
+            entries.sort((a, b) -> keyComparator.compare(a.file().minKey(), b.file().minKey()));
+            for (int i = 0; i + 1 < entries.size(); i++) {
+                ManifestEntry a = entries.get(i);
+                ManifestEntry b = entries.get(i + 1);
+                if (keyComparator.compare(a.file().maxKey(), b.file().minKey()) >= 0) {
+                    throw new RuntimeException(
+                            "LSM conflicts detected! Give up committing compact changes. Conflict files are:\n"
+                                    + a.identifier().toString(pathFactory)
+                                    + "\n"
+                                    + b.identifier().toString(pathFactory));
+                }
+            }
         }
     }
 
@@ -526,6 +559,35 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (!oldMetaSet.contains(suspect)) {
                 manifestList.delete(suspect.fileName());
             }
+        }
+    }
+
+    private static class LevelIdentifier {
+
+        private final BinaryRowData partition;
+        private final int bucket;
+        private final int level;
+
+        private LevelIdentifier(BinaryRowData partition, int bucket, int level) {
+            this.partition = partition;
+            this.bucket = bucket;
+            this.level = level;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (!(o instanceof LevelIdentifier)) {
+                return false;
+            }
+            LevelIdentifier that = (LevelIdentifier) o;
+            return Objects.equals(partition, that.partition)
+                    && bucket == that.bucket
+                    && level == that.level;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(partition, bucket, level);
         }
     }
 }

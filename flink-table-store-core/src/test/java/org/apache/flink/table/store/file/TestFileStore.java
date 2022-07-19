@@ -185,7 +185,7 @@ public class TestFileStore extends KeyValueFileStore {
                         commit.overwrite(partition, committable, Collections.emptyMap()));
     }
 
-    private List<Snapshot> commitDataImpl(
+    public List<Snapshot> commitDataImpl(
             List<KeyValue> kvs,
             Function<KeyValue, BinaryRowData> partitionCalculator,
             Function<KeyValue, Integer> bucketCalculator,
@@ -197,7 +197,7 @@ public class TestFileStore extends KeyValueFileStore {
         for (KeyValue kv : kvs) {
             BinaryRowData partition = partitionCalculator.apply(kv);
             int bucket = bucketCalculator.apply(kv);
-            writers.compute(partition, (p, m) -> m == null ? new HashMap<>() : m)
+            writers.computeIfAbsent(partition, p -> new HashMap<>())
                     .compute(
                             bucket,
                             (b, w) -> {
@@ -281,8 +281,8 @@ public class TestFileStore extends KeyValueFileStore {
                 new HashMap<>();
         for (ManifestEntry entry : entries) {
             filesPerPartitionAndBucket
-                    .compute(entry.partition(), (p, m) -> m == null ? new HashMap<>() : m)
-                    .compute(entry.bucket(), (b, l) -> l == null ? new ArrayList<>() : l)
+                    .computeIfAbsent(entry.partition(), p -> new HashMap<>())
+                    .computeIfAbsent(entry.bucket(), b -> new ArrayList<>())
                     .add(entry.file());
         }
 
@@ -309,6 +309,18 @@ public class TestFileStore extends KeyValueFileStore {
     }
 
     public Map<BinaryRowData, BinaryRowData> toKvMap(List<KeyValue> kvs) {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Compacting list of key values to kv map\n"
+                            + kvs.stream()
+                                    .map(
+                                            kv ->
+                                                    kv.toString(
+                                                            TestKeyValueGenerator.KEY_TYPE,
+                                                            TestKeyValueGenerator.DEFAULT_ROW_TYPE))
+                                    .collect(Collectors.joining("\n")));
+        }
+
         Map<BinaryRowData, BinaryRowData> result = new HashMap<>();
         for (KeyValue kv : kvs) {
             BinaryRowData key = keySerializer.toBinaryRow(kv.key()).copy();

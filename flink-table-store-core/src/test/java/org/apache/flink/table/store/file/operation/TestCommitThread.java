@@ -25,11 +25,13 @@ import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
+import org.apache.flink.table.types.logical.RowType;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -39,6 +41,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.TestFileStore.PAGE_SIZE;
 import static org.apache.flink.table.store.file.TestFileStore.WRITE_BUFFER_SIZE;
@@ -49,6 +52,9 @@ public class TestCommitThread extends Thread {
 
     private static final Logger LOG = LoggerFactory.getLogger(TestCommitThread.class);
 
+    private final RowType keyType;
+    private final RowType valueType;
+    private final boolean enableOverwrite;
     private final Map<BinaryRowData, List<KeyValue>> data;
     private final Map<BinaryRowData, List<KeyValue>> result;
     private final Map<BinaryRowData, MergeTreeWriter> writers;
@@ -57,26 +63,41 @@ public class TestCommitThread extends Thread {
     private final FileStoreCommit commit;
 
     public TestCommitThread(
+            RowType keyType,
+            RowType valueType,
+            boolean enableOverwrite,
             Map<BinaryRowData, List<KeyValue>> data,
             TestFileStore testStore,
             TestFileStore safeStore) {
+        this.keyType = keyType;
+        this.valueType = valueType;
+        this.enableOverwrite = enableOverwrite;
         this.data = data;
         this.result = new HashMap<>();
         this.writers = new HashMap<>();
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Test commit thread is given these data:\n"
+                            + data.values().stream()
+                                    .flatMap(Collection::stream)
+                                    .map(kv -> kv.toString(keyType, valueType))
+                                    .collect(Collectors.joining("\n")));
+        }
 
         this.write = safeStore.newWrite();
         this.commit = testStore.newCommit(UUID.randomUUID().toString());
     }
 
-    public Map<BinaryRowData, List<KeyValue>> getResult() {
-        return result;
+    public List<KeyValue> getResult() {
+        return result.values().stream().flatMap(Collection::stream).collect(Collectors.toList());
     }
 
     @Override
     public void run() {
         while (!data.isEmpty()) {
             try {
-                if (ThreadLocalRandom.current().nextInt(5) == 0) {
+                if (enableOverwrite && ThreadLocalRandom.current().nextInt(5) == 0) {
                     // 20% probability to overwrite
                     doOverwrite();
                 } else {
@@ -149,10 +170,17 @@ public class TestCommitThread extends Thread {
     private void writeData() throws Exception {
         List<KeyValue> changes = new ArrayList<>();
         BinaryRowData partition = pickData(changes);
-        result.compute(partition, (p, l) -> l == null ? new ArrayList<>() : l).addAll(changes);
+        result.computeIfAbsent(partition, p -> new ArrayList<>()).addAll(changes);
 
-        MergeTreeWriter writer =
-                writers.compute(partition, (p, w) -> w == null ? createWriter(p, false) : w);
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Test commit thread will write data\n"
+                            + changes.stream()
+                                    .map(kv -> kv.toString(keyType, valueType))
+                                    .collect(Collectors.joining("\n")));
+        }
+
+        MergeTreeWriter writer = writers.computeIfAbsent(partition, p -> createWriter(p, false));
         for (KeyValue kv : changes) {
             writer.write(kv);
         }
@@ -162,9 +190,17 @@ public class TestCommitThread extends Thread {
         List<KeyValue> changes = new ArrayList<>();
         BinaryRowData partition = pickData(changes);
         List<KeyValue> resultOfPartition =
-                result.compute(partition, (p, l) -> l == null ? new ArrayList<>() : l);
+                result.computeIfAbsent(partition, p -> new ArrayList<>());
         resultOfPartition.clear();
         resultOfPartition.addAll(changes);
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Test commit thread will overwrite data\n"
+                            + changes.stream()
+                                    .map(kv -> kv.toString(keyType, valueType))
+                                    .collect(Collectors.joining("\n")));
+        }
 
         if (writers.containsKey(partition)) {
             MergeTreeWriter oldWriter = writers.get(partition);
