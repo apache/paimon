@@ -89,12 +89,13 @@ public class CommitterOperatorTest {
             testHarness.processElement(
                     new Committable(Committable.Kind.FILE, committable), timestamp++);
         }
+        // checkpoint is completed but not notified, so no snapshot is committed
         OperatorSubtaskState snapshot = testHarness.snapshot(0, timestamp++);
-
         assertThat(table.snapshotManager().latestSnapshotId()).isNull();
 
         testHarness = createTestHarness(table);
         try {
+            // commit snapshot from state, fail intentionally
             testHarness.initializeState(snapshot);
             testHarness.open();
             fail("Expecting intentional exception");
@@ -106,31 +107,9 @@ public class CommitterOperatorTest {
                                     + "By restarting the job we hope that "
                                     + "writers can start writing based on these new commits.");
         }
-
-        assertResults(table, "1, 10", "2, 20");
-    }
-
-    @Test
-    public void testNotFailIfSnapshotIsComplete() throws Exception {
-        FileStoreTable table = createFileStoreTable();
-
-        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
-                createTestHarness(table);
-        testHarness.open();
-
-        TableWrite write = table.newWrite();
-        write.write(GenericRowData.of(1, 10L));
-        write.write(GenericRowData.of(2, 20L));
-
-        long timestamp = 1;
-        for (FileCommittable committable : write.prepareCommit(false)) {
-            testHarness.processElement(
-                    new Committable(Committable.Kind.FILE, committable), timestamp++);
-        }
-        OperatorSubtaskState snapshot = testHarness.snapshot(0, timestamp++);
-        testHarness.notifyOfCompletedCheckpoint(0);
         assertResults(table, "1, 10", "2, 20");
 
+        // snapshot is successfully committed, no failure is needed
         testHarness = createTestHarness(table);
         testHarness.initializeState(snapshot);
         testHarness.open();
