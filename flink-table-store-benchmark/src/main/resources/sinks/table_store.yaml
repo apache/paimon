@@ -16,9 +16,11 @@
 # limitations under the License.
 ################################################################################
 
-benchmark.metric.monitor.delay: 60s
-benchmark.metric.monitor.duration: 30min
-benchmark.metric.monitor.interval: 10s
-# benchmark.metric.reporter.host: host-name
-benchmark.sink.path: /path/to/sink # should point to a non-existing path, will be removed before each test
-# flink.rest.address: host-name
+before: |
+  CREATE CATALOG test_catalog WITH (
+    'type' = 'table-store',
+    'warehouse' = '${SINK_PATH}'
+  );
+sink-name: test_catalog.`default`.table_store_sink
+sink-properties: |
+  'bucket' = '16'

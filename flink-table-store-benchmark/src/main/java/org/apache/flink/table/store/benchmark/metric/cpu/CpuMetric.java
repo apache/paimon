@@ -99,7 +99,7 @@ public class CpuMetric {
     @Override
     public String toString() {
         try {
-            return BenchmarkUtils.MAPPER.writeValueAsString(this);
+            return BenchmarkUtils.JSON_MAPPER.writeValueAsString(this);
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
@@ -107,10 +107,10 @@ public class CpuMetric {
 
     public static List<CpuMetric> fromJsonArray(String json) {
         try {
-            ArrayNode arrayNode = (ArrayNode) BenchmarkUtils.MAPPER.readTree(json);
+            ArrayNode arrayNode = (ArrayNode) BenchmarkUtils.JSON_MAPPER.readTree(json);
             List<CpuMetric> expected = new ArrayList<>();
             for (JsonNode jsonNode : arrayNode) {
-                expected.add(BenchmarkUtils.MAPPER.convertValue(jsonNode, CpuMetric.class));
+                expected.add(BenchmarkUtils.JSON_MAPPER.convertValue(jsonNode, CpuMetric.class));
             }
             return expected;
         } catch (JsonProcessingException e) {

@@ -27,11 +27,11 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.InputStream;
+import java.util.Map;
 
 /**
  * Global configuration object for benchmark. Similar to Java properties configuration objects it
@@ -128,92 +128,19 @@ public final class BenchmarkGlobalConfiguration {
                             + ") does not exist.");
         }
 
-        Configuration configuration = loadYAMLResource(yamlConfigFile);
+        Configuration configuration;
+        try (InputStream inputStream = new FileInputStream(yamlConfigFile)) {
+            configuration =
+                    Configuration.fromMap(
+                            BenchmarkUtils.YAML_MAPPER.readValue(inputStream, Map.class));
+        } catch (IOException e) {
+            throw new RuntimeException("Error parsing YAML configuration.", e);
+        }
 
         if (dynamicProperties != null) {
             configuration.addAll(dynamicProperties);
         }
 
         return configuration;
-    }
-
-    /**
-     * Loads a YAML-file of key-value pairs.
-     *
-     * <p>Colon and whitespace ": " separate key and value (one per line). The hash tag "#" starts a
-     * single-line comment.
-     *
-     * <p>Example:
-     *
-     * <pre>
-     * jobmanager.rpc.address: localhost # network address for communication with the job manager
-     * jobmanager.rpc.port   : 6123      # network port to connect to for communication with the job manager
-     * taskmanager.rpc.port  : 6122      # network port the task manager expects incoming IPC connections
-     * </pre>
-     *
-     * <p>This does not span the whole YAML specification, but only the *syntax* of simple YAML
-     * key-value pairs (see issue #113 on GitHub). If at any point in time, there is a need to go
-     * beyond simple key-value pairs syntax compatibility will allow to introduce a YAML parser
-     * library.
-     *
-     * @param file the YAML file to read from
-     * @see <a href="http://www.yaml.org/spec/1.2/spec.html">YAML 1.2 specification</a>
-     */
-    private static Configuration loadYAMLResource(File file) {
-        final Configuration config = new Configuration();
-
-        try (BufferedReader reader =
-                new BufferedReader(new InputStreamReader(new FileInputStream(file)))) {
-
-            String line;
-            int lineNo = 0;
-            while ((line = reader.readLine()) != null) {
-                lineNo++;
-                // 1. check for comments
-                String[] comments = line.split("#", 2);
-                String conf = comments[0].trim();
-
-                // 2. get key and value
-                if (conf.length() > 0) {
-                    String[] kv = conf.split(": ", 2);
-
-                    // skip line with no valid key-value pair
-                    if (kv.length == 1) {
-                        LOG.warn(
-                                "Error while trying to split key and value in configuration file "
-                                        + file
-                                        + ":"
-                                        + lineNo
-                                        + ": \""
-                                        + line
-                                        + "\"");
-                        continue;
-                    }
-
-                    String key = kv[0].trim();
-                    String value = kv[1].trim();
-
-                    // sanity check
-                    if (key.length() == 0 || value.length() == 0) {
-                        LOG.warn(
-                                "Error after splitting key and value in configuration file "
-                                        + file
-                                        + ":"
-                                        + lineNo
-                                        + ": \""
-                                        + line
-                                        + "\"");
-                        continue;
-                    }
-
-                    LOG.info("Loading configuration property: {}, {}", key, value);
-                    config.setString(key, value);
-                }
-            }
-        } catch (IOException e) {
-            throw new RuntimeException("Error parsing YAML configuration.", e);
-        }
-
-        return config;
     }
 }

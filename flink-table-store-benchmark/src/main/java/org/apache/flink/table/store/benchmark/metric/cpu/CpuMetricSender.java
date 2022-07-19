@@ -124,7 +124,7 @@ public class CpuMetricSender implements AutoCloseable {
 
         try {
             List<CpuMetric> cpuMetrics = getCpuMetrics();
-            String jsonMessage = BenchmarkUtils.MAPPER.writeValueAsString(cpuMetrics);
+            String jsonMessage = BenchmarkUtils.JSON_MAPPER.writeValueAsString(cpuMetrics);
             this.outputStream.write(jsonMessage.getBytes(StandardCharsets.UTF_8));
             this.outputStream.write(DELIMITER);
             LOG.info("Report CPU metric: {}", jsonMessage);

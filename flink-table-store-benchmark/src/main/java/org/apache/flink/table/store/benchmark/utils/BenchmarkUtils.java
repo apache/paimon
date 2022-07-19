@@ -19,6 +19,9 @@
 package org.apache.flink.table.store.benchmark.utils;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+
+import org.slf4j.Logger;
 
 import java.text.DecimalFormat;
 import java.text.NumberFormat;
@@ -29,7 +32,8 @@ import java.util.TreeMap;
 /** Formatting utils for benchmark. */
 public class BenchmarkUtils {
 
-    public static final ObjectMapper MAPPER = new ObjectMapper();
+    public static final ObjectMapper JSON_MAPPER = new ObjectMapper();
+    public static final ObjectMapper YAML_MAPPER = new ObjectMapper(new YAMLFactory());
 
     // -------------------------------------------------------------------------------------------
     // Pretty Utilities
@@ -77,5 +81,10 @@ public class BenchmarkUtils {
 
     public static String formatDataFreshness(Long dataFreshness) {
         return dataFreshness == null ? "Unknown" : String.format("%.3fs", dataFreshness / 1000.0);
+    }
+
+    public static void printAndLog(Logger logger, String message) {
+        System.out.println(message);
+        logger.info(message);
     }
 }

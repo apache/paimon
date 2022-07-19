@@ -24,7 +24,7 @@ import org.apache.flink.table.store.benchmark.metric.JobBenchmarkMetric;
 import org.apache.flink.table.store.benchmark.metric.MetricReporter;
 import org.apache.flink.table.store.benchmark.utils.AutoClosableProcess;
 import org.apache.flink.table.store.benchmark.utils.BenchmarkGlobalConfiguration;
-import org.apache.flink.util.FileUtils;
+import org.apache.flink.table.store.benchmark.utils.BenchmarkUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,34 +32,29 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /** Runner of a single benchmark query. */
 public class QueryRunner {
 
     private static final Logger LOG = LoggerFactory.getLogger(QueryRunner.class);
 
-    private static final Pattern SINK_DDL_TEMPLATE_PATTERN =
-            Pattern.compile("-- __SINK_DDL_BEGIN__([\\s\\S]*?)-- __SINK_DDL_END__");
-
-    private final Path queryPath;
-    private final Path sinkTemplatePath;
+    private final Query query;
+    private final Sink sink;
     private final Path flinkDist;
     private final MetricReporter metricReporter;
     private final FlinkRestClient flinkRestClient;
 
     public QueryRunner(
-            Path queryPath,
-            Path sinkTemplatePath,
+            Query query,
+            Sink sink,
             Path flinkDist,
             MetricReporter metricReporter,
             FlinkRestClient flinkRestClient) {
-        this.queryPath = queryPath;
-        this.sinkTemplatePath = sinkTemplatePath;
+        this.query = query;
+        this.sink = sink;
         this.flinkDist = flinkDist;
         this.metricReporter = metricReporter;
         this.flinkRestClient = flinkRestClient;
@@ -67,19 +62,13 @@ public class QueryRunner {
 
     public JobBenchmarkMetric run() {
         try {
-            System.out.println(
-                    "==================================================================");
-            System.out.println(
-                    "Start to run query "
-                            + queryPath.getFileName()
+            BenchmarkUtils.printAndLog(
+                    LOG,
+                    "==================================================================\n"
+                            + "Start to run query "
+                            + query.name()
                             + " with sink "
-                            + sinkTemplatePath.getFileName());
-            LOG.info("==================================================================");
-            LOG.info(
-                    "Start to run query "
-                            + queryPath.getFileName()
-                            + " with sink "
-                            + sinkTemplatePath.getFileName());
+                            + sink.name());
 
             String sinkPath =
                     BenchmarkGlobalConfiguration.loadConfiguration()
@@ -88,66 +77,37 @@ public class QueryRunner {
                 throw new IllegalArgumentException(
                         BenchmarkOptions.SINK_PATH.key() + " must be set");
             }
-            String sinkProperties =
-                    FileUtils.readFileUtf8(sinkTemplatePath.toFile())
-                            .replace("${SINK_PATH}", sinkPath);
-            String sqlTemplate = FileUtils.readFileUtf8(queryPath.toFile());
-            Matcher m = SINK_DDL_TEMPLATE_PATTERN.matcher(sqlTemplate);
-            if (!m.find()) {
-                throw new IllegalArgumentException(
-                        "Cannot find __SINK_DDL_BEGIN__ and __SINK_DDL_END__ in query "
-                                + queryPath.getFileName()
-                                + ". This query is not valid.");
-            }
-            String sinkDdlTemplate = m.group(1);
-
-            String insertSql =
-                    sqlTemplate
-                            .replace("${SINK_NAME}", "S")
-                            .replace("${DDL_TEMPLATE}", sinkProperties);
-            String querySql =
-                    "SET 'execution.runtime-mode' = 'batch';\n"
-                            + sinkDdlTemplate
-                                    .replace("${SINK_NAME}", "S")
-                                    .replace("${DDL_TEMPLATE}", sinkProperties)
-                            + sinkDdlTemplate
-                                    .replace("${SINK_NAME}", "B")
-                                    .replace("${DDL_TEMPLATE}", "'connector' = 'blackhole'")
-                            + "INSERT INTO B SELECT * FROM S;";
 
             // before submitting SQL, clean sink path
             FileSystem fs = new org.apache.flink.core.fs.Path(sinkPath).getFileSystem();
             fs.delete(new org.apache.flink.core.fs.Path(sinkPath), true);
 
-            String insertJobId = submitSQLJob(Arrays.asList(insertSql.split("\n")));
+            // run initialization SQL if needed
+            Optional<String> beforeSql = query.getBeforeSql(sink, sinkPath);
+            if (beforeSql.isPresent()) {
+                BenchmarkUtils.printAndLog(LOG, "Initializing query " + query.name());
+                String beforeJobId = submitSQLJob(beforeSql.get());
+                flinkRestClient.waitUntilJobFinished(beforeJobId);
+            }
+
+            String insertJobId = submitSQLJob(query.getWriteBenchmarkSql(sink, sinkPath));
             // blocking until collect enough metrics
             JobBenchmarkMetric metrics = metricReporter.reportMetric(insertJobId);
             // cancel job
-            System.out.println(
-                    "Stop job query "
-                            + queryPath.getFileName()
-                            + " with sink "
-                            + sinkTemplatePath.getFileName());
-            LOG.info(
-                    "Stop job query "
-                            + queryPath.getFileName()
-                            + " with sink "
-                            + sinkTemplatePath.getFileName());
+            BenchmarkUtils.printAndLog(
+                    LOG, "Stop job query " + query.name() + " with sink " + sink.name());
             if (flinkRestClient.isJobRunning(insertJobId)) {
                 flinkRestClient.cancelJob(insertJobId);
             }
 
-            String queryJobId = submitSQLJob(Arrays.asList(querySql.split("\n")));
+            String queryJobId = submitSQLJob(query.getReadBenchmarkSql(sink, sinkPath));
             long queryJobRunMillis = flinkRestClient.waitUntilJobFinished(queryJobId);
             double numRecordsRead =
                     flinkRestClient.getTotalNumRecords(
                             queryJobId, flinkRestClient.getSourceVertexId(queryJobId));
             metrics.setQueryRps(numRecordsRead / (queryJobRunMillis / 1000.0));
             System.out.println(
-                    "Scan RPS for query "
-                            + queryPath.getFileName()
-                            + " is "
-                            + metrics.getPrettyQueryRps());
+                    "Scan RPS for query " + query.name() + " is " + metrics.getPrettyQueryRps());
 
             return metrics;
         } catch (IOException e) {
@@ -155,7 +115,8 @@ public class QueryRunner {
         }
     }
 
-    public String submitSQLJob(List<String> sqlLines) throws IOException {
+    public String submitSQLJob(String sql) throws IOException {
+        String[] sqlLines = sql.split("\n");
         long startMillis = System.currentTimeMillis();
 
         Path flinkBin = flinkDist.resolve("bin");
@@ -168,12 +129,12 @@ public class QueryRunner {
                         + "\nQuery {} with sink {} is running."
                         + "\n--------------------------------------------------------------------------------"
                         + "\n",
-                queryPath.getFileName(),
-                sinkTemplatePath.getFileName());
+                query.name(),
+                sink.name());
 
         SqlClientStdoutProcessor stdoutProcessor = new SqlClientStdoutProcessor();
         AutoClosableProcess.create(commands.toArray(new String[0]))
-                .setStdInputs(sqlLines.toArray(new String[0]))
+                .setStdInputs(sqlLines)
                 .setStdoutProcessor(stdoutProcessor) // logging the SQL statements and error message
                 .runBlocking();
 
@@ -183,8 +144,8 @@ public class QueryRunner {
 
         String jobId = stdoutProcessor.jobId;
         long endMillis = System.currentTimeMillis();
-        LOG.info("SQL client submit millis = " + (endMillis - startMillis) + ", jobId = " + jobId);
-        System.out.println(
+        BenchmarkUtils.printAndLog(
+                LOG,
                 "SQL client submit millis = " + (endMillis - startMillis) + ", jobId = " + jobId);
         return jobId;
     }

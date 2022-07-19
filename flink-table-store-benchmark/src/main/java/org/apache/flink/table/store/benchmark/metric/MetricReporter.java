@@ -88,10 +88,15 @@ public class MetricReporter {
         System.out.printf("Monitor metrics after %s seconds.%n", monitorDelay.getSeconds());
         waitFor(monitorDelay);
 
-        System.out.printf(
-                "Start to monitor metrics for %s seconds.%n", monitorDuration.getSeconds());
         submitMonitorThread(jobId);
-        waitFor(monitorDuration);
+        if (monitorDuration != null) {
+            System.out.printf(
+                    "Start to monitor metrics for %s seconds.%n", monitorDuration.getSeconds());
+            waitFor(monitorDuration);
+        } else {
+            System.out.println("Start to monitor metrics until job ended.%n");
+            flinkRestClient.waitUntilJobFinished(jobId);
+        }
 
         // cleanup the resource
         this.close();

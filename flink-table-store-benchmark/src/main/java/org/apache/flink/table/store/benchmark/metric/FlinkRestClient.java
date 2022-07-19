@@ -94,7 +94,7 @@ public class FlinkRestClient {
         String url = String.format("http://%s/jobs/%s", jmEndpoint, jobId);
         String response = executeAsString(url);
         try {
-            JsonNode jsonNode = BenchmarkUtils.MAPPER.readTree(response);
+            JsonNode jsonNode = BenchmarkUtils.JSON_MAPPER.readTree(response);
             return jsonNode.get("state").asText().equals("RUNNING");
         } catch (Exception e) {
             throw new RuntimeException("The response is not a valid JSON string:\n" + response, e);
@@ -106,7 +106,7 @@ public class FlinkRestClient {
             String url = String.format("http://%s/jobs/%s", jmEndpoint, jobId);
             String response = executeAsString(url);
             try {
-                JsonNode jsonNode = BenchmarkUtils.MAPPER.readTree(response);
+                JsonNode jsonNode = BenchmarkUtils.JSON_MAPPER.readTree(response);
                 boolean finished = jsonNode.get("state").asText().equals("FINISHED");
                 if (finished) {
                     return jsonNode.get("duration").asLong();
@@ -127,7 +127,7 @@ public class FlinkRestClient {
         String url = String.format("http://%s/jobs/%s", jmEndpoint, jobId);
         String response = executeAsString(url);
         try {
-            JsonNode jsonNode = BenchmarkUtils.MAPPER.readTree(response);
+            JsonNode jsonNode = BenchmarkUtils.JSON_MAPPER.readTree(response);
             JsonNode vertices = jsonNode.get("vertices");
             JsonNode sourceVertex = vertices.get(0);
             checkArgument(
@@ -163,7 +163,7 @@ public class FlinkRestClient {
         String response = executeAsString(url);
         try {
             return System.currentTimeMillis()
-                    - BenchmarkUtils.MAPPER
+                    - BenchmarkUtils.JSON_MAPPER
                             .readTree(response)
                             .get("latest")
                             .get("completed")
@@ -182,7 +182,7 @@ public class FlinkRestClient {
         String response = executeAsString(url);
         String numRecordsMetricName = null;
         try {
-            ArrayNode arrayNode = (ArrayNode) BenchmarkUtils.MAPPER.readTree(response);
+            ArrayNode arrayNode = (ArrayNode) BenchmarkUtils.JSON_MAPPER.readTree(response);
             for (JsonNode node : arrayNode) {
                 String metricName = node.get("id").asText();
                 if (metricName.startsWith("Source_") && metricName.endsWith(".numRecordsOut")) {
@@ -205,7 +205,7 @@ public class FlinkRestClient {
                         jmEndpoint, jobId, vertexId, numRecordsMetricName);
         response = executeAsString(url);
         try {
-            return BenchmarkUtils.MAPPER.readTree(response).get(0).get("sum").doubleValue();
+            return BenchmarkUtils.JSON_MAPPER.readTree(response).get(0).get("sum").doubleValue();
         } catch (Exception e) {
             throw new RuntimeException("The response is not a valid JSON string:\n" + response, e);
         }

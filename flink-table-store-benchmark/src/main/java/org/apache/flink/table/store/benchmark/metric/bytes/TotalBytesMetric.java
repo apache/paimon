@@ -153,8 +153,8 @@ public class TotalBytesMetric {
 
     public static TotalBytesMetric fromJson(String json) {
         try {
-            JsonNode jsonNode = BenchmarkUtils.MAPPER.readTree(json);
-            return BenchmarkUtils.MAPPER.convertValue(jsonNode.get(0), TotalBytesMetric.class);
+            JsonNode jsonNode = BenchmarkUtils.JSON_MAPPER.readTree(json);
+            return BenchmarkUtils.JSON_MAPPER.convertValue(jsonNode.get(0), TotalBytesMetric.class);
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }

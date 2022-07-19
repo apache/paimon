@@ -6,7 +6,7 @@ This is the benchmark module for Flink Table Store. Inspired by [Nexmark](https:
 ### Environment Preparation
 * This benchmark only runs on Linux. You'll need a Linux environment (preferably an EMR cluster). For a more reasonable result, we recommend this cluster to have:
   * One master node with 8 cores and 16GB RAM.
-  * Two worker nodes with 8 cores and 32GB RAM.
+  * Two worker nodes with 16 cores and 64GB RAM.
 * This benchmark runs on a standalone Flink cluster. Download Flink >= 1.15 from the [Apache Flink's website](https://flink.apache.org/downloads.html#apache-flink-1150) and setup a standalone cluster. Flink's job manager must be on the master node of your EMR cluster. We recommend the following Flink configurations:
     ```yaml
     jobmanager.memory.process.size: 8192m
@@ -36,8 +36,10 @@ This is the benchmark module for Flink Table Store. Inspired by [Nexmark](https:
 
 |#|Description|
 |---|---|
-|q1|Mimics the insert and update of orders in an E-commercial website.<br><br>Primary keys are totally random; Each record is about 1.5K bytes.|
-|q2|Mimics the update of uv and pv by hour of items in an E-commercial website.<br><br>Primary keys are related with real time; Each record is about 100 bytes.|
+|q1|Test insert and update random primary keys with small record size (100 bytes per record).|
+|q2|Test insert and update random primary keys with large record size (1500 bytes per record).|
+|q3|Test insert and update primary keys related with time with small record size (100 bytes per record).|
+|q4|Test insert and update primary keys related with time with large record size (1500 bytes per record).|
 
 ## Benchmark Results
 
@@ -51,7 +53,16 @@ Results of each query consist of the following aspects:
 * Query Throughput (row/s): Number of rows read from the sink per second.
 
 ## How to Add New Queries
-Just add your query to `flink-table-store-benchmark/queries` as a SQL script. Note that each query must contain a `-- __SINK_DDL_BEGIN__` and `-- __SINK_DDL_END__` so that this DDL can be used for both write and read tests. See existing queries for detail.
+1. Add your query to `flink-table-store-benchmark/queries` as a SQL script.
+2. Modify `flink-table-store-benchmark/queries/queries.yaml` to set the properties of this test. Supported properties are:
+  * `bounded`: If this test is bounded. If this is a bounded test then test results will be reported after the job is completed; otherwise results will be reported after `benchmark.metric.monitor.duration`.
+
+Note that each query must contain a `-- __SINK_DDL_BEGIN__` and `-- __SINK_DDL_END__` so that this DDL can be used for both write and read tests. See existing queries for detail.
 
 ## How to Add New Sinks
-Just add your sink to `flink-table-store-benchmark/sinks` as a SQL script. This SQL script should only contain the `WITH` options of that sink. See existing sinks for detail.
+Just add your sink to `flink-table-store-benchmark/sinks` as a yaml file, which supports the following properties:
+  * `before`: A SQL script which is appended before each test. This property is useful if your sink needs initialization (for example if your sink needs a special catalog).
+  * `sink-name`: Name of the sink table. This property will replace the `${SINK_NAME}` in each query.
+  * `sink-properties`: The `WITH` option of the sink. This property will replace the `${DDL_TEMPLATE}` in each query.
+
+See existing sinks for detail.

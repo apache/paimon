@@ -14,11 +14,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Mimics the insert and update of orders in an E-commercial website.
--- Primary keys are totally random; Each record is about 1.5K bytes.
+-- Mimics the insert and update by hour of orders in an E-commercial website.
+-- Primary keys are related with real time; Each record is about 1.5K bytes.
 
 CREATE TABLE orders_source (
-    `order_id` BIGINT, -- primary key
+    `order_id` BIGINT,
     `category_id` BIGINT,
     `category_name` STRING,
     `category_description` STRING,
@@ -64,7 +64,7 @@ CREATE TABLE orders_source (
     'connector' = 'datagen',
     'rows-per-second' = '999999999',
     'fields.order_id.min' = '0',
-    'fields.order_id.max' = '999999999',
+    'fields.order_id.max' = '9999999',
     'fields.item_currency.length' = '3',
     'fields.buyer_phone.min' = '10000000000',
     'fields.buyer_phone.max' = '99999999999',
@@ -78,6 +78,7 @@ CREATE TABLE orders_source (
 
 CREATE VIEW orders AS
 SELECT
+    CAST(MINUTE(NOW()) AS INT) AS `hr`,
     `order_id`,
     `category_id`,
     SUBSTR(`category_name`, 0, ABS(MOD(`category_id`, 64)) + 64) AS `category_name`,
@@ -126,7 +127,8 @@ FROM orders_source;
 -- __SINK_DDL_BEGIN__
 
 CREATE TABLE IF NOT EXISTS ${SINK_NAME} (
-    `order_id` BIGINT, -- primary key
+    `hr` INT,
+    `order_id` BIGINT,
     `category_id` BIGINT,
     `category_name` STRING,
     `category_description` STRING,

@@ -29,11 +29,8 @@ import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
-import org.apache.commons.io.FilenameUtils;
 
 import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
@@ -71,28 +68,28 @@ public class Benchmark {
         CommandLine line = parser.parse(options, args, true);
 
         Path location = new File(line.getOptionValue(LOCATION.getOpt())).toPath();
-        Path queriesLocation = location.resolve("queries");
-        Path sinksLocation = location.resolve("sinks");
 
         String queriesValue = line.getOptionValue(QUERIES.getOpt());
-        List<String> queries;
-        if ("all".equals(queriesValue.toLowerCase())) {
-            queries = getAllQueries(queriesLocation);
-        } else {
-            queries = Arrays.asList(queriesValue.split(","));
+        List<Query> queries = Query.load(location);
+        if (!"all".equals(queriesValue.toLowerCase())) {
+            List<String> wantedQueries =
+                    Arrays.stream(queriesValue.split(","))
+                            .map(String::trim)
+                            .collect(Collectors.toList());
+            queries.removeIf(q -> !wantedQueries.contains(q.name()));
         }
-        System.out.println("Benchmark Queries: " + queries);
 
         String sinksValue = line.getOptionValue(SINKS.getOpt());
-        List<String> sinks;
-        if ("all".equals(sinksValue.toLowerCase())) {
-            sinks = getAllSinks(sinksLocation);
-        } else {
-            sinks = Arrays.asList(sinksValue.split(","));
+        List<Sink> sinks = Sink.load(location);
+        if (!"all".equals(sinksValue.toLowerCase())) {
+            List<String> wantedSinks =
+                    Arrays.stream(sinksValue.split(","))
+                            .map(String::trim)
+                            .collect(Collectors.toList());
+            sinks.removeIf(s -> !wantedSinks.contains(s.name()));
         }
-        System.out.println("Benchmark Sinks: " + queries);
 
-        runQueries(queries, sinks, queriesLocation, sinksLocation);
+        runQueries(queries, sinks);
     }
 
     private static Options getOptions() {
@@ -103,21 +100,7 @@ public class Benchmark {
         return options;
     }
 
-    private static List<String> getAllQueries(Path queriesLocation) throws IOException {
-        return Files.list(queriesLocation)
-                .map(p -> FilenameUtils.removeExtension(p.getFileName().toString()))
-                .sorted()
-                .collect(Collectors.toList());
-    }
-
-    private static List<String> getAllSinks(Path sinksLocation) throws IOException {
-        return Files.list(sinksLocation)
-                .map(p -> FilenameUtils.removeExtension(p.getFileName().toString()))
-                .collect(Collectors.toList());
-    }
-
-    private static void runQueries(
-            List<String> queries, List<String> sinks, Path queriesLocation, Path sinksLocation) {
+    private static void runQueries(List<Query> queries, List<Sink> sinks) {
         String flinkHome = System.getenv("FLINK_HOME");
         if (flinkHome == null) {
             throw new IllegalArgumentException("FLINK_HOME environment variable is not set.");
@@ -140,24 +123,19 @@ public class Benchmark {
 
         // start to run queries
         LinkedHashMap<String, JobBenchmarkMetric> totalMetrics = new LinkedHashMap<>();
-        for (String queryName : queries) {
-            for (String sinkName : sinks) {
+        for (Query query : queries) {
+            for (Sink sink : sinks) {
                 MetricReporter reporter =
                         new MetricReporter(
                                 flinkRestClient,
                                 cpuMetricReceiver,
                                 monitorDelay,
                                 monitorInterval,
-                                monitorDuration);
+                                query.bounded() ? null : monitorDuration);
                 QueryRunner runner =
-                        new QueryRunner(
-                                queriesLocation.resolve(queryName + ".sql"),
-                                sinksLocation.resolve(sinkName + ".sql"),
-                                flinkDist,
-                                reporter,
-                                flinkRestClient);
+                        new QueryRunner(query, sink, flinkDist, reporter, flinkRestClient);
                 JobBenchmarkMetric metric = runner.run();
-                totalMetrics.put(queryName + " - " + sinkName, metric);
+                totalMetrics.put(query.name() + " - " + sink.name(), metric);
             }
         }
 

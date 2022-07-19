@@ -16,9 +16,11 @@
 # limitations under the License.
 ################################################################################
 
-benchmark.metric.monitor.delay: 60s
-benchmark.metric.monitor.duration: 30min
-benchmark.metric.monitor.interval: 10s
-# benchmark.metric.reporter.host: host-name
-benchmark.sink.path: /path/to/sink # should point to a non-existing path, will be removed before each test
-# flink.rest.address: host-name
+q1:
+  bounded: false
+q2:
+  bounded: false
+q3:
+  bounded: false
+q4:
+  bounded: false
