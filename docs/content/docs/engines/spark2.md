@@ -64,5 +64,5 @@ OPTIONS (
 ## Query Table
 
 ```sql
-SELECT * FROM table_store.default.myTable;
+SELECT * FROM myTable;
 ```
