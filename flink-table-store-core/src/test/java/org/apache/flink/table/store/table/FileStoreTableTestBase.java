@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
@@ -29,6 +30,7 @@ import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader.Re
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
+import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
@@ -37,7 +39,9 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -79,6 +83,15 @@ public abstract class FileStoreTableTestBase {
     protected static final Function<RowData, String> CHANGELOG_ROW_TO_STRING =
             rowData ->
                     rowData.getRowKind().shortString() + " " + BATCH_ROW_TO_STRING.apply(rowData);
+
+    @TempDir java.nio.file.Path tempDir;
+
+    protected Path tablePath;
+
+    @BeforeEach
+    public void before() {
+        tablePath = new Path(TestAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString());
+    }
 
     @Test
     public void testOverwrite() throws Exception {

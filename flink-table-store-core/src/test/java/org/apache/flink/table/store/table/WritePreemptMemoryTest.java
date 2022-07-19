@@ -20,7 +20,6 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
@@ -34,7 +33,6 @@ import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -47,8 +45,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ChangelogWithKeyFileStoreTable}. */
 public class WritePreemptMemoryTest extends FileStoreTableTestBase {
-
-    @TempDir java.nio.file.Path tempDir;
 
     @Test
     public void writeMultiplePartitions() throws Exception {
@@ -94,7 +90,6 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
     @Override
     protected FileStoreTable createFileStoreTable(Consumer<Configuration> configure)
             throws Exception {
-        Path tablePath = new Path(tempDir.toString());
         Configuration conf = new Configuration();
         conf.set(CoreOptions.PATH, tablePath.toString());
         conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
