@@ -49,6 +49,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
 import static org.apache.flink.table.store.file.utils.FileUtils.listVersionedFiles;
 
 /** Schema Manager to manage schema versions. */
@@ -163,9 +164,12 @@ public class SchemaManager implements Serializable {
             for (SchemaChange change : changes) {
                 if (change instanceof SetOption) {
                     SetOption setOption = (SetOption) change;
+                    checkAlterTableOption(setOption.key());
                     newOptions.put(setOption.key(), setOption.value());
                 } else if (change instanceof RemoveOption) {
-                    newOptions.remove(((RemoveOption) change).key());
+                    RemoveOption removeOption = (RemoveOption) change;
+                    checkAlterTableOption(removeOption.key());
+                    newOptions.remove(removeOption.key());
                 } else if (change instanceof AddColumn) {
                     AddColumn addColumn = (AddColumn) change;
                     int id = highestFieldId.incrementAndGet();
@@ -306,5 +310,11 @@ public class SchemaManager implements Serializable {
 
     private Path toSchemaPath(long id) {
         return new Path(tableRoot + "/schema/" + SCHEMA_PREFIX + id);
+    }
+
+    private void checkAlterTableOption(String key) {
+        if (BUCKET_KEY.key().equals(key)) {
+            throw new UnsupportedOperationException("Change bucket key is not supported yet.");
+        }
     }
 }

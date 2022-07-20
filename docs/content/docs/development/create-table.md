@@ -168,8 +168,34 @@ as much as possible.
 
 ## Bucket
 
-The record is hashed into different buckets according to the
-primary key or the whole row (without primary key).
+Bucket is the concept of dividing data into more manageable parts for more efficient queries.
+
+With `N` as bucket number, records are falling into `(0, 1, ..., N-1)` buckets. For each record, which bucket 
+it belongs is computed by the hash value of one or more columns (denoted as **bucket key**), and mod by bucket number.
+
+```
+bucket_id = hash_func(bucket_key) % num_of_buckets
+```
+
+Users can specify the bucket key as follows
+
+```sql
+CREATE TABLE MyTable (
+  catalog_id BIGINT,
+  user_id BIGINT,
+  item_id BIGINT,
+  behavior STRING,
+  dt STRING
+) WITH (
+    'bucket-key' = 'catalog_id'
+);
+```
+
+__Note:__
+- If users do not specify the bucket key explicitly, the primary key (if present) or the whole row is used as bucket key.
+- Bucket key cannot be changed once the table is created. `ALTER TALBE SET ('bucket-key' = ...)` or `ALTER TABLE RESET ('bucket-key')` will throw exception.
+
+
 
 The number of buckets is very important as it determines the
 worst-case maximum processing parallelism. But it should not be
@@ -248,3 +274,71 @@ __Note:__
 - Partial update is only supported for table with primary key.
 - Partial update is not supported for streaming consuming.
 - It is best not to have NULL values in the fields, NULL will not overwrite data.
+
+
+## Append-only Table
+
+Append-only tables are a performance feature that only accepts `INSERT_ONLY` data to append to the storage instead of 
+updating or de-duplicating the existing data, and hence suitable for use cases that do not require updates (such as log data synchronization).
+
+### Create Append-only Table
+
+By specifying the core option `'write-mode'` to `'append-only'`, users can create an append-only table as follows.
+
+```sql
+CREATE TABLE IF NOT EXISTS T1 (
+    f0 INT,
+    f1 DOUBLE,
+    f2 STRING
+) WITH (
+    'write-mode' = 'append-only',
+    'bucket' = '1' --specify the total number of buckets
+)
+```
+__Note:__
+- By definition, users cannot define primary keys on an append-only table.
+- Append-only table is different from a change-log table which does not define primary keys. 
+  For the latter, updating or deleting the whole row is accepted, although no primary key is present.
+
+### Query Append-only Table
+
+Table Store supports reading append-only table with preserved sequential order within each bucket. 
+
+For example, with following write
+
+```sql
+INSERT INTO T1 VALUES
+(1, 1.0, 'AAA'), (2, 2.0, 'BBB'), 
+(3, 3.0, 'CCC'), (1, 1.0, 'AAA')
+```
+
+The query 
+```sql
+SELECT * FROM T1
+``` 
+will return exactly the order of `(1, 1.0, 'AAA'), (2, 2.0, 'BBB'), (3, 3.0, 'CCC'), (1, 1.0, 'AAA')`
+because the total number of bucket is 1, and all records falls into the same bucket.
+
+If we create another table with more than one bucket and specify the bucket key
+```sql
+CREATE TABLE IF NOT EXISTS T2 (
+    f0 INT,
+    f1 DOUBLE,
+    f2 STRING
+) WITH (
+    'write-mode' = 'append-only',
+    'bucket' = '2',
+    'bucket-key' = 'f0'
+)
+```
+The following write will write `(1, 1.0, 'AAA'), (2, 2.0, 'BBB'), (1, 1.0, 'AAA')` to bucket-0 and `(3, 3.0, 'CCC')` to bucket-1
+```sql
+INSERT INTO T2 VALUES
+(1, 1.0, 'AAA'), (2, 2.0, 'BBB'), 
+(3, 3.0, 'CCC'), (1, 1.0, 'AAA')
+```
+The query
+```sql
+SELECT * FROM T2
+``` 
+will return either `(1, 1.0, 'AAA'), (2, 2.0, 'BBB'), (1, 1.0, 'AAA'), (3, 3.0, 'CCC')` or `(3, 3.0, 'CCC'), (1, 1.0, 'AAA'), (2, 2.0, 'BBB'), (1, 1.0, 'AAA')`.
