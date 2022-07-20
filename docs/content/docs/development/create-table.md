@@ -166,7 +166,7 @@ Partitioned filtering is the most effective way to improve performance,
 your query statements should contain partition filtering conditions
 as much as possible.
 
-## Bucket and Bucket Key
+## Bucket
 
 Bucket is the concept of dividing data into more manageable parts for more efficient queries.
 
@@ -192,9 +192,7 @@ CREATE TABLE MyTable (
 ```
 
 __Note:__
-- If users do not specify the bucket key explicitly
-  - For changelog table, the primary key (if present) or the whole row is used as bucket key.
-  - For append-only table, the whole row is used as bucket key.
+- If users do not specify the bucket key explicitly, the primary key (if present) or the whole row is used as bucket key.
 - Bucket key cannot be changed once the table is created. `ALTER TALBE SET ('bucket-key' = ...)` or `ALTER TABLE RESET ('bucket-key')` will throw exception.
 
 
