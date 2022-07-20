@@ -23,6 +23,7 @@ import org.junit.Test;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for schema changes. */
 public class SchemaChangeITCase extends CatalogITCaseBase {
@@ -43,5 +44,21 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         options = table("T").getOptions();
         assertThat(options).doesNotContainKey("xyc");
         assertThat(options).doesNotContainKey("abc");
+    }
+
+    @Test
+    public void testSetAndResetBucketKey() throws Exception {
+        sql("CREATE TABLE T1 (a STRING, b STRING, c STRING)");
+
+        assertThatThrownBy(() -> sql("ALTER TABLE T1 SET ('bucket-key' = 'c')"))
+                .getRootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change bucket key is not supported yet.");
+
+        sql("CREATE TABLE T2 (a STRING, b STRING, c STRING) WITH ('bucket-key' = 'c')");
+        assertThatThrownBy(() -> sql("ALTER TABLE T2 RESET ('bucket-key')"))
+                .getRootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change bucket key is not supported yet.");
     }
 }
