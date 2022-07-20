@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-baseURL = '//nightlies.apache.org/flink/flink-table-store-docs-master'
+baseURL = '//nightlies.apache.org/flink/flink-table-store-docs-release-0.2'
 languageCode = 'en-us'
 title = 'Apache Flink Table Store'
 enableGitInfo = false
