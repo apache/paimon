@@ -247,7 +247,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> COMPACTION_MAX_SORTED_RUN_NUM =
             ConfigOptions.key("compaction.max-sorted-run-num")
                     .intType()
-                    .noDefaultValue()
+                    .defaultValue(Integer.MAX_VALUE)
                     .withDescription(
                             "The maximum sorted run number to pick for compaction. "
                                     + "This value avoids merging too much sorted runs at the same time during compaction, "
@@ -438,7 +438,7 @@ public class CoreOptions implements Serializable {
         return options.get(COMPACTION_MAX_FILE_NUM);
     }
 
-    public Integer maxSortedRunNum() {
+    public int maxSortedRunNum() {
         return options.get(COMPACTION_MAX_SORTED_RUN_NUM);
     }
 
