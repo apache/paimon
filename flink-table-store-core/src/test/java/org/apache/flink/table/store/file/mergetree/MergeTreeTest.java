@@ -292,7 +292,8 @@ public class MergeTreeTest {
                 new UniversalCompaction(
                         options.maxSizeAmplificationPercent(),
                         options.sortedRunSizeRatio(),
-                        options.numSortedRunCompactionTrigger());
+                        options.numSortedRunCompactionTrigger(),
+                        options.maxSortedRunNum());
         CompactRewriter rewriter =
                 (outputLevel, dropDelete, sections) ->
                         dataFileWriter.write(
@@ -309,7 +310,6 @@ public class MergeTreeTest {
                 new Levels(comparator, files, options.numLevels()),
                 strategy,
                 comparator,
-                options.maxSortedRunNum(),
                 options.targetFileSize(),
                 rewriter);
     }

@@ -140,7 +140,8 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
                         new UniversalCompaction(
                                 options.maxSizeAmplificationPercent(),
                                 options.sortedRunSizeRatio(),
-                                options.numSortedRunCompactionTrigger()),
+                                options.numSortedRunCompactionTrigger(),
+                                options.maxSortedRunNum()),
                         compactExecutor,
                         levels),
                 levels,
@@ -166,7 +167,6 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
                 levels,
                 compactStrategy,
                 keyComparator,
-                options.maxSortedRunNum(),
                 options.targetFileSize(),
                 rewriter);
     }

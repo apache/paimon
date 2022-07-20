@@ -71,7 +71,8 @@ public class MergeTreeCompactManagerTest {
                         new LevelMinMax(0, 1, 5),
                         new LevelMinMax(0, 1, 8)),
                 Arrays.asList(new LevelMinMax(0, 1, 8), new LevelMinMax(0, 1, 3)),
-                (numLevels, runs) -> Optional.of(CompactUnit.fromLevelRuns(0, runs.subList(0, 2))));
+                (numLevels, runs) -> Optional.of(CompactUnit.fromLevelRuns(0, runs.subList(0, 2))),
+                false);
     }
 
     @Test
@@ -82,7 +83,8 @@ public class MergeTreeCompactManagerTest {
                         new LevelMinMax(0, 1, 5),
                         new LevelMinMax(2, 1, 7)),
                 Arrays.asList(new LevelMinMax(1, 1, 5), new LevelMinMax(2, 1, 7)),
-                (numLevels, runs) -> Optional.of(CompactUnit.fromLevelRuns(1, runs.subList(0, 2))));
+                (numLevels, runs) -> Optional.of(CompactUnit.fromLevelRuns(1, runs.subList(0, 2))),
+                false);
     }
 
     @Test
@@ -100,20 +102,6 @@ public class MergeTreeCompactManagerTest {
                         new LevelMinMax(1, 1, 5),
                         new LevelMinMax(1, 6, 7)),
                 Arrays.asList(new LevelMinMax(2, 1, 5), new LevelMinMax(2, 6, 7)));
-    }
-
-    @Test
-    public void testNormalWithMaxSortedRunNum() throws ExecutionException, InterruptedException {
-        innerTest(
-                Arrays.asList(
-                        new LevelMinMax(0, 1, 3),
-                        new LevelMinMax(1, 1, 5),
-                        new LevelMinMax(1, 6, 7)),
-                Arrays.asList(
-                        new LevelMinMax(0, 1, 3),
-                        new LevelMinMax(2, 1, 5),
-                        new LevelMinMax(2, 6, 7)),
-                1);
     }
 
     @Test
@@ -192,27 +180,14 @@ public class MergeTreeCompactManagerTest {
 
     private void innerTest(List<LevelMinMax> inputs, List<LevelMinMax> expected)
             throws ExecutionException, InterruptedException {
-        innerTest(inputs, expected, testStrategy(), true, null);
-    }
-
-    private void innerTest(
-            List<LevelMinMax> inputs, List<LevelMinMax> expected, CompactStrategy strategy)
-            throws ExecutionException, InterruptedException {
-        innerTest(inputs, expected, strategy, false, null);
-    }
-
-    private void innerTest(
-            List<LevelMinMax> inputs, List<LevelMinMax> expected, int maxSortedRunNum)
-            throws ExecutionException, InterruptedException {
-        innerTest(inputs, expected, testStrategy(), true, maxSortedRunNum);
+        innerTest(inputs, expected, testStrategy(), true);
     }
 
     private void innerTest(
             List<LevelMinMax> inputs,
             List<LevelMinMax> expected,
             CompactStrategy strategy,
-            boolean expectedDropDelete,
-            Integer maxSortedRunNum)
+            boolean expectedDropDelete)
             throws ExecutionException, InterruptedException {
         List<DataFileMeta> files = new ArrayList<>();
         for (int i = 0; i < inputs.size(); i++) {
@@ -222,13 +197,7 @@ public class MergeTreeCompactManagerTest {
         Levels levels = new Levels(comparator, files, 3);
         MergeTreeCompactManager manager =
                 new MergeTreeCompactManager(
-                        service,
-                        levels,
-                        strategy,
-                        comparator,
-                        maxSortedRunNum,
-                        2,
-                        testRewriter(expectedDropDelete));
+                        service, levels, strategy, comparator, 2, testRewriter(expectedDropDelete));
         manager.submitCompaction();
         manager.finishCompaction(true);
         List<LevelMinMax> outputs =

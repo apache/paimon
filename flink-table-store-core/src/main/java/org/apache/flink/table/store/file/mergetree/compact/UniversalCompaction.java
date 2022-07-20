@@ -43,11 +43,14 @@ public class UniversalCompaction implements CompactStrategy {
     private final int maxSizeAmp;
     private final int sizeRatio;
     private final int numRunCompactionTrigger;
+    private final Integer maxSortedRunNum;
 
-    public UniversalCompaction(int maxSizeAmp, int sizeRatio, int numRunCompactionTrigger) {
+    public UniversalCompaction(
+            int maxSizeAmp, int sizeRatio, int numRunCompactionTrigger, Integer maxSortedRunNum) {
         this.maxSizeAmp = maxSizeAmp;
         this.sizeRatio = sizeRatio;
         this.numRunCompactionTrigger = numRunCompactionTrigger;
+        this.maxSortedRunNum = maxSortedRunNum;
     }
 
     @Override
@@ -130,7 +133,7 @@ public class UniversalCompaction implements CompactStrategy {
         }
 
         if (candidateCount > 1) {
-            return createUnit(runs, maxLevel, candidateCount);
+            return createUnit(runs, maxLevel, candidateCount, maxSortedRunNum);
         }
 
         return null;
@@ -144,15 +147,30 @@ public class UniversalCompaction implements CompactStrategy {
         return size;
     }
 
+    static CompactUnit createUnit(
+            List<LevelSortedRun> runs, int maxLevel, int runCount, Integer maxSortedRunNum) {
+        boolean withinMaxRun = maxSortedRunNum == null || maxSortedRunNum >= runCount;
+        CompactUnit compactUnit =
+                createUnit(runs, maxLevel, withinMaxRun ? runCount : maxSortedRunNum);
+        if (!withinMaxRun) {
+            createUnit(runs, maxLevel, runCount - maxSortedRunNum, maxSortedRunNum.intValue());
+        }
+        return compactUnit;
+    }
+
     @VisibleForTesting
     static CompactUnit createUnit(List<LevelSortedRun> runs, int maxLevel, int runCount) {
+        return createUnit(runs, maxLevel, runCount, 0);
+    }
+
+    static CompactUnit createUnit(
+            List<LevelSortedRun> runs, int maxLevel, int runCount, int startRun) {
         int outputLevel;
         if (runCount == runs.size()) {
             outputLevel = maxLevel;
         } else {
             outputLevel = Math.max(0, runs.get(runCount).level() - 1);
         }
-
-        return CompactUnit.fromLevelRuns(outputLevel, runs.subList(0, runCount));
+        return CompactUnit.fromLevelRuns(outputLevel, runs.subList(startRun, startRun + runCount));
     }
 }

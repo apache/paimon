@@ -414,7 +414,7 @@ public class CoreOptions implements Serializable {
         // By default, this ensures that the compaction does not fall to level 0, but at least to
         // level 1
         Integer numLevels = options.get(NUM_LEVELS);
-        numLevels = numLevels == null ? numSortedRunCompactionTrigger() + 1 : numLevels;
+        numLevels = numLevels == null ? numSortedRunStopTrigger() + 1 : numLevels;
         return numLevels;
     }
 
