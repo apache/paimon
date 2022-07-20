@@ -45,6 +45,12 @@
             <td>The size amplification is defined as the amount (in percentage) of additional storage needed to store a single byte of data in the merge tree for changelog mode table.</td>
         </tr>
         <tr>
+            <td><h5>compaction.max-sorted-run-num</h5></td>
+            <td style="word-wrap: break-word;">2147483647</td>
+            <td>Integer</td>
+            <td>The maximum sorted run number to pick for compaction. This value avoids merging too much sorted runs at the same time during compaction, which may lead to OutOfMemoryError.</td>
+        </tr>
+        <tr>
             <td><h5>compaction.min.file-num</h5></td>
             <td style="word-wrap: break-word;">5</td>
             <td>Integer</td>
@@ -150,7 +156,7 @@
             <td><h5>num-sorted-run.stop-trigger</h5></td>
             <td style="word-wrap: break-word;">10</td>
             <td>Integer</td>
-            <td>The number of sorted-runs that trigger the stopping of writes.</td>
+            <td>The number of sorted runs that trigger the stopping of writes.</td>
         </tr>
         <tr>
             <td><h5>page-size</h5></td>
