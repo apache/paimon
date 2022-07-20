@@ -37,6 +37,10 @@ column_list:
   (col_name1 [, column_name2, ...])
 ```
 
+{{< hint info >}}
+__IMPORTANT:__ Checkpointing needs to be enabled when writing to the Table Store in STREAMING mode.
+{{< /hint >}}
+
 ## Parallelism
 
 It is recommended that the parallelism of sink should be less than or
