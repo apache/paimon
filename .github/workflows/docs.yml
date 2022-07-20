@@ -27,7 +27,7 @@ jobs:
       matrix:
         branch:
           - master
-          - release-0.1
+          - release-0.2
     steps:
       - uses: actions/checkout@v3
         with:
@@ -39,8 +39,8 @@ jobs:
           echo "flink_table_store_branch=${currentBranch}" >> ${GITHUB_ENV}
 
           if [ "${currentBranch}" = "master" ]; then
-            echo "flink_table_store_alias=release-0.2" >> ${GITHUB_ENV}
-          elif [ "${currentBranch}" = "release-0.1" ]; then
+            echo "flink_table_store_alias=release-0.3" >> ${GITHUB_ENV}
+          elif [ "${currentBranch}" = "release-0.2" ]; then
             echo "flink_table_store_alias=stable" >> ${GITHUB_ENV}
           fi
       - name: Build documentation
