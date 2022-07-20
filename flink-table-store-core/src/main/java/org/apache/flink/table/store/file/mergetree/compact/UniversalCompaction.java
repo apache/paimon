@@ -43,11 +43,14 @@ public class UniversalCompaction implements CompactStrategy {
     private final int maxSizeAmp;
     private final int sizeRatio;
     private final int numRunCompactionTrigger;
+    private final int maxSortedRunNum;
 
-    public UniversalCompaction(int maxSizeAmp, int sizeRatio, int numRunCompactionTrigger) {
+    public UniversalCompaction(
+            int maxSizeAmp, int sizeRatio, int numRunCompactionTrigger, int maxSortedRunNum) {
         this.maxSizeAmp = maxSizeAmp;
         this.sizeRatio = sizeRatio;
         this.numRunCompactionTrigger = numRunCompactionTrigger;
+        this.maxSortedRunNum = maxSortedRunNum;
     }
 
     @Override
@@ -130,7 +133,7 @@ public class UniversalCompaction implements CompactStrategy {
         }
 
         if (candidateCount > 1) {
-            return createUnit(runs, maxLevel, candidateCount);
+            return createUnit(runs, maxLevel, candidateCount, maxSortedRunNum);
         }
 
         return null;
@@ -145,8 +148,12 @@ public class UniversalCompaction implements CompactStrategy {
     }
 
     @VisibleForTesting
-    static CompactUnit createUnit(List<LevelSortedRun> runs, int maxLevel, int runCount) {
+    static CompactUnit createUnit(
+            List<LevelSortedRun> runs, int maxLevel, int runCount, int maxSortedRunNum) {
         int outputLevel;
+        if (runCount > maxSortedRunNum) {
+            runCount = maxSortedRunNum;
+        }
         if (runCount == runs.size()) {
             outputLevel = maxLevel;
         } else {

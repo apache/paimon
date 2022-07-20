@@ -193,7 +193,7 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(10)
                     .withDescription(
-                            "The number of sorted-runs that trigger the stopping of writes.");
+                            "The number of sorted runs that trigger the stopping of writes.");
 
     public static final ConfigOption<Integer> NUM_LEVELS =
             ConfigOptions.key("num-levels")
@@ -243,6 +243,15 @@ public class CoreOptions implements Serializable {
                             "For file set [f_0,...,f_N], the maximum file number to trigger a compaction "
                                     + "for append-only table, even if sum(size(f_i)) < targetFileSize. This value "
                                     + "avoids pending too much small files, which slows down the performance.");
+
+    public static final ConfigOption<Integer> COMPACTION_MAX_SORTED_RUN_NUM =
+            ConfigOptions.key("compaction.max-sorted-run-num")
+                    .intType()
+                    .defaultValue(Integer.MAX_VALUE)
+                    .withDescription(
+                            "The maximum sorted run number to pick for compaction. "
+                                    + "This value avoids merging too much sorted runs at the same time during compaction, "
+                                    + "which may lead to OutOfMemoryError.");
 
     public static final ConfigOption<Boolean> CHANGELOG_FILE =
             ConfigOptions.key("changelog-file")
@@ -405,7 +414,7 @@ public class CoreOptions implements Serializable {
         // By default, this ensures that the compaction does not fall to level 0, but at least to
         // level 1
         Integer numLevels = options.get(NUM_LEVELS);
-        numLevels = numLevels == null ? numSortedRunCompactionTrigger() + 1 : numLevels;
+        numLevels = numLevels == null ? numSortedRunStopTrigger() + 1 : numLevels;
         return numLevels;
     }
 
@@ -427,6 +436,10 @@ public class CoreOptions implements Serializable {
 
     public int maxFileNum() {
         return options.get(COMPACTION_MAX_FILE_NUM);
+    }
+
+    public int maxSortedRunNum() {
+        return options.get(COMPACTION_MAX_SORTED_RUN_NUM);
     }
 
     public boolean enableChangelogFile() {
