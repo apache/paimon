@@ -49,7 +49,6 @@ import org.apache.spark.sql.connector.expressions.Transform;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -278,31 +277,17 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
                                 partition -> {
                                     NamedReference[] references = partition.references();
                                     return references.length == 1
-                                            && Arrays.stream(references)
-                                                    .allMatch(
-                                                            reference ->
-                                                                    reference
-                                                                            instanceof
-                                                                            FieldReference);
+                                            && references[0] instanceof FieldReference;
                                 }));
-
-        List<String> primaryKeys = new ArrayList<>();
-        for (Map.Entry<String, String> property : properties.entrySet()) {
-            if (property.getKey().equals(PRIMARY_KEY_IDENTIFIER)) {
-                primaryKeys.addAll(
-                        Arrays.stream(property.getValue().split(","))
-                                .map(String::trim)
-                                .collect(Collectors.toList()));
-                break;
-            }
-        }
 
         return new UpdateSchema(
                 (RowType) toFlinkType(schema),
                 Arrays.stream(partitions)
                         .map(partition -> partition.references()[0].describe())
                         .collect(Collectors.toList()),
-                primaryKeys,
+                Arrays.stream(properties.getOrDefault(PRIMARY_KEY_IDENTIFIER, "").split(","))
+                        .map(String::trim)
+                        .collect(Collectors.toList()),
                 properties,
                 properties.getOrDefault(TableCatalog.PROP_COMMENT, ""));
     }

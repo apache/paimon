@@ -109,7 +109,7 @@ CREATE TABLE table_store.default.OrderTable (
     hh STRING NOT NULL COMMENT 'HH'
 ) COMMENT 'my table'
 PARTITIONED BY (dt, hh)
-TBLPROPERTIES ('foo' = 'bar', 'primary-key' = 'order_id, dt, hh')
+TBLPROPERTIES ('foo' = 'bar', 'primary-key' = 'order_id,dt,hh')
 ```
 {{< hint info >}}
 __Note:__
@@ -143,11 +143,6 @@ ALTER TABLE table_store.default.OrderTable UNSET TBLPROPERTIES ('write-buffer-si
 ALTER TABLE table_store.default.OrderTable ADD COLUMNS (buy_count INT)
 ```
 
-- Change column type
-```sql
-ALTER TABLE table_store.default.OrderTable ALTER COLUMN buy_count BIGINT
-```
-
 - Change column nullability
 ```sql
 ALTER TABLE table_store.default.OrderTable ALTER COLUMN coupon_info DROP NOT NULL
@@ -160,7 +155,6 @@ ALTER TABLE table_store.default.OrderTable ALTER COLUMN buy_count COMMENT 'buy c
 
 {{< hint info >}}
 __Note:__
-- Table Store does not support change a column with nested type (such as `ARRAY`, `MAP`, `STRUCT`), except for nullability and comment.
 - Spark does not support changing nullable column to nonnull column.
 {{< /hint >}}
 
