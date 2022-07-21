@@ -346,8 +346,9 @@ public class SparkReadITCase {
 
     @Test
     public void testCreateAndDropTable() throws Exception {
+        spark.sql("USE table_store");
         String ddl =
-                "CREATE TABLE table_store.default.MyTable (\n"
+                "CREATE TABLE default.MyTable (\n"
                         + "order_id BIGINT NOT NULL comment 'biz order id',\n"
                         + "buyer_id BIGINT NOT NULL COMMENT 'buyer id',\n"
                         + "coupon_info ARRAY<STRING> NOT NULL COMMENT 'coupon info',\n"
@@ -356,7 +357,7 @@ public class SparkReadITCase {
                         + "hh STRING NOT NULL COMMENT 'HH')\n"
                         + "COMMENT 'my table'\n"
                         + "PARTITIONED BY (dt, hh)\n"
-                        + "TBLPROPERTIES ('foo' = 'bar', 'primary-key' = 'order_id, dt, hh')";
+                        + "TBLPROPERTIES ('foo' = 'bar', 'primary-key' = 'order_id,dt,hh')";
         spark.sql(ddl);
         assertThatThrownBy(() -> spark.sql(ddl))
                 .isInstanceOf(TableAlreadyExistsException.class)
@@ -403,6 +404,7 @@ public class SparkReadITCase {
                                 new AtomicDataType(new VarCharType(false, VarCharType.MAX_LENGTH)),
                                 "HH"));
         assertThat(schema.options()).containsEntry("foo", "bar");
+        assertThat(schema.options()).doesNotContainKey("primary-key");
         assertThat(schema.primaryKeys()).containsExactly("order_id", "dt", "hh");
         assertThat(schema.trimmedPrimaryKeys()).containsOnly("order_id");
         assertThat(schema.partitionKeys()).containsExactly("dt", "hh");
@@ -463,7 +465,7 @@ public class SparkReadITCase {
 
         assertThatThrownBy(() -> spark.sql("CREATE NAMESPACE bar"))
                 .isInstanceOf(NamespaceAlreadyExistsException.class)
-                .hasMessage("Namespace 'bar' already exists");
+                .hasMessageContaining("Namespace 'bar' already exists");
 
         assertThat(spark.sql("SHOW NAMESPACES").collectAsList().toString())
                 .isEqualTo("[[bar], [default]]");

@@ -51,6 +51,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -138,7 +139,6 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
      * @return true if the namespace was dropped
      * @throws UnsupportedOperationException If drop is not a supported operation
      */
-    @Override
     public boolean dropNamespace(String[] namespace) throws NoSuchNamespaceException {
         return dropNamespace(namespace, false);
     }
@@ -279,7 +279,8 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
                                     return references.length == 1
                                             && references[0] instanceof FieldReference;
                                 }));
-
+        Map<String, String> normalizedProperties = new HashMap<>(properties);
+        normalizedProperties.remove(PRIMARY_KEY_IDENTIFIER);
         return new UpdateSchema(
                 (RowType) toFlinkType(schema),
                 Arrays.stream(partitions)
@@ -288,7 +289,7 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
                 Arrays.stream(properties.getOrDefault(PRIMARY_KEY_IDENTIFIER, "").split(","))
                         .map(String::trim)
                         .collect(Collectors.toList()),
-                properties,
+                normalizedProperties,
                 properties.getOrDefault(TableCatalog.PROP_COMMENT, ""));
     }
 
