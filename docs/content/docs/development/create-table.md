@@ -75,12 +75,9 @@ CREATE TABLE [IF NOT EXISTS] [catalog_name.][db_name.]table_name
 ```
 
 {{< hint info >}}
-__Note:__ To ensure the uniqueness of the primary key, the
-primary key must contain the partition field.
-{{< /hint >}}
-
-{{< hint info >}}
-__Note:__ Metadata column is not supported yet.
+__Note:__ 
+- To ensure the uniqueness of the primary key, the primary key must contain the partition field.
+- Metadata column is not supported yet.
 {{< /hint >}}
 
 This will create a directory under `${warehouse}/${database_name}.db/${table_name}`.
@@ -191,10 +188,11 @@ CREATE TABLE MyTable (
 );
 ```
 
+{{< hint info >}}
 __Note:__
 - If users do not specify the bucket key explicitly, the primary key (if present) or the whole row is used as bucket key.
 - Bucket key cannot be changed once the table is created. `ALTER TALBE SET ('bucket-key' = ...)` or `ALTER TABLE RESET ('bucket-key')` will throw exception.
-
+{{< /hint >}}
 
 
 The number of buckets is very important as it determines the
@@ -270,11 +268,12 @@ For example, the inputs:
 Output:
 - <1, 25.2, 10, 'This is a book'>
 
+{{< hint info >}}
 __Note:__
 - Partial update is only supported for table with primary key.
 - Partial update is not supported for streaming consuming.
 - It is best not to have NULL values in the fields, NULL will not overwrite data.
-
+{{< /hint >}}
 
 ## Append-only Table
 
@@ -295,10 +294,12 @@ CREATE TABLE IF NOT EXISTS T1 (
     'bucket' = '1' --specify the total number of buckets
 )
 ```
+{{< hint info >}}
 __Note:__
 - By definition, users cannot define primary keys on an append-only table.
 - Append-only table is different from a change-log table which does not define primary keys. 
   For the latter, updating or deleting the whole row is accepted, although no primary key is present.
+{{< /hint >}}
 
 ### Query Append-only Table
 
