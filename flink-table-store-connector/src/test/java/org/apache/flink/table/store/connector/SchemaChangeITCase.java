@@ -53,12 +53,28 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         assertThatThrownBy(() -> sql("ALTER TABLE T1 SET ('bucket-key' = 'c')"))
                 .getRootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Change bucket key is not supported yet.");
+                .hasMessage("Change bucket-key is not supported yet.");
 
         sql("CREATE TABLE T2 (a STRING, b STRING, c STRING) WITH ('bucket-key' = 'c')");
         assertThatThrownBy(() -> sql("ALTER TABLE T2 RESET ('bucket-key')"))
                 .getRootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Change bucket key is not supported yet.");
+                .hasMessage("Change bucket-key is not supported yet.");
+    }
+
+    @Test
+    public void testSetAndResetWriteMode() throws Exception {
+        sql("CREATE TABLE T1 (a STRING, b STRING, c STRING)");
+
+        assertThatThrownBy(() -> sql("ALTER TABLE T1 SET ('write-mode' = 'append-only')"))
+                .getRootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change write-mode is not supported yet.");
+
+        sql("CREATE TABLE T2 (a STRING, b STRING, c STRING) WITH ('write-mode' = 'append-only')");
+        assertThatThrownBy(() -> sql("ALTER TABLE T2 RESET ('write-mode')"))
+                .getRootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change write-mode is not supported yet.");
     }
 }

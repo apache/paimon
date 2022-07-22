@@ -50,6 +50,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
+import static org.apache.flink.table.store.CoreOptions.WRITE_MODE;
 import static org.apache.flink.table.store.file.utils.FileUtils.listVersionedFiles;
 
 /** Schema Manager to manage schema versions. */
@@ -313,8 +314,9 @@ public class SchemaManager implements Serializable {
     }
 
     private void checkAlterTableOption(String key) {
-        if (BUCKET_KEY.key().equals(key)) {
-            throw new UnsupportedOperationException("Change bucket key is not supported yet.");
+        if (BUCKET_KEY.key().equals(key) || WRITE_MODE.key().equals(key)) {
+            throw new UnsupportedOperationException(
+                    String.format("Change %s is not supported yet.", key));
         }
     }
 }
