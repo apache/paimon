@@ -32,6 +32,7 @@ import org.apache.flink.table.types.logical.RowType;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -42,17 +43,18 @@ public class SimpleTableTestHelper {
     private final TableCommit commit;
 
     public SimpleTableTestHelper(Path path, RowType rowType) throws Exception {
+        this(path, rowType, Collections.emptyList(), Collections.emptyList());
+    }
+
+    public SimpleTableTestHelper(
+            Path path, RowType rowType, List<String> partitionKeys, List<String> primaryKeys)
+            throws Exception {
         Map<String, String> options = new HashMap<>();
         // orc is shaded, can not find shaded classes in ide
         options.put(CoreOptions.FILE_FORMAT.key(), "avro");
         new SchemaManager(path)
                 .commitNewVersion(
-                        new UpdateSchema(
-                                rowType,
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                options,
-                                ""));
+                        new UpdateSchema(rowType, partitionKeys, primaryKeys, options, ""));
         Configuration conf = Configuration.fromMap(options);
         conf.setString("path", path.toString());
         FileStoreTable table = FileStoreTableFactory.create(conf);
