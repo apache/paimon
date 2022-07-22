@@ -361,7 +361,7 @@ public class SparkReadITCase {
         spark.sql(ddl);
         assertThatThrownBy(() -> spark.sql(ddl))
                 .isInstanceOf(TableAlreadyExistsException.class)
-                .hasMessage("Table default.MyTable already exists");
+                .hasMessageContaining("Table default.MyTable already exists");
         assertThatThrownBy(() -> spark.sql(ddl.replace("default", "foo")))
                 .isInstanceOf(NoSuchNamespaceException.class)
                 .hasMessage("Namespace 'foo' not found");
