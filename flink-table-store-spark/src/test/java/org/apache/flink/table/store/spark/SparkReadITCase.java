@@ -354,7 +354,7 @@ public class SparkReadITCase {
                         + "coupon_info ARRAY<STRING> NOT NULL COMMENT 'coupon info',\n"
                         + "order_amount DOUBLE NOT NULL COMMENT 'order amount',\n"
                         + "dt STRING NOT NULL COMMENT 'yyyy-MM-dd',\n"
-                        + "hh STRING NOT NULL COMMENT 'HH')\n"
+                        + "hh STRING NOT NULL COMMENT 'HH') USING table_store\n"
                         + "COMMENT 'my table'\n"
                         + "PARTITIONED BY (dt, hh)\n"
                         + "TBLPROPERTIES ('foo' = 'bar', 'primary-key' = 'order_id,dt,hh')";
@@ -364,7 +364,7 @@ public class SparkReadITCase {
                 .hasMessageContaining("Table default.MyTable already exists");
         assertThatThrownBy(() -> spark.sql(ddl.replace("default", "foo")))
                 .isInstanceOf(NoSuchNamespaceException.class)
-                .hasMessage("Namespace 'foo' not found");
+                .hasMessageContaining("Namespace 'foo' not found");
 
         Path tablePath = new Path(warehousePath, "default.db/MyTable");
         TableSchema schema = FileStoreTableFactory.create(tablePath).schema();

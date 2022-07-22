@@ -94,6 +94,7 @@ SELECT * FROM table_store.default.myTable;
 ```sql
 CREATE TABLE [IF NOT EXISTS] table_identifier 
 [ ( col_name1[:] col_type1 [ COMMENT col_comment1 ], ... ) ]
+[ USING table_store ]    
 [ COMMENT table_comment ]
 [ PARTITIONED BY ( col_name1, col_name2, ... ) ]
 [ TBLPROPERTIES ( key1=val1, key2=val2, ... ) ]       
@@ -115,6 +116,7 @@ TBLPROPERTIES ('foo' = 'bar', 'primary-key' = 'order_id,dt,hh')
 __Note:__
 - Primary key feature is supported via table properties, and composite primary key is delimited with comma.
 - Partition fields should be predefined, complex partition such like `PARTITIONED BY ( col_name2[:] col_type2 [ COMMENT col_comment2 ], ... )` is not supported.
+- For Spark 3.0, `CREATE TABLE USING table_store` is required.
 {{< /hint >}}
 
 ### Alter Table
