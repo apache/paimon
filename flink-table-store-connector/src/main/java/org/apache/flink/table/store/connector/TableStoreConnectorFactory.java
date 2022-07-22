@@ -50,7 +50,7 @@ public class TableStoreConnectorFactory extends AbstractTableStoreFactory {
     @Override
     public DynamicTableSource createDynamicTableSource(Context context) {
         if (isFlinkTable(context)) {
-            // only 1.14 temporary table sink will come here
+            // only Flink 1.14 temporary table will come here
             return FactoryUtil.createTableSource(
                     null,
                     context.getObjectIdentifier(),
@@ -65,7 +65,7 @@ public class TableStoreConnectorFactory extends AbstractTableStoreFactory {
     @Override
     public DynamicTableSink createDynamicTableSink(Context context) {
         if (isFlinkTable(context)) {
-            // only 1.14 temporary table sink will come here
+            // only Flink 1.14 temporary table will come here
             return FactoryUtil.createTableSink(
                     null,
                     context.getObjectIdentifier(),
