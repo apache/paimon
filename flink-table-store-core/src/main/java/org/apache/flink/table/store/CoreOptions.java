@@ -482,7 +482,9 @@ public class CoreOptions implements Serializable {
     public enum MergeEngine implements DescribedEnum {
         DEDUPLICATE("deduplicate", "De-duplicate and keep the last row."),
 
-        PARTIAL_UPDATE("partial-update", "Partial update non-null fields.");
+        PARTIAL_UPDATE("partial-update", "Partial update non-null fields."),
+
+        AGGREGATE("aggregation", "Aggregate fields with same primary key.");
 
         private final String value;
         private final String description;

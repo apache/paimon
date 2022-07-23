@@ -23,13 +23,19 @@ import org.apache.flink.connector.datagen.table.RandomGeneratorVisitor;
 import org.apache.flink.streaming.api.functions.source.datagen.DataGenerator;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.TableSchema;
+import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
+import org.apache.flink.table.types.logical.LogicalTypeRoot;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -105,5 +111,29 @@ public class RowDataUtilsTest {
 
     private BinaryRowData toBinary(RowData row) {
         return serializer.toBinaryRow(row).copy();
+    }
+
+    @Test
+    public void testCompare() {
+        // test DECIMAL data type
+        DecimalData xDecimalData = DecimalData.fromBigDecimal(new BigDecimal("12.34"), 4, 2);
+        DecimalData yDecimalData = DecimalData.fromBigDecimal(new BigDecimal("13.14"), 4, 2);
+        assertThat(RowDataUtils.compare(xDecimalData, yDecimalData, LogicalTypeRoot.DECIMAL))
+                .isLessThan(0);
+
+        // test DOUBLE data type
+        double xDouble = 13.14;
+        double yDouble = 12.13;
+        assertThat(RowDataUtils.compare(xDouble, yDouble, LogicalTypeRoot.DOUBLE)).isGreaterThan(0);
+
+        // test TIMESTAMP_WITHOUT_TIME_ZONE data type
+        TimestampData xTimestampData = TimestampData.fromLocalDateTime(LocalDateTime.now());
+        TimestampData yTimestampData = TimestampData.fromTimestamp(xTimestampData.toTimestamp());
+        assertThat(
+                        RowDataUtils.compare(
+                                xTimestampData,
+                                yTimestampData,
+                                LogicalTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE))
+                .isEqualTo(0);
     }
 }
