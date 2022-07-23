@@ -18,7 +18,10 @@
 
 package org.apache.flink.table.store.connector;
 
+import org.apache.flink.table.connector.sink.DynamicTableSink;
+import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
 
@@ -45,9 +48,39 @@ public class TableStoreConnectorFactory extends AbstractTableStoreFactory {
     }
 
     @Override
-    public TableStoreSink createDynamicTableSink(Context context) {
-        TableStoreSink sink = super.createDynamicTableSink(context);
+    public DynamicTableSource createDynamicTableSource(Context context) {
+        if (isFlinkTable(context)) {
+            // only Flink 1.14 temporary table will come here
+            return FactoryUtil.createTableSource(
+                    null,
+                    context.getObjectIdentifier(),
+                    context.getCatalogTable(),
+                    context.getConfiguration(),
+                    context.getClassLoader(),
+                    context.isTemporary());
+        }
+        return super.createDynamicTableSource(context);
+    }
+
+    @Override
+    public DynamicTableSink createDynamicTableSink(Context context) {
+        if (isFlinkTable(context)) {
+            // only Flink 1.14 temporary table will come here
+            return FactoryUtil.createTableSink(
+                    null,
+                    context.getObjectIdentifier(),
+                    context.getCatalogTable(),
+                    context.getConfiguration(),
+                    context.getClassLoader(),
+                    context.isTemporary());
+        }
+        TableStoreSink sink = (TableStoreSink) super.createDynamicTableSink(context);
         sink.setLockFactory(lockFactory);
         return sink;
+    }
+
+    private boolean isFlinkTable(Context context) {
+        String identifier = context.getCatalogTable().getOptions().get(FactoryUtil.CONNECTOR.key());
+        return identifier != null && !IDENTIFIER.equals(identifier);
     }
 }

@@ -23,6 +23,8 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.table.api.ValidationException;
+import org.apache.flink.table.connector.sink.DynamicTableSink;
+import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.DynamicTableSourceFactory;
@@ -58,7 +60,7 @@ public abstract class AbstractTableStoreFactory
         implements DynamicTableSourceFactory, DynamicTableSinkFactory {
 
     @Override
-    public TableStoreSource createDynamicTableSource(Context context) {
+    public DynamicTableSource createDynamicTableSource(Context context) {
         return new TableStoreSource(
                 context.getObjectIdentifier(),
                 buildFileStoreTable(context),
@@ -69,7 +71,7 @@ public abstract class AbstractTableStoreFactory
     }
 
     @Override
-    public TableStoreSink createDynamicTableSink(Context context) {
+    public DynamicTableSink createDynamicTableSink(Context context) {
         return new TableStoreSink(
                 context.getObjectIdentifier(),
                 buildFileStoreTable(context),
