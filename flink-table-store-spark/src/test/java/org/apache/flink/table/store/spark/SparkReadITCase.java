@@ -239,6 +239,13 @@ public class SparkReadITCase {
 
         options = schema1().options();
         assertThat(options).doesNotContainKey("xyc");
+
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "ALTER TABLE table_store.default.t1 SET TBLPROPERTIES('primary-key' = 'a')"))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Alter primary key is not supported");
     }
 
     @Test
@@ -365,6 +372,13 @@ public class SparkReadITCase {
         assertThatThrownBy(() -> spark.sql(ddl.replace("default", "foo")))
                 .isInstanceOf(NoSuchNamespaceException.class)
                 .hasMessageContaining("Namespace 'foo' not found");
+
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "ALTER TABLE default.MyTable UNSET TBLPROPERTIES('primary-key')"))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Alter primary key is not supported");
 
         Path tablePath = new Path(warehousePath, "default.db/MyTable");
         TableSchema schema = FileStoreTableFactory.create(tablePath).schema();
