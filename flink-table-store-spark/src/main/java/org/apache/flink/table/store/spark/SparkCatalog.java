@@ -241,9 +241,12 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
     private SchemaChange toSchemaChange(TableChange change) {
         if (change instanceof SetProperty) {
             SetProperty set = (SetProperty) change;
+            validateAlterProperty(set.property());
             return SchemaChange.setOption(set.property(), set.value());
         } else if (change instanceof RemoveProperty) {
-            return SchemaChange.removeOption(((RemoveProperty) change).property());
+            RemoveProperty remove = (RemoveProperty) change;
+            validateAlterProperty(remove.property());
+            return SchemaChange.removeOption(remove.property());
         } else if (change instanceof AddColumn) {
             AddColumn add = (AddColumn) change;
             validateAlterNestedField(add.fieldNames());
@@ -297,6 +300,12 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         if (fieldNames.length > 1) {
             throw new UnsupportedOperationException(
                     "Alter nested column is not supported: " + Arrays.toString(fieldNames));
+        }
+    }
+
+    private void validateAlterProperty(String alterKey) {
+        if (PRIMARY_KEY_IDENTIFIER.equals(alterKey)) {
+            throw new UnsupportedOperationException("Alter primary key is not supported");
         }
     }
 
