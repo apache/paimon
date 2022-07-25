@@ -35,7 +35,7 @@ Table Store supports Spark 2.4+. It is highly recommended to use Spark 2.4+ vers
 ## Install
 
 {{< stable >}}
-Download [flink-table-store-spark2-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/flink/flink-table-store-spark2/{{< version >}}/flink-table-store-spark2-{{< version >}}.jar).
+Download [flink-table-store-spark2-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-spark2-{{< version >}}.jar).
 {{< /stable >}}
 {{< unstable >}}
 You are using an unreleased version of Table Store, you need to manually [Build Spark Bundled Jar]({{< ref "docs/engines/build" >}}) from the source code.

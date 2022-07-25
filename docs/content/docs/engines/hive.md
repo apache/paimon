@@ -37,7 +37,7 @@ Table Store currently supports Hive 2.x.
 ## Install
 
 {{< stable >}}
-Download [flink-table-store-hive-connector-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/flink/flink-table-store-hive-connector-/{{< version >}}/flink-table-store-hive-connector-{{< version >}}.jar).
+Download [flink-table-store-hive-connector-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-{{< version >}}.jar).
 {{< /stable >}}
 {{< unstable >}}
 

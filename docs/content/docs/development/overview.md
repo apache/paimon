@@ -56,7 +56,8 @@ __Note:__ Table Store is only supported since Flink 1.14.
 {{< /hint >}}
 
 {{< stable >}}
-Download [flink-table-store-dist-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/flink/flink-table-store-dist/{{< version >}}/flink-table-store-dist-{{< version >}}.jar).
+- Download [flink-table-store-dist-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-dist-{{< version >}}.jar) for Flink 1.15.
+- Download [flink-table-store-dist-{{< version >}}_1.14.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-dist-{{< version >}}_1.14.jar) for Flink 1.14.
 {{< /stable >}}
 {{< unstable >}}
 You are using an unreleased version of Table Store, you need to manually [Build Bundled Jar]({{< ref "docs/engines/build" >}}) from the source code.
