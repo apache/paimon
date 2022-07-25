@@ -41,9 +41,9 @@ Download [flink-table-store-spark2-{{< version >}}.jar](https://www.apache.org/d
 You are using an unreleased version of Table Store, you need to manually [Build Spark Bundled Jar]({{< ref "docs/engines/build" >}}) from the source code.
 {{< /unstable >}}
 
-Use `--jars` in spark-sql:
+Use `--jars` in spark-shell:
 ```bash
-spark-sql ... --jars flink-table-store-spark2-{{< version >}}.jar
+spark-shell ... --jars flink-table-store-spark2-{{< version >}}.jar
 ```
 
 Alternatively, you can copy `flink-table-store-spark2-{{< version >}}.jar` under `spark/jars` in your Spark installation.
