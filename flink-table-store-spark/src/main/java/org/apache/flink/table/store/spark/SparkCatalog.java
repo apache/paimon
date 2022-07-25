@@ -284,14 +284,19 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
                                 }));
         Map<String, String> normalizedProperties = new HashMap<>(properties);
         normalizedProperties.remove(PRIMARY_KEY_IDENTIFIER);
+        String pkAsString = properties.get(PRIMARY_KEY_IDENTIFIER);
+        List<String> primaryKeys =
+                pkAsString == null
+                        ? Collections.emptyList()
+                        : Arrays.stream(pkAsString.split(","))
+                                .map(String::trim)
+                                .collect(Collectors.toList());
         return new UpdateSchema(
                 (RowType) toFlinkType(schema),
                 Arrays.stream(partitions)
                         .map(partition -> partition.references()[0].describe())
                         .collect(Collectors.toList()),
-                Arrays.stream(properties.getOrDefault(PRIMARY_KEY_IDENTIFIER, "").split(","))
-                        .map(String::trim)
-                        .collect(Collectors.toList()),
+                primaryKeys,
                 normalizedProperties,
                 properties.getOrDefault(TableCatalog.PROP_COMMENT, ""));
     }
