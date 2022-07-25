@@ -35,7 +35,7 @@ document will be guided to create a simple dynamic table to read and write it.
 __Note:__ Table Store is only supported since Flink 1.14.
 {{< /hint >}}
 
-[Download the latest binary release](https://flink.apache.org/downloads.html) of Flink,
+[Download Flink 1.15](https://flink.apache.org/downloads.html) of Flink,
 then extract the archive:
 
 ```bash
@@ -45,7 +45,7 @@ tar -xzf flink-*.tgz
 ## Step 2: Copy Table Store Bundle Jar
 
 {{< stable >}}
-Download [flink-table-store-dist-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/flink/flink-table-store-dist/{{< version >}}/flink-table-store-dist-{{< version >}}.jar).
+Download [flink-table-store-dist-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-dist-{{< version >}}.jar).
 {{< /stable >}}
 {{< unstable >}}
 You are using an unreleased version of Table Store, you need to manually [Build Bundled Jar]({{< ref "docs/engines/build" >}}) from the source code.
