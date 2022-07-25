@@ -50,11 +50,11 @@ Alternatively, you can copy `flink-table-store-spark2-{{< version >}}.jar` under
 
 ## Read
 
-Table store with Spark 2.4 does not support DDL, you can use the Dataset reader,
-you can register the Dataset as a temporary table.
+Table store with Spark 2.4 does not support DDL, you can use the Dataset reader
+and register the Dataset as a temporary table. In spark shell:
 
-```
-Dataset<Row> dataset = spark.read().format("tablestore").load("file:/tmp/warehouse/default.db/myTable");
-dataset.createOrReplaceTempView("myTable");
-spark.sql("SELECT * FROM myTable");
+```scala
+val dataset = spark.read.format("tablestore").load("file:/tmp/warehouse/default.db/myTable")
+dataset.createOrReplaceTempView("myTable")
+spark.sql("SELECT * FROM myTable")
 ```
