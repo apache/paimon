@@ -48,21 +48,13 @@ spark-sql ... --jars flink-table-store-spark2-{{< version >}}.jar
 
 Alternatively, you can copy `flink-table-store-spark2-{{< version >}}.jar` under `spark/jars` in your Spark installation.
 
-## Create Temporary View
+## Read
 
-Use the `CREATE TEMPORARY VIEW` command to create a Spark mapping table on top of
-an existing Table Store table.
+Table store with Spark 2.4 does not support DDL, you can use the Dataset reader,
+you can register the Dataset as a temporary table.
 
-```sql
-CREATE TEMPORARY VIEW myTable
-USING tablestore
-OPTIONS (
-  path "file:/tmp/warehouse/default.db/myTable"
-)
 ```
-
-## Query Table
-
-```sql
-SELECT * FROM myTable;
+Dataset<Row> dataset = spark.read().format("tablestore").load("file:/tmp/warehouse/default.db/myTable");
+dataset.createOrReplaceTempView("myTable");
+spark.sql("SELECT * FROM myTable");
 ```
