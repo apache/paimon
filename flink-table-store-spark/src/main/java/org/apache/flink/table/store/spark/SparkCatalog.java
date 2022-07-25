@@ -291,8 +291,19 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
                         : Arrays.stream(pkAsString.split(","))
                                 .map(String::trim)
                                 .collect(Collectors.toList());
+        RowType rowType = (RowType) toFlinkType(schema);
+        List<String> fields = rowType.getFieldNames();
+        if (!primaryKeys.isEmpty()) {
+            // primary key should not nullable
+            for (String pk : primaryKeys) {
+                if (rowType.getTypeAt(fields.indexOf(pk)).isNullable()) {
+                    throw new IllegalArgumentException(
+                            "Primary key should not be nullable, please add 'NOT NULL' constraint");
+                }
+            }
+        }
         return new UpdateSchema(
-                (RowType) toFlinkType(schema),
+                rowType,
                 Arrays.stream(partitions)
                         .map(partition -> partition.references()[0].describe())
                         .collect(Collectors.toList()),

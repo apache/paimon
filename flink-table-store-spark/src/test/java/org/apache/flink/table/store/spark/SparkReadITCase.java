@@ -357,6 +357,22 @@ public class SparkReadITCase {
     }
 
     @Test
+    public void testCreateTableWithNullablePk() {
+        spark.sql("USE table_store");
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "CREATE TABLE default.PKTable (\n"
+                                                + "a BIGINT,\n"
+                                                + "b STRING) USING table_store\n"
+                                                + "COMMENT 'table comment'\n"
+                                                + "TBLPROPERTIES ('primary-key' = 'a')"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Primary key should not be nullable, please add 'NOT NULL' constraint");
+    }
+
+    @Test
     public void testCreateAndDropTable() throws Exception {
         innerTest("MyTable1", true, true, false);
         innerTest("MyTable2", true, false, false);
