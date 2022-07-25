@@ -18,13 +18,19 @@
 
 package org.apache.flink.table.store.file.compact;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.Optional;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
 /** Manager to submit compaction task. */
 public abstract class CompactManager {
+
+    private static final Logger LOG = LoggerFactory.getLogger(CompactManager.class);
 
     protected final ExecutorService executor;
 
@@ -45,11 +51,26 @@ public abstract class CompactManager {
             throws ExecutionException, InterruptedException {
         if (taskFuture != null) {
             if (blocking || taskFuture.isDone()) {
-                CompactResult result = taskFuture.get();
+                CompactResult result;
+                try {
+                    result = taskFuture.get();
+                } catch (CancellationException e) {
+                    LOG.info("Compaction future is cancelled", e);
+                    taskFuture = null;
+                    return Optional.empty();
+                }
                 taskFuture = null;
                 return Optional.of(result);
             }
         }
         return Optional.empty();
+    }
+
+    public void cancelCompaction() {
+        // TODO this method may leave behind orphan files if compaction is actually finished
+        //  but some CPU work still needs to be done
+        if (taskFuture != null && !taskFuture.isCancelled()) {
+            taskFuture.cancel(true);
+        }
     }
 }

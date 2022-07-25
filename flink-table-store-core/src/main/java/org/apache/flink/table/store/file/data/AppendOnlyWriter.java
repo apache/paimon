@@ -144,6 +144,8 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
 
     @Override
     public List<DataFileMeta> close() throws Exception {
+        // cancel compaction so that it does not block job cancelling
+        compactManager.cancelCompaction();
         sync();
 
         List<DataFileMeta> result = new ArrayList<>();
