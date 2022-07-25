@@ -49,6 +49,8 @@ cd ..
 
 FLINK_DIR=`pwd`
 RELEASE_DIR=${FLINK_DIR}/tools/releasing/release
+
+rm -rf ${RELEASE_DIR}
 mkdir ${RELEASE_DIR}
 
 ###########################
