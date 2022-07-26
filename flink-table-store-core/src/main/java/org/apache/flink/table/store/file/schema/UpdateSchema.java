@@ -89,7 +89,7 @@ public class UpdateSchema {
             return rowType;
         }
         Set<String> pkSet = new HashSet<>(primaryKeys);
-        Preconditions.checkArgument(
+        Preconditions.checkState(
                 pkSet.containsAll(partitionKeys),
                 String.format(
                         "Primary key constraint %s should include all partition fields %s",

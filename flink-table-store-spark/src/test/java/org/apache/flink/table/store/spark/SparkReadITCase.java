@@ -401,7 +401,7 @@ public class SparkReadITCase {
                                                 + "COMMENT 'table comment'\n"
                                                 + "PARTITIONED BY (b)"
                                                 + "TBLPROPERTIES ('primary-key' = 'a')"))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining(
                         "Primary key constraint [a] should include all partition fields [b]");
     }
