@@ -19,8 +19,12 @@
 package org.apache.flink.table.store.file.catalog;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.FileSystem;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.util.Preconditions;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.ServiceLoader;
@@ -28,6 +32,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.CatalogOptions.METASTORE;
 import static org.apache.flink.table.store.CatalogOptions.WAREHOUSE;
+import static org.apache.flink.util.Preconditions.checkArgument;
 
 /** Factory to create {@link Catalog}. Each factory should have a unique identifier. */
 public interface CatalogFactory {
@@ -67,6 +72,21 @@ public interface CatalogFactory {
                             + factories.stream()
                                     .map(t -> t.getClass().getName())
                                     .collect(Collectors.joining("\n")));
+        }
+
+        try {
+            Path warehousePath = new Path(warehouse);
+            FileSystem fs = warehousePath.getFileSystem();
+            if (fs.exists(warehousePath)) {
+                checkArgument(
+                        fs.getFileStatus(warehousePath).isDir(),
+                        "Warehouse path '%s' should be a directory.",
+                        warehouse);
+            } else {
+                fs.mkdirs(warehousePath);
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
 
         return factories.get(0).create(warehouse, options);
