@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
@@ -145,9 +146,9 @@ public abstract class AbstractTableStoreFactory
         List<String> partitionKeys = updateSchema.partitionKeys();
         List<String> primaryKeys = updateSchema.primaryKeys();
 
-        // compare fields to ignore isNullable for row type
+        // compare fields to ignore the outside nullability and nested fields' comments
         Preconditions.checkArgument(
-                tableSchema.logicalRowType().getFields().equals(rowType.getFields()),
+                schemaEquals(tableSchema.logicalRowType(), rowType),
                 "Flink schema and store schema are not the same, "
                         + "store schema is %s, Flink schema is %s",
                 tableSchema.logicalRowType(),
@@ -168,5 +169,22 @@ public abstract class AbstractTableStoreFactory
                 primaryKeys);
 
         return table;
+    }
+
+    @VisibleForTesting
+    static boolean schemaEquals(RowType rowType1, RowType rowType2) {
+        List<RowType.RowField> fieldList1 = rowType1.getFields();
+        List<RowType.RowField> fieldList2 = rowType2.getFields();
+        if (fieldList1.size() != fieldList2.size()) {
+            return false;
+        }
+        for (int i = 0; i < fieldList1.size(); i++) {
+            RowType.RowField f1 = fieldList1.get(i);
+            RowType.RowField f2 = fieldList2.get(i);
+            if (!f1.getName().equals(f2.getName()) || !f1.getType().equals(f2.getType())) {
+                return false;
+            }
+        }
+        return true;
     }
 }
