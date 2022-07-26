@@ -69,6 +69,7 @@ public class BucketSelectorTest {
                 newSelector(and(builder.equal(0, 0), builder.equal(1, 1), builder.equal(2, 2)))
                         .get();
         assertThat(selector.hashCodes()).containsExactly(1141287431);
+        assertThat(selector.createBucketSet(20)).containsExactly(11);
     }
 
     @Test
@@ -81,6 +82,7 @@ public class BucketSelectorTest {
                                         builder.equal(2, 2)))
                         .get();
         assertThat(selector.hashCodes()).containsExactly(-1272936927, 582056914, -1234868890);
+        assertThat(selector.createBucketSet(20)).containsExactly(7, 14, 10);
     }
 
     @Test
@@ -96,6 +98,7 @@ public class BucketSelectorTest {
                                         builder.equal(2, 2)))
                         .get();
         assertThat(selector.hashCodes()).containsExactly(-1272936927, 582056914, -1234868890);
+        assertThat(selector.createBucketSet(20)).containsExactly(7, 14, 10);
     }
 
     @Test
@@ -108,6 +111,7 @@ public class BucketSelectorTest {
                                         builder.equal(2, 2)))
                         .get();
         assertThat(selector.hashCodes()).containsExactly(-1272936927, 582056914, -1234868890);
+        assertThat(selector.createBucketSet(20)).containsExactly(7, 14, 10);
     }
 
     @Test
@@ -122,6 +126,7 @@ public class BucketSelectorTest {
         assertThat(selector.hashCodes())
                 .containsExactly(
                         -1272936927, -1567268077, 582056914, 2124429589, -1234868890, 1063796399);
+        assertThat(selector.createBucketSet(20)).containsExactly(7, 17, 14, 9, 10, 19);
     }
 
     @Test
@@ -139,6 +144,7 @@ public class BucketSelectorTest {
         assertThat(selector.hashCodes())
                 .containsExactly(
                         -1272936927, -1567268077, 582056914, 2124429589, -1234868890, 1063796399);
+        assertThat(selector.createBucketSet(20)).containsExactly(7, 17, 14, 9, 10, 19);
     }
 
     private Optional<BucketSelector> newSelector(Predicate predicate) {
