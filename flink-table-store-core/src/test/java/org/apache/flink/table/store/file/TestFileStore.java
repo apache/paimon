@@ -251,6 +251,9 @@ public class TestFileStore extends KeyValueFileStore {
                 .forEach(
                         w -> {
                             try {
+                                // wait for compaction to end, otherwise orphan files may occur
+                                // see CompactManager#cancelCompaction for more info
+                                w.sync();
                                 w.close();
                             } catch (Exception e) {
                                 throw new RuntimeException(e);
