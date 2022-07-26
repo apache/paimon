@@ -115,19 +115,28 @@ public class SinkRecordConverter {
     }
 
     private int bucket(RowData row, BinaryRowData bucketKey) {
-        int hash = bucketKey.getArity() == 0 ? hashRow(row) : bucketKey.hashCode();
-        return Math.abs(hash % numBucket);
+        int hash = bucketKey.getArity() == 0 ? hashRow(row) : hashcode(bucketKey);
+        return bucket(hash, numBucket);
     }
 
     private int hashRow(RowData row) {
         if (row instanceof BinaryRowData) {
             RowKind rowKind = row.getRowKind();
             row.setRowKind(RowKind.INSERT);
-            int hash = row.hashCode();
+            int hash = hashcode((BinaryRowData) row);
             row.setRowKind(rowKind);
             return hash;
         } else {
-            return allProjection.apply(row).hashCode();
+            return hashcode(allProjection.apply(row));
         }
+    }
+
+    public static int hashcode(BinaryRowData rowData) {
+        assert rowData.getRowKind() == RowKind.INSERT;
+        return rowData.hashCode();
+    }
+
+    public static int bucket(int hashcode, int numBucket) {
+        return Math.abs(hashcode % numBucket);
     }
 }
