@@ -21,6 +21,7 @@ package org.apache.flink.table.store.table;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
@@ -157,7 +158,9 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     @Test
     public void testStreamingChangelog() throws Exception {
-        FileStoreTable table = createFileStoreTable(true);
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
         TableWrite write = table.newWrite();
         TableCommit commit = table.newCommit("user");
         write.write(GenericRowData.of(1, 10, 100L));
@@ -244,10 +247,6 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         read = table.newRead().withFilter(builder.equal(1, 30));
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(Arrays.asList("1|30|300", "1|40|400"));
-    }
-
-    protected FileStoreTable createFileStoreTable(boolean changelogFile) throws Exception {
-        return createFileStoreTable(conf -> conf.set(CoreOptions.CHANGELOG_FILE, changelogFile));
     }
 
     @Override

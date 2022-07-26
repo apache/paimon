@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.mergetree;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.util.MemorySegmentPool;
+import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
@@ -63,7 +64,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private final int numSortedRunStopTrigger;
 
-    private final boolean enableChangelogFile;
+    private final ChangelogProducer changelogProducer;
 
     private final LinkedHashSet<DataFileMeta> newFiles;
 
@@ -86,7 +87,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             DataFileWriter dataFileWriter,
             boolean commitForceCompact,
             int numSortedRunStopTrigger,
-            boolean enableChangelogFile) {
+            ChangelogProducer changelogProducer) {
         this.keyType = keyType;
         this.valueType = valueType;
         this.compactManager = compactManager;
@@ -97,7 +98,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.dataFileWriter = dataFileWriter;
         this.commitForceCompact = commitForceCompact;
         this.numSortedRunStopTrigger = numSortedRunStopTrigger;
-        this.enableChangelogFile = enableChangelogFile;
+        this.changelogProducer = changelogProducer;
         this.newFiles = new LinkedHashSet<>();
         this.compactBefore = new LinkedHashMap<>();
         this.compactAfter = new LinkedHashSet<>();
@@ -146,7 +147,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 finishCompaction(true);
             }
             List<String> extraFiles = new ArrayList<>();
-            if (enableChangelogFile) {
+            if (changelogProducer == ChangelogProducer.INPUT) {
                 extraFiles.add(
                         dataFileWriter
                                 .writeLevel0Changelog(
