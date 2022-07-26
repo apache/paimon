@@ -50,12 +50,12 @@ Alternatively, you can copy `flink-table-store-spark-{{< version >}}.jar` under 
 
 ## Catalog
 
-The following command registers the Table Store's Spark catalog with the name `table_store`:
+The following command registers the Table Store's Spark catalog with the name `tablestore`:
 
 ```bash
 spark-sql ... \
-    --conf spark.sql.catalog.table_store=org.apache.flink.table.store.spark.SparkCatalog \
-    --conf spark.sql.catalog.table_store.warehouse=file:/tmp/warehouse
+    --conf spark.sql.catalog.tablestore=org.apache.flink.table.store.spark.SparkCatalog \
+    --conf spark.sql.catalog.tablestore.warehouse=file:/tmp/warehouse
 ```
 
 Some extra configurations are needed if your Table Store Catalog uses the Hive
@@ -63,29 +63,24 @@ Metastore (No extra configuration is required for read-only).
 
 ```bash
 spark-sql ... \
-    --conf spark.sql.catalog.table_store=org.apache.flink.table.store.spark.SparkCatalog \
-    --conf spark.sql.catalog.table_store.warehouse=file:/tmp/warehouse \
-    --conf spark.sql.catalog.table_store.metastore=hive \
-    --conf spark.sql.catalog.table_store.uri=thrift://...
-```
-
-## Create Temporary View
-
-Use the `CREATE TEMPORARY VIEW` command to create a Spark mapping table on top of
-an existing Table Store table if you don't want to use Table Store Catalog.
-
-```sql
-CREATE TEMPORARY VIEW myTable
-USING tablestore
-OPTIONS (
-  path "file:/tmp/warehouse/default.db/myTable"
-)
+    --conf spark.sql.catalog.tablestore=org.apache.flink.table.store.spark.SparkCatalog \
+    --conf spark.sql.catalog.tablestore.warehouse=file:/tmp/warehouse \
+    --conf spark.sql.catalog.tablestore.metastore=hive \
+    --conf spark.sql.catalog.tablestore.uri=thrift://...
 ```
 
 ## Query Table
 
 ```sql
-SELECT * FROM table_store.default.myTable;
+SELECT * FROM tablestore.default.myTable;
+```
+
+## DataSet
+
+You can load a mapping table as DataSet on top of an existing Table Store table if you don't want to use Table Store Catalog.
+
+```scala
+val dataset = spark.read.format("tablestore").load("file:/tmp/warehouse/default.db/myTable")
 ```
 
 ## DDL Statements
@@ -94,14 +89,14 @@ SELECT * FROM table_store.default.myTable;
 ```sql
 CREATE TABLE [IF NOT EXISTS] table_identifier 
 [ ( col_name1[:] col_type1 [ COMMENT col_comment1 ], ... ) ]
-[ USING table_store ]    
+[ USING tablestore ]    
 [ COMMENT table_comment ]
 [ PARTITIONED BY ( col_name1, col_name2, ... ) ]
 [ TBLPROPERTIES ( key1=val1, key2=val2, ... ) ]       
 ```
 For example, create an order table with `order_id` as primary key and partitioned by `dt, hh`.
 ```sql
-CREATE TABLE table_store.default.OrderTable (
+CREATE TABLE tablestore.default.OrderTable (
     order_id BIGINT NOT NULL comment 'biz order id',
     buyer_id BIGINT NOT NULL COMMENT 'buyer id',
     coupon_info ARRAY<STRING> NOT NULL COMMENT 'coupon info',
@@ -116,7 +111,7 @@ TBLPROPERTIES ('foo' = 'bar', 'primary-key' = 'order_id,dt,hh')
 __Note:__
 - Primary key feature is supported via table properties, and composite primary key is delimited with comma.
 - Partition fields should be predefined, complex partition such like `PARTITIONED BY ( col_name2[:] col_type2 [ COMMENT col_comment2 ], ... )` is not supported.
-- For Spark 3.0, `CREATE TABLE USING table_store` is required.
+- For Spark 3.0, `CREATE TABLE USING tablestore` is required.
 {{< /hint >}}
 
 ### Alter Table
@@ -130,29 +125,29 @@ SET TBLPROPERTIES ( key1=val1 )
 
 - Change/add table properties
 ```sql
-ALTER TABLE table_store.default.OrderTable SET TBLPROPERTIES (
+ALTER TABLE tablestore.default.OrderTable SET TBLPROPERTIES (
     'write-buffer-size'='256 MB'
 )
 ```
 
 - Remove a table property
 ```sql
-ALTER TABLE table_store.default.OrderTable UNSET TBLPROPERTIES ('write-buffer-size')
+ALTER TABLE tablestore.default.OrderTable UNSET TBLPROPERTIES ('write-buffer-size')
 ```
 
 - Add a new column
 ```sql
-ALTER TABLE table_store.default.OrderTable ADD COLUMNS (buy_count INT)
+ALTER TABLE tablestore.default.OrderTable ADD COLUMNS (buy_count INT)
 ```
 
 - Change column nullability
 ```sql
-ALTER TABLE table_store.default.OrderTable ALTER COLUMN coupon_info DROP NOT NULL
+ALTER TABLE tablestore.default.OrderTable ALTER COLUMN coupon_info DROP NOT NULL
 ```
 
 - Change column comment
 ```sql
-ALTER TABLE table_store.default.OrderTable ALTER COLUMN buy_count COMMENT 'buy count'
+ALTER TABLE tablestore.default.OrderTable ALTER COLUMN buy_count COMMENT 'buy count'
 ```
 
 {{< hint info >}}
@@ -163,7 +158,7 @@ __Note:__
 ### Drop Table
 
 ```sql
-DROP TABLE table_store.default.OrderTable
+DROP TABLE tablestore.default.OrderTable
 ```
 {{< hint warning >}}
 __Attention__: Drop a table will delete both metadata and files on the disk.
@@ -172,13 +167,13 @@ __Attention__: Drop a table will delete both metadata and files on the disk.
 ### Create Namespace
 
 ```sql
-CREATE NAMESPACE [IF NOT EXISTS] table_store.bar
+CREATE NAMESPACE [IF NOT EXISTS] tablestore.bar
 ```
 
 ### Drop Namespace
 
 ```sql
-DROP NAMESPACE table_store.bar
+DROP NAMESPACE tablestore.bar
 ```
 
 {{< hint warning >}}

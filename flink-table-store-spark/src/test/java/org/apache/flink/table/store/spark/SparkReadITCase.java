@@ -83,8 +83,8 @@ public class SparkReadITCase {
         assertThat(warehouse.delete()).isTrue();
         warehousePath = new Path("file:" + warehouse);
         spark = SparkSession.builder().master("local[2]").getOrCreate();
-        spark.conf().set("spark.sql.catalog.table_store", SparkCatalog.class.getName());
-        spark.conf().set("spark.sql.catalog.table_store.warehouse", warehousePath.toString());
+        spark.conf().set("spark.sql.catalog.tablestore", SparkCatalog.class.getName());
+        spark.conf().set("spark.sql.catalog.tablestore.warehouse", warehousePath.toString());
 
         // flink sink
         tablePath1 = new Path(warehousePath, "default.db/t1");
@@ -204,44 +204,42 @@ public class SparkReadITCase {
 
     @Test
     public void testNormal() {
-        innerTestSimpleType(
-                spark.read().format("tablestore").option("path", tablePath1.toString()).load());
+        innerTestSimpleType(spark.read().format("tablestore").load(tablePath1.toString()));
 
-        innerTestNestedType(
-                spark.read().format("tablestore").option("path", tablePath2.toString()).load());
+        innerTestNestedType(spark.read().format("tablestore").load(tablePath2.toString()));
     }
 
     @Test
     public void testFilterPushDown() {
         innerTestSimpleTypeFilterPushDown(
-                spark.read().format("tablestore").option("path", tablePath1.toString()).load());
+                spark.read().format("tablestore").load(tablePath1.toString()));
 
         innerTestNestedTypeFilterPushDown(
-                spark.read().format("tablestore").option("path", tablePath2.toString()).load());
+                spark.read().format("tablestore").load(tablePath2.toString()));
     }
 
     @Test
     public void testCatalogNormal() {
-        innerTestSimpleType(spark.table("table_store.default.t1"));
+        innerTestSimpleType(spark.table("tablestore.default.t1"));
 
-        innerTestNestedType(spark.table("table_store.default.t2"));
+        innerTestNestedType(spark.table("tablestore.default.t2"));
     }
 
     @Test
     public void testCatalogFilterPushDown() {
-        innerTestSimpleTypeFilterPushDown(spark.table("table_store.default.t1"));
+        innerTestSimpleTypeFilterPushDown(spark.table("tablestore.default.t1"));
 
-        innerTestNestedTypeFilterPushDown(spark.table("table_store.default.t2"));
+        innerTestNestedTypeFilterPushDown(spark.table("tablestore.default.t2"));
     }
 
     @Test
     public void testSetAndRemoveOption() {
-        spark.sql("ALTER TABLE table_store.default.t1 SET TBLPROPERTIES('xyc' 'unknown1')");
+        spark.sql("ALTER TABLE tablestore.default.t1 SET TBLPROPERTIES('xyc' 'unknown1')");
 
         Map<String, String> options = schema1().options();
         assertThat(options).containsEntry("xyc", "unknown1");
 
-        spark.sql("ALTER TABLE table_store.default.t1 UNSET TBLPROPERTIES('xyc')");
+        spark.sql("ALTER TABLE tablestore.default.t1 UNSET TBLPROPERTIES('xyc')");
 
         options = schema1().options();
         assertThat(options).doesNotContainKey("xyc");
@@ -249,7 +247,7 @@ public class SparkReadITCase {
         assertThatThrownBy(
                         () ->
                                 spark.sql(
-                                        "ALTER TABLE table_store.default.t1 SET TBLPROPERTIES('primary-key' = 'a')"))
+                                        "ALTER TABLE tablestore.default.t1 SET TBLPROPERTIES('primary-key' = 'a')"))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("Alter primary key is not supported");
     }
@@ -262,9 +260,9 @@ public class SparkReadITCase {
         testHelper1.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
         testHelper1.commit();
 
-        spark.sql("ALTER TABLE table_store.default.testAddColumn ADD COLUMN d STRING");
+        spark.sql("ALTER TABLE tablestore.default.testAddColumn ADD COLUMN d STRING");
 
-        Dataset<Row> table = spark.table("table_store.default.testAddColumn");
+        Dataset<Row> table = spark.table("tablestore.default.testAddColumn");
         List<Row> results = table.collectAsList();
         assertThat(results.toString()).isEqualTo("[[1,2,1,null], [5,6,3,null]]");
 
@@ -283,8 +281,8 @@ public class SparkReadITCase {
         testHelper1.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
         testHelper1.commit();
 
-        spark.sql("ALTER TABLE table_store.default.testAlterColumnType ALTER COLUMN a TYPE BIGINT");
-        innerTestSimpleType(spark.table("table_store.default.testAlterColumnType"));
+        spark.sql("ALTER TABLE tablestore.default.testAlterColumnType ALTER COLUMN a TYPE BIGINT");
+        innerTestSimpleType(spark.table("tablestore.default.testAlterColumnType"));
     }
 
     @Test
@@ -300,30 +298,30 @@ public class SparkReadITCase {
                 .isFalse();
 
         // note: for Spark, it is illegal to change nullable column to non-nullable
-        spark.sql("ALTER TABLE table_store.default.t2 ALTER COLUMN a DROP NOT NULL");
+        spark.sql("ALTER TABLE tablestore.default.t2 ALTER COLUMN a DROP NOT NULL");
         assertThat(fieldIsNullable(getField(schema2(), 0))).isTrue();
 
-        spark.sql("ALTER TABLE table_store.default.t2 ALTER COLUMN b DROP NOT NULL");
+        spark.sql("ALTER TABLE tablestore.default.t2 ALTER COLUMN b DROP NOT NULL");
         assertThat(fieldIsNullable(getField(schema2(), 1))).isTrue();
 
-        spark.sql("ALTER TABLE table_store.default.t2 ALTER COLUMN c DROP NOT NULL");
+        spark.sql("ALTER TABLE tablestore.default.t2 ALTER COLUMN c DROP NOT NULL");
         assertThat(fieldIsNullable(getField(schema2(), 2))).isTrue();
 
-        spark.sql("ALTER TABLE table_store.default.t2 ALTER COLUMN c.c1 DROP NOT NULL");
+        spark.sql("ALTER TABLE tablestore.default.t2 ALTER COLUMN c.c1 DROP NOT NULL");
         assertThat(fieldIsNullable(getNestedField(getField(schema2(), 2), 0))).isTrue();
 
-        spark.sql("ALTER TABLE table_store.default.t2 ALTER COLUMN c.c1.c12 DROP NOT NULL");
+        spark.sql("ALTER TABLE tablestore.default.t2 ALTER COLUMN c.c1.c12 DROP NOT NULL");
         assertThat(fieldIsNullable(getNestedField(getNestedField(getField(schema2(), 2), 0), 1)))
                 .isTrue();
     }
 
     @Test
     public void testAlterPrimaryKeyNullability() {
-        spark.sql("USE table_store");
+        spark.sql("USE tablestore");
         spark.sql(
                 "CREATE TABLE default.testAlterPkNullability (\n"
                         + "a BIGINT,\n"
-                        + "b STRING) USING table_store\n"
+                        + "b STRING) USING tablestore\n"
                         + "COMMENT 'table comment'\n"
                         + "TBLPROPERTIES ('primary-key' = 'a')");
         assertThatThrownBy(
@@ -339,11 +337,10 @@ public class SparkReadITCase {
     public void testAlterTableColumnComment() {
         assertThat(getField(schema1(), 0).description()).isNull();
 
-        spark.sql("ALTER TABLE table_store.default.t1 ALTER COLUMN a COMMENT 'a new comment'");
+        spark.sql("ALTER TABLE tablestore.default.t1 ALTER COLUMN a COMMENT 'a new comment'");
         assertThat(getField(schema1(), 0).description()).isEqualTo("a new comment");
 
-        spark.sql(
-                "ALTER TABLE table_store.default.t1 ALTER COLUMN a COMMENT 'yet another comment'");
+        spark.sql("ALTER TABLE tablestore.default.t1 ALTER COLUMN a COMMENT 'yet another comment'");
         assertThat(getField(schema1(), 0).description()).isEqualTo("yet another comment");
 
         assertThat(getField(schema2(), 2).description()).isEqualTo("comment about c");
@@ -356,13 +353,13 @@ public class SparkReadITCase {
                 .isNull();
 
         spark.sql(
-                "ALTER TABLE table_store.default.t2 ALTER COLUMN c COMMENT 'yet another comment about c'");
-        spark.sql("ALTER TABLE table_store.default.t2 ALTER COLUMN c.c1 COMMENT 'a nested type'");
-        spark.sql("ALTER TABLE table_store.default.t2 ALTER COLUMN c.c2 COMMENT 'a bigint type'");
+                "ALTER TABLE tablestore.default.t2 ALTER COLUMN c COMMENT 'yet another comment about c'");
+        spark.sql("ALTER TABLE tablestore.default.t2 ALTER COLUMN c.c1 COMMENT 'a nested type'");
+        spark.sql("ALTER TABLE tablestore.default.t2 ALTER COLUMN c.c2 COMMENT 'a bigint type'");
         spark.sql(
-                "ALTER TABLE table_store.default.t2 ALTER COLUMN c.c1.c11 COMMENT 'a double type'");
+                "ALTER TABLE tablestore.default.t2 ALTER COLUMN c.c1.c11 COMMENT 'a double type'");
         spark.sql(
-                "ALTER TABLE table_store.default.t2 ALTER COLUMN c.c1.c12 COMMENT 'a boolean array'");
+                "ALTER TABLE tablestore.default.t2 ALTER COLUMN c.c1.c12 COMMENT 'a boolean array'");
 
         assertThat(getField(schema2(), 2).description()).isEqualTo("yet another comment about c");
         assertThat(getNestedField(getField(schema2(), 2), 0).description())
@@ -377,11 +374,11 @@ public class SparkReadITCase {
 
     @Test
     public void testCreateTableWithNullablePk() {
-        spark.sql("USE table_store");
+        spark.sql("USE tablestore");
         spark.sql(
                 "CREATE TABLE default.PkTable (\n"
                         + "a BIGINT,\n"
-                        + "b STRING) USING table_store\n"
+                        + "b STRING) USING tablestore\n"
                         + "COMMENT 'table comment'\n"
                         + "TBLPROPERTIES ('primary-key' = 'a')");
         Path tablePath = new Path(warehousePath, "default.db/PkTable");
@@ -391,14 +388,14 @@ public class SparkReadITCase {
 
     @Test
     public void testCreateTableWithInvalidPk() {
-        spark.sql("USE table_store");
+        spark.sql("USE tablestore");
         assertThatThrownBy(
                         () ->
                                 spark.sql(
                                         "CREATE TABLE default.PartitionedPkTable (\n"
                                                 + "a BIGINT,\n"
                                                 + "b STRING,\n"
-                                                + "c DOUBLE) USING table_store\n"
+                                                + "c DOUBLE) USING tablestore\n"
                                                 + "COMMENT 'table comment'\n"
                                                 + "PARTITIONED BY (b)"
                                                 + "TBLPROPERTIES ('primary-key' = 'a')"))
@@ -409,14 +406,14 @@ public class SparkReadITCase {
 
     @Test
     public void testCreateTableWithNonexistentPk() {
-        spark.sql("USE table_store");
+        spark.sql("USE tablestore");
         assertThatThrownBy(
                         () ->
                                 spark.sql(
                                         "CREATE TABLE default.PartitionedPkTable (\n"
                                                 + "a BIGINT,\n"
                                                 + "b STRING,\n"
-                                                + "c DOUBLE) USING table_store\n"
+                                                + "c DOUBLE) USING tablestore\n"
                                                 + "COMMENT 'table comment'\n"
                                                 + "PARTITIONED BY (b)"
                                                 + "TBLPROPERTIES ('primary-key' = 'd')"))
@@ -427,14 +424,14 @@ public class SparkReadITCase {
 
     @Test
     public void testCreateTableWithNonexistentPartition() {
-        spark.sql("USE table_store");
+        spark.sql("USE tablestore");
         assertThatThrownBy(
                         () ->
                                 spark.sql(
                                         "CREATE TABLE default.PartitionedPkTable (\n"
                                                 + "a BIGINT,\n"
                                                 + "b STRING,\n"
-                                                + "c DOUBLE) USING table_store\n"
+                                                + "c DOUBLE) USING tablestore\n"
                                                 + "COMMENT 'table comment'\n"
                                                 + "PARTITIONED BY (d)"
                                                 + "TBLPROPERTIES ('primary-key' = 'a')"))
@@ -454,7 +451,7 @@ public class SparkReadITCase {
 
     private void innerTest(String tableName, boolean hasPk, boolean partitioned, boolean appendOnly)
             throws Exception {
-        spark.sql("USE table_store");
+        spark.sql("USE tablestore");
         String ddlTemplate =
                 "CREATE TABLE default.%s (\n"
                         + "order_id BIGINT NOT NULL comment 'order_id',\n"
@@ -462,7 +459,7 @@ public class SparkReadITCase {
                         + "coupon_info ARRAY<STRING> NOT NULL COMMENT 'coupon_info',\n"
                         + "order_amount DOUBLE NOT NULL COMMENT 'order_amount',\n"
                         + "dt STRING NOT NULL COMMENT 'dt',\n"
-                        + "hh STRING NOT NULL COMMENT 'hh') USING table_store\n"
+                        + "hh STRING NOT NULL COMMENT 'hh') USING tablestore\n"
                         + "COMMENT 'table comment'\n"
                         + "%s\n"
                         + "TBLPROPERTIES (%s)";
@@ -590,8 +587,7 @@ public class SparkReadITCase {
                         BinaryStringData.fromString("12")));
         testHelper.commit();
 
-        Dataset<Row> dataset =
-                spark.read().format("tablestore").option("path", tablePath.toString()).load();
+        Dataset<Row> dataset = spark.read().format("tablestore").load(tablePath.toString());
         assertThat(dataset.select("order_id", "buyer_id", "dt").collectAsList().toString())
                 .isEqualTo("[[1,10,2022-07-20]]");
         assertThat(dataset.select("coupon_info").collectAsList().toString())
@@ -601,19 +597,19 @@ public class SparkReadITCase {
         assertThat(
                         spark.sql(
                                         String.format(
-                                                "SHOW TABLES IN table_store.default LIKE '%s'",
+                                                "SHOW TABLES IN tablestore.default LIKE '%s'",
                                                 tableName))
                                 .select("namespace", "tableName")
                                 .collectAsList()
                                 .toString())
                 .isEqualTo(String.format("[[default,%s]]", tableName));
 
-        spark.sql(String.format("DROP TABLE table_store.default.%s", tableName));
+        spark.sql(String.format("DROP TABLE tablestore.default.%s", tableName));
 
         assertThat(
                         spark.sql(
                                         String.format(
-                                                "SHOW TABLES IN table_store.default LIKE '%s'",
+                                                "SHOW TABLES IN tablestore.default LIKE '%s'",
                                                 tableName))
                                 .select("namespace", "tableName")
                                 .collectAsList()
@@ -626,7 +622,7 @@ public class SparkReadITCase {
     @Test
     public void testCreateAndDropNamespace() {
         // create namespace
-        spark.sql("USE table_store");
+        spark.sql("USE tablestore");
         spark.sql("CREATE NAMESPACE bar");
 
         assertThatThrownBy(() -> spark.sql("CREATE NAMESPACE bar"))
