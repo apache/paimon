@@ -199,6 +199,12 @@ public class SchemaManager implements Serializable {
                             });
                 } else if (change instanceof UpdateColumnNullability) {
                     UpdateColumnNullability update = (UpdateColumnNullability) change;
+                    if (update.fieldNames().length == 1
+                            && update.newNullability()
+                            && schema.primaryKeys().contains(update.fieldNames()[0])) {
+                        throw new UnsupportedOperationException(
+                                "Cannot change nullability of primary key");
+                    }
                     updateNestedColumn(
                             newFields,
                             update.fieldNames(),

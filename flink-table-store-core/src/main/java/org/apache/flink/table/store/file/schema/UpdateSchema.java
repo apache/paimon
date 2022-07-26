@@ -24,12 +24,15 @@ import org.apache.flink.table.catalog.CatalogTableImpl;
 import org.apache.flink.table.descriptors.DescriptorProperties;
 import org.apache.flink.table.descriptors.Schema;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.flink.table.descriptors.Schema.SCHEMA;
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
@@ -53,7 +56,7 @@ public class UpdateSchema {
             List<String> primaryKeys,
             Map<String, String> options,
             String comment) {
-        this.rowType = rowType;
+        this.rowType = validateRowType(rowType, primaryKeys, partitionKeys);
         this.partitionKeys = partitionKeys;
         this.primaryKeys = primaryKeys;
         this.options = new HashMap<>(options);
@@ -78,6 +81,47 @@ public class UpdateSchema {
 
     public String comment() {
         return comment;
+    }
+
+    private RowType validateRowType(
+            RowType rowType, List<String> primaryKeys, List<String> partitionKeys) {
+        List<String> fieldNames = rowType.getFieldNames();
+        Set<String> allFields = new HashSet<>(fieldNames);
+        Preconditions.checkState(
+                allFields.containsAll(partitionKeys),
+                "Table column %s should include all partition fields %s",
+                fieldNames,
+                partitionKeys);
+
+        if (primaryKeys.isEmpty()) {
+            return rowType;
+        }
+        Preconditions.checkState(
+                allFields.containsAll(primaryKeys),
+                "Table column %s should include all primary key constraint %s",
+                fieldNames,
+                primaryKeys);
+        Set<String> pkSet = new HashSet<>(primaryKeys);
+        Preconditions.checkState(
+                pkSet.containsAll(partitionKeys),
+                "Primary key constraint %s should include all partition fields %s",
+                primaryKeys,
+                partitionKeys);
+
+        // primary key should not nullable
+        List<RowType.RowField> fields = new ArrayList<>();
+        for (RowType.RowField field : rowType.getFields()) {
+            if (pkSet.contains(field.getName()) && field.getType().isNullable()) {
+                fields.add(
+                        new RowType.RowField(
+                                field.getName(),
+                                field.getType().copy(false),
+                                field.getDescription().orElse(null)));
+            } else {
+                fields.add(field);
+            }
+        }
+        return new RowType(false, fields);
     }
 
     @Override

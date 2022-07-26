@@ -40,6 +40,7 @@ import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.types.RowKind;
 
 import org.apache.commons.io.FileUtils;
+import org.apache.spark.sql.AnalysisException;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
@@ -317,6 +318,24 @@ public class SparkReadITCase {
     }
 
     @Test
+    public void testAlterPrimaryKeyNullability() {
+        spark.sql("USE table_store");
+        spark.sql(
+                "CREATE TABLE default.testAlterPkNullability (\n"
+                        + "a BIGINT,\n"
+                        + "b STRING) USING table_store\n"
+                        + "COMMENT 'table comment'\n"
+                        + "TBLPROPERTIES ('primary-key' = 'a')");
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "ALTER TABLE default.testAlterPkNullability ALTER COLUMN a DROP NOT NULL"))
+                .getRootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Cannot change nullability of primary key");
+    }
+
+    @Test
     public void testAlterTableColumnComment() {
         assertThat(getField(schema1(), 0).description()).isNull();
 
@@ -354,6 +373,73 @@ public class SparkReadITCase {
                 .isEqualTo("a double type");
         assertThat(getNestedField(getNestedField(getField(schema2(), 2), 0), 1).description())
                 .isEqualTo("a boolean array");
+    }
+
+    @Test
+    public void testCreateTableWithNullablePk() {
+        spark.sql("USE table_store");
+        spark.sql(
+                "CREATE TABLE default.PkTable (\n"
+                        + "a BIGINT,\n"
+                        + "b STRING) USING table_store\n"
+                        + "COMMENT 'table comment'\n"
+                        + "TBLPROPERTIES ('primary-key' = 'a')");
+        Path tablePath = new Path(warehousePath, "default.db/PkTable");
+        TableSchema schema = FileStoreTableFactory.create(tablePath).schema();
+        assertThat(schema.logicalRowType().getTypeAt(0).isNullable()).isFalse();
+    }
+
+    @Test
+    public void testCreateTableWithInvalidPk() {
+        spark.sql("USE table_store");
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "CREATE TABLE default.PartitionedPkTable (\n"
+                                                + "a BIGINT,\n"
+                                                + "b STRING,\n"
+                                                + "c DOUBLE) USING table_store\n"
+                                                + "COMMENT 'table comment'\n"
+                                                + "PARTITIONED BY (b)"
+                                                + "TBLPROPERTIES ('primary-key' = 'a')"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(
+                        "Primary key constraint [a] should include all partition fields [b]");
+    }
+
+    @Test
+    public void testCreateTableWithNonexistentPk() {
+        spark.sql("USE table_store");
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "CREATE TABLE default.PartitionedPkTable (\n"
+                                                + "a BIGINT,\n"
+                                                + "b STRING,\n"
+                                                + "c DOUBLE) USING table_store\n"
+                                                + "COMMENT 'table comment'\n"
+                                                + "PARTITIONED BY (b)"
+                                                + "TBLPROPERTIES ('primary-key' = 'd')"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(
+                        "Table column [a, b, c] should include all primary key constraint [d]");
+    }
+
+    @Test
+    public void testCreateTableWithNonexistentPartition() {
+        spark.sql("USE table_store");
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "CREATE TABLE default.PartitionedPkTable (\n"
+                                                + "a BIGINT,\n"
+                                                + "b STRING,\n"
+                                                + "c DOUBLE) USING table_store\n"
+                                                + "COMMENT 'table comment'\n"
+                                                + "PARTITIONED BY (d)"
+                                                + "TBLPROPERTIES ('primary-key' = 'a')"))
+                .isInstanceOf(AnalysisException.class)
+                .hasMessageContaining("Couldn't find column d");
     }
 
     @Test
