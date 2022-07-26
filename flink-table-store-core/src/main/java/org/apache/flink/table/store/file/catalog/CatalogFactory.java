@@ -80,7 +80,8 @@ public interface CatalogFactory {
             if (fs.exists(warehousePath)) {
                 checkArgument(
                         fs.getFileStatus(warehousePath).isDir(),
-                        "Warehouse path '%s' should be a directory.",
+                        "The %s path '%s' should be a directory.",
+                        WAREHOUSE.key(),
                         warehouse);
             } else {
                 fs.mkdirs(warehousePath);
