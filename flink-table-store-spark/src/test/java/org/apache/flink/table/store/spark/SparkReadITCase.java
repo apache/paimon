@@ -204,11 +204,9 @@ public class SparkReadITCase {
 
     @Test
     public void testNormal() {
-        innerTestSimpleType(
-                spark.read().format("tablestore").load(tablePath1.toString()));
+        innerTestSimpleType(spark.read().format("tablestore").load(tablePath1.toString()));
 
-        innerTestNestedType(
-                spark.read().format("tablestore").load(tablePath2.toString()));
+        innerTestNestedType(spark.read().format("tablestore").load(tablePath2.toString()));
     }
 
     @Test
@@ -342,8 +340,7 @@ public class SparkReadITCase {
         spark.sql("ALTER TABLE tablestore.default.t1 ALTER COLUMN a COMMENT 'a new comment'");
         assertThat(getField(schema1(), 0).description()).isEqualTo("a new comment");
 
-        spark.sql(
-                "ALTER TABLE tablestore.default.t1 ALTER COLUMN a COMMENT 'yet another comment'");
+        spark.sql("ALTER TABLE tablestore.default.t1 ALTER COLUMN a COMMENT 'yet another comment'");
         assertThat(getField(schema1(), 0).description()).isEqualTo("yet another comment");
 
         assertThat(getField(schema2(), 2).description()).isEqualTo("comment about c");
@@ -590,8 +587,7 @@ public class SparkReadITCase {
                         BinaryStringData.fromString("12")));
         testHelper.commit();
 
-        Dataset<Row> dataset =
-                spark.read().format("tablestore").load(tablePath.toString());
+        Dataset<Row> dataset = spark.read().format("tablestore").load(tablePath.toString());
         assertThat(dataset.select("order_id", "buyer_id", "dt").collectAsList().toString())
                 .isEqualTo("[[1,10,2022-07-20]]");
         assertThat(dataset.select("coupon_info").collectAsList().toString())
