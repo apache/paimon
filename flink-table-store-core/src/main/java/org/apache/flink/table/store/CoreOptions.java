@@ -576,7 +576,7 @@ public class CoreOptions implements Serializable {
 
         INPUT(
                 "input",
-                "Double write to a changelog file when flushing memory table, the changelog is come from input.");
+                "Double write to a changelog file when flushing memory table, the changelog is from input.");
 
         private final String value;
         private final String description;
