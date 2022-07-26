@@ -79,7 +79,7 @@ SELECT * FROM tablestore.default.myTable;
 
 You can load a mapping table as DataSet on top of an existing Table Store table if you don't want to use Table Store Catalog.
 
-```sql
+```scala
 val dataset = spark.read.format("tablestore").load("file:/tmp/warehouse/default.db/myTable")
 ```
 
