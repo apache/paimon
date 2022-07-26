@@ -85,15 +85,29 @@ public class UpdateSchema {
 
     private RowType validateRowType(
             RowType rowType, List<String> primaryKeys, List<String> partitionKeys) {
+        List<String> fieldNames = rowType.getFieldNames();
+        Set<String> allFields = new HashSet<>(fieldNames);
+        Preconditions.checkState(
+                allFields.containsAll(partitionKeys),
+                "Table column %s should include all partition fields %s",
+                fieldNames,
+                partitionKeys);
+
         if (primaryKeys.isEmpty()) {
             return rowType;
         }
+        Preconditions.checkState(
+                allFields.containsAll(primaryKeys),
+                "Table column %s should include all primary key constraint %s",
+                fieldNames,
+                primaryKeys);
         Set<String> pkSet = new HashSet<>(primaryKeys);
         Preconditions.checkState(
                 pkSet.containsAll(partitionKeys),
-                String.format(
-                        "Primary key constraint %s should include all partition fields %s",
-                        primaryKeys, partitionKeys));
+                "Primary key constraint %s should include all partition fields %s",
+                primaryKeys,
+                partitionKeys);
+
         // primary key should not nullable
         List<RowType.RowField> fields = new ArrayList<>();
         for (RowType.RowField field : rowType.getFields()) {

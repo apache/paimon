@@ -40,6 +40,7 @@ import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.types.RowKind;
 
 import org.apache.commons.io.FileUtils;
+import org.apache.spark.sql.AnalysisException;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
@@ -404,6 +405,41 @@ public class SparkReadITCase {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining(
                         "Primary key constraint [a] should include all partition fields [b]");
+    }
+
+    @Test
+    public void testCreateTableWithNonexistentPk() {
+        spark.sql("USE table_store");
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "CREATE TABLE default.PartitionedPkTable (\n"
+                                                + "a BIGINT,\n"
+                                                + "b STRING,\n"
+                                                + "c DOUBLE) USING table_store\n"
+                                                + "COMMENT 'table comment'\n"
+                                                + "PARTITIONED BY (b)"
+                                                + "TBLPROPERTIES ('primary-key' = 'd')"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(
+                        "Table column [a, b, c] should include all primary key constraint [d]");
+    }
+
+    @Test
+    public void testCreateTableWithNonexistentPartition() {
+        spark.sql("USE table_store");
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "CREATE TABLE default.PartitionedPkTable (\n"
+                                                + "a BIGINT,\n"
+                                                + "b STRING,\n"
+                                                + "c DOUBLE) USING table_store\n"
+                                                + "COMMENT 'table comment'\n"
+                                                + "PARTITIONED BY (d)"
+                                                + "TBLPROPERTIES ('primary-key' = 'a')"))
+                .isInstanceOf(AnalysisException.class)
+                .hasMessageContaining("Couldn't find column d");
     }
 
     @Test
