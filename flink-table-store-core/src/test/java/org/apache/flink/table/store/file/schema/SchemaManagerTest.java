@@ -93,8 +93,8 @@ public class SchemaManagerTest {
 
         List<DataField> fields =
                 Arrays.asList(
-                        new DataField(0, "f0", new AtomicDataType(new IntType())),
-                        new DataField(1, "f1", new AtomicDataType(new BigIntType())),
+                        new DataField(0, "f0", new AtomicDataType(new IntType(false))),
+                        new DataField(1, "f1", new AtomicDataType(new BigIntType(false))),
                         new DataField(2, "f2", new AtomicDataType(new VarCharType())));
 
         assertThat(latest.isPresent()).isTrue();
