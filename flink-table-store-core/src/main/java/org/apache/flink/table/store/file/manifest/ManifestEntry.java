@@ -31,6 +31,7 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.utils.SerializationUtils.newBytesType;
 
@@ -141,6 +142,12 @@ public class ManifestEntry {
             }
         }
         return map.values();
+    }
+
+    public static Collection<ManifestEntry> filterAddEntries(List<ManifestEntry> entries) {
+        return entries.stream()
+                .filter(entry -> entry.kind == FileKind.ADD)
+                .collect(Collectors.toList());
     }
 
     /**

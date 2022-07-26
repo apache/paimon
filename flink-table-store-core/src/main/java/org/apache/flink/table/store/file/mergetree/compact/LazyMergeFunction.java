@@ -19,48 +19,55 @@
 package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.KeyValue;
 
-/** Helper functions for the interaction with {@link MergeFunction}. */
-public class MergeFunctionHelper {
+
+import javax.annotation.Nullable;
+
+/** A lazy {@link MergeFunction}. */
+public class LazyMergeFunction implements MergeFunction {
 
     private final MergeFunction mergeFunction;
 
-    private RowData rowData;
+    private KeyValue firstKV;
     private boolean isInitialized;
 
-    public MergeFunctionHelper(MergeFunction mergeFunction) {
+    public LazyMergeFunction(MergeFunction mergeFunction) {
         this.mergeFunction = mergeFunction;
     }
 
-    /**
-     * Resets the {@link MergeFunction} helper to its default state: 1. Clears the one record which
-     * the helper maintains. 2. Resets the {@link MergeFunction} to its default state. 3. Clears the
-     * initialized state of the {@link MergeFunction}.
-     */
+    @Override
     public void reset() {
-        rowData = null;
+        firstKV = null;
         mergeFunction.reset();
         isInitialized = false;
     }
 
-    /** Adds the given {@link RowData} to the {@link MergeFunction} helper. */
-    public void add(RowData value) {
-        if (rowData == null) {
-            rowData = value;
+    @Override
+    public void add(KeyValue kv) {
+        if (firstKV == null) {
+            firstKV = kv;
         } else {
             if (!isInitialized) {
-                mergeFunction.add(rowData);
+                merge(firstKV);
                 isInitialized = true;
             }
-            mergeFunction.add(value);
+            merge(kv);
         }
     }
 
-    /**
-     * Get current value of the {@link MergeFunction} helper. Return null if the value should be
-     * skipped.
-     */
+    protected void merge(KeyValue kv) {
+        mergeFunction.add(kv);
+    }
+
+    @Nullable
+    @Override
     public RowData getValue() {
-        return isInitialized ? mergeFunction.getValue() : rowData;
+        return isInitialized ? mergeFunction.getValue() : firstKV.value();
+    }
+
+    @Override
+    public MergeFunction copy() {
+        return new LazyMergeFunction(mergeFunction.copy());
     }
 }

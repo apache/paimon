@@ -20,8 +20,13 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.types.RowKind;
+
 
 import javax.annotation.Nullable;
+
+import static org.apache.flink.util.Preconditions.checkArgument;
 
 /**
  * A {@link MergeFunction} where key is primary key (unique) and value is the partial record, update
@@ -45,9 +50,10 @@ public class PartialUpdateMergeFunction implements MergeFunction {
     }
 
     @Override
-    public void add(RowData value) {
+    public void add(KeyValue kv) {
+        checkArgument(kv.valueKind() == RowKind.INSERT, "Partial update only accept insert only records.");
         for (int i = 0; i < getters.length; i++) {
-            Object field = getters[i].getFieldOrNull(value);
+            Object field = getters[i].getFieldOrNull(kv.value());
             if (field != null) {
                 row.setField(i, field);
             }

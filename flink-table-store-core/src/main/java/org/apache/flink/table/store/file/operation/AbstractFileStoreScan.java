@@ -45,6 +45,9 @@ import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.table.store.file.manifest.ManifestEntry.filterAddEntries;
+import static org.apache.flink.table.store.file.manifest.ManifestEntry.mergeManifestEntries;
+
 /** Default implementation of {@link FileStoreScan}. */
 public abstract class AbstractFileStoreScan implements FileStoreScan {
 
@@ -191,7 +194,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         }
 
         List<ManifestEntry> files = new ArrayList<>();
-        for (ManifestEntry file : ManifestEntry.mergeManifestEntries(entries)) {
+        for (ManifestEntry file :
+                isIncremental ? filterAddEntries(entries) : mergeManifestEntries(entries)) {
             if (checkNumOfBuckets && file.totalBuckets() != numOfBuckets) {
                 String partInfo =
                         partitionConverter.getArity() > 0
@@ -266,11 +270,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private List<ManifestFileMeta> readIncremental(Long snapshotId) {
         Snapshot snapshot = snapshotManager.snapshot(snapshotId);
-        if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
-            return manifestList.read(snapshot.deltaManifestList());
-        }
-        throw new IllegalStateException(
-                String.format(
-                        "Incremental scan does not accept %s snapshot", snapshot.commitKind()));
+        return manifestList.read(snapshot.deltaManifestList());
     }
 }

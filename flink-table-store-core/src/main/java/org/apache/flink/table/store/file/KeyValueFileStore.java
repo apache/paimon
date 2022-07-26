@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreRead;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
@@ -74,7 +75,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 newKeyComparator(),
                 mergeFunction,
                 options.fileFormat(),
-                pathFactory());
+                pathFactory(),
+                options.changelogProducer() == ChangelogProducer.FULL_COMPACTION);
     }
 
     @Override

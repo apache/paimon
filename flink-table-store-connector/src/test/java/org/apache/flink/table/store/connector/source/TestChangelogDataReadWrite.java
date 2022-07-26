@@ -107,7 +107,8 @@ public class TestChangelogDataReadWrite {
                         COMPARATOR,
                         new DeduplicateMergeFunction(),
                         avro,
-                        pathFactory);
+                        pathFactory,
+                        false);
         return new KeyValueTableRead(read) {
             @Override
             public TableRead withFilter(Predicate predicate) {

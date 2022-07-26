@@ -57,6 +57,7 @@ public class DataFileReader {
     // TODO introduce Map<SchemaId, readerFactory>
     private final BulkFormat<RowData, FileSourceSplit> readerFactory;
     private final DataFilePathFactory pathFactory;
+    private final int maxLevel;
 
     private DataFileReader(
             SchemaManager schemaManager,
@@ -64,17 +65,19 @@ public class DataFileReader {
             RowType keyType,
             RowType valueType,
             BulkFormat<RowData, FileSourceSplit> readerFactory,
-            DataFilePathFactory pathFactory) {
+            DataFilePathFactory pathFactory,
+            int maxLevel) {
         this.schemaManager = schemaManager;
         this.schemaId = schemaId;
         this.keyType = keyType;
         this.valueType = valueType;
         this.readerFactory = readerFactory;
         this.pathFactory = pathFactory;
+        this.maxLevel = maxLevel;
     }
 
-    public RecordReader<KeyValue> read(String fileName) throws IOException {
-        return new DataFileRecordReader(pathFactory.toPath(fileName));
+    public RecordReader<KeyValue> read(String fileName, int level) throws IOException {
+        return new DataFileRecordReader(pathFactory.toPath(fileName), level == maxLevel);
     }
 
     private class DataFileRecordReader implements RecordReader<KeyValue> {
@@ -82,9 +85,9 @@ public class DataFileReader {
         private final BulkFormat.Reader<RowData> reader;
         private final KeyValueSerializer serializer;
 
-        private DataFileRecordReader(Path path) throws IOException {
+        private DataFileRecordReader(Path path, boolean fromTopLevel) throws IOException {
             this.reader = FileUtils.createFormatReader(readerFactory, path);
-            this.serializer = new KeyValueSerializer(keyType, valueType);
+            this.serializer = new KeyValueSerializer(keyType, valueType, fromTopLevel);
         }
 
         @Nullable
@@ -174,11 +177,24 @@ public class DataFileReader {
         }
 
         public DataFileReader create(BinaryRowData partition, int bucket) {
-            return create(partition, bucket, true, Collections.emptyList());
+            return create(partition, bucket, -1);
+        }
+
+        public DataFileReader create(BinaryRowData partition, int bucket, int maxLevel) {
+            return create(partition, bucket, true, Collections.emptyList(), maxLevel);
         }
 
         public DataFileReader create(
                 BinaryRowData partition, int bucket, boolean projectKeys, List<Predicate> filters) {
+            return create(partition, bucket, projectKeys, filters, -1);
+        }
+
+        public DataFileReader create(
+                BinaryRowData partition,
+                int bucket,
+                boolean projectKeys,
+                List<Predicate> filters,
+                int maxLevel) {
             int[][] keyProjection = projectKeys ? this.keyProjection : fullKeyProjection;
             RowType projectedKeyType = projectKeys ? this.projectedKeyType : keyType;
 
@@ -191,7 +207,8 @@ public class DataFileReader {
                     projectedKeyType,
                     projectedValueType,
                     fileFormat.createReaderFactory(recordType, projection, filters),
-                    pathFactory.createDataFilePathFactory(partition, bucket));
+                    pathFactory.createDataFilePathFactory(partition, bucket),
+                    maxLevel);
         }
 
         private void applyProjection() {

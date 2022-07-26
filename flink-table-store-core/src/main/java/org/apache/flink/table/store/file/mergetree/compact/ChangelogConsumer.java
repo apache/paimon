@@ -18,21 +18,10 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.mergetree.SortedRun;
+import org.apache.flink.table.store.file.KeyValue;
 
-import java.util.Collections;
-import java.util.List;
+/** */
+public interface ChangelogConsumer {
 
-/** Rewrite sections to the files. */
-@FunctionalInterface
-public interface CompactRewriter {
-
-    List<DataFileMeta> rewrite(int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
-            throws Exception;
-
-    default List<DataFileMeta> upgrade(int outputLevel, boolean dropDelete, DataFileMeta file)
-            throws Exception {
-        return Collections.singletonList(file.upgrade(outputLevel));
-    }
+    void consume(KeyValue keyValue);
 }

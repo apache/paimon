@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.compact;
 
 import org.apache.flink.table.store.file.data.DataFileMeta;
 
+import java.util.Collections;
 import java.util.List;
 
 /** Result of compaction. */
@@ -28,4 +29,18 @@ public interface CompactResult {
     List<DataFileMeta> before();
 
     List<DataFileMeta> after();
+
+    static CompactResult empty() {
+        return new CompactResult() {
+            @Override
+            public List<DataFileMeta> before() {
+                return Collections.emptyList();
+            }
+
+            @Override
+            public List<DataFileMeta> after() {
+                return Collections.emptyList();
+            }
+        };
+    }
 }

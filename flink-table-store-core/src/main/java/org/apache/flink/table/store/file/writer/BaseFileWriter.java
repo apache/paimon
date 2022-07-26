@@ -25,6 +25,7 @@ import org.apache.flink.util.IOUtils;
 import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 
 /**
  * The abstracted base file writer implementation for {@link FileWriter}.
@@ -34,16 +35,19 @@ import java.io.IOException;
  */
 public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
 
-    private final FileWriter.Factory<T, Metric> writerFactory;
+    private final FileWriter<T, Metric> writer;
     private final Path path;
 
-    private FileWriter<T, Metric> writer = null;
     private Metric metric = null;
-
     private boolean closed = false;
 
     public BaseFileWriter(FileWriter.Factory<T, Metric> writerFactory, Path path) {
-        this.writerFactory = writerFactory;
+        try {
+            this.writer = writerFactory.create(path);
+        } catch (IOException e) {
+            FileUtils.deleteOrWarn(path);
+            throw new UncheckedIOException(e);
+        }
         this.path = path;
     }
 
@@ -51,37 +55,19 @@ public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
         return path;
     }
 
-    private void openCurrentWriter() throws IOException {
-        this.writer = writerFactory.create(path);
-    }
-
     @Override
     public void write(T row) throws IOException {
-        if (writer == null) {
-            openCurrentWriter();
-        }
-
         writer.write(row);
     }
 
     @Override
     public long recordCount() {
-        if (writer != null) {
-            return writer.recordCount();
-        } else if (metric != null) {
-            return metric.recordCount();
-        }
-        return 0L;
+        return writer.recordCount();
     }
 
     @Override
     public long length() throws IOException {
-        if (writer != null) {
-            return writer.length();
-        } else if (metric != null) {
-            return metric.length();
-        }
-        return 0;
+        return writer.length();
     }
 
     protected abstract R createResult(Path path, Metric metric) throws IOException;
@@ -105,13 +91,8 @@ public abstract class BaseFileWriter<T, R> implements FileWriter<T, R> {
     @Override
     public void close() throws IOException {
         if (!closed) {
-            if (writer != null) {
-                writer.close();
-                metric = writer.result();
-
-                writer = null;
-            }
-
+            writer.close();
+            metric = writer.result();
             closed = true;
         }
     }

@@ -22,6 +22,7 @@ import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.file.Snapshot.CommitKind;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.source.TableScan;
 
@@ -56,6 +57,8 @@ public class ContinuousFileSplitEnumerator
 
     private final TableScan scan;
 
+    private final CommitKind commitKind;
+
     private final SnapshotManager snapshotManager;
 
     private final Map<Integer, Queue<FileStoreSourceSplit>> bucketSplits;
@@ -73,10 +76,12 @@ public class ContinuousFileSplitEnumerator
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             TableScan scan,
+            CommitKind commitKind,
             SnapshotManager snapshotManager,
             Collection<FileStoreSourceSplit> remainSplits,
             long currentSnapshotId,
             long discoveryInterval) {
+        this.commitKind = commitKind;
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.scan = checkNotNull(scan);
@@ -205,15 +210,12 @@ public class ContinuousFileSplitEnumerator
                 }
 
                 Snapshot snapshot = snapshotManager.snapshot(nextSnapshotId);
-                if (snapshot.commitKind() != Snapshot.CommitKind.APPEND) {
-                    if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE) {
-                        LOG.warn("Ignore overwrite snapshot id {}.", nextSnapshotId);
-                    }
-
+                if (snapshot.commitKind() != commitKind) {
                     nextSnapshotId++;
                     LOG.debug(
-                            "Next snapshot id {} is not append, but is {}, check next one.",
+                            "Next snapshot id {} is not {}, but is {}, check next one.",
                             nextSnapshotId,
+                            commitKind,
                             snapshot.commitKind());
                     continue;
                 }

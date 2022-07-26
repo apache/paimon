@@ -114,10 +114,11 @@ public class MergeTreeCompactTask extends CompactTask {
     }
 
     private void upgrade(
-            DataFileMeta file, List<DataFileMeta> compactBefore, List<DataFileMeta> compactAfter) {
+            DataFileMeta file, List<DataFileMeta> compactBefore, List<DataFileMeta> compactAfter)
+            throws Exception {
         if (file.level() != outputLevel) {
             compactBefore.add(file);
-            compactAfter.add(file.upgrade(outputLevel));
+            compactAfter.addAll(rewriter.upgrade(outputLevel, dropDelete, file));
             upgradeFilesNum++;
         }
     }

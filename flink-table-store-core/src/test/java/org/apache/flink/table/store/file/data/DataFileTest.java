@@ -35,6 +35,9 @@ import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
+import org.apache.flink.table.store.file.writer.BaseFileWriter;
+import org.apache.flink.table.store.file.writer.FileWriter;
+import org.apache.flink.table.store.file.writer.Metric;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -212,6 +215,24 @@ public class DataFileTest {
                                                 kv.value().getInt(1))));
     }
 
+    @Test
+    public void testEmptyBaseFileWriter() throws Exception {
+        DataFileWriter dataFileWriter = createDataFileWriter(tempDir.toString(), "avro");
+        FileWriter.Factory<KeyValue, Metric> writerFactory =
+                dataFileWriter.createFileWriterFactory();
+        Path path = dataFileWriter.pathFactory().newPath();
+        BaseFileWriter<KeyValue, Metric> baseFileWriter =
+                new BaseFileWriter<KeyValue, Metric>(writerFactory, path) {
+                    @Override
+                    protected Metric createResult(Path path, Metric metric) {
+                        return metric;
+                    }
+                };
+        baseFileWriter.close();
+        Metric result = baseFileWriter.result();
+        assertThat(result.recordCount()).isEqualTo(0);
+    }
+
     protected DataFileWriter createDataFileWriter(String path, String format) {
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
@@ -266,7 +287,7 @@ public class DataFileTest {
         for (DataFileMeta meta : actualMetas) {
             // check the contents of data file
             CloseableIterator<KeyValue> actualKvsIterator =
-                    new RecordReaderIterator<>(fileReader.read(meta.fileName()));
+                    new RecordReaderIterator<>(fileReader.read(meta.fileName(), meta.level()));
             while (actualKvsIterator.hasNext()) {
                 assertThat(expectedIterator.hasNext()).isTrue();
                 KeyValue actualKv = actualKvsIterator.next();

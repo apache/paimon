@@ -42,7 +42,7 @@ public class SortMergeReader implements RecordReader<KeyValue> {
 
     private final List<RecordReader<KeyValue>> nextBatchReaders;
     private final Comparator<RowData> userKeyComparator;
-    private final MergeFunctionHelper mergeFunctionHelper;
+    private final MergeFunction mergeFunctionHelper;
 
     private final PriorityQueue<Element> minHeap;
     private final List<Element> polled;
@@ -53,7 +53,7 @@ public class SortMergeReader implements RecordReader<KeyValue> {
             MergeFunction mergeFunction) {
         this.nextBatchReaders = new ArrayList<>(readers);
         this.userKeyComparator = userKeyComparator;
-        this.mergeFunctionHelper = new MergeFunctionHelper(mergeFunction);
+        this.mergeFunctionHelper = mergeFunction;
 
         this.minHeap =
                 new PriorityQueue<>(
@@ -177,7 +177,7 @@ public class SortMergeReader implements RecordReader<KeyValue> {
                     break;
                 }
                 minHeap.poll();
-                mergeFunctionHelper.add(element.kv.value());
+                mergeFunctionHelper.add(element.kv);
                 polled.add(element);
             }
             return true;

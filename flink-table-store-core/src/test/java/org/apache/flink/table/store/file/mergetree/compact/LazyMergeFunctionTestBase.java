@@ -20,6 +20,8 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.types.RowKind;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -34,10 +36,10 @@ import java.util.stream.Stream;
 import static org.apache.flink.table.store.file.data.DataFileTestUtils.row;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/** Tests for {@link MergeFunctionHelper}. */
-public abstract class MergeFunctionHelperTestBase {
+/** Tests for {@link LazyMergeFunction}. */
+public abstract class LazyMergeFunctionTestBase {
 
-    protected MergeFunctionHelper mergeFunctionHelper;
+    protected LazyMergeFunction mergeFunctionHelper;
 
     protected abstract MergeFunction createMergeFunction();
 
@@ -45,13 +47,13 @@ public abstract class MergeFunctionHelperTestBase {
 
     @BeforeEach
     void setUp() {
-        mergeFunctionHelper = new MergeFunctionHelper(createMergeFunction());
+        mergeFunctionHelper = new LazyMergeFunction(createMergeFunction());
     }
 
     @MethodSource("provideMergedRowData")
     @ParameterizedTest
     public void testMergeFunctionHelper(List<RowData> rows) {
-        rows.forEach(r -> mergeFunctionHelper.add(r));
+        rows.forEach(r -> mergeFunctionHelper.add(new KeyValue().replace(null, RowKind.INSERT, r)));
         assertEquals(getExpected(rows), mergeFunctionHelper.getValue());
     }
 
@@ -62,8 +64,8 @@ public abstract class MergeFunctionHelperTestBase {
                 Arguments.of(Arrays.asList(row(1), row(2))));
     }
 
-    /** Tests for {@link MergeFunctionHelper} with {@link DeduplicateMergeFunction}. */
-    public static class WithDeduplicateMergeFunctionTest extends MergeFunctionHelperTestBase {
+    /** Tests for {@link LazyMergeFunction} with {@link DeduplicateMergeFunction}. */
+    public static class WithDeduplicateMergeFunctionTest extends LazyMergeFunctionTestBase {
 
         @Override
         protected MergeFunction createMergeFunction() {
@@ -76,8 +78,8 @@ public abstract class MergeFunctionHelperTestBase {
         }
     }
 
-    /** Tests for {@link MergeFunctionHelper} with {@link ValueCountMergeFunction}. */
-    public static class WithValueRecordMergeFunctionTest extends MergeFunctionHelperTestBase {
+    /** Tests for {@link LazyMergeFunction} with {@link ValueCountMergeFunction}. */
+    public static class WithValueRecordMergeFunctionTest extends LazyMergeFunctionTestBase {
 
         @Override
         protected MergeFunction createMergeFunction() {

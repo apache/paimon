@@ -103,7 +103,7 @@ public class MergeTreeReader implements RecordReader<KeyValue> {
         reader.close();
     }
 
-    public static RecordReader<KeyValue> readerForSection(
+    private static RecordReader<KeyValue> readerForSection(
             List<SortedRun> section,
             DataFileReader dataFileReader,
             Comparator<RowData> userKeyComparator,
@@ -120,7 +120,7 @@ public class MergeTreeReader implements RecordReader<KeyValue> {
             throws IOException {
         List<ReaderSupplier<KeyValue>> readers = new ArrayList<>();
         for (DataFileMeta file : run.files()) {
-            readers.add(() -> dataFileReader.read(file.fileName()));
+            readers.add(() -> dataFileReader.read(file.fileName(), file.level()));
         }
         return ConcatRecordReader.create(readers);
     }

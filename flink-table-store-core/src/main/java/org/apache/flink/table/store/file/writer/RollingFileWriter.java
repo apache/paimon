@@ -41,7 +41,7 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
     private final List<FileWriter<T, R>> openedWriters;
     private final List<R> results;
 
-    private FileWriter<T, R> currentWriter = null;
+    protected FileWriter<T, R> currentWriter = null;
     private long lengthOfClosedFiles = 0L;
     private long recordCount = 0;
     private boolean closed = false;
@@ -69,7 +69,7 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
         }
     }
 
-    private void openCurrentWriter() {
+    protected void openCurrentWriter() {
         currentWriter = writerFactory.get();
         openedWriters.add(currentWriter);
     }

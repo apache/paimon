@@ -157,7 +157,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
-    public void testStreamingChangelog() throws Exception {
+    public void testInputChangelog() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
@@ -181,6 +181,77 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 "+I 1|10|101",
                                 "-U 1|10|101",
                                 "+U 1|10|102"));
+    }
+
+    @Test
+    public void testFullCompactionChangelog() throws Exception {
+        Configuration conf = new Configuration();
+        conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.FULL_COMPACTION);
+        conf.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 3);
+        FileStoreTable table = createFileStoreTable(toSet -> toSet.addAll(conf));
+
+        // INSERT
+
+        TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
+
+        write.write(GenericRowData.of(1, 1, 1L));
+        write.write(GenericRowData.of(1, 2, 2L));
+        commit.commit("0", write.prepareCommit(true));
+
+        write.write(GenericRowData.of(1, 1, 3L));
+        write.write(GenericRowData.of(1, 2, 4L));
+        commit.commit("1", write.prepareCommit(true));
+
+        write.write(GenericRowData.of(1, 1, 5L));
+        write.write(GenericRowData.of(1, 2, 6L));
+        commit.commit("2", write.prepareCommit(true));
+
+        List<Split> splits = table.newScan().withIncremental(true).plan().splits;
+        TableRead read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
+                .isEqualTo(Arrays.asList("+I 1|1|5", "+I 1|2|6"));
+
+        // UPDATE
+
+        write.write(GenericRowData.of(1, 1, 7L));
+        commit.commit("3", write.prepareCommit(true));
+
+        write.write(GenericRowData.of(1, 1, 8L));
+        commit.commit("4", write.prepareCommit(true));
+
+        splits = table.newScan().withIncremental(true).plan().splits;
+        read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
+                .isEqualTo(Arrays.asList("-U 1|1|5", "+U 1|1|8"));
+
+        // DELETE
+
+        write.write(GenericRowData.ofKind(RowKind.DELETE, 1, 1, 9L));
+        commit.commit("5", write.prepareCommit(true));
+
+        write.write(GenericRowData.ofKind(RowKind.DELETE, 1, 1, 10L));
+        commit.commit("6", write.prepareCommit(true));
+
+        splits = table.newScan().withIncremental(true).plan().splits;
+        read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
+                .isEqualTo(Collections.singletonList("-D 1|1|8"));
+
+        // DELETE ALL
+
+        write.write(GenericRowData.ofKind(RowKind.DELETE, 1, 2, 11L));
+        commit.commit("5", write.prepareCommit(true));
+
+        write.write(GenericRowData.ofKind(RowKind.DELETE, 1, 2, 12L));
+        commit.commit("6", write.prepareCommit(true));
+
+        splits = table.newScan().withIncremental(true).plan().splits;
+        read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
+                .isEqualTo(Collections.singletonList("-D 1|2|6"));
+
+        write.close();
     }
 
     private void writeData() throws Exception {

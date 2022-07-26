@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.operation;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
@@ -31,17 +32,22 @@ import org.apache.flink.table.store.file.data.DataFileWriter;
 import org.apache.flink.table.store.file.mergetree.Levels;
 import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
+import org.apache.flink.table.store.file.mergetree.SortedRun;
+import org.apache.flink.table.store.file.mergetree.compact.ChangelogMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.CompactRewriter;
 import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
+import org.apache.flink.table.store.file.mergetree.compact.LazyMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactTask;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
+import org.apache.flink.table.store.file.mergetree.writer.ChangelogRollingFileWriter;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.file.writer.RollingFileWriter;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
@@ -53,6 +59,8 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
+import static java.util.Collections.singletonList;
+
 /** {@link FileStoreWrite} for {@link org.apache.flink.table.store.file.KeyValueFileStore}. */
 public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
 
@@ -61,6 +69,7 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
     private final Supplier<Comparator<RowData>> keyComparatorSupplier;
     private final MergeFunction mergeFunction;
     private final CoreOptions options;
+    private final ChangelogProducer changelogProducer;
 
     public KeyValueFileStoreWrite(
             SchemaManager schemaManager,
@@ -93,6 +102,7 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
         this.keyComparatorSupplier = keyComparatorSupplier;
         this.mergeFunction = mergeFunction;
         this.options = options;
+        this.changelogProducer = options.changelogProducer();
     }
 
     @Override
@@ -114,9 +124,11 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
         if (compactFiles == null) {
             compactFiles = scanExistingFileMetas(partition, bucket);
         }
+
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
-        CompactRewriter rewriter = compactRewriter(partition, bucket, keyComparator);
         Levels levels = new Levels(keyComparator, compactFiles, options.numLevels());
+        CompactRewriter rewriter =
+                compactRewriter(partition, bucket, keyComparator, levels.numberOfLevels() - 1);
         CompactUnit unit =
                 CompactUnit.fromLevelRuns(levels.numberOfLevels() - 1, levels.levelSortedRuns());
         return new MergeTreeCompactTask(
@@ -161,7 +173,8 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
             ExecutorService compactExecutor,
             Levels levels) {
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
-        CompactRewriter rewriter = compactRewriter(partition, bucket, keyComparator);
+        CompactRewriter rewriter =
+                compactRewriter(partition, bucket, keyComparator, levels.numberOfLevels() - 1);
         return new MergeTreeCompactManager(
                 compactExecutor,
                 levels,
@@ -172,17 +185,52 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
     }
 
     private CompactRewriter compactRewriter(
-            BinaryRowData partition, int bucket, Comparator<RowData> keyComparator) {
+            BinaryRowData partition, int bucket, Comparator<RowData> keyComparator, int maxLevel) {
         DataFileWriter dataFileWriter = dataFileWriterFactory.create(partition, bucket);
-        return (outputLevel, dropDelete, sections) ->
-                dataFileWriter.write(
+        return new CompactRewriter() {
+            @Override
+            public List<DataFileMeta> rewrite(
+                    int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
+                    throws Exception {
+                RollingFileWriter<KeyValue, DataFileMeta> writer;
+                MergeFunction function;
+                if (maxLevel == outputLevel && logInFullCompaction()) {
+                    ChangelogRollingFileWriter changelogWriter =
+                            dataFileWriter.createChangelogRollingWriter(outputLevel);
+                    writer = changelogWriter;
+                    function = new ChangelogMergeFunction(mergeFunction.copy(), changelogWriter);
+                } else {
+                    writer = dataFileWriter.createRollingKvWriter(outputLevel);
+                    function = new LazyMergeFunction(mergeFunction.copy());
+                }
+
+                return dataFileWriter.doWrite(
+                        writer,
                         new RecordReaderIterator<>(
                                 new MergeTreeReader(
                                         sections,
                                         dropDelete,
-                                        dataFileReaderFactory.create(partition, bucket),
+                                        dataFileReaderFactory.create(partition, bucket, maxLevel),
                                         keyComparator,
-                                        mergeFunction.copy())),
-                        outputLevel);
+                                        function)));
+            }
+
+            @Override
+            public List<DataFileMeta> upgrade(
+                    int outputLevel, boolean dropDelete, DataFileMeta file) throws Exception {
+                if (maxLevel == outputLevel && logInFullCompaction()) {
+                    return rewrite(
+                            outputLevel,
+                            dropDelete,
+                            singletonList(singletonList(SortedRun.fromSingle(file))));
+                } else {
+                    return CompactRewriter.super.upgrade(outputLevel, dropDelete, file);
+                }
+            }
+        };
+    }
+
+    private boolean logInFullCompaction() {
+        return changelogProducer == ChangelogProducer.FULL_COMPACTION;
     }
 }

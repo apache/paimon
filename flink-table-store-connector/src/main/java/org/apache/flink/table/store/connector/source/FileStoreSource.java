@@ -25,7 +25,9 @@ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.file.Snapshot.CommitKind;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.FileStoreTable;
@@ -54,6 +56,8 @@ public class FileStoreSource
 
     private final boolean latestContinuous;
 
+    private final ChangelogProducer changelogProducer;
+
     @Nullable private final int[][] projectedFields;
 
     @Nullable private final Predicate predicate;
@@ -65,6 +69,7 @@ public class FileStoreSource
             boolean isContinuous,
             long discoveryInterval,
             boolean latestContinuous,
+            ChangelogProducer changelogProducer,
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
             @Nullable Long limit) {
@@ -72,6 +77,7 @@ public class FileStoreSource
         this.isContinuous = isContinuous;
         this.discoveryInterval = discoveryInterval;
         this.latestContinuous = latestContinuous;
+        this.changelogProducer = changelogProducer;
         this.projectedFields = projectedFields;
         this.predicate = predicate;
         this.limit = limit;
@@ -137,9 +143,14 @@ public class FileStoreSource
         // create enumerator from snapshotId and splits
         if (isContinuous) {
             long currentSnapshot = snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId;
+            CommitKind commitKind =
+                    changelogProducer == ChangelogProducer.FULL_COMPACTION
+                            ? CommitKind.COMPACT
+                            : CommitKind.APPEND;
             return new ContinuousFileSplitEnumerator(
                     context,
                     scan.withIncremental(true), // the subsequent planning is all incremental
+                    commitKind,
                     snapshotManager,
                     splits,
                     currentSnapshot,

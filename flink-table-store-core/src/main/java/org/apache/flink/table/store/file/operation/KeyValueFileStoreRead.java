@@ -25,6 +25,7 @@ import org.apache.flink.table.store.file.data.DataFileReader;
 import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
+import org.apache.flink.table.store.file.mergetree.compact.LazyMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -53,6 +54,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     private final DataFileReader.Factory dataFileReaderFactory;
     private final Comparator<RowData> keyComparator;
     private final MergeFunction mergeFunction;
+    private final boolean incrementalFromChangelogFile;
 
     private int[][] keyProjectedFields;
 
@@ -66,12 +68,14 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             Comparator<RowData> keyComparator,
             MergeFunction mergeFunction,
             FileFormat fileFormat,
-            FileStorePathFactory pathFactory) {
+            FileStorePathFactory pathFactory,
+            boolean incrementalFromChangelogFile) {
         this.dataFileReaderFactory =
                 new DataFileReader.Factory(
                         schemaManager, schemaId, keyType, valueType, fileFormat, pathFactory);
         this.keyComparator = keyComparator;
         this.mergeFunction = mergeFunction;
+        this.incrementalFromChangelogFile = incrementalFromChangelogFile;
     }
 
     public KeyValueFileStoreRead withKeyProjection(int[][] projectedFields) {
@@ -99,8 +103,15 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             // Return the raw file contents without merging
             List<ConcatRecordReader.ReaderSupplier<KeyValue>> suppliers = new ArrayList<>();
             for (DataFileMeta file : split.files()) {
+                Optional<String> changelogFile = changelogFile(file);
+                if (incrementalFromChangelogFile && !changelogFile.isPresent()) {
+                    continue;
+                }
+
                 suppliers.add(
-                        () -> dataFileReader.read(changelogFile(file).orElse(file.fileName())));
+                        () ->
+                                dataFileReader.read(
+                                        changelogFile.orElse(file.fileName()), file.level()));
             }
             return ConcatRecordReader.create(suppliers);
         } else {
@@ -114,7 +125,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                             true,
                             dataFileReader,
                             keyComparator,
-                            mergeFunction.copy());
+                            new LazyMergeFunction(mergeFunction.copy()));
 
             // project key using ProjectKeyRecordReader
             return keyProjectedFields == null

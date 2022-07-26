@@ -44,6 +44,7 @@ public class KeyValue {
     private long sequenceNumber;
     private RowKind valueKind;
     private RowData value;
+    private boolean fromTopLevel = false;
 
     public KeyValue setValue(RowData value) {
         this.value = value;
@@ -67,6 +68,11 @@ public class KeyValue {
         return this;
     }
 
+    public KeyValue replaceFromTopLevel(boolean fromTopLevel) {
+        this.fromTopLevel = fromTopLevel;
+        return this;
+    }
+
     public RowData key() {
         return key;
     }
@@ -81,6 +87,10 @@ public class KeyValue {
 
     public RowData value() {
         return value;
+    }
+
+    public boolean fromTopLevel() {
+        return fromTopLevel;
     }
 
     public static RowType schema(RowType keyType, RowType valueType) {
