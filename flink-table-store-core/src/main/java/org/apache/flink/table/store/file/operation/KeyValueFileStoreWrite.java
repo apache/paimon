@@ -151,7 +151,7 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
                 dataFileWriter,
                 options.commitForceCompact(),
                 options.numSortedRunStopTrigger(),
-                options.enableChangelogFile());
+                options.changelogProducer());
     }
 
     private CompactManager createCompactManager(
