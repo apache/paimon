@@ -81,7 +81,7 @@ as follows (recommended):
 ```sql
 CREATE TABLE T (...)
 WITH (
-    'changelog-file' = 'true',
+    'changelog-producer' = 'input',
     'log.changelog-mode' = 'all'
 )
 ```

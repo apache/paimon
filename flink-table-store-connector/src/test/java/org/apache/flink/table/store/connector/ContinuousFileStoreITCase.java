@@ -50,7 +50,7 @@ public class ContinuousFileStoreITCase extends FileStoreTableITCase {
 
     @Override
     protected List<String> ddl() {
-        String options = changelogFile ? " WITH('changelog-file'='true')" : "";
+        String options = changelogFile ? " WITH('changelog-producer'='input')" : "";
         return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING)" + options,
                 "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)"

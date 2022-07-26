@@ -21,10 +21,10 @@
             <td>Specify the table store distribution policy. Data is assigned to each bucket according to the hash value of bucket-key.<br />If you specify multiple fields, delimiter is ','.<br />If not specified, the primary key will be used; if there is no primary key, the full row will be used.</td>
         </tr>
         <tr>
-            <td><h5>changelog-file</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether to double write to a changelog file when flushing memory table. This changelog file keeps the order of data input and the details of data changes, it can be read directly during stream reads.</td>
+            <td><h5>changelog-producer</h5></td>
+            <td style="word-wrap: break-word;">none</td>
+            <td><p>Enum</p></td>
+            <td>Whether to double write to a changelog file. This changelog file keeps the details of data changes, it can be read directly during stream reads.<br /><br />Possible values:<ul><li>"none": No changelog file.</li><li>"input": Double write to a changelog file when flushing memory table, the changelog is come from input.</li></ul></td>
         </tr>
         <tr>
             <td><h5>commit.force-compact</h5></td>

@@ -253,13 +253,13 @@ public class CoreOptions implements Serializable {
                                     + "This value avoids merging too much sorted runs at the same time during compaction, "
                                     + "which may lead to OutOfMemoryError.");
 
-    public static final ConfigOption<Boolean> CHANGELOG_FILE =
-            ConfigOptions.key("changelog-file")
-                    .booleanType()
-                    .defaultValue(false)
+    public static final ConfigOption<ChangelogProducer> CHANGELOG_PRODUCER =
+            ConfigOptions.key("changelog-producer")
+                    .enumType(ChangelogProducer.class)
+                    .defaultValue(ChangelogProducer.NONE)
                     .withDescription(
-                            "Whether to double write to a changelog file when flushing memory table. "
-                                    + "This changelog file keeps the order of data input and the details of data changes, "
+                            "Whether to double write to a changelog file. "
+                                    + "This changelog file keeps the details of data changes, "
                                     + "it can be read directly during stream reads.");
 
     public static final ConfigOption<String> SEQUENCE_FIELD =
@@ -446,8 +446,8 @@ public class CoreOptions implements Serializable {
         return options.get(COMPACTION_MAX_SORTED_RUN_NUM);
     }
 
-    public boolean enableChangelogFile() {
-        return options.get(CHANGELOG_FILE);
+    public ChangelogProducer changelogProducer() {
+        return options.get(CHANGELOG_PRODUCER);
     }
 
     public Optional<String> sequenceField() {
@@ -555,6 +555,33 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         LogChangelogMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Specifies the changelog producer for table. */
+    public enum ChangelogProducer implements DescribedEnum {
+        NONE("none", "No changelog file."),
+
+        INPUT(
+                "input",
+                "Double write to a changelog file when flushing memory table, the changelog is come from input.");
+
+        private final String value;
+        private final String description;
+
+        ChangelogProducer(String value, String description) {
             this.value = value;
             this.description = description;
         }
