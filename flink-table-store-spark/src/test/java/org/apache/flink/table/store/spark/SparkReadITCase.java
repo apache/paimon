@@ -387,6 +387,20 @@ public class SparkReadITCase {
     }
 
     @Test
+    public void testDescribeTable() {
+        spark.sql("USE tablestore");
+        spark.sql(
+                "CREATE TABLE default.PartitionedTable (\n"
+                        + "a BIGINT,\n"
+                        + "b STRING) USING tablestore\n"
+                        + "COMMENT 'table comment'\n"
+                        + "PARTITIONED BY (a)\n"
+                        + "TBLPROPERTIES ('foo' = 'bar')");
+        assertThat(spark.sql("DESCRIBE default.PartitionedTable").collectAsList().toString())
+                .isEqualTo("[[a,bigint,], [b,string,], [,,], [# Partitioning,,], [Part 0,a,]]");
+    }
+
+    @Test
     public void testCreateTableWithInvalidPk() {
         spark.sql("USE tablestore");
         assertThatThrownBy(
