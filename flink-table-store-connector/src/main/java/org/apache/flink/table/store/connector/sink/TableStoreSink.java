@@ -20,13 +20,13 @@ package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
 import org.apache.flink.table.store.connector.FlinkConnectorOptions;
 import org.apache.flink.table.store.connector.TableStoreDataStreamSinkProvider;
@@ -45,6 +45,7 @@ import javax.annotation.Nullable;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.apache.flink.table.store.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
 
 /** Table sink to create {@link StoreSink}. */
@@ -79,25 +80,22 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
             return requestedMode;
         } else if (table instanceof ChangelogWithKeyFileStoreTable) {
             Configuration options = Configuration.fromMap(table.schema().options());
-            if (options.get(LOG_CHANGELOG_MODE) != LogChangelogMode.ALL) {
-                // with primary key, default sink upsert
-                ChangelogMode.Builder builder = ChangelogMode.newBuilder();
-                for (RowKind kind : requestedMode.getContainedKinds()) {
-                    if (kind != RowKind.UPDATE_BEFORE) {
-                        builder.addContainedKind(kind);
-                    }
-                }
-                return builder.build();
+            if (options.get(CHANGELOG_PRODUCER) == ChangelogProducer.INPUT) {
+                return requestedMode;
             }
 
-            // all changelog mode configured
-            if (!requestedMode.contains(RowKind.UPDATE_BEFORE)
-                    || !requestedMode.contains(RowKind.UPDATE_AFTER)) {
-                throw new ValidationException(
-                        "You cannot insert incomplete data into a table that "
-                                + "has primary key and declares all changelog mode.");
+            if (options.get(LOG_CHANGELOG_MODE) == LogChangelogMode.ALL) {
+                return requestedMode;
             }
-            return requestedMode;
+
+            // with primary key, default sink upsert
+            ChangelogMode.Builder builder = ChangelogMode.newBuilder();
+            for (RowKind kind : requestedMode.getContainedKinds()) {
+                if (kind != RowKind.UPDATE_BEFORE) {
+                    builder.addContainedKind(kind);
+                }
+            }
+            return builder.build();
         } else {
             throw new UnsupportedOperationException(
                     "Unknown FileStoreTable subclass " + table.getClass().getName());

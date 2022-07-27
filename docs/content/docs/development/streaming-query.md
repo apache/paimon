@@ -81,8 +81,7 @@ as follows (recommended):
 ```sql
 CREATE TABLE T (...)
 WITH (
-    'changelog-producer' = 'input',
-    'log.changelog-mode' = 'all'
+    'changelog-producer' = 'input'
 )
 ```
 
