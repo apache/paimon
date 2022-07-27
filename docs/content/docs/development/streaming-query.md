@@ -75,8 +75,9 @@ streaming mode. This mode has a lower cost compared to Kafka but has a higher la
 depending on the checkpoint interval of the writing job.
 
 By default, the downstream streaming consumption is disordered (ordered within the key)
-stream of upsert data. If you expect an ordered CDC data stream, you can configure it
-as follows (recommended):
+stream of upsert data. If you expect an ordered CDC data stream, and remove downstream
+changelog normalized operator (which is costly), you can configure it as follows
+(Recommended, but this requires that your input is inclusive of all changelogs):
 
 ```sql
 CREATE TABLE T (...)
