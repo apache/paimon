@@ -316,6 +316,13 @@ public class SparkReadITCase {
     }
 
     @Test
+    public void testDefaultNamespace() {
+        spark.sql("USE tablestore");
+        assertThat(spark.sql("SHOW CURRENT NAMESPACE").collectAsList().toString())
+                .isEqualTo("[[tablestore,default]]");
+    }
+
+    @Test
     public void testAlterPrimaryKeyNullability() {
         spark.sql("USE tablestore");
         spark.sql(
