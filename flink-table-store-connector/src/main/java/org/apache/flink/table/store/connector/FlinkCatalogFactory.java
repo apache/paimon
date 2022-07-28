@@ -33,7 +33,9 @@ public class FlinkCatalogFactory implements org.apache.flink.table.factories.Cat
     public static final String IDENTIFIER = "table-store";
 
     public static final ConfigOption<String> DEFAULT_DATABASE =
-            ConfigOptions.key("default-database").stringType().defaultValue(Catalog.DEFAULT_DATABASE);
+            ConfigOptions.key("default-database")
+                    .stringType()
+                    .defaultValue(Catalog.DEFAULT_DATABASE);
 
     @Override
     public String factoryIdentifier() {
