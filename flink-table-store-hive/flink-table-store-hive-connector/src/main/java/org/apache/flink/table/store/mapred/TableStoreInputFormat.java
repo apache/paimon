@@ -73,7 +73,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
                 read,
                 split,
                 table.schema().fieldNames(),
-                Arrays.asList(ColumnProjectionUtils.getReadColumnNames(jobConf)));
+                Arrays.asList(getSelectedColumns(jobConf)));
     }
 
     private FileStoreTable createFileStoreTable(JobConf jobConf) {
@@ -96,5 +96,13 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
                 new SearchArgumentToPredicateConverter(
                         sarg, tableSchema.fieldNames(), tableSchema.logicalRowType().getChildren());
         return converter.convert();
+    }
+
+    private String[] getSelectedColumns(JobConf jobConf) {
+        // when using tez engine or when same table is joined multiple times,
+        // it is possible that some selected columns are duplicated
+        return Arrays.stream(ColumnProjectionUtils.getReadColumnNames(jobConf))
+                .distinct()
+                .toArray(String[]::new);
     }
 }
