@@ -21,6 +21,7 @@ package org.apache.flink.table.store.connector;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 
 import java.util.Collections;
@@ -32,7 +33,9 @@ public class FlinkCatalogFactory implements org.apache.flink.table.factories.Cat
     public static final String IDENTIFIER = "table-store";
 
     public static final ConfigOption<String> DEFAULT_DATABASE =
-            ConfigOptions.key("default-database").stringType().defaultValue("default");
+            ConfigOptions.key("default-database")
+                    .stringType()
+                    .defaultValue(Catalog.DEFAULT_DATABASE);
 
     @Override
     public String factoryIdentifier() {
