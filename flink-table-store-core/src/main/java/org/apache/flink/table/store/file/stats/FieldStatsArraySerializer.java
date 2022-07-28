@@ -22,6 +22,7 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.format.FieldStats;
+import org.apache.flink.table.store.utils.RowDataUtils;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -47,7 +48,10 @@ public class FieldStatsArraySerializer {
         this.serializer = new RowDataSerializer(safeType);
         this.fieldGetters =
                 IntStream.range(0, safeType.getFieldCount())
-                        .mapToObj(i -> RowData.createFieldGetter(safeType.getTypeAt(i), i))
+                        .mapToObj(
+                                i ->
+                                        RowDataUtils.createNullCheckingFieldGetter(
+                                                safeType.getTypeAt(i), i))
                         .toArray(RowData.FieldGetter[]::new);
     }
 

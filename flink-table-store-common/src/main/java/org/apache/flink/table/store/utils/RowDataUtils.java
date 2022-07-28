@@ -280,4 +280,19 @@ public class RowDataUtils {
         bd = bd.setScale(0, RoundingMode.DOWN);
         return bd.longValue();
     }
+
+    public static RowData.FieldGetter createNullCheckingFieldGetter(
+            LogicalType logicalType, int index) {
+        RowData.FieldGetter getter = RowData.createFieldGetter(logicalType, index);
+        if (logicalType.isNullable()) {
+            return getter;
+        } else {
+            return row -> {
+                if (row.isNullAt(index)) {
+                    return null;
+                }
+                return getter.getFieldOrNull(row);
+            };
+        }
+    }
 }

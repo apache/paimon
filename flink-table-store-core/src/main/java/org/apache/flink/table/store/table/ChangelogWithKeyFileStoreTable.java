@@ -46,6 +46,7 @@ import org.apache.flink.table.store.table.source.SplitGenerator;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
+import org.apache.flink.table.store.utils.RowDataUtils;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -83,7 +84,8 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                 List<LogicalType> fieldTypes = rowType.getChildren();
                 RowData.FieldGetter[] fieldGetters = new RowData.FieldGetter[fieldTypes.size()];
                 for (int i = 0; i < fieldTypes.size(); i++) {
-                    fieldGetters[i] = RowData.createFieldGetter(fieldTypes.get(i), i);
+                    fieldGetters[i] =
+                            RowDataUtils.createNullCheckingFieldGetter(fieldTypes.get(i), i);
                 }
                 mergeFunction = new PartialUpdateMergeFunction(fieldGetters);
                 break;
