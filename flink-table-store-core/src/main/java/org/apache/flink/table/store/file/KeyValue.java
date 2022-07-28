@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
+import org.apache.flink.table.store.utils.RowDataUtils;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.TinyIntType;
@@ -147,7 +148,8 @@ public class KeyValue {
                 .mapToObj(
                         i ->
                                 String.valueOf(
-                                        RowData.createFieldGetter(type.getTypeAt(i), i)
+                                        RowDataUtils.createNullCheckingFieldGetter(
+                                                        type.getTypeAt(i), i)
                                                 .getFieldOrNull(row)))
                 .collect(Collectors.joining(", "));
     }

@@ -26,6 +26,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.utils.ProjectedRowData;
 import org.apache.flink.table.store.utils.Projection;
+import org.apache.flink.table.store.utils.RowDataUtils;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Collector;
@@ -71,7 +72,7 @@ public class KafkaLogDeserializationSchema implements KafkaDeserializationSchema
                 IntStream.range(0, primaryKey.length)
                         .mapToObj(
                                 i ->
-                                        RowData.createFieldGetter(
+                                        RowDataUtils.createNullCheckingFieldGetter(
                                                 physicalType
                                                         .getChildren()
                                                         .get(primaryKey[i])

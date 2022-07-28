@@ -22,10 +22,12 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connectors.hive.FlinkEmbeddedHiveRunner;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.FileStoreTestUtils;
+import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.hive.objectinspector.TableStoreObjectInspectorFactory;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.TableCommit;
@@ -56,6 +58,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -82,90 +85,427 @@ public class TableStoreHiveStorageHandlerITCase {
     }
 
     @Test
-    public void testReadExternalTableWithPk() throws Exception {
-        String path = folder.newFolder().toURI().toString();
-        Configuration conf = new Configuration();
-        conf.setString(CoreOptions.PATH, path);
-        conf.setInteger(CoreOptions.BUCKET, 2);
-        conf.setString(CoreOptions.FILE_FORMAT, "avro");
-        FileStoreTable table =
-                FileStoreTestUtils.createFileStoreTable(
-                        conf,
+    public void testReadExternalTableNoPartitionWithPk() throws Exception {
+        List<RowData> data =
+                Arrays.asList(
+                        GenericRowData.of(1, 10L, StringData.fromString("Hi"), 100L),
+                        GenericRowData.of(1, 20L, StringData.fromString("Hello"), 200L),
+                        GenericRowData.of(2, 30L, StringData.fromString("World"), 300L),
+                        GenericRowData.of(1, 10L, StringData.fromString("Hi Again"), 1000L),
+                        GenericRowData.ofKind(
+                                RowKind.DELETE, 2, 30L, StringData.fromString("World"), 300L),
+                        GenericRowData.of(2, 40L, null, 400L),
+                        GenericRowData.of(3, 50L, StringData.fromString("Store"), 200L));
+        String tableName =
+                createChangelogExternalTable(
                         RowType.of(
                                 new LogicalType[] {
                                     DataTypes.INT().getLogicalType(),
                                     DataTypes.BIGINT().getLogicalType(),
-                                    DataTypes.STRING().getLogicalType()
+                                    DataTypes.STRING().getLogicalType(),
+                                    DataTypes.BIGINT().getLogicalType()
                                 },
-                                new String[] {"a", "b", "c"}),
+                                new String[] {"a", "b", "c", "d"}),
                         Collections.emptyList(),
-                        Arrays.asList("a", "b"));
+                        Arrays.asList("a", "b"),
+                        data);
 
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
-        write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi")));
-        write.write(GenericRowData.of(1, 20L, StringData.fromString("Hello")));
-        write.write(GenericRowData.of(2, 30L, StringData.fromString("World")));
-        write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi Again")));
-        write.write(GenericRowData.ofKind(RowKind.DELETE, 2, 30L, StringData.fromString("World")));
-        write.write(GenericRowData.of(2, 40L, StringData.fromString("Test")));
-        commit.commit("0", write.prepareCommit(true));
-        write.close();
+        List<String> actual = hiveShell.executeQuery("SELECT * FROM " + tableName + " ORDER BY b");
+        List<String> expected =
+                Arrays.asList(
+                        "1\t10\tHi Again\t1000",
+                        "1\t20\tHello\t200",
+                        "2\t40\tNULL\t400",
+                        "3\t50\tStore\t200");
+        Assert.assertEquals(expected, actual);
 
-        hiveShell.execute(
-                String.join(
-                        "\n",
-                        Arrays.asList(
-                                "CREATE EXTERNAL TABLE test_table",
-                                "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
-                                "LOCATION '" + path + "'")));
-        List<String> actual = hiveShell.executeQuery("SELECT b, a, c FROM test_table ORDER BY b");
-        List<String> expected = Arrays.asList("10\t1\tHi Again", "20\t1\tHello", "40\t2\tTest");
+        actual = hiveShell.executeQuery("SELECT c, b FROM " + tableName + " ORDER BY b");
+        expected = Arrays.asList("Hi Again\t10", "Hello\t20", "NULL\t40", "Store\t50");
+        Assert.assertEquals(expected, actual);
+
+        actual = hiveShell.executeQuery("SELECT * FROM " + tableName + " WHERE d > 200 ORDER BY b");
+        expected = Arrays.asList("1\t10\tHi Again\t1000", "2\t40\tNULL\t400");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT a, sum(d) FROM " + tableName + " GROUP BY a ORDER BY a");
+        expected = Arrays.asList("1\t1200", "2\t400", "3\t200");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT d, sum(b) FROM " + tableName + " GROUP BY d ORDER BY d");
+        expected = Arrays.asList("200\t70", "400\t40", "1000\t10");
         Assert.assertEquals(expected, actual);
     }
 
     @Test
-    public void testReadExternalTableWithoutPk() throws Exception {
+    public void testReadExternalTableWithPartitionWithPk() throws Exception {
+        List<RowData> data =
+                Arrays.asList(
+                        GenericRowData.of(1, 10, 100L, StringData.fromString("Hi")),
+                        GenericRowData.of(2, 10, 200L, StringData.fromString("Hello")),
+                        GenericRowData.of(1, 20, 300L, StringData.fromString("World")),
+                        GenericRowData.of(1, 10, 100L, StringData.fromString("Hi Again")),
+                        GenericRowData.ofKind(
+                                RowKind.DELETE, 1, 20, 300L, StringData.fromString("World")),
+                        GenericRowData.of(2, 20, 100L, null),
+                        GenericRowData.of(1, 30, 200L, StringData.fromString("Store")));
+        String tableName =
+                createChangelogExternalTable(
+                        RowType.of(
+                                new LogicalType[] {
+                                    DataTypes.INT().getLogicalType(),
+                                    DataTypes.INT().getLogicalType(),
+                                    DataTypes.BIGINT().getLogicalType(),
+                                    DataTypes.STRING().getLogicalType()
+                                },
+                                new String[] {"pt", "a", "b", "c"}),
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "a"),
+                        data);
+
+        List<String> actual =
+                hiveShell.executeQuery("SELECT * FROM " + tableName + " ORDER BY pt, a");
+        List<String> expected =
+                Arrays.asList(
+                        "1\t10\t100\tHi Again",
+                        "1\t30\t200\tStore",
+                        "2\t10\t200\tHello",
+                        "2\t20\t100\tNULL");
+        Assert.assertEquals(expected, actual);
+
+        actual = hiveShell.executeQuery("SELECT c, a FROM " + tableName + " ORDER BY c, a");
+        expected = Arrays.asList("NULL\t20", "Hello\t10", "Hi Again\t10", "Store\t30");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT * FROM " + tableName + " WHERE b > 100 ORDER BY pt, a");
+        expected = Arrays.asList("1\t30\t200\tStore", "2\t10\t200\tHello");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT pt, sum(b), max(c) FROM " + tableName + " GROUP BY pt ORDER BY pt");
+        expected = Arrays.asList("1\t300\tStore", "2\t300\tHello");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT a, sum(b), max(c) FROM " + tableName + " GROUP BY a ORDER BY a");
+        expected = Arrays.asList("10\t300\tHi Again", "20\t100\tNULL", "30\t200\tStore");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT b, sum(a), max(c) FROM " + tableName + " GROUP BY b ORDER BY b");
+        expected = Arrays.asList("100\t30\tHi Again", "200\t40\tStore");
+        Assert.assertEquals(expected, actual);
+    }
+
+    @Test
+    public void testReadExternalTableNoPartitionWithValueCount() throws Exception {
+        List<RowData> data =
+                Arrays.asList(
+                        GenericRowData.of(1, 10L, StringData.fromString("Hi"), 100L),
+                        GenericRowData.of(1, 20L, StringData.fromString("Hello"), 200L),
+                        GenericRowData.of(2, 30L, StringData.fromString("World"), 300L),
+                        GenericRowData.of(1, 10L, StringData.fromString("Hi Again"), 1000L),
+                        GenericRowData.ofKind(
+                                RowKind.DELETE, 2, 30L, StringData.fromString("World"), 300L),
+                        GenericRowData.of(2, 40L, null, 400L),
+                        GenericRowData.of(3, 50L, StringData.fromString("Store"), 200L));
+        String tableName =
+                createChangelogExternalTable(
+                        RowType.of(
+                                new LogicalType[] {
+                                    DataTypes.INT().getLogicalType(),
+                                    DataTypes.BIGINT().getLogicalType(),
+                                    DataTypes.STRING().getLogicalType(),
+                                    DataTypes.BIGINT().getLogicalType()
+                                },
+                                new String[] {"a", "b", "c", "d"}),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        data);
+
+        List<String> actual =
+                hiveShell.executeQuery("SELECT * FROM " + tableName + " ORDER BY b, d");
+        List<String> expected =
+                Arrays.asList(
+                        "1\t10\tHi\t100",
+                        "1\t10\tHi Again\t1000",
+                        "1\t20\tHello\t200",
+                        "2\t40\tNULL\t400",
+                        "3\t50\tStore\t200");
+        Assert.assertEquals(expected, actual);
+
+        actual = hiveShell.executeQuery("SELECT c, b FROM " + tableName + " ORDER BY c");
+        expected = Arrays.asList("NULL\t40", "Hello\t20", "Hi\t10", "Hi Again\t10", "Store\t50");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery("SELECT * FROM " + tableName + " WHERE d <> 200 ORDER BY d");
+        expected = Arrays.asList("1\t10\tHi\t100", "2\t40\tNULL\t400", "1\t10\tHi Again\t1000");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT a, sum(d) FROM " + tableName + " GROUP BY a ORDER BY a");
+        expected = Arrays.asList("1\t1300", "2\t400", "3\t200");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT d, sum(b) FROM " + tableName + " GROUP BY d ORDER BY d");
+        expected = Arrays.asList("100\t10", "200\t70", "400\t40", "1000\t10");
+        Assert.assertEquals(expected, actual);
+    }
+
+    @Test
+    public void testReadExternalTableWithPartitionWithValueCount() throws Exception {
+        List<RowData> data =
+                Arrays.asList(
+                        GenericRowData.of(1, 10, 100L, StringData.fromString("Hi")),
+                        GenericRowData.of(2, 10, 200L, StringData.fromString("Hello")),
+                        GenericRowData.of(1, 20, 300L, StringData.fromString("World")),
+                        GenericRowData.of(1, 10, 100L, StringData.fromString("Hi Again")),
+                        GenericRowData.ofKind(
+                                RowKind.DELETE, 1, 20, 300L, StringData.fromString("World")),
+                        GenericRowData.of(2, 20, 400L, null),
+                        GenericRowData.of(1, 30, 500L, StringData.fromString("Store")));
+        String tableName =
+                createChangelogExternalTable(
+                        RowType.of(
+                                new LogicalType[] {
+                                    DataTypes.INT().getLogicalType(),
+                                    DataTypes.INT().getLogicalType(),
+                                    DataTypes.BIGINT().getLogicalType(),
+                                    DataTypes.STRING().getLogicalType()
+                                },
+                                new String[] {"pt", "a", "b", "c"}),
+                        Collections.singletonList("pt"),
+                        Collections.emptyList(),
+                        data);
+
+        List<String> actual =
+                hiveShell.executeQuery("SELECT * FROM " + tableName + " ORDER BY pt, a, c");
+        List<String> expected =
+                Arrays.asList(
+                        "1\t10\t100\tHi",
+                        "1\t10\t100\tHi Again",
+                        "1\t30\t500\tStore",
+                        "2\t10\t200\tHello",
+                        "2\t20\t400\tNULL");
+        Assert.assertEquals(expected, actual);
+
+        actual = hiveShell.executeQuery("SELECT c, b FROM " + tableName + " ORDER BY c");
+        expected =
+                Arrays.asList("NULL\t400", "Hello\t200", "Hi\t100", "Hi Again\t100", "Store\t500");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT * FROM " + tableName + " WHERE b < 400 ORDER BY b, c");
+        expected = Arrays.asList("1\t10\t100\tHi", "1\t10\t100\tHi Again", "2\t10\t200\tHello");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT pt, max(a), min(c) FROM " + tableName + " GROUP BY pt ORDER BY pt");
+        expected = Arrays.asList("1\t30\tHi", "2\t20\tHello");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT a, sum(b), min(c) FROM " + tableName + " GROUP BY a ORDER BY a");
+        expected = Arrays.asList("10\t400\tHello", "20\t400\tNULL", "30\t500\tStore");
+        Assert.assertEquals(expected, actual);
+    }
+
+    @Test
+    public void testReadExternalTableNoPartitionAppendOnly() throws Exception {
+        List<RowData> data =
+                Arrays.asList(
+                        GenericRowData.of(1, 10L, StringData.fromString("Hi"), 100L),
+                        GenericRowData.of(1, 20L, StringData.fromString("Hello"), 200L),
+                        GenericRowData.of(2, 30L, StringData.fromString("World"), 300L),
+                        GenericRowData.of(1, 10L, StringData.fromString("Hi Again"), 1000L),
+                        GenericRowData.of(2, 40L, null, 400L),
+                        GenericRowData.of(3, 50L, StringData.fromString("Store"), 200L));
+        String tableName =
+                createAppendOnlyExternalTable(
+                        RowType.of(
+                                new LogicalType[] {
+                                    DataTypes.INT().getLogicalType(),
+                                    DataTypes.BIGINT().getLogicalType(),
+                                    DataTypes.STRING().getLogicalType(),
+                                    DataTypes.BIGINT().getLogicalType()
+                                },
+                                new String[] {"a", "b", "c", "d"}),
+                        Collections.emptyList(),
+                        data);
+
+        List<String> actual =
+                hiveShell.executeQuery("SELECT * FROM " + tableName + " ORDER BY a, b, c");
+        List<String> expected =
+                Arrays.asList(
+                        "1\t10\tHi\t100",
+                        "1\t10\tHi Again\t1000",
+                        "1\t20\tHello\t200",
+                        "2\t30\tWorld\t300",
+                        "2\t40\tNULL\t400",
+                        "3\t50\tStore\t200");
+        Assert.assertEquals(expected, actual);
+
+        actual = hiveShell.executeQuery("SELECT c, b FROM " + tableName + " ORDER BY c");
+        expected =
+                Arrays.asList(
+                        "NULL\t40",
+                        "Hello\t20",
+                        "Hi\t10",
+                        "Hi Again\t10",
+                        "Store\t50",
+                        "World\t30");
+        Assert.assertEquals(expected, actual);
+
+        actual = hiveShell.executeQuery("SELECT * FROM " + tableName + " WHERE d < 300 ORDER BY d");
+        expected = Arrays.asList("1\t10\tHi\t100", "1\t20\tHello\t200", "3\t50\tStore\t200");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT a, sum(d) FROM " + tableName + " GROUP BY a ORDER BY a");
+        expected = Arrays.asList("1\t1300", "2\t700", "3\t200");
+        Assert.assertEquals(expected, actual);
+    }
+
+    @Test
+    public void testReadExternalTableWithPartitionAppendOnly() throws Exception {
+        List<RowData> data =
+                Arrays.asList(
+                        GenericRowData.of(1, 10, 100L, StringData.fromString("Hi")),
+                        GenericRowData.of(2, 10, 200L, StringData.fromString("Hello")),
+                        GenericRowData.of(1, 20, 300L, StringData.fromString("World")),
+                        GenericRowData.of(1, 10, 100L, StringData.fromString("Hi Again")),
+                        GenericRowData.of(2, 20, 400L, null),
+                        GenericRowData.of(1, 30, 500L, StringData.fromString("Store")));
+        String tableName =
+                createAppendOnlyExternalTable(
+                        RowType.of(
+                                new LogicalType[] {
+                                    DataTypes.INT().getLogicalType(),
+                                    DataTypes.INT().getLogicalType(),
+                                    DataTypes.BIGINT().getLogicalType(),
+                                    DataTypes.STRING().getLogicalType()
+                                },
+                                new String[] {"pt", "a", "b", "c"}),
+                        Collections.singletonList("pt"),
+                        data);
+
+        List<String> actual =
+                hiveShell.executeQuery("SELECT * FROM " + tableName + " ORDER BY pt, a, c");
+        List<String> expected =
+                Arrays.asList(
+                        "1\t10\t100\tHi",
+                        "1\t10\t100\tHi Again",
+                        "1\t20\t300\tWorld",
+                        "1\t30\t500\tStore",
+                        "2\t10\t200\tHello",
+                        "2\t20\t400\tNULL");
+        Assert.assertEquals(expected, actual);
+
+        actual = hiveShell.executeQuery("SELECT c, b FROM " + tableName + " ORDER BY c");
+        expected =
+                Arrays.asList(
+                        "NULL\t400",
+                        "Hello\t200",
+                        "Hi\t100",
+                        "Hi Again\t100",
+                        "Store\t500",
+                        "World\t300");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT * FROM " + tableName + " WHERE b < 400 ORDER BY b, c");
+        expected =
+                Arrays.asList(
+                        "1\t10\t100\tHi",
+                        "1\t10\t100\tHi Again",
+                        "2\t10\t200\tHello",
+                        "1\t20\t300\tWorld");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT pt, max(a), min(c) FROM " + tableName + " GROUP BY pt ORDER BY pt");
+        expected = Arrays.asList("1\t30\tHi", "2\t20\tHello");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT a, sum(b), min(c) FROM " + tableName + " GROUP BY a ORDER BY a");
+        expected = Arrays.asList("10\t400\tHello", "20\t700\tWorld", "30\t500\tStore");
+        Assert.assertEquals(expected, actual);
+    }
+
+    private String createChangelogExternalTable(
+            RowType rowType,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            List<RowData> data)
+            throws Exception {
         String path = folder.newFolder().toURI().toString();
         Configuration conf = new Configuration();
         conf.setString(CoreOptions.PATH, path);
         conf.setInteger(CoreOptions.BUCKET, 2);
         conf.setString(CoreOptions.FILE_FORMAT, "avro");
         FileStoreTable table =
-                FileStoreTestUtils.createFileStoreTable(
-                        conf,
-                        RowType.of(
-                                new LogicalType[] {
-                                    DataTypes.INT().getLogicalType(),
-                                    DataTypes.BIGINT().getLogicalType(),
-                                    DataTypes.STRING().getLogicalType()
-                                },
-                                new String[] {"a", "b", "c"}),
-                        Collections.emptyList(),
-                        Collections.emptyList());
+                FileStoreTestUtils.createFileStoreTable(conf, rowType, partitionKeys, primaryKeys);
 
+        return writeData(table, path, data);
+    }
+
+    private String createAppendOnlyExternalTable(
+            RowType rowType, List<String> partitionKeys, List<RowData> data) throws Exception {
+        String path = folder.newFolder().toURI().toString();
+        Configuration conf = new Configuration();
+        conf.setString(CoreOptions.PATH, path);
+        conf.setInteger(CoreOptions.BUCKET, 2);
+        conf.setString(CoreOptions.FILE_FORMAT, "avro");
+        conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
+        FileStoreTable table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf, rowType, partitionKeys, Collections.emptyList());
+
+        return writeData(table, path, data);
+    }
+
+    private String writeData(FileStoreTable table, String path, List<RowData> data)
+            throws Exception {
         TableWrite write = table.newWrite();
         TableCommit commit = table.newCommit("user");
-        write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi")));
-        write.write(GenericRowData.of(1, 20L, StringData.fromString("Hello")));
-        write.write(GenericRowData.of(2, 30L, StringData.fromString("World")));
-        write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi")));
-        write.write(GenericRowData.ofKind(RowKind.DELETE, 2, 30L, StringData.fromString("World")));
-        write.write(GenericRowData.of(2, 40L, StringData.fromString("Test")));
-        commit.commit("0", write.prepareCommit(true));
+        for (RowData rowData : data) {
+            write.write(rowData);
+            if (ThreadLocalRandom.current().nextInt(5) == 0) {
+                commit.commit(UUID.randomUUID().toString(), write.prepareCommit(false));
+            }
+        }
+        commit.commit(UUID.randomUUID().toString(), write.prepareCommit(true));
         write.close();
 
+        String tableName = "test_table_" + (UUID.randomUUID().toString().substring(0, 4));
         hiveShell.execute(
                 String.join(
                         "\n",
                         Arrays.asList(
-                                "CREATE EXTERNAL TABLE test_table",
+                                "CREATE EXTERNAL TABLE " + tableName + " ",
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
                                 "LOCATION '" + path + "'")));
-        List<String> actual = hiveShell.executeQuery("SELECT b, a, c FROM test_table ORDER BY b");
-        List<String> expected =
-                Arrays.asList("10\t1\tHi", "10\t1\tHi", "20\t1\tHello", "40\t2\tTest");
-        Assert.assertEquals(expected, actual);
+        return tableName;
     }
 
     @Test
@@ -432,45 +772,5 @@ public class TableStoreHiveStorageHandlerITCase {
                 Collections.singletonList("NULL\t2022-06-18 08:30:00.0"),
                 hiveShell.executeQuery(
                         "SELECT * FROM test_table WHERE ts = '2022-06-18 08:30:00'"));
-    }
-
-    @Test
-    public void testProjectionPushdown() throws Exception {
-        String path = folder.newFolder().toURI().toString();
-        Configuration conf = new Configuration();
-        conf.setString(CoreOptions.PATH, path);
-        conf.setInteger(CoreOptions.BUCKET, 2);
-        conf.setString(CoreOptions.FILE_FORMAT, "avro");
-        FileStoreTable table =
-                FileStoreTestUtils.createFileStoreTable(
-                        conf,
-                        RowType.of(
-                                new LogicalType[] {
-                                    DataTypes.INT().getLogicalType(),
-                                    DataTypes.BIGINT().getLogicalType(),
-                                    DataTypes.STRING().getLogicalType()
-                                },
-                                new String[] {"a", "b", "c"}),
-                        Collections.emptyList(),
-                        Collections.emptyList());
-
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
-        write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi")));
-        write.write(GenericRowData.of(2, 20L, StringData.fromString("Hello")));
-        write.write(GenericRowData.of(3, 30L, StringData.fromString("World")));
-        commit.commit("0", write.prepareCommit(true));
-        write.close();
-
-        hiveShell.execute(
-                String.join(
-                        "\n",
-                        Arrays.asList(
-                                "CREATE EXTERNAL TABLE test_table",
-                                "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
-                                "LOCATION '" + path + "'")));
-        List<String> actual = hiveShell.executeQuery("SELECT c, a FROM test_table ORDER BY a");
-        List<String> expected = Arrays.asList("Hi\t1", "Hello\t2", "World\t3");
-        Assert.assertEquals(expected, actual);
     }
 }

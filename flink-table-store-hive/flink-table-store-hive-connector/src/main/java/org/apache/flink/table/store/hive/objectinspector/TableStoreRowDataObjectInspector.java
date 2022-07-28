@@ -20,6 +20,7 @@ package org.apache.flink.table.store.hive.objectinspector;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.hive.HiveTypeUtils;
+import org.apache.flink.table.store.utils.RowDataUtils;
 import org.apache.flink.table.types.logical.LogicalType;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
@@ -53,7 +54,7 @@ public class TableStoreRowDataObjectInspector extends StructObjectInspector {
                             name,
                             TableStoreObjectInspectorFactory.create(logicalType),
                             i,
-                            RowData.createFieldGetter(logicalType, i),
+                            RowDataUtils.createNullCheckingFieldGetter(logicalType, i),
                             fieldComments.get(i));
             structFields.add(structField);
             structFieldMap.put(name, structField);
