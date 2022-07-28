@@ -41,7 +41,7 @@ As shown in the architecture above:
 - For writes, it supports streaming synchronization from the changelog of databases (CDC) or batch
   insert/overwrite from offline data.
 
-**Ecosystem:** In addition to Apache Flink, Table Store also supports read/write by other computation
+**Ecosystem:** In addition to Apache Flink, Table Store also supports read by other computation
 engines like Apache Hive, Apache Spark and Trino.
 
 **Internal:** Under the hood, Table Store uses a hybrid storage architecture with a lake format to store

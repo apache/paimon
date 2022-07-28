@@ -51,10 +51,10 @@ parallelism of the sink with the `sink.parallelism` option.
     <thead>
     <tr>
       <th class="text-left" style="width: 20%">Option</th>
-      <th class="text-center" style="width: 5%">Required</th>
-      <th class="text-center" style="width: 5%">Default</th>
-      <th class="text-center" style="width: 10%">Type</th>
-      <th class="text-center" style="width: 60%">Description</th>
+      <th class="text-left" style="width: 5%">Required</th>
+      <th class="text-left" style="width: 5%">Default</th>
+      <th class="text-left" style="width: 10%">Type</th>
+      <th class="text-left" style="width: 60%">Description</th>
     </tr>
     </thead>
     <tbody>
@@ -78,10 +78,10 @@ to eliminate expired snapshots:
     <thead>
     <tr>
       <th class="text-left" style="width: 20%">Option</th>
-      <th class="text-center" style="width: 5%">Required</th>
-      <th class="text-center" style="width: 5%">Default</th>
-      <th class="text-center" style="width: 10%">Type</th>
-      <th class="text-center" style="width: 60%">Description</th>
+      <th class="text-left" style="width: 5%">Required</th>
+      <th class="text-left" style="width: 5%">Default</th>
+      <th class="text-left" style="width: 10%">Type</th>
+      <th class="text-left" style="width: 60%">Description</th>
     </tr>
     </thead>
     <tbody>
@@ -126,10 +126,10 @@ following parameters control this tradeoff:
     <thead>
     <tr>
       <th class="text-left" style="width: 20%">Option</th>
-      <th class="text-center" style="width: 5%">Required</th>
-      <th class="text-center" style="width: 5%">Default</th>
-      <th class="text-center" style="width: 10%">Type</th>
-      <th class="text-center" style="width: 60%">Description</th>
+      <th class="text-left" style="width: 5%">Required</th>
+      <th class="text-left" style="width: 5%">Default</th>
+      <th class="text-left" style="width: 10%">Type</th>
+      <th class="text-left" style="width: 60%">Description</th>
     </tr>
     </thead>
     <tbody>
@@ -170,10 +170,10 @@ The following parameters determine when to stop writing:
     <thead>
     <tr>
       <th class="text-left" style="width: 20%">Option</th>
-      <th class="text-center" style="width: 5%">Required</th>
-      <th class="text-center" style="width: 5%">Default</th>
-      <th class="text-center" style="width: 10%">Type</th>
-      <th class="text-center" style="width: 60%">Description</th>
+      <th class="text-left" style="width: 5%">Required</th>
+      <th class="text-left" style="width: 5%">Default</th>
+      <th class="text-left" style="width: 10%">Type</th>
+      <th class="text-left" style="width: 60%">Description</th>
     </tr>
     </thead>
     <tbody>
