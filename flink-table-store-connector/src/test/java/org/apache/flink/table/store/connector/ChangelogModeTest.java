@@ -38,6 +38,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+
+import javax.annotation.Nullable;
+
 import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -65,7 +68,7 @@ public class ChangelogModeTest {
             Configuration options,
             ChangelogMode expectSource,
             ChangelogMode expectSink,
-            LogStoreTableFactory logStoreTableFactory)
+            @Nullable LogStoreTableFactory logStoreTableFactory)
             throws Exception {
         new SchemaManager(path)
                 .commitNewVersion(
