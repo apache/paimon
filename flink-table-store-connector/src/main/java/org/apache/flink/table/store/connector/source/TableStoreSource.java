@@ -30,6 +30,7 @@ import org.apache.flink.table.connector.source.abilities.SupportsWatermarkPushDo
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
 import org.apache.flink.table.store.CoreOptions.LogConsistency;
 import org.apache.flink.table.store.connector.FlinkConnectorOptions;
@@ -50,6 +51,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.apache.flink.table.store.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
 
@@ -116,9 +118,15 @@ public class TableStoreSource
         } else if (table instanceof ChangelogValueCountFileStoreTable) {
             return ChangelogMode.all();
         } else if (table instanceof ChangelogWithKeyFileStoreTable) {
+            Configuration options = Configuration.fromMap(table.schema().options());
+
+            if (logStoreTableFactory == null
+                    && options.get(CHANGELOG_PRODUCER) != ChangelogProducer.NONE) {
+                return ChangelogMode.all();
+            }
+
             // optimization: transaction consistency and all changelog mode avoid the generation of
             // normalized nodes. See TableStoreSink.getChangelogMode validation.
-            Configuration options = Configuration.fromMap(table.schema().options());
             return options.get(LOG_CONSISTENCY) == LogConsistency.TRANSACTIONAL
                             && options.get(LOG_CHANGELOG_MODE) == LogChangelogMode.ALL
                     ? ChangelogMode.all()
