@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.utils.RowDataUtils;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.StringUtils;
 
@@ -41,7 +42,10 @@ public class RowDataPartitionComputer {
         this.partitionFieldGetters =
                 Arrays.stream(partitionColumns)
                         .mapToInt(columnList::indexOf)
-                        .mapToObj(i -> RowData.createFieldGetter(rowType.getTypeAt(i), i))
+                        .mapToObj(
+                                i ->
+                                        RowDataUtils.createNullCheckingFieldGetter(
+                                                rowType.getTypeAt(i), i))
                         .toArray(RowData.FieldGetter[]::new);
     }
 

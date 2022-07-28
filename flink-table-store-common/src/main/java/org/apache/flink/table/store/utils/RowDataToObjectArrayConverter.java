@@ -33,7 +33,10 @@ public class RowDataToObjectArrayConverter {
         this.rowType = rowType;
         this.fieldGetters =
                 IntStream.range(0, rowType.getFieldCount())
-                        .mapToObj(i -> RowData.createFieldGetter(rowType.getTypeAt(i), i))
+                        .mapToObj(
+                                i ->
+                                        RowDataUtils.createNullCheckingFieldGetter(
+                                                rowType.getTypeAt(i), i))
                         .toArray(RowData.FieldGetter[]::new);
     }
 
