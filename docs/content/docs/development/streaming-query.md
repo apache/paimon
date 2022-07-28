@@ -49,9 +49,9 @@ Different `log.scan` mode will result in different consuming behavior under stre
 <table class="table table-bordered">
     <thead>
     <tr>
-      <th class="text-left" style="width: 20%">Scan Mode</th>
-      <th class="text-center" style="width: 5%">Default</th>
-      <th class="text-center" style="width: 60%">Description</th>
+      <th class="text-left" style="width: 10%">Scan Mode</th>
+      <th class="text-left" style="width: 5%">Default</th>
+      <th class="text-left" style="width: 60%">Description</th>
     </tr>
     </thead>
     <tbody>
