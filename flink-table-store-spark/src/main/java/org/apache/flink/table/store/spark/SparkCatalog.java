@@ -78,6 +78,11 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
     }
 
     @Override
+    public String[] defaultNamespace() {
+        return new String[] {Catalog.DEFAULT_DATABASE};
+    }
+
+    @Override
     public void createNamespace(String[] namespace, Map<String, String> metadata)
             throws NamespaceAlreadyExistsException {
         Preconditions.checkArgument(

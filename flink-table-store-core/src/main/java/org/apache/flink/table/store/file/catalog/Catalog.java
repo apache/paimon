@@ -35,6 +35,8 @@ import java.util.Optional;
  */
 public interface Catalog extends AutoCloseable {
 
+    String DEFAULT_DATABASE = "default";
+
     /**
      * Get lock factory from catalog. Lock is used to support multiple concurrent writes on the
      * object store.
