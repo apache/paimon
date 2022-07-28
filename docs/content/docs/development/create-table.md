@@ -33,7 +33,7 @@ Table Store uses its own catalog to manage all the databases and tables. Users n
 ```sql
 CREATE CATALOG my_catalog WITH (
   'type'='table-store',
-  'warehouse'='hdfs://nn:8020/warehouse/path'
+  'warehouse'='hdfs://nn:8020/warehouse/path' -- or 'file://tmp/foo/bar'
 );
 
 USE CATALOG my_catalog;
@@ -90,10 +90,10 @@ Important options include the following:
     <thead>
     <tr>
       <th class="text-left" style="width: 20%">Option</th>
-      <th class="text-center" style="width: 5%">Required</th>
-      <th class="text-center" style="width: 5%">Default</th>
-      <th class="text-center" style="width: 10%">Type</th>
-      <th class="text-center" style="width: 60%">Description</th>
+      <th class="text-left" style="width: 5%">Required</th>
+      <th class="text-left" style="width: 5%">Default</th>
+      <th class="text-left" style="width: 10%">Type</th>
+      <th class="text-left" style="width: 60%">Description</th>
     </tr>
     </thead>
     <tbody>
@@ -145,7 +145,7 @@ CREATE TABLE MyTable (
 );
 ```
 
-For example, the `MyTable` table above has its data distribution
+For example, the above `MyTable` has its data distribution
 in the following order:
 - Partition: isolating different data based on partition fields.
 - Bucket: Within a single partition, distributed into 4 different
@@ -343,3 +343,10 @@ The query
 SELECT * FROM T2
 ``` 
 will return either `(1, 1.0, 'AAA'), (2, 2.0, 'BBB'), (1, 1.0, 'AAA'), (3, 3.0, 'CCC')` or `(3, 3.0, 'CCC'), (1, 1.0, 'AAA'), (2, 2.0, 'BBB'), (1, 1.0, 'AAA')`.
+
+### Supported Flink Data Type
+
+Users can refer to [Flink Data Types](https://nightlies.apache.org/flink/flink-docs-release-1.15/docs/dev/table/types/).
+{{< hint info >}}
+__Note:__ `MULTISET` is **not supported** for all `write-mode`, and `MAP` is **only supported** as a non-primary key field in a primary-keyed table.
+{{< /hint >}}
