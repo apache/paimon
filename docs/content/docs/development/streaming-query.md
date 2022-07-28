@@ -100,8 +100,8 @@ __Note:__ The normalized node needs to persist all the data into the state, whic
 
 {{< img src="/img/changelog-producer-input.png">}}
 
-When the changelog-producer is input, the storage trust input data is a complete changelog and
-is saved so that downstream consumption can also read the complete changelog.
+When the changelog-producer is input, the storage trusts input data is a complete changelog
+so that downstream consumption can also read the complete changelog.
 
 {{< hint info >}}
 __Note:__ You need to ensure that the input is a complete changelog, such as from a Database CDC,
