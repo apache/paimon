@@ -28,6 +28,7 @@ import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.connector.utils.StreamExecutionEnvironmentUtils;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.operation.Lock;
@@ -103,7 +104,8 @@ public class StoreSink implements Serializable {
 
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         boolean streamingCheckpointEnabled =
-                env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
+                StreamExecutionEnvironmentUtils.getConfiguration(env)
+                                        .get(ExecutionOptions.RUNTIME_MODE)
                                 == RuntimeExecutionMode.STREAMING
                         && env.getCheckpointConfig().isCheckpointingEnabled();
         SingleOutputStreamOperator<?> committed =
