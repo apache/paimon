@@ -34,6 +34,10 @@ Table Store currently supports the following features related with Hive:
 
 Table Store currently supports Hive 2.x.
 
+## Execution Engine
+
+Table Store currently supports MR and Tez execution engine for Hive.
+
 ## Install
 
 {{< stable >}}

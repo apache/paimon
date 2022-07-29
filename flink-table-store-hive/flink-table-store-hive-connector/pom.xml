@@ -198,10 +198,6 @@ under the License.
                     <artifactId>hive-webhcat-java-client</artifactId>
                 </exclusion>
                 <exclusion>
-                    <groupId>org.apache.tez</groupId>
-                    <artifactId>tez-common</artifactId>
-                </exclusion>
-                <exclusion>
                     <!-- This dependency is no longer shipped with the JDK since Java 9.-->
                     <groupId>jdk.tools</groupId>
                     <artifactId>jdk.tools</artifactId>
@@ -245,10 +241,6 @@ under the License.
                 <exclusion>
                     <artifactId>hadoop-yarn-server-web-proxy</artifactId>
                     <groupId>org.apache.hadoop</groupId>
-                </exclusion>
-                <exclusion>
-                    <artifactId>hadoop-shim</artifactId>
-                    <groupId>org.apache.tez</groupId>
                 </exclusion>
                 <exclusion>
                     <artifactId>jms</artifactId>
