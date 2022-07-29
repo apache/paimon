@@ -37,9 +37,7 @@ public class AppendOnlyReader implements RecordReader<RowData> {
 
     public AppendOnlyReader(Path path, BulkFormat<RowData, FileSourceSplit> readerFactory)
             throws IOException {
-        long fileSize = FileUtils.getFileSize(path);
-        FileSourceSplit split = new FileSourceSplit("ignore", path, 0, fileSize);
-        this.reader = readerFactory.createReader(FileUtils.DEFAULT_READER_CONFIG, split);
+        this.reader = FileUtils.createFormatReader(readerFactory, path);
     }
 
     @Nullable

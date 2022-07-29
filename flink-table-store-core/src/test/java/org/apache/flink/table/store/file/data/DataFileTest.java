@@ -54,6 +54,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link DataFileReader} and {@link DataFileWriter}. */
 public class DataFileTest {
@@ -62,6 +63,14 @@ public class DataFileTest {
             DataFileTestDataGenerator.builder().memTableCapacity(20).build();
 
     @TempDir java.nio.file.Path tempDir;
+
+    @Test
+    public void testReadNonExistentFile() {
+        DataFileReader reader = createDataFileReader(tempDir.toString(), "avro", null, null);
+        assertThatThrownBy(() -> reader.read("dummy_file"))
+                .hasMessageContaining(
+                        "you can configure 'snapshot.time-retained' option with a larger value.");
+    }
 
     @RepeatedTest(10)
     public void testWriteAndReadDataFileWithStatsCollectingRollingFile() throws Exception {
