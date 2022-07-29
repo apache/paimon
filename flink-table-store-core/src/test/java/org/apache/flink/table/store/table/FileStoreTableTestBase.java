@@ -215,8 +215,12 @@ public abstract class FileStoreTableTestBase {
         return b;
     }
 
+    protected FileStoreTable createFileStoreTable(int numOfBucket) throws Exception {
+        return createFileStoreTable(conf -> conf.set(BUCKET, numOfBucket));
+    }
+
     protected FileStoreTable createFileStoreTable() throws Exception {
-        return createFileStoreTable(conf -> {});
+        return createFileStoreTable(1);
     }
 
     protected abstract FileStoreTable createFileStoreTable(Consumer<Configuration> configure)
