@@ -60,7 +60,8 @@ public class FileStoreSourceReaderTest {
     private FileStoreSourceReader createReader(TestingReaderContext context) {
         return new FileStoreSourceReader(
                 context,
-                new TestChangelogDataReadWrite(tempDir.toString(), null).createReadWithKey());
+                new TestChangelogDataReadWrite(tempDir.toString(), null).createReadWithKey(),
+                null);
     }
 
     private static FileStoreSourceSplit createTestFileSplit() {

@@ -91,7 +91,8 @@ public class FileStoreSourceSplitReaderTest {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
         FileStoreSourceSplitReader reader =
                 new FileStoreSourceSplitReader(
-                        valueCountMode ? rw.createReadWithValueCount() : rw.createReadWithKey());
+                        valueCountMode ? rw.createReadWithValueCount() : rw.createReadWithKey(),
+                        null);
 
         List<Tuple2<Long, Long>> input = kvs();
         List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
@@ -132,7 +133,8 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testPrimaryKeyWithDelete() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
-        FileStoreSourceSplitReader reader = new FileStoreSourceSplitReader(rw.createReadWithKey());
+        FileStoreSourceSplitReader reader =
+                new FileStoreSourceSplitReader(rw.createReadWithKey(), null);
 
         List<Tuple2<Long, Long>> input = kvs();
         RecordWriter<KeyValue> writer = rw.createMergeTreeWriter(row(1), 0);
@@ -171,7 +173,8 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testMultipleBatchInSplit() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
-        FileStoreSourceSplitReader reader = new FileStoreSourceSplitReader(rw.createReadWithKey());
+        FileStoreSourceSplitReader reader =
+                new FileStoreSourceSplitReader(rw.createReadWithKey(), null);
 
         List<Tuple2<Long, Long>> input1 = kvs();
         List<DataFileMeta> files = rw.writeFiles(row(1), 0, input1);
@@ -207,7 +210,8 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testRestore() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
-        FileStoreSourceSplitReader reader = new FileStoreSourceSplitReader(rw.createReadWithKey());
+        FileStoreSourceSplitReader reader =
+                new FileStoreSourceSplitReader(rw.createReadWithKey(), null);
 
         List<Tuple2<Long, Long>> input = kvs();
         List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
@@ -233,7 +237,8 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testRestoreMultipleBatchInSplit() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
-        FileStoreSourceSplitReader reader = new FileStoreSourceSplitReader(rw.createReadWithKey());
+        FileStoreSourceSplitReader reader =
+                new FileStoreSourceSplitReader(rw.createReadWithKey(), null);
 
         List<Tuple2<Long, Long>> input1 = kvs();
         List<DataFileMeta> files = rw.writeFiles(row(1), 0, input1);
@@ -264,7 +269,8 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testMultipleSplits() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
-        FileStoreSourceSplitReader reader = new FileStoreSourceSplitReader(rw.createReadWithKey());
+        FileStoreSourceSplitReader reader =
+                new FileStoreSourceSplitReader(rw.createReadWithKey(), null);
 
         List<Tuple2<Long, Long>> input1 = kvs();
         List<DataFileMeta> files1 = rw.writeFiles(row(1), 0, input1);
@@ -302,8 +308,36 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testNoSplit() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
-        FileStoreSourceSplitReader reader = new FileStoreSourceSplitReader(rw.createReadWithKey());
+        FileStoreSourceSplitReader reader =
+                new FileStoreSourceSplitReader(rw.createReadWithKey(), null);
         assertThatThrownBy(reader::fetch).hasMessageContaining("no split remaining");
+        reader.close();
+    }
+
+    @Test
+    public void testLimit() throws Exception {
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
+        FileStoreSourceSplitReader reader =
+                new FileStoreSourceSplitReader(rw.createReadWithKey(), 2L);
+
+        List<Tuple2<Long, Long>> input = kvs();
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
+
+        assignSplit(reader, newSourceSplit("id1", row(1), 0, files, 0));
+
+        RecordsWithSplitIds<RecordAndPosition<RowData>> records = reader.fetch();
+
+        List<Tuple2<RowKind, Long>> expected =
+                input.stream()
+                        .map(t -> new Tuple2<>(RowKind.INSERT, t.f1))
+                        .collect(Collectors.toList());
+
+        List<Tuple2<RowKind, Long>> result = readRecords(records, "id1", 0);
+        assertThat(result).isEqualTo(expected.subList(0, 2));
+
+        records = reader.fetch();
+        assertRecords(records, null, "id1", 0, Collections.emptyList());
+
         reader.close();
     }
 

@@ -35,9 +35,10 @@ public final class FileStoreSourceReader
                 FileStoreSourceSplit,
                 FileStoreSourceSplitState> {
 
-    public FileStoreSourceReader(SourceReaderContext readerContext, TableRead tableRead) {
+    public FileStoreSourceReader(
+            SourceReaderContext readerContext, TableRead tableRead, Long limit) {
         super(
-                () -> new FileStoreSourceSplitReader(tableRead),
+                () -> new FileStoreSourceSplitReader(tableRead, limit),
                 (element, output, splitState) -> {
                     output.collect(element.getRecord());
                     splitState.setPosition(element);

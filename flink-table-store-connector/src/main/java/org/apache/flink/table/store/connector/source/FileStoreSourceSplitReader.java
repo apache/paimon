@@ -43,6 +43,8 @@ public class FileStoreSourceSplitReader
 
     private final TableRead tableRead;
 
+    private final Long limit;
+
     private final Queue<FileStoreSourceSplit> splits;
 
     private final Pool<FileStoreRecordIterator> pool;
@@ -52,11 +54,12 @@ public class FileStoreSourceSplitReader
     private long currentNumRead;
     private RecordReader.RecordIterator<RowData> currentFirstBatch;
 
-    public FileStoreSourceSplitReader(TableRead tableRead) {
+    public FileStoreSourceSplitReader(TableRead tableRead, Long limit) {
         this.tableRead = tableRead;
+        this.limit = limit;
         this.splits = new LinkedList<>();
         this.pool = new Pool<>(1);
-        this.pool.add(new FileStoreRecordIterator());
+        this.pool.add(new FileStoreRecordIterator(limit));
     }
 
     @Override
@@ -162,10 +165,16 @@ public class FileStoreSourceSplitReader
 
     private class FileStoreRecordIterator implements BulkFormat.RecordIterator<RowData> {
 
+        private final Long limit;
+
         private RecordReader.RecordIterator<RowData> iterator;
 
         private final MutableRecordAndPosition<RowData> recordAndPosition =
                 new MutableRecordAndPosition<>();
+
+        public FileStoreRecordIterator(Long limit) {
+            this.limit = limit;
+        }
 
         public FileStoreRecordIterator replace(RecordReader.RecordIterator<RowData> iterator) {
             this.iterator = iterator;
@@ -176,6 +185,9 @@ public class FileStoreSourceSplitReader
         @Nullable
         @Override
         public RecordAndPosition<RowData> next() {
+            if (limit != null && currentNumRead >= limit) {
+                return null;
+            }
             RowData row;
             try {
                 row = iterator.next();

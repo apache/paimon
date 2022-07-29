@@ -60,6 +60,7 @@ public class FlinkSourceBuilder {
     @Nullable private Predicate predicate;
     @Nullable private LogSourceProvider logSourceProvider;
     @Nullable private Integer parallelism;
+    @Nullable private Long limit;
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
 
     public FlinkSourceBuilder(ObjectIdentifier tableIdentifier, FileStoreTable table) {
@@ -85,6 +86,11 @@ public class FlinkSourceBuilder {
 
     public FlinkSourceBuilder withPredicate(Predicate predicate) {
         this.predicate = predicate;
+        return this;
+    }
+
+    public FlinkSourceBuilder withLimit(@Nullable Long limit) {
+        this.limit = limit;
         return this;
     }
 
@@ -115,7 +121,8 @@ public class FlinkSourceBuilder {
                 discoveryIntervalMills(),
                 continuousScanLatest,
                 projectedFields,
-                predicate);
+                predicate,
+                limit);
     }
 
     private Source<RowData, ?, ?> buildSource() {

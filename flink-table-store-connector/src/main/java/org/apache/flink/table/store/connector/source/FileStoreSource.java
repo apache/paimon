@@ -58,19 +58,23 @@ public class FileStoreSource
 
     @Nullable private final Predicate predicate;
 
+    @Nullable private final Long limit;
+
     public FileStoreSource(
             FileStoreTable table,
             boolean isContinuous,
             long discoveryInterval,
             boolean latestContinuous,
             @Nullable int[][] projectedFields,
-            @Nullable Predicate predicate) {
+            @Nullable Predicate predicate,
+            @Nullable Long limit) {
         this.table = table;
         this.isContinuous = isContinuous;
         this.discoveryInterval = discoveryInterval;
         this.latestContinuous = latestContinuous;
         this.projectedFields = projectedFields;
         this.predicate = predicate;
+        this.limit = limit;
     }
 
     @Override
@@ -87,7 +91,7 @@ public class FileStoreSource
         if (predicate != null) {
             read.withFilter(predicate);
         }
-        return new FileStoreSourceReader(context, read);
+        return new FileStoreSourceReader(context, read, limit);
     }
 
     @Override

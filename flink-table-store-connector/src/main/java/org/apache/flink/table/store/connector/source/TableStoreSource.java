@@ -25,6 +25,7 @@ import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
 import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
+import org.apache.flink.table.connector.source.abilities.SupportsLimitPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsWatermarkPushDown;
 import org.apache.flink.table.data.RowData;
@@ -65,6 +66,7 @@ public class TableStoreSource
         implements ScanTableSource,
                 SupportsFilterPushDown,
                 SupportsProjectionPushDown,
+                SupportsLimitPushDown,
                 SupportsWatermarkPushDown {
 
     private final ObjectIdentifier tableIdentifier;
@@ -75,6 +77,7 @@ public class TableStoreSource
 
     @Nullable private Predicate predicate;
     @Nullable private int[][] projectFields;
+    @Nullable private Long limit;
 
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
 
@@ -84,7 +87,16 @@ public class TableStoreSource
             boolean streaming,
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
-        this(tableIdentifier, table, streaming, context, logStoreTableFactory, null, null, null);
+        this(
+                tableIdentifier,
+                table,
+                streaming,
+                context,
+                logStoreTableFactory,
+                null,
+                null,
+                null,
+                null);
     }
 
     private TableStoreSource(
@@ -95,6 +107,7 @@ public class TableStoreSource
             @Nullable LogStoreTableFactory logStoreTableFactory,
             @Nullable Predicate predicate,
             @Nullable int[][] projectFields,
+            @Nullable Long limit,
             @Nullable WatermarkStrategy<RowData> watermarkStrategy) {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
@@ -103,6 +116,7 @@ public class TableStoreSource
         this.logStoreTableFactory = logStoreTableFactory;
         this.predicate = predicate;
         this.projectFields = projectFields;
+        this.limit = limit;
         this.watermarkStrategy = watermarkStrategy;
     }
 
@@ -151,6 +165,7 @@ public class TableStoreSource
                         .withLogSourceProvider(logSourceProvider)
                         .withProjection(projectFields)
                         .withPredicate(predicate)
+                        .withLimit(limit)
                         .withParallelism(
                                 Configuration.fromMap(table.schema().options())
                                         .get(FlinkConnectorOptions.SCAN_PARALLELISM))
@@ -170,6 +185,7 @@ public class TableStoreSource
                 logStoreTableFactory,
                 predicate,
                 projectFields,
+                limit,
                 watermarkStrategy);
     }
 
@@ -202,5 +218,10 @@ public class TableStoreSource
     @Override
     public void applyWatermark(WatermarkStrategy<RowData> watermarkStrategy) {
         this.watermarkStrategy = watermarkStrategy;
+    }
+
+    @Override
+    public void applyLimit(long limit) {
+        this.limit = limit;
     }
 }
