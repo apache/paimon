@@ -187,8 +187,10 @@ public class FileUtils {
             throw new FileNotFoundException(
                     String.format(
                             "File '%s' not found, Possible causes: "
-                                    + "1.consumption is too slow, you can improve the performance of consumption. "
-                                    + "2.snapshot expires too fast, you can configure a larger snapshot.time-retained.",
+                                    + "1.snapshot expires too fast, you can configure 'snapshot.time-retained'"
+                                    + " option with a larger value. "
+                                    + "2.consumption is too slow, you can improve the performance of consumption"
+                                    + " (For example, increasing parallelism).",
                             file));
         }
 
