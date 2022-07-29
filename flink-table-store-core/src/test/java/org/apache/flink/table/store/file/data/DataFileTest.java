@@ -68,7 +68,8 @@ public class DataFileTest {
     public void testReadNonExistentFile() {
         DataFileReader reader = createDataFileReader(tempDir.toString(), "avro", null, null);
         assertThatThrownBy(() -> reader.read("dummy_file"))
-                .hasMessageContaining("you can configure a larger snapshot.time-retained");
+                .hasMessageContaining(
+                        "you can configure 'snapshot.time-retained' option with a larger value.");
     }
 
     @RepeatedTest(10)
