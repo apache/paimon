@@ -46,7 +46,8 @@ import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitive
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
-import org.junit.Rule;
+import org.junit.BeforeClass;
+import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
@@ -68,13 +69,33 @@ import java.util.concurrent.ThreadLocalRandom;
 @RunWith(FlinkEmbeddedHiveRunner.class)
 public class TableStoreHiveStorageHandlerITCase {
 
-    @Rule public TemporaryFolder folder = new TemporaryFolder();
+    @ClassRule public static TemporaryFolder folder = new TemporaryFolder();
 
     @HiveSQL(files = {})
     private static HiveShell hiveShell;
 
+    private static String engine;
+
+    @BeforeClass
+    public static void beforeClass() {
+        // TODO Currently FlinkEmbeddedHiveRunner can only be used for one test class,
+        //  so we have to select engine randomly. Write our own Hive tester in the future.
+        engine = ThreadLocalRandom.current().nextBoolean() ? "mr" : "tez";
+    }
+
     @Before
     public void before() {
+        if ("mr".equals(engine)) {
+            hiveShell.execute("SET hive.execution.engine=mr");
+        } else if ("tez".equals(engine)) {
+            hiveShell.execute("SET hive.execution.engine=tez");
+            hiveShell.execute("SET tez.local.mode=true");
+            hiveShell.execute("SET hive.jar.directory=" + folder.getRoot().getAbsolutePath());
+            hiveShell.execute("SET tez.staging-dir=" + folder.getRoot().getAbsolutePath());
+        } else {
+            throw new UnsupportedOperationException("Unsupported engine " + engine);
+        }
+
         hiveShell.execute("CREATE DATABASE IF NOT EXISTS test_db");
         hiveShell.execute("USE test_db");
     }
@@ -137,6 +158,33 @@ public class TableStoreHiveStorageHandlerITCase {
                 hiveShell.executeQuery(
                         "SELECT d, sum(b) FROM " + tableName + " GROUP BY d ORDER BY d");
         expected = Arrays.asList("200\t70", "400\t40", "1000\t10");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT T1.a, T1.b, T1.d + T2.d FROM "
+                                + tableName
+                                + " T1 INNER JOIN "
+                                + tableName
+                                + " T2 ON T1.a = T2.a AND T1.b = T2.b ORDER BY T1.a, T1.b");
+        expected = Arrays.asList("1\t10\t2000", "1\t20\t400", "2\t40\t800", "3\t50\t400");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT T1.a, T1.b, T2.b, T1.d + T2.d FROM "
+                                + tableName
+                                + " T1 INNER JOIN "
+                                + tableName
+                                + " T2 ON T1.a = T2.a ORDER BY T1.a, T1.b, T2.b");
+        expected =
+                Arrays.asList(
+                        "1\t10\t10\t2000",
+                        "1\t10\t20\t1200",
+                        "1\t20\t10\t1200",
+                        "1\t20\t20\t400",
+                        "2\t40\t40\t800",
+                        "3\t50\t50\t400");
         Assert.assertEquals(expected, actual);
     }
 
@@ -203,6 +251,29 @@ public class TableStoreHiveStorageHandlerITCase {
                         "SELECT b, sum(a), max(c) FROM " + tableName + " GROUP BY b ORDER BY b");
         expected = Arrays.asList("100\t30\tHi Again", "200\t40\tStore");
         Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT a, b FROM (SELECT T1.a AS a, T1.b + T2.b AS b FROM "
+                                + tableName
+                                + " T1 JOIN "
+                                + tableName
+                                + " T2 ON T1.a = T2.a) T3 ORDER BY a, b");
+        expected = Arrays.asList("10\t200", "10\t300", "10\t300", "10\t400", "20\t200", "30\t400");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT b, a FROM (SELECT T1.b AS b, T1.a + T2.a AS a FROM "
+                                + tableName
+                                + " T1 JOIN "
+                                + tableName
+                                + " T2 ON T1.b = T2.b) T3 ORDER BY b, a");
+        expected =
+                Arrays.asList(
+                        "100\t20", "100\t30", "100\t30", "100\t40", "200\t20", "200\t40", "200\t40",
+                        "200\t60");
+        Assert.assertEquals(expected, actual);
     }
 
     @Test
@@ -261,6 +332,24 @@ public class TableStoreHiveStorageHandlerITCase {
                 hiveShell.executeQuery(
                         "SELECT d, sum(b) FROM " + tableName + " GROUP BY d ORDER BY d");
         expected = Arrays.asList("100\t10", "200\t70", "400\t40", "1000\t10");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT T1.b, T1.d, T2.d FROM "
+                                + tableName
+                                + " T1 JOIN "
+                                + tableName
+                                + " T2 ON T1.b = T2.b ORDER BY T1.b, T1.d, T2.d");
+        expected =
+                Arrays.asList(
+                        "10\t100\t100",
+                        "10\t100\t1000",
+                        "10\t1000\t100",
+                        "10\t1000\t1000",
+                        "20\t200\t200",
+                        "40\t400\t400",
+                        "50\t200\t200");
         Assert.assertEquals(expected, actual);
     }
 
@@ -323,6 +412,24 @@ public class TableStoreHiveStorageHandlerITCase {
                         "SELECT a, sum(b), min(c) FROM " + tableName + " GROUP BY a ORDER BY a");
         expected = Arrays.asList("10\t400\tHello", "20\t400\tNULL", "30\t500\tStore");
         Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT T1.b, T1.c, T2.c FROM "
+                                + tableName
+                                + " T1 JOIN "
+                                + tableName
+                                + " T2 ON T1.b = T2.b ORDER BY T1.b, T1.c, T2.c");
+        expected =
+                Arrays.asList(
+                        "100\tHi\tHi",
+                        "100\tHi\tHi Again",
+                        "100\tHi Again\tHi",
+                        "100\tHi Again\tHi Again",
+                        "200\tHello\tHello",
+                        "400\tNULL\tNULL",
+                        "500\tStore\tStore");
+        Assert.assertEquals(expected, actual);
     }
 
     @Test
@@ -371,7 +478,9 @@ public class TableStoreHiveStorageHandlerITCase {
                         "World\t30");
         Assert.assertEquals(expected, actual);
 
-        actual = hiveShell.executeQuery("SELECT * FROM " + tableName + " WHERE d < 300 ORDER BY d");
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT * FROM " + tableName + " WHERE d < 300 ORDER BY b, d");
         expected = Arrays.asList("1\t10\tHi\t100", "1\t20\tHello\t200", "3\t50\tStore\t200");
         Assert.assertEquals(expected, actual);
 
@@ -379,6 +488,16 @@ public class TableStoreHiveStorageHandlerITCase {
                 hiveShell.executeQuery(
                         "SELECT a, sum(d) FROM " + tableName + " GROUP BY a ORDER BY a");
         expected = Arrays.asList("1\t1300", "2\t700", "3\t200");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT T1.a, T1.b, T2.b FROM "
+                                + tableName
+                                + " T1 JOIN "
+                                + tableName
+                                + " T2 ON T1.a = T2.a WHERE T1.a > 1 ORDER BY T1.a, T1.b, T2.b");
+        expected = Arrays.asList("2\t30\t30", "2\t30\t40", "2\t40\t30", "2\t40\t40", "3\t50\t50");
         Assert.assertEquals(expected, actual);
     }
 
@@ -449,6 +568,22 @@ public class TableStoreHiveStorageHandlerITCase {
                 hiveShell.executeQuery(
                         "SELECT a, sum(b), min(c) FROM " + tableName + " GROUP BY a ORDER BY a");
         expected = Arrays.asList("10\t400\tHello", "20\t700\tWorld", "30\t500\tStore");
+        Assert.assertEquals(expected, actual);
+
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT T1.a, T1.b, T2.b FROM "
+                                + tableName
+                                + " T1 JOIN "
+                                + tableName
+                                + " T2 ON T1.a = T2.a WHERE T1.a > 10 ORDER BY T1.a, T1.b, T2.b");
+        expected =
+                Arrays.asList(
+                        "20\t300\t300",
+                        "20\t300\t400",
+                        "20\t400\t300",
+                        "20\t400\t400",
+                        "30\t500\t500");
         Assert.assertEquals(expected, actual);
     }
 
