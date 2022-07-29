@@ -25,6 +25,8 @@ import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.table.source.TableRead;
 
+import javax.annotation.Nullable;
+
 import java.util.Map;
 
 /** A {@link SourceReader} that read records from {@link FileStoreSourceSplit}. */
@@ -36,7 +38,7 @@ public final class FileStoreSourceReader
                 FileStoreSourceSplitState> {
 
     public FileStoreSourceReader(
-            SourceReaderContext readerContext, TableRead tableRead, Long limit) {
+            SourceReaderContext readerContext, TableRead tableRead, @Nullable Long limit) {
         super(
                 () -> new FileStoreSourceSplitReader(tableRead, limit),
                 (element, output, splitState) -> {
