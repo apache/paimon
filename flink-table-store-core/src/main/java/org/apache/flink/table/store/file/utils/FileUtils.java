@@ -54,7 +54,7 @@ public class FileUtils {
     private static final Logger LOG = LoggerFactory.getLogger(FileUtils.class);
     private static final int LIST_MAX_RETRY = 30;
 
-    public static final Configuration DEFAULT_READER_CONFIG = new Configuration();
+    private static final Configuration DEFAULT_READER_CONFIG = new Configuration();
 
     static {
         DEFAULT_READER_CONFIG.setInteger(SourceReaderOptions.ELEMENT_QUEUE_CAPACITY, 1);
@@ -82,11 +82,9 @@ public class FileUtils {
             BulkFormat<RowData, FileSourceSplit> readerFactory)
             throws IOException {
         List<T> result = new ArrayList<>();
-        long fileSize = FileUtils.getFileSize(path);
-        FileSourceSplit split = new FileSourceSplit("ignore", path, 0, fileSize);
-        BulkFormat.Reader<RowData> reader =
-                readerFactory.createReader(DEFAULT_READER_CONFIG, split);
-        Utils.forEachRemaining(reader, row -> result.add(serializer.fromRow(row)));
+        Utils.forEachRemaining(
+                createFormatReader(readerFactory, path),
+                row -> result.add(serializer.fromRow(row)));
         return result;
     }
 
@@ -181,5 +179,23 @@ public class FileUtils {
                 .map(Path::getName)
                 .filter(name -> name.startsWith(prefix))
                 .map(name -> Long.parseLong(name.substring(prefix.length())));
+    }
+
+    public static BulkFormat.Reader<RowData> createFormatReader(
+            BulkFormat<RowData, FileSourceSplit> format, Path file) throws IOException {
+        if (!file.getFileSystem().exists(file)) {
+            throw new FileNotFoundException(
+                    String.format(
+                            "File '%s' not found, Possible causes: "
+                                    + "1.snapshot expires too fast, you can configure 'snapshot.time-retained'"
+                                    + " option with a larger value. "
+                                    + "2.consumption is too slow, you can improve the performance of consumption"
+                                    + " (For example, increasing parallelism).",
+                            file));
+        }
+
+        long fileSize = FileUtils.getFileSize(file);
+        FileSourceSplit split = new FileSourceSplit("ignore", file, 0, fileSize);
+        return format.createReader(FileUtils.DEFAULT_READER_CONFIG, split);
     }
 }

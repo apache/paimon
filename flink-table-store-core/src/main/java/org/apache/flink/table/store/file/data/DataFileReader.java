@@ -83,9 +83,7 @@ public class DataFileReader {
         private final KeyValueSerializer serializer;
 
         private DataFileRecordReader(Path path) throws IOException {
-            long fileSize = FileUtils.getFileSize(path);
-            FileSourceSplit split = new FileSourceSplit("ignore", path, 0, fileSize);
-            this.reader = readerFactory.createReader(FileUtils.DEFAULT_READER_CONFIG, split);
+            this.reader = FileUtils.createFormatReader(readerFactory, path);
             this.serializer = new KeyValueSerializer(keyType, valueType);
         }
 
