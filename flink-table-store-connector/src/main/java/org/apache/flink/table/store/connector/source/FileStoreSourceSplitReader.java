@@ -43,6 +43,8 @@ public class FileStoreSourceSplitReader
 
     private final TableRead tableRead;
 
+    @Nullable private final Long limit;
+
     private final Queue<FileStoreSourceSplit> splits;
 
     private final Pool<FileStoreRecordIterator> pool;
@@ -52,8 +54,9 @@ public class FileStoreSourceSplitReader
     private long currentNumRead;
     private RecordReader.RecordIterator<RowData> currentFirstBatch;
 
-    public FileStoreSourceSplitReader(TableRead tableRead) {
+    public FileStoreSourceSplitReader(TableRead tableRead, @Nullable Long limit) {
         this.tableRead = tableRead;
+        this.limit = limit;
         this.splits = new LinkedList<>();
         this.pool = new Pool<>(1);
         this.pool.add(new FileStoreRecordIterator());
@@ -176,6 +179,9 @@ public class FileStoreSourceSplitReader
         @Nullable
         @Override
         public RecordAndPosition<RowData> next() {
+            if (limit != null && currentNumRead >= limit) {
+                return null;
+            }
             RowData row;
             try {
                 row = iterator.next();
