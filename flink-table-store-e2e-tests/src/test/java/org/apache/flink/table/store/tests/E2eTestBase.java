@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.tests;
 
-import org.apache.flink.table.store.tests.utils.TestUtils;
-
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.slf4j.Logger;
@@ -30,7 +28,6 @@ import org.testcontainers.containers.DockerComposeContainer;
 import org.testcontainers.containers.output.OutputFrame;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.utility.MountableFile;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -63,11 +60,6 @@ public abstract class E2eTestBase {
         this.withKafka = withKafka;
         this.withHive = withHive;
     }
-
-    private static final String TABLE_STORE_JAR_NAME = "flink-table-store.jar";
-    protected static final String TABLE_STORE_HIVE_CONNECTOR_JAR_NAME =
-            "flink-table-store-hive-connector.jar";
-    private static final String BUNDLED_HADOOP_JAR_NAME = "bundled-hadoop.jar";
 
     protected static final String TEST_DATA_DIR = "/test-data";
     protected static final String HDFS_ROOT = "hdfs://namenode:8020";
@@ -121,10 +113,6 @@ public abstract class E2eTestBase {
         environment.start();
         jobManager = environment.getContainerByServiceName("jobmanager_1").get();
         jobManager.execInContainer("chown", "-R", "flink:flink", TEST_DATA_DIR);
-
-        copyResource(TABLE_STORE_JAR_NAME);
-        copyResource(TABLE_STORE_HIVE_CONNECTOR_JAR_NAME);
-        copyResource(BUNDLED_HADOOP_JAR_NAME);
     }
 
     @AfterEach
@@ -132,12 +120,6 @@ public abstract class E2eTestBase {
         if (environment != null) {
             environment.stop();
         }
-    }
-
-    private void copyResource(String resourceName) {
-        jobManager.copyFileToContainer(
-                MountableFile.forHostPath(TestUtils.getResource(resourceName).toString()),
-                TEST_DATA_DIR + "/" + resourceName);
     }
 
     protected void writeSharedFile(String filename, String content) throws Exception {
@@ -172,20 +154,7 @@ public abstract class E2eTestBase {
                         "su",
                         "flink",
                         "-c",
-                        "bin/sql-client.sh -f "
-                                + TEST_DATA_DIR
-                                + "/"
-                                + fileName
-                                // run with table store jar
-                                + " --jar "
-                                + TEST_DATA_DIR
-                                + "/"
-                                + TABLE_STORE_JAR_NAME
-                                // run with bundled hadoop jar
-                                + " --jar "
-                                + TEST_DATA_DIR
-                                + "/"
-                                + BUNDLED_HADOOP_JAR_NAME);
+                        "bin/sql-client.sh -f " + TEST_DATA_DIR + "/" + fileName);
         LOG.info(execResult.getStdout());
         LOG.info(execResult.getStderr());
         if (execResult.getExitCode() != 0) {
