@@ -46,10 +46,6 @@ public class KeyValueSerializer extends ObjectSerializer<KeyValue> {
     private final KeyValue reusedKv;
 
     public KeyValueSerializer(RowType keyType, RowType valueType) {
-        this(keyType, valueType, false);
-    }
-
-    public KeyValueSerializer(RowType keyType, RowType valueType, boolean fromTopLevel) {
         super(KeyValue.schema(keyType, valueType));
 
         this.keyArity = keyType.getFieldCount();
@@ -61,10 +57,7 @@ public class KeyValueSerializer extends ObjectSerializer<KeyValue> {
 
         this.reusedKey = new OffsetRowData(keyArity, 0);
         this.reusedValue = new OffsetRowData(valueArity, keyArity + 2);
-        this.reusedKv =
-                new KeyValue()
-                        .replace(reusedKey, -1, null, reusedValue)
-                        .replaceFromTopLevel(fromTopLevel);
+        this.reusedKv = new KeyValue().replace(reusedKey, -1, null, reusedValue);
     }
 
     @Override

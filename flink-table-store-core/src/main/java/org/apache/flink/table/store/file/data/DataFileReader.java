@@ -84,17 +84,21 @@ public class DataFileReader {
 
         private final BulkFormat.Reader<RowData> reader;
         private final KeyValueSerializer serializer;
+        private final boolean fromTopLevel;
 
         private DataFileRecordReader(Path path, boolean fromTopLevel) throws IOException {
             this.reader = FileUtils.createFormatReader(readerFactory, path);
-            this.serializer = new KeyValueSerializer(keyType, valueType, fromTopLevel);
+            this.serializer = new KeyValueSerializer(keyType, valueType);
+            this.fromTopLevel = fromTopLevel;
         }
 
         @Nullable
         @Override
         public RecordIterator<KeyValue> readBatch() throws IOException {
             BulkFormat.RecordIterator<RowData> iterator = reader.readBatch();
-            return iterator == null ? null : new DataFileRecordIterator(iterator, serializer);
+            return iterator == null
+                    ? null
+                    : new DataFileRecordIterator(iterator, serializer, fromTopLevel);
         }
 
         @Override
@@ -107,11 +111,15 @@ public class DataFileReader {
 
         private final BulkFormat.RecordIterator<RowData> iterator;
         private final KeyValueSerializer serializer;
+        private final boolean fromTopLevel;
 
         private DataFileRecordIterator(
-                BulkFormat.RecordIterator<RowData> iterator, KeyValueSerializer serializer) {
+                BulkFormat.RecordIterator<RowData> iterator,
+                KeyValueSerializer serializer,
+                boolean fromTopLevel) {
             this.iterator = iterator;
             this.serializer = serializer;
+            this.fromTopLevel = fromTopLevel;
         }
 
         @Override
@@ -119,7 +127,9 @@ public class DataFileReader {
             RecordAndPosition<RowData> result = iterator.next();
 
             // TODO schema evolution
-            return result == null ? null : serializer.fromRow(result.getRecord());
+            return result == null
+                    ? null
+                    : serializer.fromRow(result.getRecord()).replaceFromTopLevel(fromTopLevel);
         }
 
         @Override

@@ -22,9 +22,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.types.RowKind;
 
-
-import javax.annotation.Nullable;
-
 import static org.apache.flink.types.RowKind.DELETE;
 import static org.apache.flink.types.RowKind.INSERT;
 import static org.apache.flink.types.RowKind.UPDATE_AFTER;
@@ -45,7 +42,8 @@ public class ChangelogMergeFunction implements MergeFunction {
     private KeyValue lastKV;
     private boolean isInitialized;
 
-    public ChangelogMergeFunction(MergeFunction mergeFunction, ChangelogConsumer changelogConsumer) {
+    public ChangelogMergeFunction(
+            MergeFunction mergeFunction, ChangelogConsumer changelogConsumer) {
         this.mergeFunction = mergeFunction;
         this.changelogConsumer = changelogConsumer;
         this.reuseChangelogKV = new KeyValue();

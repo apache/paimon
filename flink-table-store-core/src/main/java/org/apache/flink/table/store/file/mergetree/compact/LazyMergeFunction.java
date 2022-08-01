@@ -21,7 +21,6 @@ package org.apache.flink.table.store.file.mergetree.compact;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
 
-
 import javax.annotation.Nullable;
 
 /** A lazy {@link MergeFunction}. */

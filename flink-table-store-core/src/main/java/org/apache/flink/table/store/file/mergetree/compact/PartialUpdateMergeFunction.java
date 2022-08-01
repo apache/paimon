@@ -23,7 +23,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.types.RowKind;
 
-
 import javax.annotation.Nullable;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
@@ -51,7 +50,9 @@ public class PartialUpdateMergeFunction implements MergeFunction {
 
     @Override
     public void add(KeyValue kv) {
-        checkArgument(kv.valueKind() == RowKind.INSERT, "Partial update only accept insert only records.");
+        checkArgument(
+                kv.valueKind() == RowKind.INSERT,
+                "Partial update only accept insert only records.");
         for (int i = 0; i < getters.length; i++) {
             Object field = getters[i].getFieldOrNull(kv.value());
             if (field != null) {

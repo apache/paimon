@@ -54,7 +54,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     private final DataFileReader.Factory dataFileReaderFactory;
     private final Comparator<RowData> keyComparator;
     private final MergeFunction mergeFunction;
-    private final boolean incrementalFromChangelogFile;
+    private final boolean changelogFileOnly;
 
     private int[][] keyProjectedFields;
 
@@ -69,13 +69,13 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             MergeFunction mergeFunction,
             FileFormat fileFormat,
             FileStorePathFactory pathFactory,
-            boolean incrementalFromChangelogFile) {
+            boolean changelogFileOnly) {
         this.dataFileReaderFactory =
                 new DataFileReader.Factory(
                         schemaManager, schemaId, keyType, valueType, fileFormat, pathFactory);
         this.keyComparator = keyComparator;
         this.mergeFunction = mergeFunction;
-        this.incrementalFromChangelogFile = incrementalFromChangelogFile;
+        this.changelogFileOnly = changelogFileOnly;
     }
 
     public KeyValueFileStoreRead withKeyProjection(int[][] projectedFields) {
@@ -104,7 +104,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             List<ConcatRecordReader.ReaderSupplier<KeyValue>> suppliers = new ArrayList<>();
             for (DataFileMeta file : split.files()) {
                 Optional<String> changelogFile = changelogFile(file);
-                if (incrementalFromChangelogFile && !changelogFile.isPresent()) {
+                if (changelogFileOnly && !changelogFile.isPresent()) {
                     continue;
                 }
 
