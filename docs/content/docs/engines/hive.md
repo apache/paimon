@@ -103,6 +103,7 @@ SELECT * FROM test_table;
 Run the following Hive SQL in Hive CLI to access the created table.
 
 ```sql
+-- Assume that flink-table-store-hive-connector-{{< version >}}.jar is already in auxlib directory.
 -- List tables in Hive
 -- (you might need to switch to "default" database if you're not there by default)
 
@@ -129,6 +130,7 @@ OK
 To access existing table store table, you can also register them as external tables in Hive. Run the following Hive SQL in Hive CLI.
 
 ```sql
+-- Assume that flink-table-store-hive-connector-{{< version >}}.jar is already in auxlib directory.
 -- Let's use the test_table created in the above section.
 -- To create an external table, you don't need to specify any column or table properties.
 -- Pointing the location to the path of table is enough.
