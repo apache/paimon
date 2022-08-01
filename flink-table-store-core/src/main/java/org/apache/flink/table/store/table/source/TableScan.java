@@ -97,6 +97,12 @@ public abstract class TableScan {
         return this;
     }
 
+    @VisibleForTesting
+    public TableScan withBucket(int bucket) {
+        scan.withBucket(bucket);
+        return this;
+    }
+
     public Plan plan() {
         FileStoreScan.Plan plan = scan.plan();
         return new Plan(plan.snapshotId(), generateSplits(plan.groupByPartFiles()));

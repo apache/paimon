@@ -20,6 +20,9 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -34,11 +37,18 @@ import org.apache.flink.table.store.table.source.TableRead;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
+import static org.apache.flink.table.store.table.sink.SinkRecordConverter.bucket;
+import static org.apache.flink.table.store.table.sink.SinkRecordConverter.hashcode;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link AppendOnlyFileStoreTable}. */
@@ -133,6 +143,60 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 // this record is in the same file with "+1|11|101"
                                 "+1|12|102"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING)).isEmpty();
+    }
+
+    @Test
+    public void testSequentialRead() throws Exception {
+        Random random = new Random();
+        int numOfBucket = Math.max(random.nextInt(8), 1);
+        FileStoreTable table = createFileStoreTable(numOfBucket);
+        RowDataSerializer serializer = new RowDataSerializer(table.schema().logicalRowType());
+        TableWrite write = table.newWrite();
+
+        TableCommit commit = table.newCommit("user");
+        List<Map<Integer, List<RowData>>> dataset = new ArrayList<>();
+        Map<Integer, List<RowData>> dataPerBucket = new HashMap<>(numOfBucket);
+        int numOfPartition = Math.max(random.nextInt(10), 1);
+        for (int i = 0; i < numOfPartition; i++) {
+            for (int j = 0; j < Math.max(random.nextInt(200), 1); j++) {
+                BinaryRowData data =
+                        serializer
+                                .toBinaryRow(
+                                        GenericRowData.of(i, random.nextInt(), random.nextLong()))
+                                .copy();
+                int bucket = bucket(hashcode(data), numOfBucket);
+                dataPerBucket.compute(
+                        bucket,
+                        (k, v) -> {
+                            if (v == null) {
+                                v = new ArrayList<>();
+                            }
+                            v.add(data);
+                            return v;
+                        });
+                write.write(data);
+            }
+            dataset.add(new HashMap<>(dataPerBucket));
+            dataPerBucket.clear();
+        }
+        commit.commit("0", write.prepareCommit(true));
+
+        int partition = random.nextInt(numOfPartition);
+        List<Integer> availableBucket = new ArrayList<>(dataset.get(partition).keySet());
+        int bucket = availableBucket.get(random.nextInt(availableBucket.size()));
+
+        Predicate partitionFilter =
+                new PredicateBuilder(table.schema().logicalRowType()).equal(0, partition);
+        List<Split> splits =
+                table.newScan().withFilter(partitionFilter).withBucket(bucket).plan().splits;
+        TableRead read = table.newRead();
+        getResult(read, splits, binaryRow(partition), bucket, STREAMING_ROW_TO_STRING);
+
+        assertThat(getResult(read, splits, binaryRow(partition), bucket, STREAMING_ROW_TO_STRING))
+                .containsExactlyElementsOf(
+                        dataset.get(partition).get(bucket).stream()
+                                .map(STREAMING_ROW_TO_STRING)
+                                .collect(Collectors.toList()));
     }
 
     private void writeData() throws Exception {
