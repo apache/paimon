@@ -130,7 +130,7 @@ under the License.
                         <!-- test table store with kafka sql jar -->
                         <artifactItem>
                             <groupId>org.apache.flink</groupId>
-                            <artifactId>flink-sql-connector-kafka</artifactId>
+                            <artifactId>${flink.sql.connector.kafka}</artifactId>
                             <version>${flink.version}</version>
                             <destFileName>flink-sql-connector-kafka.jar</destFileName>
                             <type>jar</type>
