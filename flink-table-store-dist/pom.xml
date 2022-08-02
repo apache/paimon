@@ -142,6 +142,10 @@ under the License.
                                 <relocation>
                                     <pattern>org.apache.flink.connector</pattern>
                                     <shadedPattern>org.apache.flink.table.store.shaded.connector</shadedPattern>
+                                    <excludes>
+                                        <exclude>org.apache.flink.connector.base.**</exclude>
+                                        <exclude>org.apache.flink.connector.file.**</exclude>
+                                    </excludes>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.apache.flink.kafka</pattern>
