@@ -29,7 +29,7 @@ services:
     volumes:
       - testdata:/test-data
       - /tmp/flink-table-store-e2e-tests-jars:/jars
-    entrypoint: /bin/bash -c "cp /jars/flink-table-store.jar /jars/bundled-hadoop.jar /opt/flink/lib && /docker-entrypoint.sh jobmanager"
+    entrypoint: /bin/bash -c "cp /jars/flink-table-store.jar /jars/bundled-hadoop.jar /jars/flink-sql-connector-kafka.jar /opt/flink/lib && /docker-entrypoint.sh jobmanager"
     env_file:
       - ./flink.env
     networks:
@@ -44,7 +44,7 @@ services:
     volumes:
       - testdata:/test-data
       - /tmp/flink-table-store-e2e-tests-jars:/jars
-    entrypoint: /bin/bash -c "cp /jars/flink-table-store.jar /jars/bundled-hadoop.jar /opt/flink/lib && /docker-entrypoint.sh taskmanager"
+    entrypoint: /bin/bash -c "cp /jars/flink-table-store.jar /jars/bundled-hadoop.jar /jars/flink-sql-connector-kafka.jar /opt/flink/lib && /docker-entrypoint.sh taskmanager"
     env_file:
       - ./flink.env
     networks:
