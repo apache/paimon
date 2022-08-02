@@ -28,7 +28,8 @@ services:
     image: apache/flink:${flink.version}-java8
     volumes:
       - testdata:/test-data
-    entrypoint: /bin/bash -c "wget -P /opt/flink/lib/ https://repo.maven.apache.org/maven2/org/apache/flink/flink-shaded-hadoop-2-uber/2.8.3-10.0/flink-shaded-hadoop-2-uber-2.8.3-10.0.jar && /docker-entrypoint.sh jobmanager"
+      - /tmp/flink-table-store-e2e-tests-jars:/jars
+    entrypoint: /bin/bash -c "cp /jars/flink-table-store.jar /jars/bundled-hadoop.jar /opt/flink/lib && /docker-entrypoint.sh jobmanager"
     env_file:
       - ./flink.env
     networks:
@@ -42,7 +43,8 @@ services:
     image: apache/flink:${flink.version}-java8
     volumes:
       - testdata:/test-data
-    entrypoint: /bin/bash -c "wget -P /opt/flink/lib/ https://repo.maven.apache.org/maven2/org/apache/flink/flink-shaded-hadoop-2-uber/2.8.3-10.0/flink-shaded-hadoop-2-uber-2.8.3-10.0.jar && /docker-entrypoint.sh taskmanager"
+      - /tmp/flink-table-store-e2e-tests-jars:/jars
+    entrypoint: /bin/bash -c "cp /jars/flink-table-store.jar /jars/bundled-hadoop.jar /opt/flink/lib && /docker-entrypoint.sh taskmanager"
     env_file:
       - ./flink.env
     networks:
@@ -130,6 +132,7 @@ services:
     image: bde2020/hive:2.3.2-postgresql-metastore
     volumes:
       - testdata:/test-data
+      - /tmp/flink-table-store-e2e-tests-jars:/jars
     networks:
       testnetwork:
         aliases:
