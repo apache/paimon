@@ -78,7 +78,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>${flink.sql.connector.kafka}</artifactId>
+            <artifactId>${flink.connector.kafka}</artifactId>
             <version>${flink.version}</version>
         </dependency>
     </dependencies>
@@ -105,7 +105,8 @@ under the License.
                                     <include>org.apache.flink:flink-table-store-format</include>
                                     <include>org.apache.flink:flink-table-store-hive-catalog</include>
                                     <include>org.apache.flink:flink-table-store-kafka</include>
-                                    <include>org.apache.flink:${flink.sql.connector.kafka}</include>
+                                    <include>org.apache.flink:${flink.connector.kafka}</include>
+                                    <include>org.apache.kafka:*</include>
                                 </includes>
                             </artifactSet>
                             <filters>
@@ -133,11 +134,27 @@ under the License.
                                         <exclude>META-INF/LICENSE.txt</exclude>
                                     </excludes>
                                 </filter>
+                                <filter>
+                                    <artifact>org.apache.kafka:*</artifact>
+                                    <excludes>
+                                        <exclude>kafka/kafka-version.properties</exclude>
+                                        <exclude>LICENSE</exclude>
+                                        <!-- Does not contain anything relevant.
+                                            Cites a binary dependency on jersey, but this is neither reflected in the
+                                            dependency graph, nor are any jersey files bundled. -->
+                                        <exclude>NOTICE</exclude>
+                                        <exclude>common/**</exclude>
+                                    </excludes>
+                                </filter>
                             </filters>
                             <relocations>
                                 <relocation>
+                                    <pattern>org.apache.flink.avro.shaded</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.avro.shaded</shadedPattern>
+                                </relocation>
+                                <relocation>
                                     <pattern>org.apache.flink.connector</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.flink.connector</shadedPattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.connector</shadedPattern>
                                     <excludes>
                                         <exclude>org.apache.flink.connector.base.**</exclude>
                                         <exclude>org.apache.flink.connector.file.**</exclude>
@@ -145,15 +162,35 @@ under the License.
                                 </relocation>
                                 <relocation>
                                     <pattern>org.apache.flink.kafka</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.flink.kafka</shadedPattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.kafka</shadedPattern>
                                 </relocation>
-                                <!--
-                                flink-sql-connector-kafka contains shaded kafka classes.
-                                As we've shaded kafka connector we also need to shade kafka dependencies.
-                                -->
+                                <relocation>
+                                    <pattern>org.apache.flink.streaming.connectors.kafka</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.streaming.connectors.kafka</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.flink.streaming.util.serialization.JSONKeyValueDeserializationSchema</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.streaming.util.serialization.JSONKeyValueDeserializationSchema</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.flink.streaming.util.serialization.KeyedDeserializationSchema</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.streaming.util.serialization.KeyedDeserializationSchema</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.flink.streaming.util.serialization.KeyedSerializationSchema</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.streaming.util.serialization.KeyedSerializationSchema</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.flink.streaming.util.serialization.TypeInformationKeyValueSerializationSchema</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.streaming.util.serialization.TypeInformationKeyValueSerializationSchema</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.hadoop.security.token.delegation.HiveDelegationTokenSupport</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.security.token.delegation.HiveDelegationTokenSupport</shadedPattern>
+                                </relocation>
                                 <relocation>
                                     <pattern>org.apache.kafka</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.flink.kafka.shaded.org.apache.kafka</shadedPattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.kafka</shadedPattern>
                                 </relocation>
                             </relocations>
                         </configuration>
