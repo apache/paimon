@@ -63,3 +63,7 @@ mvn clean install -Dmaven.test.skip=true -Pflink-1.14
 ```
 
 You can find Flink 1.14 bundled jar in `./flink-table-store-dist/target/flink-table-store-dist-{{< version >}}.jar`.
+
+{{< hint info >}}
+__Note:__ Please do not use other connector jars (Hive, Spark), they are not available under `-Pflink-1.14`.
+  {{< /hint >}}
