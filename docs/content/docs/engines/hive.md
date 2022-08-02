@@ -49,7 +49,10 @@ You are using an unreleased version of Table Store. See [Build From Source]({{< 
 
 {{< /unstable >}}
 
-Copy table store Hive connector bundle jar to a path accessible by Hive, then use `add jar /path/to/flink-table-store-hive-connector-{{< version >}}.jar` to enable table store support in Hive.
+There are several ways to add this jar to Hive.
+
+* You can create an `auxlib` folder under the root directory of Hive, and copy `flink-table-store-hive-connector-{{< version >}}.jar` into `auxlib`.
+* You can also copy this jar to a path accessible by Hive, then use `add jar /path/to/flink-table-store-hive-connector-{{< version >}}.jar` to enable table store support in Hive. Note that this method is not recommended. If you're using the MR execution engine and running a join statement, you may be faced with the exception `org.apache.hive.com.esotericsoftware.kryo.kryoexception: unable to find class`.
 
 ## Using Table Store Hive Catalog
 
@@ -100,10 +103,7 @@ SELECT * FROM test_table;
 Run the following Hive SQL in Hive CLI to access the created table.
 
 ```sql
--- Enable table store support in Hive
-
-ADD JAR /path/to/flink-table-store-hive-connector-{{< version >}}.jar;
-
+-- Assume that flink-table-store-hive-connector-{{< version >}}.jar is already in auxlib directory.
 -- List tables in Hive
 -- (you might need to switch to "default" database if you're not there by default)
 
@@ -130,10 +130,7 @@ OK
 To access existing table store table, you can also register them as external tables in Hive. Run the following Hive SQL in Hive CLI.
 
 ```sql
--- Enable table store support in Hive
-
-ADD JAR /path/to/flink-table-store-hive-connector-{{< version >}}.jar;
-
+-- Assume that flink-table-store-hive-connector-{{< version >}}.jar is already in auxlib directory.
 -- Let's use the test_table created in the above section.
 -- To create an external table, you don't need to specify any column or table properties.
 -- Pointing the location to the path of table is enough.

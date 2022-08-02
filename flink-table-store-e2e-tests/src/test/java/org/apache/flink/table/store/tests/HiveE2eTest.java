@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.tests;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.Container;
 import org.testcontainers.containers.ContainerState;
@@ -34,11 +35,24 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 public class HiveE2eTest extends E2eTestBase {
 
-    private static final String ADD_JAR_HQL =
-            "ADD JAR " + TEST_DATA_DIR + "/" + TABLE_STORE_HIVE_CONNECTOR_JAR_NAME + ";";
+    private static final String TABLE_STORE_HIVE_CONNECTOR_JAR_NAME =
+            "flink-table-store-hive-connector.jar";
 
     public HiveE2eTest() {
         super(false, true);
+    }
+
+    @BeforeEach
+    @Override
+    public void before() throws Exception {
+        super.before();
+        getHive()
+                .execInContainer(
+                        "/bin/bash",
+                        "-c",
+                        "mkdir /opt/hive/auxlib && cp /jars/"
+                                + TABLE_STORE_HIVE_CONNECTOR_JAR_NAME
+                                + " /opt/hive/auxlib");
     }
 
     @Test
@@ -58,6 +72,7 @@ public class HiveE2eTest extends E2eTestBase {
         runSql(
                 "INSERT INTO table_store_pk VALUES "
                         + "(1, 10, 'Hi'), "
+                        + "(1, 100, 'Hi Again'), "
                         + "(2, 20, 'Hello'), "
                         + "(3, 30, 'Table'), "
                         + "(4, 40, 'Store');",
@@ -68,28 +83,30 @@ public class HiveE2eTest extends E2eTestBase {
                         + "STORED BY 'org.apache.flink.table.store.hive.TableStoreHiveStorageHandler'\n"
                         + "LOCATION '"
                         + tableStorePkPath
-                        + "/default_catalog.catalog/default_database.db/table_store_pk';";
-        writeSharedFile(
-                "pk.hql",
-                // same default database name as Flink
-                ADD_JAR_HQL
-                        + "\n"
-                        + externalTablePkDdl
-                        + "\nSELECT b, a, c FROM table_store_pk ORDER BY b;");
+                        + "/default_catalog.catalog/default_database.db/table_store_pk';\n";
 
-        ContainerState hive = getHive();
-        Container.ExecResult execResult =
-                hive.execInContainer(
-                        "/opt/hive/bin/hive",
-                        "--hiveconf",
-                        "hive.root.logger=INFO,console",
-                        "-f",
-                        TEST_DATA_DIR + "/pk.hql");
-        assertThat(execResult.getStdout())
-                .isEqualTo("10\t1\tHi\n" + "20\t2\tHello\n" + "30\t3\tTable\n" + "40\t4\tStore\n");
-        if (execResult.getExitCode() != 0) {
-            throw new AssertionError("Failed when running hive sql.");
-        }
+        checkQueryResult(
+                externalTablePkDdl + "SELECT * FROM table_store_pk ORDER BY b;",
+                "1\t10\tHi\n"
+                        + "2\t20\tHello\n"
+                        + "3\t30\tTable\n"
+                        + "4\t40\tStore\n"
+                        + "1\t100\tHi Again\n");
+        checkQueryResult(
+                externalTablePkDdl + "SELECT b, a FROM table_store_pk ORDER BY b;",
+                "10\t1\n" + "20\t2\n" + "30\t3\n" + "40\t4\n" + "100\t1\n");
+        checkQueryResult(
+                externalTablePkDdl + "SELECT * FROM table_store_pk WHERE a > 1 ORDER BY b;",
+                "2\t20\tHello\n" + "3\t30\tTable\n" + "4\t40\tStore\n");
+        checkQueryResult(
+                externalTablePkDdl
+                        + "SELECT a, SUM(b), MIN(c) FROM table_store_pk GROUP BY a ORDER BY a;",
+                "1\t110\tHi\n" + "2\t20\tHello\n" + "3\t30\tTable\n" + "4\t40\tStore\n");
+        checkQueryResult(
+                externalTablePkDdl
+                        + "SELECT T1.a, T1.b, T2.b FROM table_store_pk T1 JOIN table_store_pk T2 "
+                        + "ON T1.a = T2.a WHERE T1.a <= 2 ORDER BY T1.a, T1.b, T2.b;",
+                "1\t10\t10\n" + "1\t10\t100\n" + "1\t100\t10\n" + "1\t100\t100\n" + "2\t20\t20\n");
     }
 
     @Test
@@ -118,26 +135,50 @@ public class HiveE2eTest extends E2eTestBase {
                         "  'bucket' = '2'",
                         ");",
                         "",
-                        "INSERT INTO T VALUES (1, 10, 'Hi'), (2, 20, 'Hello');");
+                        "INSERT INTO T VALUES "
+                                + "(1, 10, 'Hi'), "
+                                + "(1, 100, 'Hi Again'), "
+                                + "(2, 20, 'Hello'), "
+                                + "(3, 30, 'Table'), "
+                                + "(4, 40, 'Store');");
         runSql(sql);
 
-        writeSharedFile(
-                "query.hql",
-                // same default database name as Flink
-                ADD_JAR_HQL + "\nSELECT b, a, c FROM t ORDER BY b;");
+        checkQueryResult(
+                "SELECT * FROM t ORDER BY b;",
+                "1\t10\tHi\n"
+                        + "2\t20\tHello\n"
+                        + "3\t30\tTable\n"
+                        + "4\t40\tStore\n"
+                        + "1\t100\tHi Again\n");
+        checkQueryResult(
+                "SELECT b, a FROM t ORDER BY b;",
+                "10\t1\n" + "20\t2\n" + "30\t3\n" + "40\t4\n" + "100\t1\n");
+        checkQueryResult(
+                "SELECT * FROM t WHERE a > 1 ORDER BY b;",
+                "2\t20\tHello\n" + "3\t30\tTable\n" + "4\t40\tStore\n");
+        checkQueryResult(
+                "SELECT a, SUM(b), MIN(c) FROM t GROUP BY a ORDER BY a;",
+                "1\t110\tHi\n" + "2\t20\tHello\n" + "3\t30\tTable\n" + "4\t40\tStore\n");
+        checkQueryResult(
+                "SELECT T1.a, T1.b, T2.b FROM t T1 JOIN t T2 "
+                        + "ON T1.a = T2.a WHERE T1.a <= 2 ORDER BY T1.a, T1.b, T2.b;",
+                "1\t10\t10\n" + "1\t10\t100\n" + "1\t100\t10\n" + "1\t100\t100\n" + "2\t20\t20\n");
+    }
 
-        ContainerState hive = getHive();
+    private void checkQueryResult(String query, String expected) throws Exception {
+        writeSharedFile("pk.hql", query);
         Container.ExecResult execResult =
-                hive.execInContainer(
-                        "/opt/hive/bin/hive",
-                        "--hiveconf",
-                        "hive.root.logger=INFO,console",
-                        "-f",
-                        TEST_DATA_DIR + "/query.hql");
-        assertThat(execResult.getStdout()).isEqualTo("10\t1\tHi\n" + "20\t2\tHello\n");
+                getHive()
+                        .execInContainer(
+                                "/opt/hive/bin/hive",
+                                "--hiveconf",
+                                "hive.root.logger=INFO,console",
+                                "-f",
+                                TEST_DATA_DIR + "/pk.hql");
         if (execResult.getExitCode() != 0) {
             throw new AssertionError("Failed when running hive sql.");
         }
+        assertThat(execResult.getStdout()).isEqualTo(expected);
     }
 
     private ContainerState getHive() {
