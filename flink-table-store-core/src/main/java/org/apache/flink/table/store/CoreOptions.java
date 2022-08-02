@@ -193,7 +193,8 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .noDefaultValue()
                     .withDescription(
-                            "The number of sorted runs that trigger the stopping of writes.");
+                            "The number of sorted runs that trigger the stopping of writes,"
+                                    + " the default value is 'num-sorted-run.compaction-trigger' + 1.");
 
     public static final ConfigOption<Integer> NUM_LEVELS =
             ConfigOptions.key("num-levels")
