@@ -167,6 +167,10 @@ under the License.
                                     <pattern>org.apache.flink.streaming.util.serialization.TypeInformationKeyValueSerializationSchema</pattern>
                                     <shadedPattern>org.apache.flink.table.store.shaded.streaming.util.serialization.TypeInformationKeyValueSerializationSchema</shadedPattern>
                                 </relocation>
+                                <relocation>
+                                    <pattern>org.apache.hadoop.security.token.delegation.HiveDelegationTokenSupport</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.security.token.delegation.HiveDelegationTokenSupport</shadedPattern>
+                                </relocation>
                                 <!--
                                 flink-sql-connector-kafka contains shaded kafka classes.
                                 As we've shaded kafka connector we also need to shade kafka dependencies.
