@@ -164,7 +164,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<MemorySize> WRITE_BUFFER_SIZE =
             ConfigOptions.key("write-buffer-size")
                     .memoryType()
-                    .defaultValue(MemorySize.parse("128 mb"))
+                    .defaultValue(MemorySize.parse("256 mb"))
                     .withDescription(
                             "Amount of data to build up in memory before converting to a sorted on-disk file.");
 
@@ -191,9 +191,10 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> NUM_SORTED_RUNS_STOP_TRIGGER =
             ConfigOptions.key("num-sorted-run.stop-trigger")
                     .intType()
-                    .defaultValue(10)
+                    .noDefaultValue()
                     .withDescription(
-                            "The number of sorted runs that trigger the stopping of writes.");
+                            "The number of sorted runs that trigger the stopping of writes,"
+                                    + " the default value is 'num-sorted-run.compaction-trigger' + 1.");
 
     public static final ConfigOption<Integer> NUM_LEVELS =
             ConfigOptions.key("num-levels")
@@ -407,7 +408,11 @@ public class CoreOptions implements Serializable {
     }
 
     public int numSortedRunStopTrigger() {
-        return Math.max(numSortedRunCompactionTrigger(), options.get(NUM_SORTED_RUNS_STOP_TRIGGER));
+        Integer stopTrigger = options.get(NUM_SORTED_RUNS_STOP_TRIGGER);
+        if (stopTrigger == null) {
+            stopTrigger = numSortedRunCompactionTrigger() + 1;
+        }
+        return Math.max(numSortedRunCompactionTrigger(), stopTrigger);
     }
 
     public int numLevels() {
