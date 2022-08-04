@@ -18,10 +18,12 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactUnit;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.Levels;
 
 import org.slf4j.Logger;
@@ -102,6 +104,21 @@ public class MergeTreeCompactManager extends CompactManager {
                             }
                             submitCompaction(unit, dropDelete);
                         });
+    }
+
+    @Override
+    public void addLevel0File(DataFileMeta file) {
+        levels.addLevel0File(file);
+    }
+
+    @Override
+    public int numberOfSortedRuns() {
+        return levels.numberOfSortedRuns();
+    }
+
+    @VisibleForTesting
+    public Levels levels() {
+        return levels;
     }
 
     private void submitCompaction(CompactUnit unit, boolean dropDelete) {

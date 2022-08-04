@@ -31,6 +31,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 
 /** Compact manager for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
@@ -70,6 +71,35 @@ public class AppendOnlyCompactManager extends CompactManager {
                                         executor.submit(new AutoCompactTask(inputs, rewriter)));
     }
 
+    /** Finish current task, and update result files to {@link #toCompact}. */
+    @Override
+    public Optional<CompactResult> finishCompaction(boolean blocking)
+            throws ExecutionException, InterruptedException {
+        Optional<CompactResult> result = super.finishCompaction(blocking);
+        result.ifPresent(
+                r -> {
+                    if (!r.after().isEmpty()) {
+                        // if the last compacted file is still small,
+                        // add it back to the head
+                        DataFileMeta lastFile = r.after().get(r.after().size() - 1);
+                        if (lastFile.fileSize() < targetFileSize) {
+                            toCompact.offerFirst(lastFile);
+                        }
+                    }
+                });
+        return result;
+    }
+
+    @Override
+    public void addLevel0File(DataFileMeta file) {
+        toCompact.add(file);
+    }
+
+    @Override
+    public int numberOfSortedRuns() {
+        return 1;
+    }
+
     @VisibleForTesting
     Optional<List<DataFileMeta>> pickCompactBefore() {
         return pick(toCompact, targetFileSize, minFileNum, maxFileNum);
@@ -80,6 +110,10 @@ public class AppendOnlyCompactManager extends CompactManager {
             long targetFileSize,
             int minFileNum,
             int maxFileNum) {
+        if (toCompact.isEmpty()) {
+            return Optional.empty();
+        }
+
         long totalFileSize = 0L;
         int fileNum = 0;
         LinkedList<DataFileMeta> candidates = new LinkedList<>();

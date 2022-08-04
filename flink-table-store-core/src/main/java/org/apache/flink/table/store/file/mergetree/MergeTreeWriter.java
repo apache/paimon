@@ -52,8 +52,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private final CompactManager compactManager;
 
-    private final Levels levels;
-
     private final Comparator<RowData> keyComparator;
 
     private final MergeFunction mergeFunction;
@@ -80,7 +78,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             RowType keyType,
             RowType valueType,
             CompactManager compactManager,
-            Levels levels,
             long maxSequenceNumber,
             Comparator<RowData> keyComparator,
             MergeFunction mergeFunction,
@@ -91,7 +88,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.keyType = keyType;
         this.valueType = valueType;
         this.compactManager = compactManager;
-        this.levels = levels;
         this.newSequenceNumber = maxSequenceNumber + 1;
         this.keyComparator = keyComparator;
         this.mergeFunction = mergeFunction;
@@ -109,8 +105,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @VisibleForTesting
-    Levels levels() {
-        return levels;
+    CompactManager compactManager() {
+        return compactManager;
     }
 
     @Override
@@ -142,7 +138,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     @Override
     public void flushMemory() throws Exception {
         if (memTable.size() > 0) {
-            if (levels.numberOfSortedRuns() > numSortedRunStopTrigger) {
+            if (compactManager.numberOfSortedRuns() > numSortedRunStopTrigger) {
                 // stop writing, wait for compaction finished
                 finishCompaction(true);
             }
@@ -165,7 +161,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                                         file -> {
                                             DataFileMeta fileMeta = file.copy(extraFiles);
                                             newFiles.add(fileMeta);
-                                            levels.addLevel0File(fileMeta);
+                                            compactManager.addLevel0File(fileMeta);
                                             return true;
                                         })
                                 .orElse(false);

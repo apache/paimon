@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.file.compact;
 
+import org.apache.flink.table.store.file.data.DataFileMeta;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,6 +44,10 @@ public abstract class CompactManager {
 
     /** Submit a new compaction task. */
     public abstract void submitCompaction();
+
+    public abstract void addLevel0File(DataFileMeta file);
+
+    public abstract int numberOfSortedRuns();
 
     public boolean isCompactionFinished() {
         return taskFuture == null;

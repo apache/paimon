@@ -19,10 +19,10 @@
 
 package org.apache.flink.table.store.file.data;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.accumulators.LongCounter;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
@@ -41,13 +41,13 @@ import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
 import static org.apache.flink.table.store.file.data.AppendOnlyWriter.RowRollingWriter.createRollingRowWriter;
+import static org.apache.flink.table.store.file.data.DataFileMeta.getMaxSequenceNumber;
 
 /**
  * A {@link RecordWriter} implementation that only accepts records which are always insert
@@ -60,9 +60,8 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     private final long targetFileSize;
     private final RowType writeSchema;
     private final DataFilePathFactory pathFactory;
-    private final AppendOnlyCompactManager compactManager;
+    private final CompactManager compactManager;
     private final boolean forceCompact;
-    private final LinkedList<DataFileMeta> toCompact;
     private final List<DataFileMeta> compactBefore;
     private final List<DataFileMeta> compactAfter;
     private final LongCounter seqNumCounter;
@@ -74,8 +73,8 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
             FileFormat fileFormat,
             long targetFileSize,
             RowType writeSchema,
-            LinkedList<DataFileMeta> restoredFiles,
-            AppendOnlyCompactManager compactManager,
+            long maxSequenceNumber,
+            CompactManager compactManager,
             boolean forceCompact,
             DataFilePathFactory pathFactory) {
         this.schemaId = schemaId;
@@ -85,10 +84,9 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
         this.pathFactory = pathFactory;
         this.compactManager = compactManager;
         this.forceCompact = forceCompact;
-        this.toCompact = restoredFiles;
         this.compactBefore = new ArrayList<>();
         this.compactAfter = new ArrayList<>();
-        this.seqNumCounter = new LongCounter(getMaxSequenceNumber(restoredFiles) + 1);
+        this.seqNumCounter = new LongCounter(maxSequenceNumber + 1);
         this.writer =
                 createRollingRowWriter(
                         schemaId,
@@ -128,7 +126,7 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
                             seqNumCounter);
         }
         // add new generated files
-        toCompact.addAll(newFiles);
+        newFiles.forEach(compactManager::addLevel0File);
         submitCompaction();
 
         boolean blocking = endOnfInput || forceCompact;
@@ -160,16 +158,9 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
         return result;
     }
 
-    private static long getMaxSequenceNumber(List<DataFileMeta> fileMetas) {
-        return fileMetas.stream()
-                .map(DataFileMeta::maxSequenceNumber)
-                .max(Long::compare)
-                .orElse(-1L);
-    }
-
     private void submitCompaction() throws ExecutionException, InterruptedException {
         finishCompaction(false);
-        if (compactManager.isCompactionFinished() && !toCompact.isEmpty()) {
+        if (compactManager.isCompactionFinished()) {
             compactManager.submitCompaction();
         }
     }
@@ -182,15 +173,6 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
                         result -> {
                             compactBefore.addAll(result.before());
                             compactAfter.addAll(result.after());
-                            if (!result.after().isEmpty()) {
-                                // if the last compacted file is still small,
-                                // add it back to the head
-                                DataFileMeta lastFile =
-                                        result.after().get(result.after().size() - 1);
-                                if (lastFile.fileSize() < targetFileSize) {
-                                    toCompact.offerFirst(lastFile);
-                                }
-                            }
                         });
     }
 
@@ -201,11 +183,6 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
         compactBefore.clear();
         compactAfter.clear();
         return increment;
-    }
-
-    @VisibleForTesting
-    List<DataFileMeta> getToCompact() {
-        return toCompact;
     }
 
     /** Rolling file writer for append-only table. */

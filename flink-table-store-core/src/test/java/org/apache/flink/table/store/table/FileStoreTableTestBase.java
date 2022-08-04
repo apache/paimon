@@ -25,11 +25,14 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
+import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.TableCommit;
@@ -52,9 +55,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.CoreOptions.BUCKET;
 import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
+import static org.apache.flink.table.store.CoreOptions.COMPACTION_MAX_FILE_NUM;
+import static org.apache.flink.table.store.CoreOptions.WRITE_SKIP_COMPACTION;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base test class for {@link FileStoreTable}. */
@@ -209,6 +215,40 @@ public abstract class FileStoreTableTestBase {
         commit.commit("6", commit6);
 
         write.close();
+    }
+
+    @Test
+    public void testWriteNoCompaction() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(WRITE_SKIP_COMPACTION, true);
+                            conf.set(COMPACTION_MAX_FILE_NUM, 5);
+                        });
+
+        TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
+        for (int i = 0; i < 10; i++) {
+            write.write(GenericRowData.of(1, 1, 100L));
+            commit.commit(String.valueOf(i), write.prepareCommit(true));
+        }
+        write.close();
+
+        List<DataFileMeta> files =
+                table.newScan().plan().splits.stream()
+                        .flatMap(split -> split.files().stream())
+                        .collect(Collectors.toList());
+        for (DataFileMeta file : files) {
+            assertThat(file.level()).isEqualTo(0);
+        }
+
+        SnapshotManager snapshotManager = new SnapshotManager(table.location());
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        assertThat(latestSnapshotId).isNotNull();
+        for (int i = 1; i <= latestSnapshotId; i++) {
+            Snapshot snapshot = snapshotManager.snapshot(i);
+            assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+        }
     }
 
     protected List<String> getResult(

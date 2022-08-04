@@ -272,7 +272,6 @@ public class MergeTreeTest {
                         dataFileWriter.keyType(),
                         dataFileWriter.valueType(),
                         createCompactManager(dataFileWriter, service, files),
-                        new Levels(comparator, files, options.numLevels()),
                         maxSequenceNumber,
                         comparator,
                         new DeduplicateMergeFunction(),
@@ -346,7 +345,10 @@ public class MergeTreeTest {
 
     private void assertRecords(List<TestRecord> expected) throws Exception {
         // compaction will drop delete
-        List<DataFileMeta> files = ((MergeTreeWriter) writer).levels().allFiles();
+        List<DataFileMeta> files =
+                ((MergeTreeCompactManager) ((MergeTreeWriter) writer).compactManager())
+                        .levels()
+                        .allFiles();
         assertRecords(expected, files, true);
     }
 

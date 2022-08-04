@@ -56,11 +56,4 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         }
         return existingFileMetas;
     }
-
-    protected long getMaxSequenceNumber(List<DataFileMeta> fileMetas) {
-        return fileMetas.stream()
-                .map(DataFileMeta::maxSequenceNumber)
-                .max(Long::compare)
-                .orElse(-1L);
-    }
 }

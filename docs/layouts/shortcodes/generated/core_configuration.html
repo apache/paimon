@@ -230,5 +230,11 @@
             <td><p>Enum</p></td>
             <td>Specify the write mode for table.<br /><br />Possible values:<ul><li>"append-only": The table can only accept append-only insert operations. Neither data deduplication nor any primary key constraints will be done when inserting rows into table store.</li><li>"change-log": The table can accept insert/delete/update operations.</li></ul></td>
         </tr>
+        <tr>
+            <td><h5>write.skip-compaction</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to skip compaction on write.</td>
+        </tr>
     </tbody>
 </table>

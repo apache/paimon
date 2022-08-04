@@ -25,6 +25,7 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactUnit;
+import org.apache.flink.table.store.file.compact.NoopCompactManager;
 import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileReader;
 import org.apache.flink.table.store.file.data.DataFileWriter;
@@ -52,6 +53,8 @@ import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
+
+import static org.apache.flink.table.store.file.data.DataFileMeta.getMaxSequenceNumber;
 
 /** {@link FileStoreWrite} for {@link org.apache.flink.table.store.file.KeyValueFileStore}. */
 public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
@@ -130,21 +133,27 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
             ExecutorService compactExecutor) {
         DataFileWriter dataFileWriter = dataFileWriterFactory.create(partition, bucket);
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
-        Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
+        CompactManager compactManager;
+        if (options.writeSkipCompaction()) {
+            compactManager = new NoopCompactManager(compactExecutor);
+        } else {
+            Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
+            compactManager =
+                    createCompactManager(
+                            partition,
+                            bucket,
+                            new UniversalCompaction(
+                                    options.maxSizeAmplificationPercent(),
+                                    options.sortedRunSizeRatio(),
+                                    options.numSortedRunCompactionTrigger(),
+                                    options.maxSortedRunNum()),
+                            compactExecutor,
+                            levels);
+        }
         return new MergeTreeWriter(
                 dataFileWriter.keyType(),
                 dataFileWriter.valueType(),
-                createCompactManager(
-                        partition,
-                        bucket,
-                        new UniversalCompaction(
-                                options.maxSizeAmplificationPercent(),
-                                options.sortedRunSizeRatio(),
-                                options.numSortedRunCompactionTrigger(),
-                                options.maxSortedRunNum()),
-                        compactExecutor,
-                        levels),
-                levels,
+                compactManager,
                 getMaxSequenceNumber(restoreFiles),
                 keyComparator,
                 mergeFunction.copy(),
