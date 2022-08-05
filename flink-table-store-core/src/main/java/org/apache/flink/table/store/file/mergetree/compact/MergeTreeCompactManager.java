@@ -75,15 +75,14 @@ public class MergeTreeCompactManager extends CompactManager {
     }
 
     @Override
-    public void addLevel0File(DataFileMeta file) {
+    public void addNewFile(DataFileMeta file) {
         levels.addLevel0File(file);
     }
 
     @Override
-    public void submitCompaction() {
+    public void triggerCompaction() {
         if (taskFuture != null) {
-            throw new IllegalStateException(
-                    "Please finish the previous compaction before submitting new one.");
+            return;
         }
         strategy.pick(levels.numberOfLevels(), levels.levelSortedRuns())
                 .ifPresent(
@@ -144,9 +143,9 @@ public class MergeTreeCompactManager extends CompactManager {
 
     /** Finish current task, and update result files to {@link Levels}. */
     @Override
-    public Optional<CompactResult> finishCompaction(boolean blocking)
+    public Optional<CompactResult> getCompactionResult(boolean blocking)
             throws ExecutionException, InterruptedException {
-        Optional<CompactResult> result = super.finishCompaction(blocking);
+        Optional<CompactResult> result = innerGetCompactionResult(blocking);
         result.ifPresent(r -> levels.update(r.before(), r.after()));
         return result;
     }

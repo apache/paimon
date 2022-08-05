@@ -59,10 +59,9 @@ public class AppendOnlyCompactManager extends CompactManager {
     }
 
     @Override
-    public void submitCompaction() {
+    public void triggerCompaction() {
         if (taskFuture != null) {
-            throw new IllegalStateException(
-                    "Please finish the previous compaction before submitting new one.");
+            return;
         }
         pickCompactBefore()
                 .ifPresent(
@@ -77,15 +76,15 @@ public class AppendOnlyCompactManager extends CompactManager {
     }
 
     @Override
-    public void addLevel0File(DataFileMeta file) {
+    public void addNewFile(DataFileMeta file) {
         toCompact.add(file);
     }
 
     /** Finish current task, and update result files to {@link #toCompact}. */
     @Override
-    public Optional<CompactResult> finishCompaction(boolean blocking)
+    public Optional<CompactResult> getCompactionResult(boolean blocking)
             throws ExecutionException, InterruptedException {
-        Optional<CompactResult> result = super.finishCompaction(blocking);
+        Optional<CompactResult> result = innerGetCompactionResult(blocking);
         result.ifPresent(
                 r -> {
                     if (!r.after().isEmpty()) {

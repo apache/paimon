@@ -45,17 +45,25 @@ public abstract class CompactManager {
     /** Should wait compaction finish. */
     public abstract boolean shouldWaitCompaction();
 
-    /** Add a new level 0 file. */
-    public abstract void addLevel0File(DataFileMeta file);
+    /** Add a new file. */
+    public abstract void addNewFile(DataFileMeta file);
 
     /** Submit a new compaction task. */
-    public abstract void submitCompaction();
+    public abstract void triggerCompaction();
 
-    public boolean isCompactionFinished() {
-        return taskFuture == null;
+    /** Get compaction result. Wait finish if {@code blocking} is true. */
+    public abstract Optional<CompactResult> getCompactionResult(boolean blocking)
+            throws ExecutionException, InterruptedException;
+
+    public void cancelCompaction() {
+        // TODO this method may leave behind orphan files if compaction is actually finished
+        //  but some CPU work still needs to be done
+        if (taskFuture != null && !taskFuture.isCancelled()) {
+            taskFuture.cancel(true);
+        }
     }
 
-    public Optional<CompactResult> finishCompaction(boolean blocking)
+    protected final Optional<CompactResult> innerGetCompactionResult(boolean blocking)
             throws ExecutionException, InterruptedException {
         if (taskFuture != null) {
             if (blocking || taskFuture.isDone()) {
@@ -72,13 +80,5 @@ public abstract class CompactManager {
             }
         }
         return Optional.empty();
-    }
-
-    public void cancelCompaction() {
-        // TODO this method may leave behind orphan files if compaction is actually finished
-        //  but some CPU work still needs to be done
-        if (taskFuture != null && !taskFuture.isCancelled()) {
-            taskFuture.cancel(true);
-        }
     }
 }

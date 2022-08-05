@@ -126,18 +126,18 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
                             seqNumCounter);
         }
         // add new generated files
-        newFiles.forEach(compactManager::addLevel0File);
+        newFiles.forEach(compactManager::addNewFile);
         submitCompaction();
 
         boolean blocking = endOnfInput || forceCompact;
-        finishCompaction(blocking);
+        getCompactionResult(blocking);
 
         return drainIncrement(newFiles);
     }
 
     @Override
     public void sync() throws Exception {
-        finishCompaction(true);
+        getCompactionResult(true);
     }
 
     @Override
@@ -159,16 +159,14 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     }
 
     private void submitCompaction() throws ExecutionException, InterruptedException {
-        finishCompaction(false);
-        if (compactManager.isCompactionFinished()) {
-            compactManager.submitCompaction();
-        }
+        getCompactionResult(false);
+        compactManager.triggerCompaction();
     }
 
-    private void finishCompaction(boolean blocking)
+    private void getCompactionResult(boolean blocking)
             throws ExecutionException, InterruptedException {
         compactManager
-                .finishCompaction(blocking)
+                .getCompactionResult(blocking)
                 .ifPresent(
                         result -> {
                             compactBefore.addAll(result.before());

@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.compact;
 
 import org.apache.flink.table.store.file.data.DataFileMeta;
 
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 
 /** A {@link CompactManager} which doesn't do things. */
@@ -35,8 +36,13 @@ public class NoopCompactManager extends CompactManager {
     }
 
     @Override
-    public void addLevel0File(DataFileMeta file) {}
+    public void addNewFile(DataFileMeta file) {}
 
     @Override
-    public void submitCompaction() {}
+    public void triggerCompaction() {}
+
+    @Override
+    public Optional<CompactResult> getCompactionResult(boolean blocking) {
+        return Optional.empty();
+    }
 }

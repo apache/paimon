@@ -136,7 +136,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         if (memTable.size() > 0) {
             if (compactManager.shouldWaitCompaction()) {
                 // stop writing, wait for compaction finished
-                finishCompaction(true);
+                getCompactionResult(true);
             }
             List<String> extraFiles = new ArrayList<>();
             if (changelogProducer == ChangelogProducer.INPUT) {
@@ -157,7 +157,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                                         file -> {
                                             DataFileMeta fileMeta = file.copy(extraFiles);
                                             newFiles.add(fileMeta);
-                                            compactManager.addLevel0File(fileMeta);
+                                            compactManager.addNewFile(fileMeta);
                                             return true;
                                         })
                                 .orElse(false);
@@ -175,13 +175,13 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     public Increment prepareCommit(boolean endOfInput) throws Exception {
         flushMemory();
         boolean blocking = endOfInput || commitForceCompact;
-        finishCompaction(blocking);
+        getCompactionResult(blocking);
         return drainIncrement();
     }
 
     @Override
     public void sync() throws Exception {
-        finishCompaction(true);
+        getCompactionResult(true);
     }
 
     private Increment drainIncrement() {
@@ -218,14 +218,12 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     private void submitCompaction() throws Exception {
-        finishCompaction(false);
-        if (compactManager.isCompactionFinished()) {
-            compactManager.submitCompaction();
-        }
+        getCompactionResult(false);
+        compactManager.triggerCompaction();
     }
 
-    private void finishCompaction(boolean blocking) throws Exception {
-        Optional<CompactResult> result = compactManager.finishCompaction(blocking);
+    private void getCompactionResult(boolean blocking) throws Exception {
+        Optional<CompactResult> result = compactManager.getCompactionResult(blocking);
         result.ifPresent(this::updateCompactResult);
     }
 
