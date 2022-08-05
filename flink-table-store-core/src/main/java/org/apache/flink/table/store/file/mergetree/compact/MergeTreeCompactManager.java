@@ -48,6 +48,8 @@ public class MergeTreeCompactManager extends CompactManager {
 
     private final long minFileSize;
 
+    private final int numSortedRunStopTrigger;
+
     private final CompactRewriter rewriter;
 
     public MergeTreeCompactManager(
@@ -56,13 +58,25 @@ public class MergeTreeCompactManager extends CompactManager {
             CompactStrategy strategy,
             Comparator<RowData> keyComparator,
             long minFileSize,
+            int numSortedRunStopTrigger,
             CompactRewriter rewriter) {
         super(executor);
         this.levels = levels;
         this.strategy = strategy;
         this.minFileSize = minFileSize;
+        this.numSortedRunStopTrigger = numSortedRunStopTrigger;
         this.keyComparator = keyComparator;
         this.rewriter = rewriter;
+    }
+
+    @Override
+    public boolean shouldWaitCompaction() {
+        return levels.numberOfSortedRuns() > numSortedRunStopTrigger;
+    }
+
+    @Override
+    public void addLevel0File(DataFileMeta file) {
+        levels.addLevel0File(file);
     }
 
     @Override
@@ -104,16 +118,6 @@ public class MergeTreeCompactManager extends CompactManager {
                             }
                             submitCompaction(unit, dropDelete);
                         });
-    }
-
-    @Override
-    public void addLevel0File(DataFileMeta file) {
-        levels.addLevel0File(file);
-    }
-
-    @Override
-    public int numberOfSortedRuns() {
-        return levels.numberOfSortedRuns();
     }
 
     @VisibleForTesting

@@ -30,13 +30,13 @@ public class NoopCompactManager extends CompactManager {
     }
 
     @Override
-    public void submitCompaction() {}
+    public boolean shouldWaitCompaction() {
+        return false;
+    }
 
     @Override
     public void addLevel0File(DataFileMeta file) {}
 
     @Override
-    public int numberOfSortedRuns() {
-        return -1;
-    }
+    public void submitCompaction() {}
 }

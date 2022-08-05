@@ -71,6 +71,16 @@ public class AppendOnlyCompactManager extends CompactManager {
                                         executor.submit(new AutoCompactTask(inputs, rewriter)));
     }
 
+    @Override
+    public boolean shouldWaitCompaction() {
+        return false;
+    }
+
+    @Override
+    public void addLevel0File(DataFileMeta file) {
+        toCompact.add(file);
+    }
+
     /** Finish current task, and update result files to {@link #toCompact}. */
     @Override
     public Optional<CompactResult> finishCompaction(boolean blocking)
@@ -88,16 +98,6 @@ public class AppendOnlyCompactManager extends CompactManager {
                     }
                 });
         return result;
-    }
-
-    @Override
-    public void addLevel0File(DataFileMeta file) {
-        toCompact.add(file);
-    }
-
-    @Override
-    public int numberOfSortedRuns() {
-        return 1;
     }
 
     @VisibleForTesting

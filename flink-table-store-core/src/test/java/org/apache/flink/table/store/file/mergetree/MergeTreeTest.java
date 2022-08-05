@@ -277,7 +277,6 @@ public class MergeTreeTest {
                         new DeduplicateMergeFunction(),
                         dataFileWriter,
                         options.commitForceCompact(),
-                        options.numSortedRunStopTrigger(),
                         ChangelogProducer.NONE);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
@@ -311,6 +310,7 @@ public class MergeTreeTest {
                 strategy,
                 comparator,
                 options.targetFileSize(),
+                options.numSortedRunStopTrigger(),
                 rewriter);
     }
 

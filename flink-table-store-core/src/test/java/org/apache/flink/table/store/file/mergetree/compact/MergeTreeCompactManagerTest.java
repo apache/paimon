@@ -197,7 +197,13 @@ public class MergeTreeCompactManagerTest {
         Levels levels = new Levels(comparator, files, 3);
         MergeTreeCompactManager manager =
                 new MergeTreeCompactManager(
-                        service, levels, strategy, comparator, 2, testRewriter(expectedDropDelete));
+                        service,
+                        levels,
+                        strategy,
+                        comparator,
+                        2,
+                        Integer.MAX_VALUE,
+                        testRewriter(expectedDropDelete));
         manager.submitCompaction();
         manager.finishCompaction(true);
         List<LevelMinMax> outputs =

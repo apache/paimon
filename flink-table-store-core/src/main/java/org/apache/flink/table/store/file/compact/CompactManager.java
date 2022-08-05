@@ -42,12 +42,14 @@ public abstract class CompactManager {
         this.executor = executor;
     }
 
-    /** Submit a new compaction task. */
-    public abstract void submitCompaction();
+    /** Should wait compaction finish. */
+    public abstract boolean shouldWaitCompaction();
 
+    /** Add a new level 0 file. */
     public abstract void addLevel0File(DataFileMeta file);
 
-    public abstract int numberOfSortedRuns();
+    /** Submit a new compaction task. */
+    public abstract void submitCompaction();
 
     public boolean isCompactionFinished() {
         return taskFuture == null;

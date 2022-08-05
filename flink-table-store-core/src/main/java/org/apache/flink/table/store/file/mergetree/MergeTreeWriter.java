@@ -60,8 +60,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private final boolean commitForceCompact;
 
-    private final int numSortedRunStopTrigger;
-
     private final ChangelogProducer changelogProducer;
 
     private final LinkedHashSet<DataFileMeta> newFiles;
@@ -83,7 +81,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             MergeFunction mergeFunction,
             DataFileWriter dataFileWriter,
             boolean commitForceCompact,
-            int numSortedRunStopTrigger,
             ChangelogProducer changelogProducer) {
         this.keyType = keyType;
         this.valueType = valueType;
@@ -93,7 +90,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.mergeFunction = mergeFunction;
         this.dataFileWriter = dataFileWriter;
         this.commitForceCompact = commitForceCompact;
-        this.numSortedRunStopTrigger = numSortedRunStopTrigger;
         this.changelogProducer = changelogProducer;
         this.newFiles = new LinkedHashSet<>();
         this.compactBefore = new LinkedHashMap<>();
@@ -138,7 +134,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     @Override
     public void flushMemory() throws Exception {
         if (memTable.size() > 0) {
-            if (compactManager.numberOfSortedRuns() > numSortedRunStopTrigger) {
+            if (compactManager.shouldWaitCompaction()) {
                 // stop writing, wait for compaction finished
                 finishCompaction(true);
             }

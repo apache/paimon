@@ -159,7 +159,6 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
                 mergeFunction.copy(),
                 dataFileWriter,
                 options.commitForceCompact(),
-                options.numSortedRunStopTrigger(),
                 options.changelogProducer());
     }
 
@@ -177,6 +176,7 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
                 compactStrategy,
                 keyComparator,
                 options.targetFileSize(),
+                options.numSortedRunStopTrigger(),
                 rewriter);
     }
 
