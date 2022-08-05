@@ -24,9 +24,13 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Build From Source
+# Build from Source
 
-Clone from git, enter:
+In order to build the Flink Table Store you need the source code. Either [download the source of a release]({{< downloads >}}) or [clone the git repository]({{< github_repo >}}).
+
+In addition, you need **Maven 3** and a **JDK** (Java Development Kit). Flink Table Store requires **Java 8** to build.
+
+To clone from git, enter:
 
 ```bash
 git clone {{< github_repo >}}
