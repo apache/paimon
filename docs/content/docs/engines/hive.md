@@ -32,7 +32,7 @@ Table Store currently supports the following features related with Hive:
 
 ## Version
 
-Table Store currently supports Hive 2.x.
+Table Store currently supports Hive 2.3.
 
 ## Execution Engine
 
