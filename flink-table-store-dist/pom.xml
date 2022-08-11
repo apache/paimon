@@ -185,10 +185,6 @@ under the License.
                                     <shadedPattern>org.apache.flink.table.store.shaded.streaming.util.serialization.TypeInformationKeyValueSerializationSchema</shadedPattern>
                                 </relocation>
                                 <relocation>
-                                    <pattern>org.apache.hadoop.security.token.delegation.HiveDelegationTokenSupport</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.security.token.delegation.HiveDelegationTokenSupport</shadedPattern>
-                                </relocation>
-                                <relocation>
                                     <pattern>org.apache.kafka</pattern>
                                     <shadedPattern>org.apache.flink.table.store.shaded.org.apache.kafka</shadedPattern>
                                 </relocation>
