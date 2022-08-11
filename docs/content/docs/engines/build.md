@@ -26,7 +26,7 @@ under the License.
 
 # Build from Source
 
-In order to build the Flink Table Store you need the source code. Either [download the source of a release]({{< downloads >}}) or [clone the git repository]({{< github_repo >}}).
+In order to build the Flink Table Store you need the source code. Either [download the source of a release](https://flink.apache.org/downloads.html) or [clone the git repository]({{< github_repo >}}).
 
 In addition, you need **Maven 3** and a **JDK** (Java Development Kit). Flink Table Store requires **Java 8** to build.
 
