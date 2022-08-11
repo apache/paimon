@@ -507,6 +507,18 @@ under the License.
                                     <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.fs.ProxyLocalFileSystem</shadedPattern>
                                 </relocation>
                                 <relocation>
+                                    <pattern>org.apache.hadoop.fs.ProxyFileSystem</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.fs.ProxyFileSystem</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.hadoop.fs.DefaultFileAccess</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.fs.DefaultFileAccess</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.hadoop.mapred.WebHCatJTShim23</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.mapred.WebHCatJTShim23</shadedPattern>
+                                </relocation>
+                                <relocation>
                                     <pattern>org.apache.hadoop.security.token.delegation.HiveDelegationTokenSupport</pattern>
                                     <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.security.token.delegation.HiveDelegationTokenSupport</shadedPattern>
                                 </relocation>
