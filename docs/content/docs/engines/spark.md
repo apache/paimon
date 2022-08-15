@@ -58,6 +58,14 @@ spark-sql ... \
     --conf spark.sql.catalog.tablestore.warehouse=file:/tmp/warehouse
 ```
 
+If you would like to use Table Store Hive catalog from Spark, please also download the following jar file with corresponding Hive version and append its path to `--jars` argument.
+
+| |Jar|
+|---|---|
+|Hive 2.3|[flink-table-store-hive-catalog-{{< version >}}_2.3.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.3.jar)|
+|Hive 2.2|[flink-table-store-hive-catalog-{{< version >}}_2.2.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.2.jar)|
+|Hive 2.1|[flink-table-store-hive-catalog-{{< version >}}_2.1.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.1.jar)|
+
 Some extra configurations are needed if your Table Store Catalog uses the Hive
 Metastore (No extra configuration is required for read-only).
 
