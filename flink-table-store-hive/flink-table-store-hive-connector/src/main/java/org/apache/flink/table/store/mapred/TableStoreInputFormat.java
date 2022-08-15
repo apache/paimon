@@ -30,11 +30,8 @@ import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
 
-import org.apache.hadoop.hive.ql.exec.SerializationUtilities;
 import org.apache.hadoop.hive.ql.io.sarg.ConvertAstToSearchArg;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
-import org.apache.hadoop.hive.ql.plan.ExprNodeGenericFuncDesc;
-import org.apache.hadoop.hive.ql.plan.TableScanDesc;
 import org.apache.hadoop.hive.serde2.ColumnProjectionUtils;
 import org.apache.hadoop.mapred.InputFormat;
 import org.apache.hadoop.mapred.InputSplit;
@@ -84,14 +81,10 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
     }
 
     private Optional<Predicate> createPredicate(TableSchema tableSchema, JobConf jobConf) {
-        String hiveFilter = jobConf.get(TableScanDesc.FILTER_EXPR_CONF_STR);
-        if (hiveFilter == null) {
+        SearchArgument sarg = ConvertAstToSearchArg.createFromConf(jobConf);
+        if (sarg == null) {
             return Optional.empty();
         }
-
-        ExprNodeGenericFuncDesc exprNodeDesc =
-                SerializationUtilities.deserializeObject(hiveFilter, ExprNodeGenericFuncDesc.class);
-        SearchArgument sarg = ConvertAstToSearchArg.create(jobConf, exprNodeDesc);
         SearchArgumentToPredicateConverter converter =
                 new SearchArgumentToPredicateConverter(
                         sarg, tableSchema.fieldNames(), tableSchema.logicalRowType().getChildren());

@@ -86,7 +86,9 @@ public class HiveSchema {
             String columnNames = properties.getProperty(serdeConstants.LIST_COLUMNS);
             String columnNameDelimiter =
                     properties.getProperty(
-                            serdeConstants.COLUMN_NAME_DELIMITER, String.valueOf(SerDeUtils.COMMA));
+                            // serdeConstants.COLUMN_NAME_DELIMITER is not defined in earlier Hive
+                            // versions, so we use a constant string instead
+                            "column.name.delimite", String.valueOf(SerDeUtils.COMMA));
             List<String> names = Arrays.asList(columnNames.split(columnNameDelimiter));
 
             String columnTypes = properties.getProperty(serdeConstants.LIST_COLUMN_TYPES);
