@@ -32,7 +32,7 @@ Table Store currently supports the following features related with Hive:
 
 ## Version
 
-Table Store currently supports Hive 2.3.
+Table Store currently supports Hive 2.1, 2.2 and 2.3.
 
 ## Execution Engine
 
@@ -40,12 +40,43 @@ Table Store currently supports MR and Tez execution engine for Hive.
 
 ## Install
 
+### Table Store Hive Catalog (For Flink)
+
 {{< stable >}}
-Download [flink-table-store-hive-connector-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-{{< version >}}.jar).
+Download the jar file with corresponding version.
+
+| |Jar|
+|---|---|
+|Hive 2.3|[flink-table-store-hive-catalog-{{< version >}}_2.3.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.3.jar)|
+|Hive 2.2|[flink-table-store-hive-catalog-{{< version >}}_2.2.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.2.jar)|
+|Hive 2.1|[flink-table-store-hive-catalog-{{< version >}}_2.1.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.1.jar)|
+
 {{< /stable >}}
 {{< unstable >}}
 
-You are using an unreleased version of Table Store. See [Build From Source]({{< ref "docs/engines/build" >}}) for how to build and find Hive connector jar file.
+You are using an unreleased version of Table Store. See [Build From Source]({{< ref "docs/engines/build" >}}) for how to build and find Table Store Hive catalog jar file.
+
+{{< /unstable >}}
+
+To enable Table Store Hive Catalog support in Flink, you can pick one of the following two methods.
+* Copy the jar file into the `lib` directory of your Flink installation directory. Note that this must be done before starting your Flink cluster.
+* If you're using Flink's SQL client, append `--jar /path/to/flink-table-store-hive-catalog-{{< version >}}.jar` to the starting command of SQL client.
+
+### Table Store Hive Connector (For Hive)
+
+{{< stable >}}
+Download the jar file with corresponding version.
+
+| |Jar|
+|---|---|
+|Hive 2.3|[flink-table-store-hive-connector-{{< version >}}_2.3.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-{{< version >}}_2.3.jar)|
+|Hive 2.2|[flink-table-store-hive-connector-{{< version >}}_2.2.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-{{< version >}}_2.2.jar)|
+|Hive 2.1|[flink-table-store-hive-connector-{{< version >}}_2.1.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-{{< version >}}_2.1.jar)|
+
+{{< /stable >}}
+{{< unstable >}}
+
+You are using an unreleased version of Table Store. See [Build From Source]({{< ref "docs/engines/build" >}}) for how to build and find Table Store Hive connector jar file.
 
 {{< /unstable >}}
 
