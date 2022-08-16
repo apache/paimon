@@ -175,7 +175,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>${flink.runtime}</artifactId>
+            <artifactId>flink-runtime</artifactId>
             <version>${flink.version}</version>
             <exclusions>
                 <exclusion>
@@ -235,7 +235,7 @@ under the License.
                                 <includes combine.children="append">
                                     <!-- Flink -->
                                     <include>org.apache.flink:flink-core</include>
-                                    <include>org.apache.flink:${flink.runtime}</include>
+                                    <include>org.apache.flink:flink-runtime</include>
                                     <include>org.apache.flink:${flink.streaming.java}</include>
                                     <include>org.apache.flink:flink-connector-files</include>
                                     <include>org.apache.flink:flink-hadoop-fs</include>
