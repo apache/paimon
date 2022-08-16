@@ -44,6 +44,12 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
+            <artifactId>flink-table-store-hive-catalog</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
             <artifactId>flink-table-store-hive-connector</artifactId>
             <version>${project.version}</version>
         </dependency>
@@ -102,6 +108,16 @@ under the License.
                             <artifactId>flink-table-store-dist</artifactId>
                             <version>${project.version}</version>
                             <destFileName>flink-table-store.jar</destFileName>
+                            <type>jar</type>
+                            <overWrite>true</overWrite>
+                            <outputDirectory>/tmp/flink-table-store-e2e-tests-jars
+                            </outputDirectory>
+                        </artifactItem>
+                        <artifactItem>
+                            <groupId>org.apache.flink</groupId>
+                            <artifactId>flink-table-store-hive-catalog</artifactId>
+                            <version>${project.version}</version>
+                            <destFileName>flink-table-store-hive-catalog.jar</destFileName>
                             <type>jar</type>
                             <overWrite>true</overWrite>
                             <outputDirectory>/tmp/flink-table-store-e2e-tests-jars
