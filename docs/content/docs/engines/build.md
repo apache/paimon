@@ -48,7 +48,23 @@ You can find Flink 1.15 bundled jar in `./flink-table-store-dist/target/flink-ta
 
 ## Hive
 
-You can find Hive bundled jar in `./flink-table-store-hive/flink-table-store-hive-connector/target/flink-table-store-hive-connector-{{< version >}}.jar`.
+To build with Hive 2.3, no special argument is needed.
+
+To build with Hive 2.2, run the following command.
+
+```bash
+mvn clean install -Dmaven.test.skip=true -Phive-2.2
+```
+
+To build with Hive 2.1, run the following command.
+
+```bash
+mvn clean install -Dmaven.test.skip=true -Phive-2.1
+```
+
+You can find Hive catalog jar in `./flink-table-store-hive/flink-table-store-hive-catalog/target/flink-table-store-hive-catalog-{{< version >}}.jar`. 
+
+You can find Hive connector jar in `./flink-table-store-hive/flink-table-store-hive-connector/target/flink-table-store-hive-connector-{{< version >}}.jar`.
 
 ## Spark
 
