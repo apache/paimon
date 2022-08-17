@@ -57,17 +57,17 @@ mkdir ${RELEASE_DIR}
 
 mvn clean install -Dcheckstyle.skip=true -Dgpg.skip -DskipTests
 cp flink-table-store-dist/target/flink-table-store-dist-${RELEASE_VERSION}.jar ${RELEASE_DIR}
-cp flink-table-store-hive/flink-table-store-hive-connector/target/flink-table-store-hive-catalog-${RELEASE_VERSION}.jar ${RELEASE_DIR}/flink-table-store-hive-catalog-${RELEASE_VERSION}_2.3.jar
+cp flink-table-store-hive/flink-table-store-hive-catalog/target/flink-table-store-hive-catalog-${RELEASE_VERSION}.jar ${RELEASE_DIR}/flink-table-store-hive-catalog-${RELEASE_VERSION}_2.3.jar
 cp flink-table-store-hive/flink-table-store-hive-connector/target/flink-table-store-hive-connector-${RELEASE_VERSION}.jar ${RELEASE_DIR}/flink-table-store-hive-connector-${RELEASE_VERSION}_2.3.jar
 cp flink-table-store-spark/target/flink-table-store-spark-${RELEASE_VERSION}.jar ${RELEASE_DIR}
 cp flink-table-store-spark2/target/flink-table-store-spark2-${RELEASE_VERSION}.jar ${RELEASE_DIR}
 
 mvn clean install -Dcheckstyle.skip=true -Dgpg.skip -DskipTests -Phive-2.2 -f flink-table-store-hive
-cp flink-table-store-hive/flink-table-store-hive-connector/target/flink-table-store-hive-catalog-${RELEASE_VERSION}.jar ${RELEASE_DIR}/flink-table-store-hive-catalog-${RELEASE_VERSION}_2.2.jar
+cp flink-table-store-hive/flink-table-store-hive-catalog/target/flink-table-store-hive-catalog-${RELEASE_VERSION}.jar ${RELEASE_DIR}/flink-table-store-hive-catalog-${RELEASE_VERSION}_2.2.jar
 cp flink-table-store-hive/flink-table-store-hive-connector/target/flink-table-store-hive-connector-${RELEASE_VERSION}.jar ${RELEASE_DIR}/flink-table-store-hive-connector-${RELEASE_VERSION}_2.2.jar
 
 mvn clean install -Dcheckstyle.skip=true -Dgpg.skip -DskipTests -Phive-2.1 -f flink-table-store-hive
-cp flink-table-store-hive/flink-table-store-hive-connector/target/flink-table-store-hive-catalog-${RELEASE_VERSION}.jar ${RELEASE_DIR}/flink-table-store-hive-catalog-${RELEASE_VERSION}_2.1.jar
+cp flink-table-store-hive/flink-table-store-hive-catalog/target/flink-table-store-hive-catalog-${RELEASE_VERSION}.jar ${RELEASE_DIR}/flink-table-store-hive-catalog-${RELEASE_VERSION}_2.1.jar
 cp flink-table-store-hive/flink-table-store-hive-connector/target/flink-table-store-hive-connector-${RELEASE_VERSION}.jar ${RELEASE_DIR}/flink-table-store-hive-connector-${RELEASE_VERSION}_2.1.jar
 
 mvn clean install -Dcheckstyle.skip=true -Dgpg.skip -Dmaven.test.skip=true -Pflink-1.14
