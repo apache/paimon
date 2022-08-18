@@ -1,9 +1,9 @@
 ---
-title: "Spark"
+title: "Spark3"
 weight: 3
 type: docs
 aliases:
-- /engines/spark.html
+- /engines/spark3.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,7 +24,7 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Spark
+# Spark3
 
 Table Store supports reading table store tables through Spark.
 
