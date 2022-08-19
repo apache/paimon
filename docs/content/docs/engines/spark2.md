@@ -48,6 +48,10 @@ spark-shell ... --jars flink-table-store-spark2-{{< version >}}.jar
 
 Alternatively, you can copy `flink-table-store-spark2-{{< version >}}.jar` under `spark/jars` in your Spark installation.
 
+{{< hint info >}}
+__Note:__ If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR` is set.
+{{< /hint >}}
+
 ## Read
 
 Table store with Spark 2.4 does not support DDL, you can use the Dataset reader
