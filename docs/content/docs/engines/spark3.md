@@ -48,6 +48,10 @@ spark-sql ... --jars flink-table-store-spark-{{< version >}}.jar
 
 Alternatively, you can copy `flink-table-store-spark-{{< version >}}.jar` under `spark/jars` in your Spark installation.
 
+{{< hint info >}}
+__Note:__ If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR` is set.
+{{< /hint >}}
+
 ## Catalog
 
 The following command registers the Table Store's Spark catalog with the name `tablestore`:
