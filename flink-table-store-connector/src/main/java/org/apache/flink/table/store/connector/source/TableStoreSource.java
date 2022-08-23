@@ -54,6 +54,7 @@ import java.util.List;
 import static org.apache.flink.table.store.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
+import static org.apache.flink.table.store.CoreOptions.LOG_SCAN_REMOVE_NORMALIZE;
 
 /**
  * Table source to create {@link FileStoreSource} under batch mode or change-tracking is disabled.
@@ -119,6 +120,10 @@ public class TableStoreSource
             return ChangelogMode.all();
         } else if (table instanceof ChangelogWithKeyFileStoreTable) {
             Configuration options = Configuration.fromMap(table.schema().options());
+
+            if (options.get(LOG_SCAN_REMOVE_NORMALIZE)) {
+                return ChangelogMode.all();
+            }
 
             if (logStoreTableFactory == null
                     && options.get(CHANGELOG_PRODUCER) != ChangelogProducer.NONE) {
