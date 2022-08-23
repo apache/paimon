@@ -57,9 +57,9 @@ public class FileFormatTest {
         // write
 
         List<RowData> expected = new ArrayList<>();
-        expected.add(GenericRowData.of(1, 1));
-        expected.add(GenericRowData.of(2, 2));
-        expected.add(GenericRowData.of(3, 3));
+        expected.add(GenericRowData.of(1, 11));
+        expected.add(GenericRowData.of(2, 22));
+        expected.add(GenericRowData.of(3, 33));
         FSDataOutputStream out = fs.create(path, FileSystem.WriteMode.NO_OVERWRITE);
         BulkWriter<RowData> writer = avro.createWriterFactory(rowType).create(out);
         for (RowData row : expected) {
@@ -77,7 +77,7 @@ public class FileFormatTest {
         List<RowData> result = new ArrayList<>();
         Utils.forEachRemaining(
                 reader,
-                rowData -> result.add(GenericRowData.of(rowData.getInt(0), rowData.getInt(0))));
+                rowData -> result.add(GenericRowData.of(rowData.getInt(0), rowData.getInt(1))));
 
         assertThat(result).isEqualTo(expected);
     }
