@@ -58,6 +58,8 @@ You are using an unreleased version of Table Store. See [Build From Source]({{< 
 
 {{< /unstable >}}
 
+If you're aiming for Hive 2.1 CDH 6.3, see [Build From Source]({{< ref "docs/engines/build" >}}) for more information.
+
 To enable Table Store Hive Catalog support in Flink, you can pick one of the following two methods.
 * Copy the jar file into the `lib` directory of your Flink installation directory. Note that this must be done before starting your Flink cluster.
 * If you're using Flink's SQL client, append `--jar /path/to/flink-table-store-hive-catalog-{{< version >}}.jar` to the starting command of SQL client.
@@ -79,6 +81,8 @@ Download the jar file with corresponding version.
 You are using an unreleased version of Table Store. See [Build From Source]({{< ref "docs/engines/build" >}}) for how to build and find Table Store Hive connector jar file.
 
 {{< /unstable >}}
+
+If you're aiming for Hive 2.1 CDH 6.3, see [Build From Source]({{< ref "docs/engines/build" >}}) for more information.
 
 There are several ways to add this jar to Hive.
 

@@ -59,6 +59,19 @@ under the License.
                 <hive.version>2.2.0</hive.version>
             </properties>
         </profile>
+
+        <profile>
+            <id>hive-2.1-cdh-6.3</id>
+            <properties>
+                <hive.version>2.1.1-cdh6.3.4</hive.version>
+            </properties>
+            <repositories>
+                <repository>
+                    <id>cloudera</id>
+                    <url>https://repository.cloudera.com/artifactory/cloudera-repos/</url>
+                </repository>
+            </repositories>
+        </profile>
     </profiles>
 
 </project>

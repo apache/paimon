@@ -20,33 +20,26 @@ package org.apache.flink.table.store.hive;
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputSerializer;
 
-import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.apache.hadoop.mapred.JobConf;
-import org.apache.hadoop.security.Credentials;
-import org.apache.hadoop.security.UserGroupInformation;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
 
-/** Wrap {@link JobConf} to a serializable class. */
+/** Wrap {@link HiveConf} to a serializable class. */
 public class SerializableHiveConf implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private transient JobConf jobConf;
+    private transient HiveConf conf;
 
     public SerializableHiveConf(HiveConf conf) {
-        this.jobConf = createJobConfWithCredentials(conf);
+        this.conf = conf;
     }
 
     public HiveConf conf() {
-        HiveConf hiveConf = new HiveConf(jobConf, HiveConf.class);
-        // to make sure Hive configuration properties in conf not be overridden
-        hiveConf.addResource(jobConf);
-        return hiveConf;
+        return conf;
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
@@ -55,7 +48,7 @@ public class SerializableHiveConf implements Serializable {
         // we write the jobConf through a separate serializer to avoid cryptic exceptions when it
         // corrupts the serialization stream
         final DataOutputSerializer ser = new DataOutputSerializer(256);
-        jobConf.write(ser);
+        conf.write(ser);
         out.writeInt(ser.length());
         out.write(ser.getSharedBuffer(), 0, ser.length());
     }
@@ -66,36 +59,13 @@ public class SerializableHiveConf implements Serializable {
         final byte[] data = new byte[in.readInt()];
         in.readFully(data);
         final DataInputDeserializer deser = new DataInputDeserializer(data);
-        this.jobConf = new JobConf();
+        this.conf = new HiveConf();
         try {
-            jobConf.readFields(deser);
+            conf.readFields(deser);
         } catch (IOException e) {
             throw new IOException(
-                    "Could not deserialize JobConf, the serialized and de-serialized don't match.",
+                    "Could not deserialize HiveConf, the serialized and de-serialized don't match.",
                     e);
         }
-        Credentials currentUserCreds = UserGroupInformation.getCurrentUser().getCredentials();
-        if (currentUserCreds != null) {
-            jobConf.getCredentials().addAll(currentUserCreds);
-        }
-    }
-
-    private static void addCredentialsIntoJobConf(JobConf jobConf) {
-        UserGroupInformation currentUser;
-        try {
-            currentUser = UserGroupInformation.getCurrentUser();
-        } catch (IOException e) {
-            throw new RuntimeException("Unable to determine current user", e);
-        }
-        Credentials currentUserCreds = currentUser.getCredentials();
-        if (currentUserCreds != null) {
-            jobConf.getCredentials().mergeAll(currentUserCreds);
-        }
-    }
-
-    private static JobConf createJobConfWithCredentials(Configuration configuration) {
-        JobConf jobConf = new JobConf(configuration);
-        addCredentialsIntoJobConf(jobConf);
-        return jobConf;
     }
 }
