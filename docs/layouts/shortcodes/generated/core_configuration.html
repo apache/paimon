@@ -111,6 +111,12 @@
             <td>Specify the startup mode for log consumer.<br /><br />Possible values:<ul><li>"full": Perform a snapshot on the table upon first startup, and continue to read the latest changes.</li><li>"latest": Start from the latest.</li><li>"from-timestamp": Start from user-supplied timestamp.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>log.scan.remove-normalize</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to force the removal of the normalize node when streaming read. Note: This is dangerous and is likely to cause data errors if downstream is used to calculate aggregation.</td>
+        </tr>
+        <tr>
             <td><h5>log.scan.timestamp-millis</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
