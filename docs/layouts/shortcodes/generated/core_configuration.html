@@ -114,7 +114,7 @@
             <td><h5>log.scan.remove-normalize</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether to force the removal of the normalize node when streaming read. Note: This is dangerous and is likely to cause data errors if downstream is used to calculate aggregation.</td>
+            <td>Whether to force the removal of the normalize node when streaming read. Note: This is dangerous and is likely to cause data errors if downstream is used to calculate aggregation and the input is not complete changelog.</td>
         </tr>
         <tr>
             <td><h5>log.scan.timestamp-millis</h5></td>

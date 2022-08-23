@@ -310,7 +310,7 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to force the removal of the normalize node when streaming read."
                                     + " Note: This is dangerous and is likely to cause data errors if downstream"
-                                    + " is used to calculate aggregation.");
+                                    + " is used to calculate aggregation and the input is not complete changelog.");
 
     public static final ConfigOption<String> LOG_KEY_FORMAT =
             ConfigOptions.key("log.key.format")
