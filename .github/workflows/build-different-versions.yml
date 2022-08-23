@@ -24,7 +24,7 @@ jobs:
           mvn clean install -Dmaven.test.skip=true -Phive-2.1 -f flink-table-store-hive
       - name: Build Hive 2.1 CDH 6.3
         run: |
-          mvn clean install -Dmaven.test.skip=true -Phive-2.1 -f flink-table-store-hive
+          mvn clean install -Dmaven.test.skip=true -Phive-2.1-cdh-6.3 -f flink-table-store-hive
       - name: Build Flink 1.14
         run: |
           mvn clean install -Dmaven.test.skip=true -Pflink-1.14
