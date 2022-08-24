@@ -1,6 +1,6 @@
 # Flink Table Store
 
-Flink Table Store is a unified streaming and batch store for building dynamic tables on Apache Flink.
+Flink Table Store is a data lake storage for streaming updates/deletes changelog ingestion and high-performance queries in real time.
 
 Flink Table Store is developed under the umbrella of [Apache Flink](https://flink.apache.org/).
 
