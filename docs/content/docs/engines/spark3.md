@@ -132,7 +132,7 @@ ALTER TABLE table_identifier
 SET TBLPROPERTIES ( key1=val1 ) 
     | RESET TBLPROPERTIES (key2)
     | ADD COLUMNS ( col_name col_type [ , ... ] )
-    | { ALTER | CHNAGE } COLUMN col_name { DROP NOT NULL | COMMENT 'new_comment'}
+    | { ALTER | CHANGE } COLUMN col_name { DROP NOT NULL | COMMENT 'new_comment'}
 ```
 
 - Change/add table properties
