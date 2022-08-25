@@ -37,7 +37,7 @@ This is the benchmark module for Flink Table Store. Inspired by [Nexmark](https:
 
 |#|Description|
 |---|---|
-|q1|Test insert and update random primary keys with normal record size (100 bytes per record). Mimics the update of uv and pv of items in an E-commercial website.|
+|q1|Test insert and update random primary keys with normal record size (150 bytes per record). Mimics the update of uv and pv of items in an E-commercial website.|
 
 ## Benchmark Results
 

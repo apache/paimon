@@ -15,7 +15,7 @@
 -- limitations under the License.
 
 -- Mimics the update of uv and pv of items in an E-commercial website.
--- Primary keys ranges from 0 to 10^8; Each record is about 100 bytes.
+-- Primary keys ranges from 0 to 10^8; Each record is about 150 bytes.
 
 CREATE TABLE item_uv_pv_1d_source (
     `item_id` BIGINT,
