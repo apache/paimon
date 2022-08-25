@@ -23,5 +23,4 @@ before: |
   );
 sink-name: test_catalog.`default`.table_store_sink
 sink-properties: |
-  'bucket' = '16',
-  'write-buffer-size' = '512m'
+  'bucket' = '16'
