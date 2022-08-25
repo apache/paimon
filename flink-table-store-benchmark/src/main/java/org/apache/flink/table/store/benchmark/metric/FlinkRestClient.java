@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.benchmark.metric;
 
-import org.apache.flink.table.store.benchmark.metric.bytes.BpsMetric;
-import org.apache.flink.table.store.benchmark.metric.bytes.TotalBytesMetric;
 import org.apache.flink.table.store.benchmark.utils.BenchmarkUtils;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
@@ -32,7 +30,9 @@ import org.apache.http.HttpStatus;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPatch;
+import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.methods.HttpRequestBase;
+import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
@@ -43,6 +43,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.net.URI;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
@@ -85,9 +86,15 @@ public class FlinkRestClient {
     }
 
     public void cancelJob(String jobId) {
-        LOG.info("Stopping Job: {}", jobId);
+        LOG.info("Cancelling Job: {}", jobId);
         String url = String.format("http://%s/jobs/%s?mode=cancel", jmEndpoint, jobId);
         patch(url);
+    }
+
+    public void stopJobWithSavepoint(String jobId, String savepointPath) {
+        LOG.info("Stopping Job: {}", jobId);
+        String url = String.format("http://%s/jobs/%s/stop", jmEndpoint, jobId);
+        post(url, "{\"targetDirectory\": \"" + savepointPath + "\", \"drain\": false}");
     }
 
     public boolean isJobRunning(String jobId) {
@@ -98,6 +105,21 @@ public class FlinkRestClient {
             return jsonNode.get("state").asText().equals("RUNNING");
         } catch (Exception e) {
             throw new RuntimeException("The response is not a valid JSON string:\n" + response, e);
+        }
+    }
+
+    public void waitUntilNumberOfRows(String jobId, long numberOfRows) {
+        while (true) {
+            String sourceVertexId = getSourceVertexId(jobId);
+            double actualNumRecords = getTotalNumRecords(jobId, sourceVertexId);
+            if (actualNumRecords >= numberOfRows) {
+                return;
+            }
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                // ignore
+            }
         }
     }
 
@@ -139,24 +161,6 @@ public class FlinkRestClient {
         }
     }
 
-    public synchronized BpsMetric getBpsMetric(String jobId, String vertexId) {
-        String url =
-                String.format(
-                        "http://%s/jobs/%s/vertices/%s/subtasks/metrics?get=numBytesOutPerSecond",
-                        jmEndpoint, jobId, vertexId);
-        String response = executeAsString(url);
-        return BpsMetric.fromJson(response);
-    }
-
-    public synchronized TotalBytesMetric getTotalBytesMetric(String jobId, String vertexId) {
-        String url =
-                String.format(
-                        "http://%s/jobs/%s/vertices/%s/subtasks/metrics?get=numBytesOut",
-                        jmEndpoint, jobId, vertexId);
-        String response = executeAsString(url);
-        return TotalBytesMetric.fromJson(response);
-    }
-
     @Nullable
     public synchronized Long getDataFreshness(String jobId) {
         String url = String.format("http://%s/jobs/%s/checkpoints", jmEndpoint, jobId);
@@ -174,7 +178,15 @@ public class FlinkRestClient {
         }
     }
 
+    public synchronized double getNumRecordsPerSecond(String jobId, String vertexId) {
+        return getSourceMetric(jobId, vertexId, "numRecordsOutPerSecond");
+    }
+
     public synchronized double getTotalNumRecords(String jobId, String vertexId) {
+        return getSourceMetric(jobId, vertexId, "numRecordsOut");
+    }
+
+    public synchronized double getSourceMetric(String jobId, String vertexId, String metric) {
         String url =
                 String.format(
                         "http://%s/jobs/%s/vertices/%s/subtasks/metrics",
@@ -185,7 +197,7 @@ public class FlinkRestClient {
             ArrayNode arrayNode = (ArrayNode) BenchmarkUtils.JSON_MAPPER.readTree(response);
             for (JsonNode node : arrayNode) {
                 String metricName = node.get("id").asText();
-                if (metricName.startsWith("Source_") && metricName.endsWith(".numRecordsOut")) {
+                if (metricName.startsWith("Source_") && metricName.endsWith("." + metric)) {
                     numRecordsMetricName = metricName;
                     break;
                 }
@@ -195,8 +207,8 @@ public class FlinkRestClient {
         }
 
         if (numRecordsMetricName == null) {
-            throw new RuntimeException(
-                    "Can't find number of records metric name from the response:\n" + response);
+            LOG.warn("Can't find " + metric + " name from the response: " + response);
+            return -1;
         }
 
         url =
@@ -208,6 +220,29 @@ public class FlinkRestClient {
             return BenchmarkUtils.JSON_MAPPER.readTree(response).get(0).get("sum").doubleValue();
         } catch (Exception e) {
             throw new RuntimeException("The response is not a valid JSON string:\n" + response, e);
+        }
+    }
+
+    private void post(String url, String json) {
+        HttpPost httpPost = new HttpPost();
+        httpPost.setURI(URI.create(url));
+        try {
+            httpPost.setEntity(new StringEntity(json));
+        } catch (UnsupportedEncodingException e) {
+            throw new RuntimeException(e);
+        }
+        HttpResponse response;
+        try {
+            httpPost.setHeader("Connection", "close");
+            response = httpClient.execute(httpPost);
+            int httpCode = response.getStatusLine().getStatusCode();
+            if (httpCode != HttpStatus.SC_ACCEPTED) {
+                String msg = String.format("http execute failed,status code is %d", httpCode);
+                throw new RuntimeException(msg);
+            }
+        } catch (Exception e) {
+            httpPost.abort();
+            throw new RuntimeException(e);
         }
     }
 

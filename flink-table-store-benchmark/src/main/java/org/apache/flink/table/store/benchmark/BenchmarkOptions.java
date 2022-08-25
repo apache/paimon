@@ -33,12 +33,6 @@ public class BenchmarkOptions {
                     .withDescription(
                             "When to monitor the metrics, default 1 minute after job is started.");
 
-    public static final ConfigOption<Duration> METRIC_MONITOR_DURATION =
-            ConfigOptions.key("benchmark.metric.monitor.duration")
-                    .durationType()
-                    .defaultValue(Duration.ofMinutes(30))
-                    .withDescription("How long to monitor the metrics, default 30 minutes.");
-
     public static final ConfigOption<Duration> METRIC_MONITOR_INTERVAL =
             ConfigOptions.key("benchmark.metric.monitor.interval")
                     .durationType()

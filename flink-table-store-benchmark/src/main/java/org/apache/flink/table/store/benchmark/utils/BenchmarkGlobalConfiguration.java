@@ -128,11 +128,12 @@ public final class BenchmarkGlobalConfiguration {
                             + ") does not exist.");
         }
 
-        Configuration configuration;
+        Configuration configuration = new Configuration();
         try (InputStream inputStream = new FileInputStream(yamlConfigFile)) {
-            configuration =
-                    Configuration.fromMap(
-                            BenchmarkUtils.YAML_MAPPER.readValue(inputStream, Map.class));
+            Map<?, ?> yaml = BenchmarkUtils.YAML_MAPPER.readValue(inputStream, Map.class);
+            for (Map.Entry<?, ?> entry : yaml.entrySet()) {
+                configuration.setString(entry.getKey().toString(), entry.getValue().toString());
+            }
         } catch (IOException e) {
             throw new RuntimeException("Error parsing YAML configuration.", e);
         }
