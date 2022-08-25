@@ -253,8 +253,8 @@ CREATE TABLE MyTable (
 );
 
 INSERT INTO MyTable
-SELECT product_id, price, number, NULL FROM Src1 UNION ALL
-SELECT product_id, NULL, NULL, detail FROM Src2;
+SELECT product_id, price, number, CAST(NULL AS STRING) FROM Src1 UNION ALL
+SELECT product_id, CAST(NULL AS DOUBLE), CAST(NULL AS BIGINT), detail FROM Src2;
 ```
 
 The value fields are updated to the latest data one by one
