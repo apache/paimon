@@ -15,7 +15,7 @@
 -- limitations under the License.
 
 -- Mimics the update of uv and pv of items in an E-commercial website.
--- Primary keys are totally random; Each record is about 100 bytes.
+-- Primary keys ranges from 0 to 10^8; Each record is about 100 bytes.
 
 CREATE TABLE item_uv_pv_1d_source (
     `item_id` BIGINT,
@@ -32,7 +32,7 @@ CREATE TABLE item_uv_pv_1d_source (
     'connector' = 'datagen',
     'rows-per-second' = '999999999',
     'fields.item_id.min' = '0',
-    'fields.item_id.max' = '999999999',
+    'fields.item_id.max' = '99999999',
     'fields.item_click_uv_1d.min' = '0',
     'fields.item_click_uv_1d.max' = '999999999',
     'fields.item_click_pv_1d.min' = '0',

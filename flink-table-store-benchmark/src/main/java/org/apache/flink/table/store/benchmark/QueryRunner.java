@@ -18,10 +18,12 @@
 
 package org.apache.flink.table.store.benchmark;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.table.store.benchmark.metric.FlinkRestClient;
 import org.apache.flink.table.store.benchmark.metric.JobBenchmarkMetric;
 import org.apache.flink.table.store.benchmark.metric.MetricReporter;
+import org.apache.flink.table.store.benchmark.metric.cpu.CpuMetricReceiver;
 import org.apache.flink.table.store.benchmark.utils.AutoClosableProcess;
 import org.apache.flink.table.store.benchmark.utils.BenchmarkGlobalConfiguration;
 import org.apache.flink.table.store.benchmark.utils.BenchmarkUtils;
@@ -31,9 +33,9 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.function.Consumer;
 
 /** Runner of a single benchmark query. */
@@ -44,23 +46,26 @@ public class QueryRunner {
     private final Query query;
     private final Sink sink;
     private final Path flinkDist;
-    private final MetricReporter metricReporter;
     private final FlinkRestClient flinkRestClient;
+    private final CpuMetricReceiver cpuMetricReceiver;
+    private final Configuration benchmarkConf;
 
     public QueryRunner(
             Query query,
             Sink sink,
             Path flinkDist,
-            MetricReporter metricReporter,
-            FlinkRestClient flinkRestClient) {
+            FlinkRestClient flinkRestClient,
+            CpuMetricReceiver cpuMetricReceiver,
+            Configuration benchmarkConf) {
         this.query = query;
         this.sink = sink;
         this.flinkDist = flinkDist;
-        this.metricReporter = metricReporter;
         this.flinkRestClient = flinkRestClient;
+        this.cpuMetricReceiver = cpuMetricReceiver;
+        this.benchmarkConf = benchmarkConf;
     }
 
-    public JobBenchmarkMetric run() {
+    public Result run() {
         try {
             BenchmarkUtils.printAndLog(
                     LOG,
@@ -70,34 +75,39 @@ public class QueryRunner {
                             + " with sink "
                             + sink.name());
 
-            String sinkPath =
+            String sinkPathConfig =
                     BenchmarkGlobalConfiguration.loadConfiguration()
                             .getString(BenchmarkOptions.SINK_PATH);
-            if (sinkPath == null) {
+            if (sinkPathConfig == null) {
                 throw new IllegalArgumentException(
                         BenchmarkOptions.SINK_PATH.key() + " must be set");
             }
 
             // before submitting SQL, clean sink path
-            FileSystem fs = new org.apache.flink.core.fs.Path(sinkPath).getFileSystem();
-            fs.delete(new org.apache.flink.core.fs.Path(sinkPath), true);
+            FileSystem fs = new org.apache.flink.core.fs.Path(sinkPathConfig).getFileSystem();
+            fs.delete(new org.apache.flink.core.fs.Path(sinkPathConfig), true);
 
-            // run initialization SQL if needed
-            Optional<String> beforeSql = query.getBeforeSql(sink, sinkPath);
-            if (beforeSql.isPresent()) {
-                BenchmarkUtils.printAndLog(LOG, "Initializing query " + query.name());
-                String beforeJobId = submitSQLJob(beforeSql.get());
-                flinkRestClient.waitUntilJobFinished(beforeJobId);
-            }
+            String sinkPath = sinkPathConfig + "/data";
+            String savepointPath = sinkPathConfig + "/savepoint";
 
-            String insertJobId = submitSQLJob(query.getWriteBenchmarkSql(sink, sinkPath));
-            // blocking until collect enough metrics
-            JobBenchmarkMetric metrics = metricReporter.reportMetric(insertJobId);
-            // cancel job
-            BenchmarkUtils.printAndLog(
-                    LOG, "Stop job query " + query.name() + " with sink " + sink.name());
-            if (flinkRestClient.isJobRunning(insertJobId)) {
-                flinkRestClient.cancelJob(insertJobId);
+            Duration monitorDelay = benchmarkConf.get(BenchmarkOptions.METRIC_MONITOR_DELAY);
+            Duration monitorInterval = benchmarkConf.get(BenchmarkOptions.METRIC_MONITOR_INTERVAL);
+
+            List<JobBenchmarkMetric> writeMetric = new ArrayList<>();
+            for (Query.WriteSql sql : query.getWriteBenchmarkSql(sink, sinkPath)) {
+                BenchmarkUtils.printAndLog(LOG, "Running SQL " + sql.name);
+                String jobId = submitSQLJob(sql.text);
+                MetricReporter metricReporter =
+                        new MetricReporter(
+                                flinkRestClient,
+                                cpuMetricReceiver,
+                                monitorDelay,
+                                monitorInterval,
+                                sql.rowNum);
+                JobBenchmarkMetric metric = metricReporter.reportMetric(sql.name, jobId);
+                writeMetric.add(metric);
+                flinkRestClient.stopJobWithSavepoint(jobId, savepointPath);
+                flinkRestClient.waitUntilJobFinished(jobId);
             }
 
             String queryJobId = submitSQLJob(query.getReadBenchmarkSql(sink, sinkPath));
@@ -105,11 +115,14 @@ public class QueryRunner {
             double numRecordsRead =
                     flinkRestClient.getTotalNumRecords(
                             queryJobId, flinkRestClient.getSourceVertexId(queryJobId));
-            metrics.setQueryRps(numRecordsRead / (queryJobRunMillis / 1000.0));
+            double scanRps = numRecordsRead / (queryJobRunMillis / 1000.0);
             System.out.println(
-                    "Scan RPS for query " + query.name() + " is " + metrics.getPrettyQueryRps());
+                    "Scan RPS for query "
+                            + query.name()
+                            + " is "
+                            + BenchmarkUtils.formatLongValue((long) scanRps));
 
-            return metrics;
+            return new Result(writeMetric, scanRps);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -148,6 +161,17 @@ public class QueryRunner {
                 LOG,
                 "SQL client submit millis = " + (endMillis - startMillis) + ", jobId = " + jobId);
         return jobId;
+    }
+
+    /** Result metric of the current query. */
+    public static class Result {
+        public final List<JobBenchmarkMetric> writeMetric;
+        public final double scanRps;
+
+        private Result(List<JobBenchmarkMetric> writeMetric, double scanRps) {
+            this.writeMetric = writeMetric;
+            this.scanRps = scanRps;
+        }
     }
 
     private static class SqlClientStdoutProcessor implements Consumer<String> {
