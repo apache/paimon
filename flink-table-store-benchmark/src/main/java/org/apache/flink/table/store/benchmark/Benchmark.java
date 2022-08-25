@@ -21,9 +21,9 @@ package org.apache.flink.table.store.benchmark;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.benchmark.metric.FlinkRestClient;
 import org.apache.flink.table.store.benchmark.metric.JobBenchmarkMetric;
-import org.apache.flink.table.store.benchmark.metric.MetricReporter;
 import org.apache.flink.table.store.benchmark.metric.cpu.CpuMetricReceiver;
 import org.apache.flink.table.store.benchmark.utils.BenchmarkGlobalConfiguration;
+import org.apache.flink.table.store.benchmark.utils.BenchmarkUtils;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
@@ -32,7 +32,6 @@ import org.apache.commons.cli.Options;
 
 import java.io.File;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -117,80 +116,88 @@ public class Benchmark {
         CpuMetricReceiver cpuMetricReceiver = new CpuMetricReceiver(reporterAddress, reporterPort);
         cpuMetricReceiver.runServer();
 
-        Duration monitorDelay = benchmarkConf.get(BenchmarkOptions.METRIC_MONITOR_DELAY);
-        Duration monitorInterval = benchmarkConf.get(BenchmarkOptions.METRIC_MONITOR_INTERVAL);
-        Duration monitorDuration = benchmarkConf.get(BenchmarkOptions.METRIC_MONITOR_DURATION);
-
         // start to run queries
-        LinkedHashMap<String, JobBenchmarkMetric> totalMetrics = new LinkedHashMap<>();
+        LinkedHashMap<String, QueryRunner.Result> totalResults = new LinkedHashMap<>();
         for (Query query : queries) {
             for (Sink sink : sinks) {
-                MetricReporter reporter =
-                        new MetricReporter(
+                QueryRunner runner =
+                        new QueryRunner(
+                                query,
+                                sink,
+                                flinkDist,
                                 flinkRestClient,
                                 cpuMetricReceiver,
-                                monitorDelay,
-                                monitorInterval,
-                                query.bounded() ? null : monitorDuration);
-                QueryRunner runner =
-                        new QueryRunner(query, sink, flinkDist, reporter, flinkRestClient);
-                JobBenchmarkMetric metric = runner.run();
-                totalMetrics.put(query.name() + " - " + sink.name(), metric);
+                                benchmarkConf);
+                QueryRunner.Result result = runner.run();
+                totalResults.put(query.name() + " - " + sink.name(), result);
             }
         }
 
         // print benchmark summary
-        printSummary(totalMetrics);
+        printSummary(totalResults);
 
         flinkRestClient.close();
         cpuMetricReceiver.close();
     }
 
-    public static void printSummary(LinkedHashMap<String, JobBenchmarkMetric> totalMetrics) {
-        if (totalMetrics.isEmpty()) {
+    public static void printSummary(LinkedHashMap<String, QueryRunner.Result> totalResults) {
+        if (totalResults.isEmpty()) {
             return;
         }
         System.err.println(
                 "-------------------------------- Benchmark Results --------------------------------");
         int itemMaxLength = 27;
         System.err.println();
-        printBPSSummary(itemMaxLength, totalMetrics);
+        printBPSSummary(itemMaxLength, totalResults);
         System.err.println();
     }
 
     private static void printBPSSummary(
-            int itemMaxLength, LinkedHashMap<String, JobBenchmarkMetric> totalMetrics) {
-        printLine('-', "+", itemMaxLength, "", "", "", "", "", "", "", "");
+            int itemMaxLength, LinkedHashMap<String, QueryRunner.Result> totalResults) {
+        String[] emptyItems = new String[7];
+        Arrays.fill(emptyItems, "");
+        printLine('-', "+", itemMaxLength, emptyItems);
         printLine(
                 ' ',
                 "|",
                 itemMaxLength,
                 " Benchmark Query",
-                " Throughput (byte/s)",
-                " Total Bytes",
+                " Throughput (rows/s)",
+                " Total Rows",
                 " Cores",
-                " Throughput/Cores",
+                " Throughput/Core",
                 " Avg Data Freshness",
-                " Max Data Freshness",
-                " Query Throughput (row/s)");
-        printLine('-', "+", itemMaxLength, "", "", "", "", "", "", "", "");
+                " Max Data Freshness");
+        printLine('-', "+", itemMaxLength, emptyItems);
 
-        for (Map.Entry<String, JobBenchmarkMetric> entry : totalMetrics.entrySet()) {
-            JobBenchmarkMetric metric = entry.getValue();
+        for (Map.Entry<String, QueryRunner.Result> entry : totalResults.entrySet()) {
+            QueryRunner.Result result = entry.getValue();
+            for (JobBenchmarkMetric metric : result.writeMetric) {
+                printLine(
+                        ' ',
+                        "|",
+                        itemMaxLength,
+                        entry.getKey() + " - " + metric.getName(),
+                        metric.getPrettyRps(),
+                        metric.getPrettyTotalRows(),
+                        metric.getPrettyCpu(),
+                        metric.getPrettyRpsPerCore(),
+                        metric.getAvgDataFreshnessString(),
+                        metric.getMaxDataFreshnessString());
+            }
             printLine(
                     ' ',
                     "|",
                     itemMaxLength,
-                    entry.getKey(),
-                    metric.getPrettyBps(),
-                    metric.getPrettyTotalBytes(),
-                    metric.getPrettyCpu(),
-                    metric.getPrettyBpsPerCore(),
-                    metric.getAvgDataFreshnessString(),
-                    metric.getMaxDataFreshnessString(),
-                    metric.getPrettyQueryRps());
+                    entry.getKey() + " - Scan",
+                    BenchmarkUtils.formatLongValue((long) result.scanRps),
+                    "",
+                    "",
+                    "",
+                    "",
+                    "");
         }
-        printLine('-', "+", itemMaxLength, "", "", "", "", "", "", "", "");
+        printLine('-', "+", itemMaxLength, emptyItems);
     }
 
     private static void printLine(

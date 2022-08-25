@@ -20,32 +20,41 @@ package org.apache.flink.table.store.benchmark.metric;
 
 import org.apache.flink.table.store.benchmark.utils.BenchmarkUtils;
 
-import java.util.Objects;
-
 /** The aggregated result of a single benchmark query. */
 public class JobBenchmarkMetric {
-    private final double bps;
-    private final long totalBytes;
+
+    private final String name;
+    private final double rps;
+    private final long totalRows;
     private final double cpu;
     private final Long avgDataFreshness;
     private final Long maxDataFreshness;
-    private double queryRps;
 
     public JobBenchmarkMetric(
-            double bps, long totalBytes, double cpu, Long avgDataFreshness, Long maxDataFreshness) {
-        this.bps = bps;
-        this.totalBytes = totalBytes;
+            String name,
+            double rps,
+            long totalRows,
+            double cpu,
+            Long avgDataFreshness,
+            Long maxDataFreshness) {
+        this.name = name;
+        this.rps = rps;
+        this.totalRows = totalRows;
         this.cpu = cpu;
         this.avgDataFreshness = avgDataFreshness;
         this.maxDataFreshness = maxDataFreshness;
     }
 
-    public String getPrettyBps() {
-        return BenchmarkUtils.formatLongValue((long) bps);
+    public String getName() {
+        return name;
     }
 
-    public String getPrettyTotalBytes() {
-        return BenchmarkUtils.formatLongValue(totalBytes);
+    public String getPrettyRps() {
+        return BenchmarkUtils.formatLongValue((long) rps);
+    }
+
+    public String getPrettyTotalRows() {
+        return BenchmarkUtils.formatLongValue(totalRows);
     }
 
     public String getPrettyCpu() {
@@ -56,12 +65,12 @@ public class JobBenchmarkMetric {
         return cpu;
     }
 
-    public String getPrettyBpsPerCore() {
-        return BenchmarkUtils.formatLongValue(getBpsPerCore());
+    public String getPrettyRpsPerCore() {
+        return BenchmarkUtils.formatLongValue(getRpsPerCore());
     }
 
-    public long getBpsPerCore() {
-        return (long) (bps / cpu);
+    public long getRpsPerCore() {
+        return (long) (rps / cpu);
     }
 
     public String getAvgDataFreshnessString() {
@@ -70,35 +79,5 @@ public class JobBenchmarkMetric {
 
     public String getMaxDataFreshnessString() {
         return BenchmarkUtils.formatDataFreshness(maxDataFreshness);
-    }
-
-    public void setQueryRps(double queryRps) {
-        this.queryRps = queryRps;
-    }
-
-    public String getPrettyQueryRps() {
-        return BenchmarkUtils.formatLongValue((long) queryRps);
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        JobBenchmarkMetric that = (JobBenchmarkMetric) o;
-        return Double.compare(that.bps, bps) == 0 && Double.compare(that.cpu, cpu) == 0;
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(bps, cpu);
-    }
-
-    @Override
-    public String toString() {
-        return "BenchmarkMetric{" + "bps=" + bps + ", cpu=" + cpu + '}';
     }
 }

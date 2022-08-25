@@ -26,7 +26,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -37,32 +36,32 @@ public class Query {
             Pattern.compile("-- __SINK_DDL_BEGIN__([\\s\\S]*?)-- __SINK_DDL_END__");
 
     private final String name;
-    private final String beforeSql;
-    private final String querySql;
-    private final boolean bounded;
+    private final List<String> writeSqlName;
+    private final List<String> writeSqlText;
+    private final List<Long> rowNum;
 
-    private Query(String name, String beforeSql, String querySql, boolean bounded) {
+    private Query(
+            String name, List<String> writeSqlName, List<String> writeSqlText, List<Long> rowNum) {
         this.name = name;
-        this.beforeSql = beforeSql;
-        this.querySql = querySql;
-        this.bounded = bounded;
+        this.writeSqlName = writeSqlName;
+        this.writeSqlText = writeSqlText;
+        this.rowNum = rowNum;
     }
 
     public String name() {
         return name;
     }
 
-    public boolean bounded() {
-        return bounded;
-    }
-
-    public Optional<String> getBeforeSql(Sink sink, String sinkPath) {
-        return Optional.ofNullable(beforeSql)
-                .map(sql -> getSql(sink.beforeSql() + "\n" + sql, sink, sinkPath));
-    }
-
-    public String getWriteBenchmarkSql(Sink sink, String sinkPath) {
-        return getSql(sink.beforeSql() + "\n" + querySql, sink, sinkPath);
+    public List<WriteSql> getWriteBenchmarkSql(Sink sink, String sinkPath) {
+        List<WriteSql> res = new ArrayList<>();
+        for (int i = 0; i < writeSqlName.size(); i++) {
+            res.add(
+                    new WriteSql(
+                            writeSqlName.get(i),
+                            getSql(sink.beforeSql() + "\n" + writeSqlText.get(i), sink, sinkPath),
+                            rowNum.get(i)));
+        }
+        return res;
     }
 
     public String getReadBenchmarkSql(Sink sink, String sinkPath) {
@@ -79,16 +78,18 @@ public class Query {
     }
 
     private String getSinkDdl(String tableName, String tableProperties) {
-        Matcher m = SINK_DDL_TEMPLATE_PATTERN.matcher(querySql);
-        if (!m.find()) {
-            throw new IllegalArgumentException(
-                    "Cannot find __SINK_DDL_BEGIN__ and __SINK_DDL_END__ in query "
-                            + name
-                            + ". This query is not valid.");
+        for (String s : writeSqlText) {
+            Matcher m = SINK_DDL_TEMPLATE_PATTERN.matcher(s);
+            if (m.find()) {
+                return m.group(1)
+                        .replace("${SINK_NAME}", tableName)
+                        .replace("${DDL_TEMPLATE}", tableProperties);
+            }
         }
-        return m.group(1)
-                .replace("${SINK_NAME}", tableName)
-                .replace("${DDL_TEMPLATE}", tableProperties);
+        throw new IllegalArgumentException(
+                "Cannot find __SINK_DDL_BEGIN__ and __SINK_DDL_END__ in query "
+                        + name
+                        + ". This query is not valid.");
     }
 
     private String getSql(String sqlTemplate, Sink sink, String sinkPath) {
@@ -109,20 +110,33 @@ public class Query {
         for (Map.Entry<?, ?> entry : yaml.entrySet()) {
             String name = (String) entry.getKey();
             Map<?, ?> queryMap = (Map<?, ?>) entry.getValue();
-            String beforeSqlFileName = (String) queryMap.get("before");
-            boolean bounded =
-                    queryMap.containsKey("bounded")
-                            && Boolean.parseBoolean(queryMap.get("bounded").toString());
-            result.add(
-                    new Query(
-                            name,
-                            beforeSqlFileName == null
-                                    ? null
-                                    : FileUtils.readFileUtf8(
-                                            queryLocation.resolve(beforeSqlFileName).toFile()),
-                            FileUtils.readFileUtf8(queryLocation.resolve(name + ".sql").toFile()),
-                            bounded));
+            List<String> writeSqlName = new ArrayList<>();
+            List<String> writeSqlText = new ArrayList<>();
+            for (Object filename : (List<?>) queryMap.get("sql")) {
+                writeSqlName.add(filename.toString());
+                writeSqlText.add(
+                        FileUtils.readFileUtf8(
+                                queryLocation.resolve(filename.toString()).toFile()));
+            }
+            List<Long> rowNum = new ArrayList<>();
+            for (Object rowNumStr : (List<?>) queryMap.get("row-num")) {
+                rowNum.add(Long.valueOf(rowNumStr.toString()));
+            }
+            result.add(new Query(name, writeSqlName, writeSqlText, rowNum));
         }
         return result;
+    }
+
+    /** Sql for write benchmarks. */
+    public static class WriteSql {
+        public final String name;
+        public final String text;
+        public final long rowNum;
+
+        private WriteSql(String name, String text, long rowNum) {
+            this.name = name;
+            this.text = text;
+            this.rowNum = rowNum;
+        }
     }
 }

@@ -17,10 +17,5 @@
 ################################################################################
 
 q1:
-  bounded: false
-q2:
-  bounded: false
-q3:
-  bounded: false
-q4:
-  bounded: false
+  sql: [q1.sql]
+  row-num: [500000000]

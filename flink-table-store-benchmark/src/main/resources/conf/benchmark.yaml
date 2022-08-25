@@ -16,8 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-benchmark.metric.monitor.delay: 60s
-benchmark.metric.monitor.duration: 30min
+benchmark.metric.monitor.delay: 30s
 benchmark.metric.monitor.interval: 10s
 # benchmark.metric.reporter.host: host-name
 benchmark.sink.path: /path/to/sink # should point to a non-existing path, will be removed before each test

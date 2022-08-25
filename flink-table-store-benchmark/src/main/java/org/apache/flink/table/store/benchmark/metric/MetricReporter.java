@@ -19,8 +19,6 @@
 package org.apache.flink.table.store.benchmark.metric;
 
 import org.apache.flink.api.common.time.Deadline;
-import org.apache.flink.table.store.benchmark.metric.bytes.BpsMetric;
-import org.apache.flink.table.store.benchmark.metric.bytes.TotalBytesMetric;
 import org.apache.flink.table.store.benchmark.metric.cpu.CpuMetricReceiver;
 
 import org.slf4j.Logger;
@@ -40,7 +38,8 @@ public class MetricReporter {
 
     private final Duration monitorDelay;
     private final Duration monitorInterval;
-    private final Duration monitorDuration;
+    private final Long monitorRowNumber;
+
     private final FlinkRestClient flinkRestClient;
     private final CpuMetricReceiver cpuMetricReceiver;
     private final List<BenchmarkMetric> metrics;
@@ -52,10 +51,11 @@ public class MetricReporter {
             CpuMetricReceiver cpuMetricReceiver,
             Duration monitorDelay,
             Duration monitorInterval,
-            Duration monitorDuration) {
+            long monitorRowNumber) {
         this.monitorDelay = monitorDelay;
         this.monitorInterval = monitorInterval;
-        this.monitorDuration = monitorDuration;
+        this.monitorRowNumber = monitorRowNumber;
+
         this.flinkRestClient = flinkRestClient;
         this.cpuMetricReceiver = cpuMetricReceiver;
         this.metrics = new ArrayList<>();
@@ -84,19 +84,13 @@ public class MetricReporter {
         }
     }
 
-    public JobBenchmarkMetric reportMetric(String jobId) {
+    public JobBenchmarkMetric reportMetric(String name, String jobId) {
         System.out.printf("Monitor metrics after %s seconds.%n", monitorDelay.getSeconds());
         waitFor(monitorDelay);
 
         submitMonitorThread(jobId);
-        if (monitorDuration != null) {
-            System.out.printf(
-                    "Start to monitor metrics for %s seconds.%n", monitorDuration.getSeconds());
-            waitFor(monitorDuration);
-        } else {
-            System.out.println("Start to monitor metrics until job ended.%n");
-            flinkRestClient.waitUntilJobFinished(jobId);
-        }
+        System.out.printf("Start to monitor metrics for %d rows.%n", monitorRowNumber);
+        flinkRestClient.waitUntilNumberOfRows(jobId, monitorRowNumber);
 
         // cleanup the resource
         this.close();
@@ -104,8 +98,8 @@ public class MetricReporter {
         if (metrics.isEmpty()) {
             throw new RuntimeException("The metric reporter doesn't collect any metrics.");
         }
-        double sumBps = 0.0;
-        long totalBytes = 0;
+        double sumRps = 0.0;
+        long totalRows = 0;
         double sumCpu = 0.0;
 
         Long avgDataFreshness = 0L;
@@ -113,8 +107,8 @@ public class MetricReporter {
         int validDataFreshnessCount = 0;
 
         for (BenchmarkMetric metric : metrics) {
-            sumBps += metric.getBps();
-            totalBytes = metric.getTotalBytes();
+            sumRps += metric.getRps();
+            totalRows = metric.getTotalRows();
             sumCpu += metric.getCpu();
             if (metric.getDataFreshness() != null) {
                 avgDataFreshness += metric.getDataFreshness();
@@ -123,7 +117,7 @@ public class MetricReporter {
             }
         }
 
-        double avgBps = sumBps / metrics.size();
+        double avgRps = sumRps / metrics.size();
         double avgCpu = sumCpu / metrics.size();
         if (validDataFreshnessCount == 0) {
             avgDataFreshness = null;
@@ -133,17 +127,19 @@ public class MetricReporter {
         }
         JobBenchmarkMetric metric =
                 new JobBenchmarkMetric(
-                        avgBps, totalBytes, avgCpu, avgDataFreshness, maxDataFreshness);
+                        name, avgRps, totalRows, avgCpu, avgDataFreshness, maxDataFreshness);
 
         String message =
                 String.format(
-                        "Summary: Average Throughput = %s, "
-                                + "Total Bytes = %s, "
+                        "Summary: Name = %s, "
+                                + "Average Throughput = %s, "
+                                + "Total Rows = %s, "
                                 + "Cores = %s, "
                                 + "Avg Data Freshness = %s, "
                                 + "Max Data Freshness = %s",
-                        metric.getPrettyBps(),
-                        metric.getPrettyTotalBytes(),
+                        name,
+                        metric.getPrettyRps(),
+                        metric.getPrettyTotalRows(),
                         metric.getPrettyCpu(),
                         metric.getAvgDataFreshnessString(),
                         metric.getMaxDataFreshnessString());
@@ -169,21 +165,26 @@ public class MetricReporter {
         @Override
         public void run() {
             try {
-                BpsMetric bps = flinkRestClient.getBpsMetric(jobId, vertexId);
-                TotalBytesMetric totalBytes = flinkRestClient.getTotalBytesMetric(jobId, vertexId);
+                String sourceVertexId = flinkRestClient.getSourceVertexId(jobId);
+                double tps = flinkRestClient.getNumRecordsPerSecond(jobId, sourceVertexId);
+                double totalRows = flinkRestClient.getTotalNumRecords(jobId, sourceVertexId);
                 Long dataFreshness = flinkRestClient.getDataFreshness(jobId);
                 double cpu = cpuMetricReceiver.getTotalCpu();
                 int tms = cpuMetricReceiver.getNumberOfTM();
                 BenchmarkMetric metric =
-                        new BenchmarkMetric(bps.getSum(), totalBytes.getSum(), cpu, dataFreshness);
-                // it's thread-safe to update metrics
-                metrics.add(metric);
+                        new BenchmarkMetric(tps, (long) totalRows, cpu, dataFreshness);
+
+                if (tps >= 0 && totalRows >= 0) {
+                    // it's thread-safe to update metrics
+                    metrics.add(metric);
+                }
+
                 // logging
                 String message =
                         String.format(
-                                "Current Throughput = %s, Total Bytes = %s, Cores = %s (%s TMs), Data Freshness = %s",
-                                metric.getPrettyBps(),
-                                metric.getPrettyTotalBytes(),
+                                "Current Throughput = %s, Total Rows = %s, Cores = %s (%s TMs), Data Freshness = %s",
+                                metric.getPrettyRps(),
+                                metric.getPrettyTotalRows(),
                                 metric.getPrettyCpu(),
                                 tms,
                                 metric.getDataFreshnessString());
