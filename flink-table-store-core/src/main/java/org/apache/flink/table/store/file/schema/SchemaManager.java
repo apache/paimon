@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.schema.SchemaChange.AddColumn;
 import org.apache.flink.table.store.file.schema.SchemaChange.RemoveOption;
@@ -49,8 +50,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
-import static org.apache.flink.table.store.CoreOptions.WRITE_MODE;
 import static org.apache.flink.table.store.file.utils.FileUtils.listVersionedFiles;
 
 /** Schema Manager to manage schema versions. */
@@ -320,9 +319,9 @@ public class SchemaManager implements Serializable {
     }
 
     private void checkAlterTableOption(String key) {
-        if (BUCKET_KEY.key().equals(key) || WRITE_MODE.key().equals(key)) {
+        if (CoreOptions.getImmutableOptionKeys().contains(key)) {
             throw new UnsupportedOperationException(
-                    String.format("Change %s is not supported yet.", key));
+                    String.format("Change '%s' is not supported yet.", key));
         }
     }
 }
