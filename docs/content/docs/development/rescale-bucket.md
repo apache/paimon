@@ -80,8 +80,8 @@ are listed as follows.
 CREATE TABLE verified_orders (
     trade_order_id BIGINT,
     item_id BIGINT,
-    item_price DOUBLE
-    dt STRING
+    item_price DOUBLE,
+    dt STRING,
     PRIMARY KEY (dt, trade_order_id, item_id) NOT ENFORCED 
 ) PARTITIONED BY (dt)
 WITH (
@@ -114,6 +114,7 @@ and the job's latency keeps increasing. To improve the data freshness, users can
   ```
 - Switch to the batch mode and overwrite the current partition(s) to which the streaming job is writing
   ```sql
+  SET 'execution.runtime-mode' = 'batch';
   -- suppose today is 2022-06-22
   -- case 1: there is no late event which updates the historical partitions, thus overwrite today's partition is enough
   INSERT OVERWRITE verified_orders PARTITION (dt = '2022-06-22')
@@ -132,10 +133,17 @@ and the job's latency keeps increasing. To improve the data freshness, users can
   FROM verified_orders
   WHERE dt IN ('2022-06-20', '2022-06-21', '2022-06-22') AND order_status = 'verified'
   ```
-- After overwrite job finished, restore the streaming job from the savepoint 
-( see [Starting a Job from a Savepoint](https://nightlies.apache.org/flink/flink-docs-release-1.15/docs/deployment/cli/) )
-  ```bash
-  $ ./bin/flink run \
-      --fromSavepoint <savepointPath> \
-      ...
-   ```
+- After overwrite job finished, switch back to streaming mode. And now, the parallelism can be increased alongside with bucket number to restore the streaming job from the savepoint 
+( see [Start a SQL Job from a savepoint](https://nightlies.apache.org/flink/flink-docs-release-1.15/docs/dev/table/sqlclient/#start-a-sql-job-from-a-savepoint) )
+  ```sql
+  SET 'execution.runtime-mode' = 'streaming';
+  SET 'execution.savepoint.path' = <savepointPath>;
+
+  INSERT INTO verified_orders
+  SELECT trade_order_id,
+       item_id,
+       item_price,
+       DATE_FORMAT(gmt_create, 'yyyy-MM-dd') AS dt
+  FROM raw_orders
+  WHERE order_status = 'verified'
+  ```
