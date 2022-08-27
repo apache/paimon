@@ -25,6 +25,9 @@ public interface LogSinkFunction extends SinkFunction<SinkRecord> {
 
     void setWriteCallback(WriteCallback writeCallback);
 
+    /** Flush pending records. */
+    void flush() throws Exception;
+
     /**
      * A callback interface that the user can implement to know the offset of the bucket when the
      * request is complete.

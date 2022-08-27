@@ -192,6 +192,11 @@ public class StoreWriteOperator extends PrepareCommitOperator {
         }
 
         if (logCallback != null) {
+            try {
+                logSinkFunction.flush();
+            } catch (Exception e) {
+                throw new IOException(e);
+            }
             logCallback
                     .offsets()
                     .forEach(
