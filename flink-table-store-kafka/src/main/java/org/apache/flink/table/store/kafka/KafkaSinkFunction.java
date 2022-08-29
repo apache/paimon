@@ -19,10 +19,10 @@
 package org.apache.flink.table.store.kafka;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.connectors.kafka.FlinkKafkaException;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer;
 import org.apache.flink.streaming.connectors.kafka.KafkaSerializationSchema;
 import org.apache.flink.table.store.table.sink.LogSinkFunction;
-import org.apache.flink.table.store.table.sink.LogSinkFunction.WriteCallback;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 
 import org.apache.kafka.clients.producer.Callback;
@@ -76,5 +76,10 @@ public class KafkaSinkFunction extends FlinkKafkaProducer<SinkRecord> implements
                     }
                     baseCallback.onCompletion(metadata, exception);
                 };
+    }
+
+    @Override
+    public void flush() throws FlinkKafkaException {
+        super.preCommit(super.currentTransaction());
     }
 }
