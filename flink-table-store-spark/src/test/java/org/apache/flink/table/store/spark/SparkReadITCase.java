@@ -551,7 +551,7 @@ public class SparkReadITCase {
                                                 tableName)))
                 .getRootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("Change write-mode is not supported yet");
+                .hasMessageContaining("Change 'write-mode' is not supported yet");
 
         Path tablePath = new Path(warehousePath, String.format("default.db/%s", tableName));
         TableSchema schema = FileStoreTableFactory.create(tablePath).schema();

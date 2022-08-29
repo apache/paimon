@@ -33,12 +33,18 @@ import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.util.Preconditions;
 
 import java.io.Serializable;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
 import static org.apache.flink.configuration.description.TextElement.text;
@@ -52,6 +58,7 @@ public class CoreOptions implements Serializable {
                     .defaultValue(1)
                     .withDescription("Bucket number for file store.");
 
+    @Immutable
     public static final ConfigOption<String> BUCKET_KEY =
             ConfigOptions.key("bucket-key")
                     .stringType()
@@ -135,12 +142,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(Duration.ofSeconds(1))
                     .withDescription("The discovery interval of continuous reading.");
 
+    @Immutable
     public static final ConfigOption<MergeEngine> MERGE_ENGINE =
             ConfigOptions.key("merge-engine")
                     .enumType(MergeEngine.class)
                     .defaultValue(MergeEngine.DEDUPLICATE)
                     .withDescription("Specify the merge engine for table with primary key.");
 
+    @Immutable
     public static final ConfigOption<WriteMode> WRITE_MODE =
             ConfigOptions.key("write-mode")
                     .enumType(WriteMode.class)
@@ -263,6 +272,7 @@ public class CoreOptions implements Serializable {
                                     + "This changelog file keeps the details of data changes, "
                                     + "it can be read directly during stream reads.");
 
+    @Immutable
     public static final ConfigOption<String> SEQUENCE_FIELD =
             ConfigOptions.key("sequence.field")
                     .stringType()
@@ -626,4 +636,27 @@ public class CoreOptions implements Serializable {
         }
         return list;
     }
+
+    @Internal
+    public static Set<String> getImmutableOptionKeys() {
+        final Field[] fields = CoreOptions.class.getFields();
+        final Set<String> immutableKeys = new HashSet<>(fields.length);
+        for (Field field : fields) {
+            if (ConfigOption.class.isAssignableFrom(field.getType())
+                    && field.getAnnotation(Immutable.class) != null) {
+                try {
+                    immutableKeys.add(((ConfigOption<?>) field.get(CoreOptions.class)).key());
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
+        return immutableKeys;
+    }
+
+    /** Annotation used on {@link ConfigOption} fields to exclude it from schema change. */
+    @Internal
+    @Target(ElementType.FIELD)
+    @Retention(RetentionPolicy.RUNTIME)
+    public @interface Immutable {}
 }
