@@ -164,19 +164,22 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
             @Override
             public TableRead withFilter(Predicate predicate) {
-                List<Predicate> predicates = new ArrayList<>();
+                List<Predicate> keyPredicates = new ArrayList<>();
+                List<Predicate> valuePredicates = new ArrayList<>();
                 for (Predicate sub : splitAnd(predicate)) {
-                    // TODO support value filter
                     if (containsFields(sub, nonPrimaryKeys)) {
-                        continue;
+                        valuePredicates.add(sub);
+                    } else {
+                        // TODO Actually, the index is wrong, but it is OK. The orc filter
+                        // just use name instead of index.
+                        keyPredicates.add(sub);
                     }
-
-                    // TODO Actually, the index is wrong, but it is OK. The orc filter
-                    // just use name instead of index.
-                    predicates.add(sub);
                 }
-                if (predicates.size() > 0) {
-                    read.withFilter(and(predicates));
+                if (keyPredicates.size() > 0) {
+                    read.withFilter(and(keyPredicates));
+                }
+                if (valuePredicates.size() > 0) {
+                    read.withValueFilter(and(valuePredicates));
                 }
                 return this;
             }
