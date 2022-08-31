@@ -23,15 +23,22 @@ import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.types.logical.BigIntType;
+import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -65,6 +72,22 @@ public class FileStoreSourceSplitReaderTest {
     public static void after() {
         service.shutdownNow();
         service = null;
+    }
+
+    @BeforeEach
+    public void beforeEach() throws Exception {
+        SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
+        schemaManager.commitNewVersion(
+                new UpdateSchema(
+                        new RowType(
+                                Arrays.asList(
+                                        new RowType.RowField("k", new BigIntType()),
+                                        new RowType.RowField("v", new BigIntType()),
+                                        new RowType.RowField("default", new IntType()))),
+                        Collections.singletonList("default"),
+                        Arrays.asList("k", "default"),
+                        Collections.emptyMap(),
+                        null));
     }
 
     @Test

@@ -50,13 +50,10 @@ import org.apache.flink.table.store.utils.RowDataUtils;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
-import static org.apache.flink.table.store.file.predicate.PredicateBuilder.containsFields;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.pickTransformFieldMapping;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.splitAnd;
 
@@ -155,32 +152,11 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableRead newRead() {
-        List<String> primaryKeys = tableSchema.trimmedPrimaryKeys();
-        Set<String> nonPrimaryKeys =
-                tableSchema.fieldNames().stream()
-                        .filter(name -> !primaryKeys.contains(name))
-                        .collect(Collectors.toSet());
         return new KeyValueTableRead(store.newRead()) {
 
             @Override
             public TableRead withFilter(Predicate predicate) {
-                List<Predicate> keyPredicates = new ArrayList<>();
-                List<Predicate> valuePredicates = new ArrayList<>();
-                for (Predicate sub : splitAnd(predicate)) {
-                    if (containsFields(sub, nonPrimaryKeys)) {
-                        valuePredicates.add(sub);
-                    } else {
-                        // TODO Actually, the index is wrong, but it is OK. The orc filter
-                        // just use name instead of index.
-                        keyPredicates.add(sub);
-                    }
-                }
-                if (keyPredicates.size() > 0) {
-                    read.withFilter(and(keyPredicates));
-                }
-                if (valuePredicates.size() > 0) {
-                    read.withValueFilter(and(valuePredicates));
-                }
+                read.withFilter(predicate);
                 return this;
             }
 

@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.schema;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
@@ -314,7 +315,8 @@ public class SchemaManager implements Serializable {
         return new Path(tableRoot + "/schema");
     }
 
-    private Path toSchemaPath(long id) {
+    @VisibleForTesting
+    public Path toSchemaPath(long id) {
         return new Path(tableRoot + "/schema/" + SCHEMA_PREFIX + id);
     }
 
