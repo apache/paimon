@@ -21,8 +21,8 @@ package org.apache.flink.table.store.connector.source;
 import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
-import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.connector.source.SnapshotEnumerator.EnumeratorResult;
 import org.apache.flink.table.store.table.source.TableScan;
 
 import org.slf4j.Logger;
@@ -40,7 +40,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
-import java.util.concurrent.Callable;
 
 import static org.apache.flink.table.store.connector.source.PendingSplitsCheckpoint.INVALID_SNAPSHOT;
 import static org.apache.flink.util.Preconditions.checkArgument;
@@ -53,10 +52,6 @@ public class ContinuousFileSplitEnumerator
     private static final Logger LOG = LoggerFactory.getLogger(ContinuousFileSplitEnumerator.class);
 
     private final SplitEnumeratorContext<FileStoreSourceSplit> context;
-
-    private final TableScan scan;
-
-    private final SnapshotManager snapshotManager;
 
     private final Map<Integer, Queue<FileStoreSourceSplit>> bucketSplits;
 
@@ -72,22 +67,20 @@ public class ContinuousFileSplitEnumerator
 
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
+            Path location,
             TableScan scan,
-            SnapshotManager snapshotManager,
             Collection<FileStoreSourceSplit> remainSplits,
             long currentSnapshotId,
             long discoveryInterval) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
-        this.scan = checkNotNull(scan);
-        this.snapshotManager = snapshotManager;
         this.bucketSplits = new HashMap<>();
         addSplits(remainSplits);
         this.currentSnapshotId = currentSnapshotId;
         this.discoveryInterval = discoveryInterval;
         this.readersAwaitingSplit = new HashSet<>();
         this.splitGenerator = new FileStoreSourceSplitGenerator();
-        this.snapshotEnumerator = new SnapshotEnumerator(currentSnapshotId);
+        this.snapshotEnumerator = new SnapshotEnumerator(location, scan, currentSnapshotId);
     }
 
     private void addSplits(Collection<FileStoreSourceSplit> splits) {
@@ -159,7 +152,7 @@ public class ContinuousFileSplitEnumerator
         }
 
         currentSnapshotId = result.snapshotId;
-        addSplits(result.splits);
+        addSplits(splitGenerator.createSplits(result.plan));
         assignSplits();
     }
 
@@ -181,63 +174,5 @@ public class ContinuousFileSplitEnumerator
                         }
                     }
                 });
-    }
-
-    private class SnapshotEnumerator implements Callable<EnumeratorResult> {
-
-        private long nextSnapshotId;
-
-        private SnapshotEnumerator(long currentSnapshot) {
-            this.nextSnapshotId = currentSnapshot + 1;
-        }
-
-        @Nullable
-        @Override
-        public EnumeratorResult call() {
-            // TODO sync with processDiscoveredSplits to avoid too more splits in memory
-            while (true) {
-                if (!snapshotManager.snapshotExists(nextSnapshotId)) {
-                    // TODO check latest snapshot id, expired?
-                    LOG.debug(
-                            "Next snapshot id {} not exists, wait for it to be generated.",
-                            nextSnapshotId);
-                    return null;
-                }
-
-                Snapshot snapshot = snapshotManager.snapshot(nextSnapshotId);
-                if (snapshot.commitKind() != Snapshot.CommitKind.APPEND) {
-                    if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE) {
-                        LOG.warn("Ignore overwrite snapshot id {}.", nextSnapshotId);
-                    }
-
-                    nextSnapshotId++;
-                    LOG.debug(
-                            "Next snapshot id {} is not append, but is {}, check next one.",
-                            nextSnapshotId,
-                            snapshot.commitKind());
-                    continue;
-                }
-
-                List<FileStoreSourceSplit> splits =
-                        splitGenerator.createSplits(scan.withSnapshot(nextSnapshotId).plan());
-                EnumeratorResult result = new EnumeratorResult(nextSnapshotId, splits);
-                LOG.debug("Find snapshot id {}, it has {} splits.", nextSnapshotId, splits.size());
-
-                nextSnapshotId++;
-                return result;
-            }
-        }
-    }
-
-    private static class EnumeratorResult {
-
-        private final long snapshotId;
-
-        private final List<FileStoreSourceSplit> splits;
-
-        private EnumeratorResult(long snapshotId, List<FileStoreSourceSplit> splits) {
-            this.snapshotId = snapshotId;
-            this.splits = splits;
-        }
     }
 }

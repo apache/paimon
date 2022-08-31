@@ -23,7 +23,9 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.DynamicTableSource;
+import org.apache.flink.table.connector.source.LookupTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
+import org.apache.flink.table.connector.source.TableFunctionProvider;
 import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsLimitPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
@@ -36,6 +38,7 @@ import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
 import org.apache.flink.table.store.CoreOptions.LogConsistency;
 import org.apache.flink.table.store.connector.FlinkConnectorOptions;
 import org.apache.flink.table.store.connector.TableStoreDataStreamScanProvider;
+import org.apache.flink.table.store.connector.lookup.FileStoreLookupFunction;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.predicate.PredicateConverter;
@@ -45,12 +48,14 @@ import org.apache.flink.table.store.table.AppendOnlyFileStoreTable;
 import org.apache.flink.table.store.table.ChangelogValueCountFileStoreTable;
 import org.apache.flink.table.store.table.ChangelogWithKeyFileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.utils.Projection;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.IntStream;
 
 import static org.apache.flink.table.store.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
@@ -65,6 +70,7 @@ import static org.apache.flink.table.store.CoreOptions.LOG_SCAN_REMOVE_NORMALIZE
  */
 public class TableStoreSource
         implements ScanTableSource,
+                LookupTableSource,
                 SupportsFilterPushDown,
                 SupportsProjectionPushDown,
                 SupportsLimitPushDown,
@@ -228,5 +234,20 @@ public class TableStoreSource
     @Override
     public void applyLimit(long limit) {
         this.limit = limit;
+    }
+
+    @Override
+    public LookupRuntimeProvider getLookupRuntimeProvider(LookupContext context) {
+        if (limit != null) {
+            throw new RuntimeException(
+                    "Limit push down should not happen in Lookup source, but it is " + limit);
+        }
+        int[] projection =
+                projectFields == null
+                        ? IntStream.range(0, table.schema().fields().size()).toArray()
+                        : Projection.of(projectFields).toTopLevelIndexes();
+        int[] joinKey = Projection.of(context.getKeys()).toTopLevelIndexes();
+        return TableFunctionProvider.of(
+                new FileStoreLookupFunction(table, projection, joinKey, predicate));
     }
 }

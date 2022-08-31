@@ -91,15 +91,17 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             for (int i = 1; i < children.size(); i++) {
                 literals.add(extractLiteral(fieldRefExpr.getOutputDataType(), children.get(i)));
             }
-            return builder.in(fieldRefExpr.getInputIndex(), literals);
+            return builder.in(builder.indexOf(fieldRefExpr.getName()), literals);
         } else if (func == BuiltInFunctionDefinitions.IS_NULL) {
             return extractFieldReference(children.get(0))
-                    .map(FieldReferenceExpression::getFieldIndex)
+                    .map(FieldReferenceExpression::getName)
+                    .map(builder::indexOf)
                     .map(builder::isNull)
                     .orElseThrow(UnsupportedExpression::new);
         } else if (func == BuiltInFunctionDefinitions.IS_NOT_NULL) {
             return extractFieldReference(children.get(0))
-                    .map(FieldReferenceExpression::getFieldIndex)
+                    .map(FieldReferenceExpression::getName)
+                    .map(builder::indexOf)
                     .map(builder::isNotNull)
                     .orElseThrow(UnsupportedExpression::new);
         } else if (func == BuiltInFunctionDefinitions.LIKE) {
@@ -164,7 +166,7 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                     Matcher beginMatcher = BEGIN_PATTERN.matcher(escapedSqlPattern);
                     if (beginMatcher.matches()) {
                         return builder.startsWith(
-                                fieldRefExpr.getFieldIndex(),
+                                builder.indexOf(fieldRefExpr.getName()),
                                 BinaryStringData.fromString(beginMatcher.group(1)));
                     }
                 }
@@ -184,13 +186,13 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         if (fieldRefExpr.isPresent()) {
             Object literal =
                     extractLiteral(fieldRefExpr.get().getOutputDataType(), children.get(1));
-            return visit1.apply(fieldRefExpr.get().getFieldIndex(), literal);
+            return visit1.apply(builder.indexOf(fieldRefExpr.get().getName()), literal);
         } else {
             fieldRefExpr = extractFieldReference(children.get(1));
             if (fieldRefExpr.isPresent()) {
                 Object literal =
                         extractLiteral(fieldRefExpr.get().getOutputDataType(), children.get(0));
-                return visit2.apply(fieldRefExpr.get().getFieldIndex(), literal);
+                return visit2.apply(builder.indexOf(fieldRefExpr.get().getName()), literal);
             }
         }
 
