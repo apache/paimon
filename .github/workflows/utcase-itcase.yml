@@ -19,4 +19,4 @@ jobs:
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          mvn clean install -pl '!flink-table-store-e2e-tests,!flink-table-store-connector' -Duser.timezone=$jvm_timezone
+          mvn clean install -pl '!flink-table-store-e2e-tests,!flink-table-store-connector,!flink-table-store-dist' -Duser.timezone=$jvm_timezone
