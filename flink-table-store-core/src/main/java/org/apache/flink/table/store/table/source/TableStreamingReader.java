@@ -16,18 +16,14 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.connector.lookup;
+package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.connector.source.SnapshotEnumerator;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateFilter;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.source.Split;
-import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.store.utils.TypeUtils;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
@@ -46,7 +42,7 @@ import java.util.stream.IntStream;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.transformFieldMapping;
 
 /** A streaming reader to read table. */
-public class StreamingReader {
+public class TableStreamingReader {
 
     private final FileStoreTable table;
     private final int[] projection;
@@ -55,7 +51,8 @@ public class StreamingReader {
 
     private SnapshotEnumerator enumerator;
 
-    public StreamingReader(FileStoreTable table, int[] projection, @Nullable Predicate predicate) {
+    public TableStreamingReader(
+            FileStoreTable table, int[] projection, @Nullable Predicate predicate) {
         this.table = table;
         this.projection = projection;
         this.predicate = predicate;

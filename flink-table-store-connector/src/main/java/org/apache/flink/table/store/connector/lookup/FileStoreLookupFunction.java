@@ -29,6 +29,7 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateFilter;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.source.TableStreamingReader;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.FileUtils;
@@ -72,7 +73,7 @@ public class FileStoreLookupFunction extends TableFunction<RowData> {
 
     // timestamp when cache expires
     private transient long nextLoadTime;
-    private transient StreamingReader reader;
+    private transient TableStreamingReader streamingReader;
 
     public FileStoreLookupFunction(
             FileStoreTable table,
@@ -129,10 +130,10 @@ public class FileStoreLookupFunction extends TableFunction<RowData> {
                         joinKeys,
                         recordFilter);
         this.nextLoadTime = -1;
-        this.reader = new StreamingReader(table, projection, this.predicate);
+        this.streamingReader = new TableStreamingReader(table, projection, this.predicate);
 
         // do first load
-        this.lookupTable.refresh(reader.nextBatch());
+        refresh();
     }
 
     private PredicateFilter createRecordFilter(int[] projection) {
@@ -171,12 +172,16 @@ public class FileStoreLookupFunction extends TableFunction<RowData> {
                     refreshInterval.toMinutes());
         }
 
-        Iterator<RowData> batch = reader.nextBatch();
+        refresh();
+
+        nextLoadTime = System.currentTimeMillis() + refreshInterval.toMillis();
+    }
+
+    private void refresh() throws IOException {
+        Iterator<RowData> batch = streamingReader.nextBatch();
         if (batch != null) {
             this.lookupTable.refresh(batch);
         }
-
-        nextLoadTime = System.currentTimeMillis() + refreshInterval.toMillis();
     }
 
     @Override

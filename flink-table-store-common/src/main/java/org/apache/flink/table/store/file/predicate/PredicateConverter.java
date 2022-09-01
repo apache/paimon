@@ -47,7 +47,12 @@ import java.util.regex.Pattern;
 import static org.apache.flink.table.data.conversion.DataStructureConverters.getConverter;
 import static org.apache.flink.table.types.logical.utils.LogicalTypeCasts.supportsImplicitCast;
 
-/** Convert {@link Expression} to {@link Predicate}. */
+/**
+ * Convert {@link Expression} to {@link Predicate}.
+ *
+ * <p>For {@link FieldReferenceExpression}, please use name instead of index, if the project
+ * pushdown is before and the filter pushdown is after, the index of the filter will be projected.
+ */
 public class PredicateConverter implements ExpressionVisitor<Predicate> {
 
     private final PredicateBuilder builder;

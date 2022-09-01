@@ -46,7 +46,7 @@ import static org.rocksdb.CompactionStyle.UNIVERSAL;
 import static org.rocksdb.CompressionType.LZ4_COMPRESSION;
 import static org.rocksdb.InfoLogLevel.INFO_LEVEL;
 
-/** Options for rocksdb. */
+/** Options for rocksdb. Copied from flink {@code RocksDBConfigurableOptions}. */
 public class RocksDBOptions {
 
     // --------------------------------------------------------------------------

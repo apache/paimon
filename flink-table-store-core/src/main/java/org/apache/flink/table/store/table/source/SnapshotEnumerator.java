@@ -16,12 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.connector.source;
+package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.table.source.TableScan;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
