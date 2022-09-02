@@ -33,6 +33,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static java.util.Collections.singletonList;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -67,7 +68,8 @@ public class LookupTableTest {
                         rowType,
                         singletonList("f0"),
                         singletonList("f0"),
-                        r -> r.getInt(0) < 3);
+                        r -> r.getInt(0) < 3,
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
         table.refresh(singletonList(row(1, 11, 111)).iterator());
         List<RowData> result = table.get(row(1));
@@ -94,7 +96,8 @@ public class LookupTableTest {
                         rowType,
                         singletonList("f0"),
                         singletonList("f1"),
-                        r -> r.getInt(0) < 3);
+                        r -> r.getInt(0) < 3,
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
         table.refresh(singletonList(row(1, 11, 111)).iterator());
         List<RowData> result = table.get(row(11));

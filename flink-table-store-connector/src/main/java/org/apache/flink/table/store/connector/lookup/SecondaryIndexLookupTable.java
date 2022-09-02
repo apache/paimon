@@ -43,9 +43,10 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
             RowType rowType,
             List<String> primaryKey,
             List<String> secKey,
-            Predicate<RowData> recordFilter)
+            Predicate<RowData> recordFilter,
+            long lruCacheSize)
             throws IOException {
-        super(stateFactory, rowType, primaryKey, recordFilter);
+        super(stateFactory, rowType, primaryKey, recordFilter, lruCacheSize / 2);
         List<String> fieldNames = rowType.getFieldNames();
         int[] secKeyMapping = secKey.stream().mapToInt(fieldNames::indexOf).toArray();
         this.secKeyRow = new KeyProjectedRowData(secKeyMapping);
@@ -53,7 +54,8 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
                 stateFactory.setState(
                         "sec-index",
                         InternalSerializers.create(TypeUtils.project(rowType, secKeyMapping)),
-                        InternalSerializers.create(TypeUtils.project(rowType, primaryKeyMapping)));
+                        InternalSerializers.create(TypeUtils.project(rowType, primaryKeyMapping)),
+                        lruCacheSize / 2);
     }
 
     @Override

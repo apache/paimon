@@ -32,36 +32,45 @@ import java.io.IOException;
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 /** Rocksdb state for key -> a single value. */
-public class RocksDBValueState extends RocksDBState {
+public class RocksDBValueState extends RocksDBState<RocksDBState.Reference> {
 
     public RocksDBValueState(
             RocksDB db,
             ColumnFamilyHandle columnFamily,
             TypeSerializer<RowData> keySerializer,
-            TypeSerializer<RowData> valueSerializer) {
-        super(db, columnFamily, keySerializer, valueSerializer);
+            TypeSerializer<RowData> valueSerializer,
+            long lruCacheSize) {
+        super(db, columnFamily, keySerializer, valueSerializer, lruCacheSize);
     }
 
     @Nullable
     public RowData get(RowData key) throws IOException {
-        byte[] valueBytes;
         try {
-            valueBytes = db.get(columnFamily, serializeKey(key));
-        } catch (RocksDBException e) {
+            Reference valueRef = get(wrap(serializeKey(key)));
+            return valueRef.isPresent() ? deserializeValue(valueRef.bytes) : null;
+        } catch (Exception e) {
             throw new IOException(e);
         }
-        if (valueBytes == null) {
-            return null;
+    }
+
+    private Reference get(ByteArray keyBytes) throws RocksDBException {
+        Reference valueRef = cache.getIfPresent(keyBytes);
+        if (valueRef == null) {
+            valueRef = ref(db.get(columnFamily, keyBytes.bytes));
+            cache.put(keyBytes, valueRef);
         }
 
-        return deserializeValue(valueBytes);
+        return valueRef;
     }
 
     public void put(RowData key, RowData value) throws IOException {
         checkArgument(value != null);
 
         try {
-            db.put(columnFamily, writeOptions, serializeKey(key), serializeValue(value));
+            byte[] keyBytes = serializeKey(key);
+            byte[] valueBytes = serializeValue(value);
+            db.put(columnFamily, writeOptions, keyBytes, valueBytes);
+            cache.put(wrap(keyBytes), ref(valueBytes));
         } catch (RocksDBException e) {
             throw new IOException(e);
         }
@@ -70,8 +79,10 @@ public class RocksDBValueState extends RocksDBState {
     public void delete(RowData key) throws IOException {
         try {
             byte[] keyBytes = serializeKey(key);
-            if (db.get(columnFamily, keyBytes) != null) {
+            ByteArray keyByteArray = wrap(keyBytes);
+            if (get(keyByteArray).isPresent()) {
                 db.delete(columnFamily, writeOptions, keyBytes);
+                cache.put(keyByteArray, ref(null));
             }
         } catch (RocksDBException e) {
             throw new IOException(e);

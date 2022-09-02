@@ -20,6 +20,7 @@ package org.apache.flink.table.store.connector;
 
 import org.apache.flink.annotation.docs.Documentation;
 import org.apache.flink.configuration.ConfigOption;
+import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.configuration.description.Description;
@@ -48,6 +49,12 @@ import static org.rocksdb.InfoLogLevel.INFO_LEVEL;
 
 /** Options for rocksdb. Copied from flink {@code RocksDBConfigurableOptions}. */
 public class RocksDBOptions {
+
+    public static final ConfigOption<Long> LRU_CACHE_MAX_ROWS =
+            ConfigOptions.key("lru.cache.max-rows")
+                    .longType()
+                    .defaultValue(10_000L)
+                    .withDescription("The maximum number of rows to store in the cache");
 
     // --------------------------------------------------------------------------
     // Provided configurable DBOptions within Flink

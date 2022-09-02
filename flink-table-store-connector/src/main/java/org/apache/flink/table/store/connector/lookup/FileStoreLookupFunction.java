@@ -53,6 +53,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.flink.table.store.connector.RocksDBOptions.LRU_CACHE_MAX_ROWS;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.transformFieldMapping;
 import static org.apache.flink.util.Preconditions.checkArgument;
 
@@ -128,7 +129,8 @@ public class FileStoreLookupFunction extends TableFunction<RowData> {
                         rowType,
                         table.schema().primaryKeys(),
                         joinKeys,
-                        recordFilter);
+                        recordFilter,
+                        options.getLong(LRU_CACHE_MAX_ROWS));
         this.nextLoadTime = -1;
         this.streamingReader = new TableStreamingReader(table, projection, this.predicate);
 

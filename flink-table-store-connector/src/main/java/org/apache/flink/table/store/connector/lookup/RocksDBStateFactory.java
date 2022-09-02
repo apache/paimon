@@ -52,7 +52,6 @@ public class RocksDBStateFactory implements Closeable {
                         conf);
         this.columnFamilyOptions =
                 RocksDBOptions.createColumnOptions(new ColumnFamilyOptions(), conf);
-        // TODO Options
 
         try {
             this.db = RocksDB.open(new Options(dbOptions, columnFamilyOptions), path);
@@ -64,17 +63,21 @@ public class RocksDBStateFactory implements Closeable {
     public RocksDBValueState valueState(
             String name,
             TypeSerializer<RowData> keySerializer,
-            TypeSerializer<RowData> valueSerializer)
+            TypeSerializer<RowData> valueSerializer,
+            long lruCacheSize)
             throws IOException {
-        return new RocksDBValueState(db, createColumnFamily(name), keySerializer, valueSerializer);
+        return new RocksDBValueState(
+                db, createColumnFamily(name), keySerializer, valueSerializer, lruCacheSize);
     }
 
     public RocksDBSetState setState(
             String name,
             TypeSerializer<RowData> keySerializer,
-            TypeSerializer<RowData> valueSerializer)
+            TypeSerializer<RowData> valueSerializer,
+            long lruCacheSize)
             throws IOException {
-        return new RocksDBSetState(db, createColumnFamily(name), keySerializer, valueSerializer);
+        return new RocksDBSetState(
+                db, createColumnFamily(name), keySerializer, valueSerializer, lruCacheSize);
     }
 
     private ColumnFamilyHandle createColumnFamily(String name) throws IOException {

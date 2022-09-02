@@ -28,12 +28,13 @@ import org.rocksdb.RocksIterator;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 /** Rocksdb state for key -> Set values. */
-public class RocksDBSetState extends RocksDBState {
+public class RocksDBSetState extends RocksDBState<List<byte[]>> {
 
     private static final byte[] EMPTY = new byte[0];
 
@@ -41,30 +42,44 @@ public class RocksDBSetState extends RocksDBState {
             RocksDB db,
             ColumnFamilyHandle columnFamily,
             TypeSerializer<RowData> keySerializer,
-            TypeSerializer<RowData> valueSerializer) {
-        super(db, columnFamily, keySerializer, valueSerializer);
+            TypeSerializer<RowData> valueSerializer,
+            long lruCacheSize) {
+        super(db, columnFamily, keySerializer, valueSerializer, lruCacheSize);
     }
 
     public List<RowData> get(RowData key) throws IOException {
-        try (RocksIterator iterator = db.newIterator(columnFamily)) {
-            byte[] keyBytes = serializeKey(key);
-            iterator.seek(keyBytes);
+        ByteArray keyBytes = wrap(serializeKey(key));
+        List<byte[]> valueBytes = cache.getIfPresent(keyBytes);
+        if (valueBytes == null) {
+            valueBytes = new ArrayList<>();
+            try (RocksIterator iterator = db.newIterator(columnFamily)) {
+                iterator.seek(keyBytes.bytes);
 
-            List<RowData> values = new ArrayList<>();
-            while (iterator.isValid() && startWithKeyPrefix(keyBytes, iterator.key())) {
-                byte[] rawKeyBytes = iterator.key();
-                valueInputView.setBuffer(
-                        rawKeyBytes, keyBytes.length, rawKeyBytes.length - keyBytes.length);
-                values.add(valueSerializer.deserialize(valueInputView));
-
-                iterator.next();
+                while (iterator.isValid() && startWithKeyPrefix(keyBytes.bytes, iterator.key())) {
+                    byte[] rawKeyBytes = iterator.key();
+                    byte[] value =
+                            Arrays.copyOfRange(
+                                    rawKeyBytes, keyBytes.bytes.length, rawKeyBytes.length);
+                    valueBytes.add(value);
+                    iterator.next();
+                }
             }
-            return values;
+            cache.put(keyBytes, valueBytes);
         }
+
+        List<RowData> values = new ArrayList<>(valueBytes.size());
+        for (byte[] value : valueBytes) {
+            valueInputView.setBuffer(value);
+            values.add(valueSerializer.deserialize(valueInputView));
+        }
+        return values;
     }
 
     public void retract(RowData key, RowData value) throws IOException {
         checkArgument(value != null);
+
+        // it is hard to maintain cache, invalidate the key.
+        cache.invalidate(wrap(serializeKey(key)));
 
         byte[] bytes = serializeKeyAndValue(key, value);
         try {
@@ -78,6 +93,9 @@ public class RocksDBSetState extends RocksDBState {
 
     public void add(RowData key, RowData value) throws IOException {
         checkArgument(value != null);
+
+        // it is hard to maintain cache, invalidate the key.
+        cache.invalidate(wrap(serializeKey(key)));
 
         try {
             db.put(columnFamily, writeOptions, serializeKeyAndValue(key, value), EMPTY);

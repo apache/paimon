@@ -46,7 +46,8 @@ public class PrimaryKeyLookupTable implements LookupTable {
             RocksDBStateFactory stateFactory,
             RowType rowType,
             List<String> primaryKey,
-            Predicate<RowData> recordFilter)
+            Predicate<RowData> recordFilter,
+            long lruCacheSize)
             throws IOException {
         List<String> fieldNames = rowType.getFieldNames();
         this.primaryKeyMapping = primaryKey.stream().mapToInt(fieldNames::indexOf).toArray();
@@ -55,7 +56,8 @@ public class PrimaryKeyLookupTable implements LookupTable {
                 stateFactory.valueState(
                         "table",
                         InternalSerializers.create(TypeUtils.project(rowType, primaryKeyMapping)),
-                        InternalSerializers.create(rowType));
+                        InternalSerializers.create(rowType),
+                        lruCacheSize);
         this.recordFilter = recordFilter;
     }
 

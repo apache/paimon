@@ -39,13 +39,15 @@ public interface LookupTable {
             RowType rowType,
             List<String> primaryKey,
             List<String> joinKey,
-            Predicate<RowData> recordFilter)
+            Predicate<RowData> recordFilter,
+            long lruCacheSize)
             throws IOException {
         if (new HashSet<>(primaryKey).equals(new HashSet<>(joinKey))) {
-            return new PrimaryKeyLookupTable(stateFactory, rowType, joinKey, recordFilter);
+            return new PrimaryKeyLookupTable(
+                    stateFactory, rowType, joinKey, recordFilter, lruCacheSize);
         } else {
             return new SecondaryIndexLookupTable(
-                    stateFactory, rowType, primaryKey, joinKey, recordFilter);
+                    stateFactory, rowType, primaryKey, joinKey, recordFilter, lruCacheSize);
         }
     }
 }
