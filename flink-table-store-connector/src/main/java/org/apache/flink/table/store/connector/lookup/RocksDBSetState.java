@@ -104,7 +104,7 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
         // it is hard to maintain cache, invalidate the key.
         cache.invalidate(wrap(keyOutView.getCopyOfBuffer()));
 
-        valueSerializer.serialize(value, valueOutputView);
+        valueSerializer.serialize(value, keyOutView);
         return keyOutView.getCopyOfBuffer();
     }
 
