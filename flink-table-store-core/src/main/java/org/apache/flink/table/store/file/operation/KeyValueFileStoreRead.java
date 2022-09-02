@@ -31,6 +31,7 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.ProjectKeyRecordReader;
@@ -47,6 +48,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.data.DataFilePathFactory.CHANGELOG_FILE_PREFIX;
@@ -72,6 +74,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     @Nullable private List<Predicate> keyFilters;
 
     @Nullable private List<Predicate> allFilters;
+
+    @Nullable private List<Predicate> filters;
 
     public KeyValueFileStoreRead(
             SchemaManager schemaManager,
@@ -133,13 +137,14 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         if (split.isIncremental()) {
             // incremental mode cannot push down value filters, because the update for the same key
             // may occur in the next split
-            DataFileReader dataFileReader = createDataFileReader(split, true, false);
             // Return the raw file contents without merging
             List<ConcatRecordReader.ReaderSupplier<KeyValue>> suppliers = new ArrayList<>();
             for (DataFileMeta file : split.files()) {
                 if (acceptFilter(false).test(file)) {
                     suppliers.add(
-                            () -> dataFileReader.read(changelogFile(file).orElse(file.fileName())));
+                            () ->
+                                    createDataFileReader(split, true)
+                                            .read(changelogFile(file).orElse(file.fileName())));
                 }
             }
             return ConcatRecordReader.create(suppliers);
@@ -148,33 +153,31 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             // Do not project key in MergeTreeReader.
             List<List<SortedRun>> sections =
                     new IntervalPartition(split.files(), keyComparator).partition();
-            DataFileReader dataFileReaderWithAllFilters = createDataFileReader(split, false, true);
-            DataFileReader dataFileReaderWithKeyFilters = createDataFileReader(split, false, false);
             MergeFunction mergeFunc = mergeFunction.copy();
             List<ConcatRecordReader.ReaderSupplier<KeyValue>> readers = new ArrayList<>();
             for (List<SortedRun> section : sections) {
                 // if key ranges do not have overlap, value filter can be pushed down as well
                 boolean acceptAll = section.size() == 1;
-                List<SortedRun> hitSection = new ArrayList<>();
-                for (SortedRun run : section) {
-                    List<DataFileMeta> hitFiles = new ArrayList<>();
-                    for (DataFileMeta file : run.files()) {
-                        if (acceptFilter(acceptAll).test(file)) {
-                            hitFiles.add(file);
-                        }
-                    }
-                    if (hitFiles.size() > 0) {
-                        hitSection.add(SortedRun.fromSorted(hitFiles));
-                    }
-                }
+                List<SortedRun> hitSection =
+                        section.stream()
+                                .map(SortedRun::files)
+                                .map(
+                                        files ->
+                                                files.stream()
+                                                        .filter(
+                                                                file ->
+                                                                        acceptFilter(acceptAll)
+                                                                                .test(file))
+                                                        .collect(Collectors.toList()))
+                                .filter(files -> files.size() > 0)
+                                .map(SortedRun::fromSorted)
+                                .collect(Collectors.toList());
                 if (hitSection.size() > 0) {
                     readers.add(
                             () ->
                                     MergeTreeReader.readerForSection(
                                             hitSection,
-                                            acceptAll
-                                                    ? dataFileReaderWithAllFilters
-                                                    : dataFileReaderWithKeyFilters,
+                                            createDataFileReader(split, false),
                                             keyComparator,
                                             mergeFunc));
                 }
@@ -190,22 +193,16 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     @VisibleForTesting
     java.util.function.Predicate<DataFileMeta> acceptFilter(boolean acceptAllFilter) {
-        Predicate keyFilter = keyFilters == null ? null : and(keyFilters);
-        Predicate allFilter = allFilters == null ? null : and(allFilters);
-        return file -> {
-            if (valueCountMode) {
-                return allFilter == null
-                        || allFilter.test(
-                                file.rowCount(),
-                                file.keyStats().fields(rowStatsConverter, file.rowCount()));
-            } else {
-                Predicate filter = acceptAllFilter ? allFilter : keyFilter;
-                return filter == null
-                        || filter.test(
-                                file.rowCount(),
-                                file.valueStats().fields(rowStatsConverter, file.rowCount()));
-            }
-        };
+        filters = valueCountMode || acceptAllFilter ? allFilters : keyFilters;
+        Function<DataFileMeta, BinaryTableStats> statsFun =
+                file -> valueCountMode ? file.keyStats() : file.valueStats();
+        return file ->
+                filters == null
+                        || and(filters)
+                                .test(
+                                        file.rowCount(),
+                                        statsFun.apply(file)
+                                                .fields(rowStatsConverter, file.rowCount()));
     }
 
     private Optional<String> changelogFile(DataFileMeta fileMeta) {
@@ -217,12 +214,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         return Optional.empty();
     }
 
-    private DataFileReader createDataFileReader(
-            Split split, boolean projectKeys, boolean acceptAllFilter) {
+    private DataFileReader createDataFileReader(Split split, boolean projectKeys) {
         return dataFileReaderFactory.create(
-                split.partition(),
-                split.bucket(),
-                projectKeys,
-                acceptAllFilter ? allFilters : keyFilters);
+                split.partition(), split.bucket(), projectKeys, filters);
     }
 }
