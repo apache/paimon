@@ -76,13 +76,8 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
     }
 
     public void retract(RowData key, RowData value) throws IOException {
-        checkArgument(value != null);
-
-        // it is hard to maintain cache, invalidate the key.
-        cache.invalidate(wrap(serializeKey(key)));
-
-        byte[] bytes = serializeKeyAndValue(key, value);
         try {
+            byte[] bytes = invalidKeyAndGetKVBytes(key, value);
             if (db.get(columnFamily, bytes) != null) {
                 db.delete(columnFamily, writeOptions, bytes);
             }
@@ -92,22 +87,24 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
     }
 
     public void add(RowData key, RowData value) throws IOException {
-        checkArgument(value != null);
-
-        // it is hard to maintain cache, invalidate the key.
-        cache.invalidate(wrap(serializeKey(key)));
-
         try {
-            db.put(columnFamily, writeOptions, serializeKeyAndValue(key, value), EMPTY);
+            byte[] bytes = invalidKeyAndGetKVBytes(key, value);
+            db.put(columnFamily, writeOptions, bytes, EMPTY);
         } catch (RocksDBException e) {
             throw new IOException(e);
         }
     }
 
-    private byte[] serializeKeyAndValue(RowData key, RowData value) throws IOException {
+    private byte[] invalidKeyAndGetKVBytes(RowData key, RowData value) throws IOException {
+        checkArgument(value != null);
+
         keyOutView.clear();
         keySerializer.serialize(key, keyOutView);
-        valueSerializer.serialize(value, keyOutView);
+
+        // it is hard to maintain cache, invalidate the key.
+        cache.invalidate(wrap(keyOutView.getCopyOfBuffer()));
+
+        valueSerializer.serialize(value, valueOutputView);
         return keyOutView.getCopyOfBuffer();
     }
 
