@@ -54,6 +54,7 @@ import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.flink.table.store.CoreOptions.LOG_SCAN;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.LOG_SYSTEM;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.NONE;
 import static org.apache.flink.table.store.log.LogStoreTableFactory.discoverLogStoreFactory;
 
 /** Abstract table store factory to create table source and table sink. */
@@ -106,7 +107,7 @@ public abstract class AbstractTableStoreFactory
         Configuration configOptions = new Configuration();
         options.forEach(configOptions::setString);
 
-        if (configOptions.get(LOG_SYSTEM) == null) {
+        if (configOptions.get(LOG_SYSTEM).equalsIgnoreCase(NONE)) {
             // Use file store continuous reading
             validateFileStoreContinuous(configOptions);
             return Optional.empty();

@@ -34,6 +34,8 @@ public class FlinkConnectorOptions {
 
     public static final String TABLE_STORE_PREFIX = "table-store.";
 
+    public static final String NONE = "none";
+
     @Internal
     @Documentation.ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<String> ROOT_PATH =
@@ -63,7 +65,7 @@ public class FlinkConnectorOptions {
     public static final ConfigOption<String> LOG_SYSTEM =
             ConfigOptions.key("log.system")
                     .stringType()
-                    .noDefaultValue()
+                    .defaultValue(NONE)
                     .withDescription("The log system used to keep changes of the table.");
 
     public static final ConfigOption<Integer> SINK_PARALLELISM = FactoryUtil.SINK_PARALLELISM;

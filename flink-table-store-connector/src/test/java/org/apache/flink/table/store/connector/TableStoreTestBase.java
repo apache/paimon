@@ -113,6 +113,8 @@ public abstract class TableStoreTestBase extends KafkaTableTestBase {
                 TABLE_STORE_PREFIX + BOOTSTRAP_SERVERS.key(), getBootstrapServers());
         if (enableLogStore) {
             configuration.setString(TABLE_STORE_PREFIX + LOG_SYSTEM.key(), "kafka");
+        } else {
+            configuration.setString(TABLE_STORE_PREFIX + LOG_SYSTEM.key(), "none");
         }
     }
 
