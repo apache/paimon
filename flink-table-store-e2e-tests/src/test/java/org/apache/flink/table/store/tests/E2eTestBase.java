@@ -30,6 +30,7 @@ import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.Wait;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -146,8 +147,40 @@ public abstract class E2eTestBase {
                 "cat >" + TEST_DATA_DIR + "/" + filename + " <<EOF\n" + content + "EOF\n");
     }
 
+    protected void createKafkaTopic(String topicName, int partitionNum)
+            throws IOException, InterruptedException {
+        assert withKafka;
+        ContainerState kafka = environment.getContainerByServiceName("kafka_1").get();
+        kafka.execInContainer(
+                "bash",
+                "-c",
+                String.format(
+                        "kafka-topics --create --bootstrap-server kafka:29092 --replication-factor 1 --partitions %d --topic %s",
+                        partitionNum, topicName));
+    }
+
+    protected void sendKafkaMessage(String filename, String content, String topicName)
+            throws IOException, InterruptedException {
+        assert withKafka;
+        ContainerState kafka = environment.getContainerByServiceName("kafka_1").get();
+        String uuid = topicName.substring("ts-topic-".length() + 1);
+        String tmpDir = "/tmp" + TEST_DATA_DIR + "/" + uuid;
+        kafka.execInContainer("mkdir", "-p", tmpDir);
+        kafka.execInContainer("touch", tmpDir + "/" + filename);
+        kafka.execInContainer(
+                "bash",
+                "-c",
+                String.format("cat > %s/%s <<EOF\n%s\nEOF\n", tmpDir, filename, content));
+        kafka.execInContainer(
+                "bash",
+                "-c",
+                String.format(
+                        "kafka-console-producer --bootstrap-server kafka:29092 --topic %s < %s/%s",
+                        topicName, tmpDir, filename));
+    }
+
     protected void runSql(String sql) throws Exception {
-        String fileName = UUID.randomUUID().toString() + ".sql";
+        String fileName = UUID.randomUUID() + ".sql";
         writeSharedFile(fileName, sql);
         Container.ExecResult execResult =
                 jobManager.execInContainer(
@@ -164,7 +197,7 @@ public abstract class E2eTestBase {
 
     protected String createResultSink(String sinkName, String schema) {
         String testDataSinkDdl =
-                "CREATE TABLE %s ( %s ) WITH (\n"
+                "CREATE TEMPORARY TABLE %s ( %s ) WITH (\n"
                         + "    'connector' = 'print',\n"
                         + "    'print-identifier' = '%s'\n"
                         + ");";
