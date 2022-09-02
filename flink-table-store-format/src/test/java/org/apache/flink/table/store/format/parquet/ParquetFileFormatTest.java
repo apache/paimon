@@ -22,32 +22,37 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 
+import org.apache.parquet.hadoop.ParquetOutputFormat;
 import org.junit.jupiter.api.Test;
 
+import static org.apache.flink.table.store.format.parquet.ParquetFileFormat.getParquetConfiguration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ParquetFileFormatFactory}. */
 public class ParquetFileFormatTest {
     private static final ConfigOption<String> KEY1 =
             ConfigOptions.key("k1").stringType().defaultValue("absent");
-    private static final ConfigOption<String> COMPRESS =
-            ConfigOptions.key("compress").stringType().defaultValue("absent");
 
     @Test
     public void testAbsent() {
         Configuration options = new Configuration();
         ParquetFileFormat parquet = new ParquetFileFormatFactory().create(options);
         assertThat(parquet.formatOptions().getString(KEY1)).isEqualTo("absent");
-        assertThat(parquet.formatOptions().getString(COMPRESS)).isEqualTo("lz4");
     }
 
     @Test
     public void testPresent() {
         Configuration options = new Configuration();
         options.setString(KEY1.key(), "v1");
-        options.setString(COMPRESS.key(), "snappy");
         ParquetFileFormat parquet = new ParquetFileFormatFactory().create(options);
         assertThat(parquet.formatOptions().getString(KEY1)).isEqualTo("v1");
-        assertThat(parquet.formatOptions().getString(COMPRESS)).isEqualTo("snappy");
+    }
+
+    @Test
+    public void testCompressionCodecName() {
+        Configuration configuration = new Configuration();
+        configuration.setString("compression", "snappy");
+        assertThat(getParquetConfiguration(configuration).get(ParquetOutputFormat.COMPRESSION))
+                .isEqualTo("snappy");
     }
 }

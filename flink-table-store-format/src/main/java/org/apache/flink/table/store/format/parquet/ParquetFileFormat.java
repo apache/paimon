@@ -76,14 +76,14 @@ public class ParquetFileFormat extends FileFormat {
         return Optional.of(new ParquetFileStatsExtractor(type));
     }
 
-    private static org.apache.hadoop.conf.Configuration getParquetConfiguration(
+    public static org.apache.hadoop.conf.Configuration getParquetConfiguration(
             ReadableConfig options) {
         org.apache.hadoop.conf.Configuration conf = new org.apache.hadoop.conf.Configuration();
         Properties properties = new Properties();
         ((org.apache.flink.configuration.Configuration) options).addAllToProperties(properties);
         properties.forEach(
                 (k, v) -> {
-                    conf.set("parquet." + k, v.toString());
+                    conf.set(IDENTIFIER + "." + k, v.toString());
                 });
         return conf;
     }

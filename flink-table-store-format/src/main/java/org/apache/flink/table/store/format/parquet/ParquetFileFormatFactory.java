@@ -21,6 +21,8 @@ package org.apache.flink.table.store.format.parquet;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.format.FileFormatFactory;
 
+import org.apache.parquet.hadoop.ParquetOutputFormat;
+
 import java.util.Properties;
 
 /** Factory to create {@link ParquetFileFormat}. */
@@ -38,10 +40,12 @@ public class ParquetFileFormatFactory implements FileFormatFactory {
     }
 
     private Configuration supplyDefaultOptions(Configuration options) {
-        if (!options.containsKey("compress")) {
+        String compression =
+                ParquetOutputFormat.COMPRESSION.replaceFirst(String.format("^%s.", IDENTIFIER), "");
+        if (!options.containsKey(compression)) {
             Properties properties = new Properties();
             options.addAllToProperties(properties);
-            properties.setProperty("compress", "lz4");
+            properties.setProperty(compression, "lz4");
             Configuration newOptions = new Configuration();
             properties.forEach((k, v) -> newOptions.setString(k.toString(), v.toString()));
             return newOptions;
