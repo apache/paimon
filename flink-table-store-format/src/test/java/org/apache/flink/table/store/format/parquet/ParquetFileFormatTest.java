@@ -21,11 +21,14 @@ package org.apache.flink.table.store.format.parquet;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.DelegatingConfiguration;
 
+import org.apache.parquet.format.CompressionCodec;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
 import org.junit.jupiter.api.Test;
 
 import static org.apache.flink.table.store.format.parquet.ParquetFileFormat.getParquetConfiguration;
+import static org.apache.flink.table.store.format.parquet.ParquetFileFormatFactory.IDENTIFIER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ParquetFileFormatFactory}. */
@@ -49,10 +52,23 @@ public class ParquetFileFormatTest {
     }
 
     @Test
-    public void testCompressionCodecName() {
-        Configuration configuration = new Configuration();
-        configuration.setString("compression", "snappy");
-        assertThat(getParquetConfiguration(configuration).get(ParquetOutputFormat.COMPRESSION))
-                .isEqualTo("snappy");
+    public void testDefaultCompressionCodecName() {
+        Configuration conf = new Configuration();
+        assertThat(getCompressionCodec(conf)).isEqualTo(CompressionCodec.SNAPPY.name());
+    }
+
+    @Test
+    public void testSpecifiedCompressionCodecName() {
+        String lz4 = CompressionCodec.LZ4.name();
+        Configuration conf = new Configuration();
+        conf.setString(ParquetOutputFormat.COMPRESSION, lz4);
+        assertThat(getCompressionCodec(conf)).isEqualTo(lz4);
+    }
+
+    private String getCompressionCodec(Configuration conf) {
+        DelegatingConfiguration formatOptions = new DelegatingConfiguration(conf, IDENTIFIER + ".");
+        ParquetFileFormat parquet = new ParquetFileFormatFactory().create(formatOptions);
+        return getParquetConfiguration(parquet.formatOptions())
+                .get(ParquetOutputFormat.COMPRESSION);
     }
 }

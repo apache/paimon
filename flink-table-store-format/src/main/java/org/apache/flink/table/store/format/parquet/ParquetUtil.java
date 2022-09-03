@@ -35,10 +35,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** parquet utility, support for extracting metadata and etc. */
+/** Parquet utilities that support to extract the metadata, assert expected stats, etc. */
 public class ParquetUtil {
 
     /**
+     * Extract stats from specified Parquet files path.
+     *
      * @param path the path of parquet files to be read
      * @return result sets as map, key is column name, value is statistics (for example, null count,
      *     minimum value, maximum value)
@@ -67,6 +69,8 @@ public class ParquetUtil {
     }
 
     /**
+     * Generate {@link ParquetFileReader} instance to read the Parquet files at the given path.
+     *
      * @param path the path of parquet files to be read
      * @return parquet reader, used for reading footer, status, etc.
      * @throws IOException

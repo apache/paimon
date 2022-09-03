@@ -21,7 +21,6 @@ package org.apache.flink.table.store.format.parquet;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.formats.parquet.row.ParquetRowDataBuilder;
@@ -35,7 +34,6 @@ import org.apache.flink.table.types.logical.RowType;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.Properties;
 
 import static org.apache.flink.formats.parquet.ParquetFileFormatFactory.UTC_TIMEZONE;
 import static org.apache.flink.table.store.format.parquet.ParquetFileFormatFactory.IDENTIFIER;
@@ -77,14 +75,9 @@ public class ParquetFileFormat extends FileFormat {
     }
 
     public static org.apache.hadoop.conf.Configuration getParquetConfiguration(
-            ReadableConfig options) {
+            Configuration options) {
         org.apache.hadoop.conf.Configuration conf = new org.apache.hadoop.conf.Configuration();
-        Properties properties = new Properties();
-        ((org.apache.flink.configuration.Configuration) options).addAllToProperties(properties);
-        properties.forEach(
-                (k, v) -> {
-                    conf.set(IDENTIFIER + "." + k, v.toString());
-                });
+        options.toMap().forEach((key, value) -> conf.set(IDENTIFIER + "." + key, value));
         return conf;
     }
 }

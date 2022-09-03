@@ -158,7 +158,7 @@ public class ParquetFileStatsExtractor implements FileStatsExtractor {
     }
 
     /**
-     * parquet cannot provide statistics for decimal fields directly, but we can extract them from
+     * Parquet cannot provide statistics for decimal fields directly, but we can extract them from
      * primitive statistics.
      */
     private FieldStats convertStatsToDecimalFieldStats(

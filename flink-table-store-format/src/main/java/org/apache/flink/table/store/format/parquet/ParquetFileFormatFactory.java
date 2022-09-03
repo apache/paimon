@@ -22,6 +22,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.format.FileFormatFactory;
 
 import org.apache.parquet.hadoop.ParquetOutputFormat;
+import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 
 import java.util.Properties;
 
@@ -45,7 +46,7 @@ public class ParquetFileFormatFactory implements FileFormatFactory {
         if (!options.containsKey(compression)) {
             Properties properties = new Properties();
             options.addAllToProperties(properties);
-            properties.setProperty(compression, "lz4");
+            properties.setProperty(compression, CompressionCodecName.SNAPPY.name());
             Configuration newOptions = new Configuration();
             properties.forEach((k, v) -> newOptions.setString(k.toString(), v.toString()));
             return newOptions;
