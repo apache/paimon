@@ -178,7 +178,10 @@ public class DataFileReader {
         }
 
         public DataFileReader create(
-                BinaryRowData partition, int bucket, boolean projectKeys, List<Predicate> filters) {
+                BinaryRowData partition,
+                int bucket,
+                boolean projectKeys,
+                @Nullable List<Predicate> filters) {
             int[][] keyProjection = projectKeys ? this.keyProjection : fullKeyProjection;
             RowType projectedKeyType = projectKeys ? this.projectedKeyType : keyType;
 

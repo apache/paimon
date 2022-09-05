@@ -46,6 +46,8 @@ import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.io.DatumWriter;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.List;
@@ -65,7 +67,7 @@ public class AvroFileFormat extends FileFormat {
 
     @Override
     public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
-            RowType type, int[][] projection, List<Predicate> filters) {
+            RowType type, int[][] projection, @Nullable List<Predicate> filters) {
         // avro is a file format that keeps schemas in file headers,
         // if the schema given to the reader is not equal to the schema in header,
         // reader will automatically map the fields and give back records with our desired

@@ -62,6 +62,12 @@ public class MergeTreeReader implements RecordReader<KeyValue> {
         this.reader = ConcatRecordReader.create(readers);
     }
 
+    public MergeTreeReader(boolean dropDelete, List<ReaderSupplier<KeyValue>> sectionReaders)
+            throws IOException {
+        this.dropDelete = dropDelete;
+        this.reader = ConcatRecordReader.create(sectionReaders);
+    }
+
     @Nullable
     @Override
     public RecordIterator<KeyValue> readBatch() throws IOException {

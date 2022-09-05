@@ -34,6 +34,8 @@ import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.utils.Projection;
 import org.apache.flink.table.types.logical.RowType;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -51,7 +53,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
 
     private int[][] projection;
 
-    private List<Predicate> filters;
+    @Nullable private List<Predicate> filters;
 
     public AppendOnlyFileStoreRead(
             SchemaManager schemaManager,

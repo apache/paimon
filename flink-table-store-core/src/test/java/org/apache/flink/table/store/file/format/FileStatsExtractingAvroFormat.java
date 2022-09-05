@@ -29,6 +29,8 @@ import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.types.logical.RowType;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 import java.util.Optional;
 
@@ -44,7 +46,7 @@ public class FileStatsExtractingAvroFormat extends FileFormat {
 
     @Override
     public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
-            RowType type, int[][] projection, List<Predicate> filters) {
+            RowType type, int[][] projection, @Nullable List<Predicate> filters) {
         return avro.createReaderFactory(type, projection, filters);
     }
 

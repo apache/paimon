@@ -29,6 +29,8 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.types.logical.RowType;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -59,7 +61,7 @@ public abstract class FileFormat {
      * @param filters A list of filters in conjunctive form for filtering on a best-effort basis.
      */
     public abstract BulkFormat<RowData, FileSourceSplit> createReaderFactory(
-            RowType type, int[][] projection, List<Predicate> filters);
+            RowType type, int[][] projection, @Nullable List<Predicate> filters);
 
     /** Create a {@link BulkWriter.Factory} from the type. */
     public abstract BulkWriter.Factory<RowData> createWriterFactory(RowType type);

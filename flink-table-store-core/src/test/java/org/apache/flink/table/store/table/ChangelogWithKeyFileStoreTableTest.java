@@ -228,25 +228,46 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(GenericRowData.of(1, 60, 600L));
         commit.commit("2", write.prepareCommit(true));
 
-        write.close();
-
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
         List<Split> splits = table.newScan().plan().splits;
 
-        TableRead read = table.newRead().withFilter(builder.equal(2, 300L));
+        // push down key filter a = 30
+        TableRead read = table.newRead().withFilter(builder.equal(1, 30));
+        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
+                .hasSameElementsAs(Arrays.asList("1|30|300", "1|40|400"));
+
+        // push down value filter b = 300L
+        read = table.newRead().withFilter(builder.equal(2, 300L));
+        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
+                .hasSameElementsAs(Arrays.asList("1|30|300", "1|40|400"));
+
+        // push down both key filter and value filter
+        read =
+                table.newRead()
+                        .withFilter(
+                                PredicateBuilder.or(builder.equal(1, 10), builder.equal(2, 300L)));
+        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
+                .hasSameElementsAs(Arrays.asList("1|10|100", "1|20|200", "1|30|300", "1|40|400"));
+
+        // update pk 60, 10
+        write.write(GenericRowData.of(1, 60, 500L));
+        write.write(GenericRowData.of(1, 10, 10L));
+        commit.commit("3", write.prepareCommit(true));
+
+        write.close();
+
+        // cannot push down value filter b = 600L
+        splits = table.newScan().plan().splits;
+        read = table.newRead().withFilter(builder.equal(2, 600L));
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
                         Arrays.asList(
-                                "1|10|100",
+                                "1|10|10",
                                 "1|20|200",
                                 "1|30|300",
                                 "1|40|400",
                                 "1|50|500",
-                                "1|60|600"));
-
-        read = table.newRead().withFilter(builder.equal(1, 30));
-        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
-                .hasSameElementsAs(Arrays.asList("1|30|300", "1|40|400"));
+                                "1|60|500"));
     }
 
     @Override
