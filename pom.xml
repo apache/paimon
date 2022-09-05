@@ -119,6 +119,7 @@ under the License.
         <flink.streaming.java>flink-streaming-java</flink.streaming.java>
         <flink.sql.orc>flink-sql-orc</flink.sql.orc>
         <flink.orc>flink-orc</flink.orc>
+        <flink.parquet>flink-parquet</flink.parquet>
         <flink.connector.kafka>flink-connector-kafka</flink.connector.kafka>
         <flink.sql.connector.kafka>flink-sql-connector-kafka</flink.sql.connector.kafka>
         <flink.test.utils>flink-test-utils</flink.test.utils>
@@ -296,6 +297,7 @@ under the License.
                 <flink.streaming.java>flink-streaming-java_${scala.binary.version}</flink.streaming.java>
                 <flink.sql.orc>flink-sql-orc_${scala.binary.version}</flink.sql.orc>
                 <flink.orc>flink-orc_${scala.binary.version}</flink.orc>
+                <flink.parquet>flink-parquet_${scala.binary.version}</flink.parquet>
                 <flink.connector.kafka>flink-connector-kafka_${scala.binary.version}</flink.connector.kafka>
                 <flink.sql.connector.kafka>flink-sql-connector-kafka_${scala.binary.version}</flink.sql.connector.kafka>
                 <flink.test.utils>flink-test-utils_${scala.binary.version}</flink.test.utils>

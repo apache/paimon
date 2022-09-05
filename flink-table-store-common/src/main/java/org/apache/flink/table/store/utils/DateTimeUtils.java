@@ -21,6 +21,7 @@ package org.apache.flink.table.store.utils;
 import org.apache.flink.table.data.TimestampData;
 
 import java.time.DateTimeException;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
@@ -90,6 +91,10 @@ public class DateTimeUtils {
     public static int toInternal(java.sql.Date date) {
         long ts = date.getTime() + LOCAL_TZ.getOffset(date.getTime());
         return (int) (ts / MILLIS_PER_DAY);
+    }
+
+    public static int toInternal(LocalDate date) {
+        return ymdToUnixDate(date.getYear(), date.getMonthValue(), date.getDayOfMonth());
     }
 
     public static Integer parseDate(String s) {
