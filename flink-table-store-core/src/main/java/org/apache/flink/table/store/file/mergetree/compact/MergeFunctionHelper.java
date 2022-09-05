@@ -26,7 +26,7 @@ public class MergeFunctionHelper {
 
     private final MergeFunction mergeFunction;
 
-    private KeyValue firstKV;
+    private KeyValue initialKV;
     private boolean isInitialized;
 
     public MergeFunctionHelper(MergeFunction mergeFunction) {
@@ -35,18 +35,18 @@ public class MergeFunctionHelper {
 
     /** Resets the {@link MergeFunction} helper to its default state. */
     public void reset() {
-        firstKV = null;
+        initialKV = null;
         mergeFunction.reset();
         isInitialized = false;
     }
 
     /** Adds the given {@link KeyValue} to the {@link MergeFunction} helper. */
     public void add(KeyValue kv) {
-        if (firstKV == null) {
-            firstKV = kv;
+        if (initialKV == null) {
+            initialKV = kv;
         } else {
             if (!isInitialized) {
-                merge(firstKV);
+                merge(initialKV);
                 isInitialized = true;
             }
             merge(kv);
@@ -59,6 +59,6 @@ public class MergeFunctionHelper {
 
     /** Get current value of the {@link MergeFunction} helper. */
     public RowData getValue() {
-        return isInitialized ? mergeFunction.getValue() : firstKV.value();
+        return isInitialized ? mergeFunction.getValue() : initialKV.value();
     }
 }

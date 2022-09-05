@@ -52,7 +52,7 @@ public class PartialUpdateMergeFunction implements MergeFunction {
     public void add(KeyValue kv) {
         checkArgument(
                 kv.valueKind() == RowKind.INSERT || kv.valueKind() == RowKind.UPDATE_AFTER,
-                "Partial update only accept insert only records.");
+                "Partial update can not accept delete records. Partial delete is not supported!");
         for (int i = 0; i < getters.length; i++) {
             Object field = getters[i].getFieldOrNull(kv.value());
             if (field != null) {
