@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.data.DataFileMeta;
@@ -31,8 +30,6 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.stats.BinaryTableStats;
-import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.ProjectKeyRecordReader;
 import org.apache.flink.table.store.file.utils.RecordReader;
@@ -48,11 +45,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.data.DataFilePathFactory.CHANGELOG_FILE_PREFIX;
-import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.containsFields;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.splitAnd;
 
@@ -67,15 +62,12 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     private final Comparator<RowData> keyComparator;
     private final MergeFunction mergeFunction;
     private final boolean valueCountMode;
-    private final FieldStatsArraySerializer rowStatsConverter;
 
     @Nullable private int[][] keyProjectedFields;
 
-    @Nullable private List<Predicate> keyFilters;
+    @Nullable private List<Predicate> filtersForOverlappedSection;
 
-    @Nullable private List<Predicate> allFilters;
-
-    @Nullable private List<Predicate> filters;
+    @Nullable private List<Predicate> filtersForNonOverlappedSection;
 
     public KeyValueFileStoreRead(
             SchemaManager schemaManager,
@@ -93,10 +85,6 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         this.keyComparator = keyComparator;
         this.mergeFunction = mergeFunction;
         this.valueCountMode = tableSchema.trimmedPrimaryKeys().isEmpty();
-        this.rowStatsConverter =
-                valueCountMode
-                        ? new FieldStatsArraySerializer(keyType)
-                        : new FieldStatsArraySerializer(valueType);
     }
 
     public KeyValueFileStoreRead withKeyProjection(int[][] projectedFields) {
@@ -112,7 +100,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     @Override
     public FileStoreRead<KeyValue> withFilter(Predicate predicate) {
-        allFilters = new ArrayList<>();
+        List<Predicate> allFilters = new ArrayList<>();
+        List<Predicate> pkFilters = null;
         List<String> primaryKeys = tableSchema.trimmedPrimaryKeys();
         Set<String> nonPrimaryKeys =
                 tableSchema.fieldNames().stream()
@@ -121,68 +110,37 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         for (Predicate sub : splitAnd(predicate)) {
             allFilters.add(sub);
             if (!containsFields(sub, nonPrimaryKeys)) {
-                if (keyFilters == null) {
-                    keyFilters = new ArrayList<>();
+                if (pkFilters == null) {
+                    pkFilters = new ArrayList<>();
                 }
                 // TODO Actually, the index is wrong, but it is OK.
                 //  The orc filter just use name instead of index.
-                keyFilters.add(sub);
+                pkFilters.add(sub);
             }
         }
+        // for section which does not have key range overlap, push down value filters too
+        filtersForNonOverlappedSection = allFilters;
+        filtersForOverlappedSection = valueCountMode ? allFilters : pkFilters;
         return this;
     }
 
     @Override
     public RecordReader<KeyValue> createReader(Split split) throws IOException {
         if (split.isIncremental()) {
-            // incremental mode cannot push down value filters, because the update for the same key
-            // may occur in the next split
+            DataFileReader dataFileReader =
+                    dataFileReaderFactory.create(
+                            split.partition(), split.bucket(), true, filtersForOverlappedSection);
             // Return the raw file contents without merging
             List<ConcatRecordReader.ReaderSupplier<KeyValue>> suppliers = new ArrayList<>();
             for (DataFileMeta file : split.files()) {
-                if (acceptFilter(false).test(file)) {
-                    suppliers.add(
-                            () ->
-                                    createDataFileReader(split, true)
-                                            .read(changelogFile(file).orElse(file.fileName())));
-                }
+                suppliers.add(
+                        () -> dataFileReader.read(changelogFile(file).orElse(file.fileName())));
             }
             return ConcatRecordReader.create(suppliers);
         } else {
             // in this case merge tree should merge records with same key
             // Do not project key in MergeTreeReader.
-            List<List<SortedRun>> sections =
-                    new IntervalPartition(split.files(), keyComparator).partition();
-            MergeFunction mergeFunc = mergeFunction.copy();
-            List<ConcatRecordReader.ReaderSupplier<KeyValue>> readers = new ArrayList<>();
-            for (List<SortedRun> section : sections) {
-                // if key ranges do not have overlap, value filter can be pushed down as well
-                boolean acceptAll = section.size() == 1;
-                List<SortedRun> hitSection =
-                        section.stream()
-                                .map(SortedRun::files)
-                                .map(
-                                        files ->
-                                                files.stream()
-                                                        .filter(
-                                                                file ->
-                                                                        acceptFilter(acceptAll)
-                                                                                .test(file))
-                                                        .collect(Collectors.toList()))
-                                .filter(files -> files.size() > 0)
-                                .map(SortedRun::fromSorted)
-                                .collect(Collectors.toList());
-                if (hitSection.size() > 0) {
-                    readers.add(
-                            () ->
-                                    MergeTreeReader.readerForSection(
-                                            hitSection,
-                                            createDataFileReader(split, false),
-                                            keyComparator,
-                                            mergeFunc));
-                }
-            }
-            MergeTreeReader reader = new MergeTreeReader(true, readers);
+            MergeTreeReader reader = new MergeTreeReader(true, createSectionReaders(split));
 
             // project key using ProjectKeyRecordReader
             return keyProjectedFields == null
@@ -191,18 +149,26 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         }
     }
 
-    @VisibleForTesting
-    java.util.function.Predicate<DataFileMeta> acceptFilter(boolean acceptAllFilter) {
-        filters = valueCountMode || acceptAllFilter ? allFilters : keyFilters;
-        Function<DataFileMeta, BinaryTableStats> statsFun =
-                file -> valueCountMode ? file.keyStats() : file.valueStats();
-        return file ->
-                filters == null
-                        || and(filters)
-                                .test(
-                                        file.rowCount(),
-                                        statsFun.apply(file)
-                                                .fields(rowStatsConverter, file.rowCount()));
+    private List<ConcatRecordReader.ReaderSupplier<KeyValue>> createSectionReaders(Split split) {
+        List<ConcatRecordReader.ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
+        MergeFunction mergeFunc = mergeFunction.copy();
+        for (List<SortedRun> section :
+                new IntervalPartition(split.files(), keyComparator).partition()) {
+            DataFileReader dataFileReader = createDataFileReader(split, section.size() > 1);
+            sectionReaders.add(
+                    () ->
+                            MergeTreeReader.readerForSection(
+                                    section, dataFileReader, keyComparator, mergeFunc));
+        }
+        return sectionReaders;
+    }
+
+    private DataFileReader createDataFileReader(Split split, boolean overlapped) {
+        return dataFileReaderFactory.create(
+                split.partition(),
+                split.bucket(),
+                false,
+                overlapped ? filtersForOverlappedSection : filtersForNonOverlappedSection);
     }
 
     private Optional<String> changelogFile(DataFileMeta fileMeta) {
@@ -212,10 +178,5 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             }
         }
         return Optional.empty();
-    }
-
-    private DataFileReader createDataFileReader(Split split, boolean projectKeys) {
-        return dataFileReaderFactory.create(
-                split.partition(), split.bucket(), projectKeys, filters);
     }
 }

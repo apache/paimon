@@ -19,31 +19,20 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.writer.BinaryRowWriter;
-import org.apache.flink.table.runtime.typeutils.ArrayDataSerializer;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
-import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.data.DataFileTestUtils;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
-import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.file.stats.BinaryTableStats;
-import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
-import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
-import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
@@ -189,145 +178,6 @@ public class KeyValueFileStoreReadTest {
             assertThat(expected).containsKey(key);
             assertThat(value).isEqualTo(expected.get(key));
         }
-    }
-
-    @Test
-    public void testAcceptFilterUnderValueCountMode() throws Exception {
-        TestFileStore store =
-                createStore(
-                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
-                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
-                        RowType.of(
-                                new LogicalType[] {new BigIntType(false)},
-                                new String[] {"_VALUE_COUNT"}),
-                        new ValueCountMergeFunction());
-        // no filter
-        KeyValueFileStoreRead read = store.newRead();
-        assertThat(read.acceptFilter(true).test(DataFileTestUtils.newFile())).isTrue();
-        assertThat(read.acceptFilter(false).test(DataFileTestUtils.newFile())).isTrue();
-
-        // test filter
-        PredicateBuilder builder = new PredicateBuilder(TestKeyValueGenerator.DEFAULT_ROW_TYPE);
-        DataFileMeta file =
-                new DataFileMeta(
-                        "",
-                        100,
-                        100,
-                        rowData(10),
-                        rowData(200),
-                        rowStats(),
-                        StatsTestUtils.newEmptyTableStats(), // not used
-                        0,
-                        100,
-                        0,
-                        0);
-
-        // test shopId = 123
-        read.withFilter(builder.equal(2, 123));
-        assertThat(read.acceptFilter(true).test(file)).isTrue();
-        assertThat(read.acceptFilter(false).test(file)).isTrue();
-
-        // test shopId = 321
-        read.withFilter(builder.equal(2, 321));
-        assertThat(read.acceptFilter(true).test(file)).isFalse();
-        assertThat(read.acceptFilter(false).test(file)).isFalse();
-    }
-
-    @Test
-    public void testAcceptFilterUnderPrimaryKeyMode() throws Exception {
-        TestFileStore store =
-                createStore(
-                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
-                        new DeduplicateMergeFunction());
-        // no filter
-        KeyValueFileStoreRead read = store.newRead();
-        assertThat(read.acceptFilter(true).test(DataFileTestUtils.newFile())).isTrue();
-        assertThat(read.acceptFilter(false).test(DataFileTestUtils.newFile())).isTrue();
-
-        // test filter
-        PredicateBuilder builder = new PredicateBuilder(TestKeyValueGenerator.DEFAULT_ROW_TYPE);
-        DataFileMeta file =
-                new DataFileMeta(
-                        "",
-                        100,
-                        100,
-                        rowData(10),
-                        rowData(200),
-                        new FieldStatsArraySerializer(TestKeyValueGenerator.KEY_TYPE)
-                                .toBinary(
-                                        new FieldStats[] {
-                                            new FieldStats(10, 200, 0),
-                                            new FieldStats(100L, 100L, 0)
-                                        }),
-                        rowStats(),
-                        0,
-                        100,
-                        0,
-                        0);
-
-        // shopId = 123 (key only)
-        read.withFilter(builder.equal(2, 123));
-        assertThat(read.acceptFilter(true).test(file)).isTrue();
-        assertThat(read.acceptFilter(false).test(file)).isTrue();
-
-        // shopId = 321 (key only)
-        read = store.newRead();
-        read.withFilter(builder.equal(2, 321));
-        assertThat(read.acceptFilter(true).test(file)).isFalse();
-        assertThat(read.acceptFilter(false).test(file)).isFalse();
-
-        // hr = 20 (value only)
-        read = store.newRead();
-        read.withFilter(builder.equal(1, 20));
-        assertThat(read.acceptFilter(true).test(file)).isTrue();
-        assertThat(read.acceptFilter(false).test(file)).isTrue();
-
-        // hr = 21 (value only)
-        read = store.newRead();
-        read.withFilter(builder.equal(1, 21));
-        assertThat(read.acceptFilter(true).test(file)).isFalse();
-        assertThat(read.acceptFilter(false).test(file)).isTrue();
-
-        // hr = 21 and shopId = 123 (key and value)
-        read = store.newRead();
-        read.withFilter(PredicateBuilder.and(builder.equal(1, 21), builder.equal(2, 123)));
-        assertThat(read.acceptFilter(true).test(file)).isFalse();
-        assertThat(read.acceptFilter(false).test(file)).isTrue();
-    }
-
-    private static BinaryRowData rowData(int value) {
-        BinaryRowData row =
-                new BinaryRowData(TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFieldCount());
-        BinaryRowWriter writer = new BinaryRowWriter(row);
-        writer.writeString(0, StringData.fromString("2022-08-30"));
-        writer.writeInt(1, 20);
-        writer.writeInt(2, value);
-        writer.writeLong(3, 100L);
-        writer.writeLong(4, 200L);
-        writer.writeArray(
-                5, new GenericArrayData(new int[0]), new ArrayDataSerializer(new IntType()));
-        writer.writeString(6, StringData.fromString("a comment"));
-        writer.complete();
-        return row;
-    }
-
-    private static BinaryTableStats rowStats() {
-        return new FieldStatsArraySerializer(TestKeyValueGenerator.DEFAULT_ROW_TYPE)
-                .toBinary(
-                        new FieldStats[] {
-                            new FieldStats(
-                                    StringData.fromString("2022-08-29"),
-                                    StringData.fromString("2022-08-30"),
-                                    0),
-                            new FieldStats(20, 20, 0),
-                            new FieldStats(10, 200, 0),
-                            new FieldStats(100L, 100L, 0),
-                            new FieldStats(200L, 200L, 0),
-                            new FieldStats(null, null, 0), // not used
-                            new FieldStats(null, null, 0)
-                        });
     }
 
     private List<KeyValue> writeThenRead(
