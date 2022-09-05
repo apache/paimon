@@ -177,7 +177,7 @@ public class SortMergeReader implements RecordReader<KeyValue> {
                     break;
                 }
                 minHeap.poll();
-                mergeFunctionHelper.add(element.kv.value());
+                mergeFunctionHelper.add(element.kv);
                 polled.add(element);
             }
             return true;

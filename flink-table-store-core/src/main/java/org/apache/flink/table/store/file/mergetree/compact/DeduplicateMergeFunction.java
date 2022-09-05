@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.KeyValue;
 
 import javax.annotation.Nullable;
 
@@ -38,8 +39,8 @@ public class DeduplicateMergeFunction implements MergeFunction {
     }
 
     @Override
-    public void add(RowData value) {
-        latestValue = value;
+    public void add(KeyValue kv) {
+        latestValue = kv.value();
     }
 
     @Override

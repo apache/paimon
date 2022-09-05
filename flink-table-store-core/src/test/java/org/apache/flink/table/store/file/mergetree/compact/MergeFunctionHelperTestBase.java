@@ -20,8 +20,11 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.types.RowKind;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -32,6 +35,7 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import static org.apache.flink.table.store.file.data.DataFileTestUtils.row;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Tests for {@link MergeFunctionHelper}. */
@@ -51,7 +55,7 @@ public abstract class MergeFunctionHelperTestBase {
     @MethodSource("provideMergedRowData")
     @ParameterizedTest
     public void testMergeFunctionHelper(List<RowData> rows) {
-        rows.forEach(r -> mergeFunctionHelper.add(r));
+        rows.forEach(r -> mergeFunctionHelper.add(new KeyValue().replace(null, RowKind.INSERT, r)));
         assertEquals(getExpected(rows), mergeFunctionHelper.getValue());
     }
 
@@ -92,6 +96,16 @@ public abstract class MergeFunctionHelperTestBase {
                 long total = rows.stream().mapToLong(r -> r.getLong(0)).sum();
                 return total == 0 ? null : GenericRowData.of(total);
             }
+        }
+
+        @Test
+        public void testIllegalInput() {
+            mergeFunctionHelper.add(new KeyValue().replace(null, RowKind.INSERT, row(1)));
+            assertThatThrownBy(
+                            () ->
+                                    mergeFunctionHelper.add(
+                                            new KeyValue().replace(null, RowKind.DELETE, row(1))))
+                    .hasMessageContaining("Value count only accept insert only records");
         }
     }
 }
