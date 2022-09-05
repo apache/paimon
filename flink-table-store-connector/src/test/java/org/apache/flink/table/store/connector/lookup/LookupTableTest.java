@@ -89,6 +89,27 @@ public class LookupTableTest {
     }
 
     @Test
+    public void testPkTableFilter() throws IOException {
+        LookupTable table =
+                LookupTable.create(
+                        stateFactory,
+                        rowType,
+                        singletonList("f0"),
+                        singletonList("f0"),
+                        r -> r.getInt(1) < 22,
+                        ThreadLocalRandom.current().nextInt(2) * 10);
+
+        table.refresh(singletonList(row(1, 11, 111)).iterator());
+        List<RowData> result = table.get(row(1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, 11, 111);
+
+        table.refresh(singletonList(row(1, 22, 222)).iterator());
+        result = table.get(row(1));
+        assertThat(result).hasSize(0);
+    }
+
+    @Test
     public void testSecKeyTable() throws IOException {
         LookupTable table =
                 LookupTable.create(

@@ -76,6 +76,8 @@ public class PrimaryKeyLookupTable implements LookupTable {
                 if (recordFilter.test(row)) {
                     tableState.put(primaryKey, row);
                 } else {
+                    // The new record under primary key is filtered
+                    // We need to delete this primary key as it no longer exists.
                     tableState.delete(primaryKey);
                 }
             } else {

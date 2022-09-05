@@ -118,7 +118,35 @@ public class LookupJoinITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testLookupFilter1() throws Exception {
+    public void testLookupFilterPk() throws Exception {
+        executeSql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+
+        String query =
+                "SELECT T.i, D.j, D.k1 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i AND D.i > 2";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+
+        executeSql("INSERT INTO T VALUES (1), (2), (3)");
+        List<Row> result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, null, null), Row.of(2, null, null), Row.of(3, null, null));
+
+        executeSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        Thread.sleep(2000); // wait refresh
+        executeSql("INSERT INTO T VALUES (1), (2), (3), (4)");
+        result = iterator.collect(4);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, null, null),
+                        Row.of(2, null, null),
+                        Row.of(3, 33, 333),
+                        Row.of(4, null, null));
+
+        iterator.close();
+    }
+
+    @Test
+    public void testLookupFilterSelect() throws Exception {
         executeSql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
@@ -146,7 +174,7 @@ public class LookupJoinITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testLookupFilter2() throws Exception {
+    public void testLookupFilterUnSelect() throws Exception {
         executeSql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
@@ -174,7 +202,7 @@ public class LookupJoinITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testLookupFilter3() throws Exception {
+    public void testLookupFilterUnSelectAndUpdate() throws Exception {
         executeSql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
@@ -260,7 +288,32 @@ public class LookupJoinITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testNonPkLookupFilter1() throws Exception {
+    public void testNonPkLookupFilterPk() throws Exception {
+        executeSql(
+                "INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
+
+        String query =
+                "SELECT T.i, D.k1 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.j AND D.i > 2";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+
+        executeSql("INSERT INTO T VALUES (11), (22), (33)");
+        List<Row> result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(Row.of(11, null), Row.of(22, 333), Row.of(33, null));
+
+        executeSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        Thread.sleep(2000); // wait refresh
+        executeSql("INSERT INTO T VALUES (11), (22), (33), (44)");
+        result = iterator.collect(4);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(11, null), Row.of(22, null), Row.of(33, 333), Row.of(44, null));
+
+        iterator.close();
+    }
+
+    @Test
+    public void testNonPkLookupFilterSelect() throws Exception {
         executeSql(
                 "INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
@@ -286,7 +339,7 @@ public class LookupJoinITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testNonPkLookupFilter2() throws Exception {
+    public void testNonPkLookupFilterUnSelect() throws Exception {
         executeSql(
                 "INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
@@ -312,7 +365,7 @@ public class LookupJoinITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testNonPkLookupFilter3() throws Exception {
+    public void testNonPkLookupFilterUnSelectAndUpdate() throws Exception {
         executeSql(
                 "INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
