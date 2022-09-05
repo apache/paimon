@@ -38,25 +38,30 @@ public class ParquetInputFormatFactory {
             RowType producedRowType,
             TypeInformation<RowData> producedTypeInfo,
             boolean isUtcTimestamp) {
+        Class<?> formatClass = null;
         try {
-            return createFrom115(conf, producedRowType, producedTypeInfo, isUtcTimestamp);
+            formatClass =
+                    Class.forName("org.apache.flink.formats.parquet.ParquetColumnarRowInputFormat");
+            return createFrom115(
+                    formatClass, conf, producedRowType, producedTypeInfo, isUtcTimestamp);
         } catch (ClassNotFoundException e) {
+            throw new RuntimeException(e);
+        } catch (NoSuchMethodException e) {
             try {
-                return createFrom114(conf, producedRowType, isUtcTimestamp);
-            } catch (ClassNotFoundException ex) {
+                return createFrom114(formatClass, conf, producedRowType, isUtcTimestamp);
+            } catch (NoSuchMethodException ex) {
                 throw new RuntimeException(ex);
             }
         }
     }
 
     private static BulkFormat<RowData, FileSourceSplit> createFrom115(
+            Class<?> formatClass,
             Configuration conf,
             RowType producedRowType,
             TypeInformation<RowData> producedTypeInfo,
             boolean isUtcTimestamp)
-            throws ClassNotFoundException {
-        Class<?> formatClass =
-                Class.forName("org.apache.flink.formats.parquet.ParquetColumnarRowInputFormat");
+            throws NoSuchMethodException {
         try {
             return ReflectionUtils.invokeStaticMethod(
                     formatClass,
@@ -69,16 +74,17 @@ public class ParquetInputFormatFactory {
                     2048,
                     isUtcTimestamp,
                     true);
-        } catch (NoSuchMethodException | InvocationTargetException | IllegalAccessException e) {
+        } catch (InvocationTargetException | IllegalAccessException e) {
             throw new RuntimeException(e);
         }
     }
 
     private static BulkFormat<RowData, FileSourceSplit> createFrom114(
-            Configuration conf, RowType producedRowType, boolean isUtcTimestamp)
-            throws ClassNotFoundException {
-        Class<?> formatClass =
-                Class.forName("org.apache.flink.formats.parquet.ParquetColumnarRowInputFormat");
+            Class<?> formatClass,
+            Configuration conf,
+            RowType producedRowType,
+            boolean isUtcTimestamp)
+            throws NoSuchMethodException {
         try {
             return ReflectionUtils.invokeStaticMethod(
                     formatClass,
@@ -90,7 +96,7 @@ public class ParquetInputFormatFactory {
                     2048,
                     isUtcTimestamp,
                     true);
-        } catch (NoSuchMethodException | InvocationTargetException | IllegalAccessException e) {
+        } catch (InvocationTargetException | IllegalAccessException e) {
             throw new RuntimeException(e);
         }
     }

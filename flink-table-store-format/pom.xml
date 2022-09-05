@@ -242,6 +242,12 @@ under the License.
                                         <exclude>META-INF/services/**</exclude>
                                     </excludes>
                                 </filter>
+                                <filter>
+                                    <artifact>org.apache.flink:${flink.sql.parquet}</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/services/**</exclude>
+                                    </excludes>
+                                </filter>
                                 <!-- Another copy of the Apache license, which we don't need. -->
                                 <filter>
                                     <artifact>*</artifact>
@@ -258,6 +264,10 @@ under the License.
                                 <relocation>
                                     <pattern>org.apache.flink.formats.avro</pattern>
                                     <shadedPattern>org.apache.flink.table.store.shaded.org.apache.flink.formats.avro</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.parquet</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.parquet</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.apache.flink.formats.parquet</pattern>
