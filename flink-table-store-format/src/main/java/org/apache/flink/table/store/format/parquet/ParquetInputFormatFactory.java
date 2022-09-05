@@ -42,7 +42,7 @@ public class ParquetInputFormatFactory {
         try {
             formatClass =
                     Class.forName("org.apache.flink.formats.parquet.ParquetColumnarRowInputFormat");
-            return createFrom115(
+            return createFromLatestFlinkVersion(
                     formatClass, conf, producedRowType, producedTypeInfo, isUtcTimestamp);
         } catch (ClassNotFoundException e) {
             throw new RuntimeException(e);
@@ -55,7 +55,7 @@ public class ParquetInputFormatFactory {
         }
     }
 
-    private static BulkFormat<RowData, FileSourceSplit> createFrom115(
+    private static BulkFormat<RowData, FileSourceSplit> createFromLatestFlinkVersion(
             Class<?> formatClass,
             Configuration conf,
             RowType producedRowType,
