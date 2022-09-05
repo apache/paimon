@@ -378,14 +378,19 @@ public class TestFileStore extends KeyValueFileStore {
     }
 
     private Set<Path> getFilesInUse() {
+        Set<Path> result = new HashSet<>();
         FileStorePathFactory pathFactory = pathFactory();
         ManifestList manifestList = manifestListFactory().create();
         FileStoreScan scan = newScan();
 
+        SchemaManager schemaManager = new SchemaManager(options.path());
+        schemaManager.listAllIds().forEach(id -> result.add(schemaManager.toSchemaPath(id)));
+
         SnapshotManager snapshotManager = snapshotManager();
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
+
         if (latestSnapshotId == null) {
-            return Collections.emptySet();
+            return result;
         }
 
         long firstInUseSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
@@ -396,7 +401,6 @@ public class TestFileStore extends KeyValueFileStore {
             }
         }
 
-        Set<Path> result = new HashSet<>();
         for (long id = firstInUseSnapshotId; id <= latestSnapshotId; id++) {
             Path snapshotPath = snapshotManager.snapshotPath(id);
             Snapshot snapshot = Snapshot.fromPath(snapshotPath);
