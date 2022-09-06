@@ -67,7 +67,7 @@ public class SnapshotEnumerator implements Callable<SnapshotEnumerator.Enumerato
 
                 nextSnapshotId++;
                 LOG.debug(
-                        "Next snapshot id {} is not append, but is {}, check next one.",
+                        "Next snapshot id {} is not APPEND, but is {}, check next one.",
                         nextSnapshotId,
                         snapshot.commitKind());
                 continue;
