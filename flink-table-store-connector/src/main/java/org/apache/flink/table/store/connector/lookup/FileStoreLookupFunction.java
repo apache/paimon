@@ -180,8 +180,11 @@ public class FileStoreLookupFunction extends TableFunction<RowData> {
     }
 
     private void refresh() throws IOException {
-        Iterator<RowData> batch = streamingReader.nextBatch();
-        if (batch != null) {
+        while (true) {
+            Iterator<RowData> batch = streamingReader.nextBatch();
+            if (batch == null) {
+                return;
+            }
             this.lookupTable.refresh(batch);
         }
     }
