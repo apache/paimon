@@ -33,6 +33,14 @@ a processing time attribute and the other table to be backed by a lookup source 
 First, create a table, and update it in real-time.
 
 ```sql
+-- Create a table store catalog
+CREATE CATALOG my_catalog WITH (
+  'type'='table-store',
+  'warehouse'='hdfs://nn:8020/warehouse/path' -- or 'file://tmp/foo/bar'
+);
+
+USE CATALOG my_catalog;
+
 -- Create a table in table-store catalog
 CREATE TABLE customers (
   id INT PRIMARY KEY NOT ENFORCED,

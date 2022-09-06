@@ -38,7 +38,7 @@ import java.nio.charset.StandardCharsets;
 /** Factory to create state. */
 public class RocksDBStateFactory implements Closeable {
 
-    private final RocksDB db;
+    private RocksDB db;
 
     private final ColumnFamilyOptions columnFamilyOptions;
 
@@ -92,6 +92,9 @@ public class RocksDBStateFactory implements Closeable {
 
     @Override
     public void close() throws IOException {
-        this.db.close();
+        if (db != null) {
+            db.close();
+            db = null;
+        }
     }
 }

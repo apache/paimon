@@ -190,6 +190,7 @@ public class FileStoreLookupFunction extends TableFunction<RowData> {
     public void close() throws IOException {
         if (stateFactory != null) {
             stateFactory.close();
+            stateFactory = null;
         }
 
         if (path != null) {
