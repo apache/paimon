@@ -56,7 +56,7 @@ public class LookupJoinITCase extends AbstractTestBase {
         executeSql("CREATE TABLE T (i INT, `proctime` AS PROCTIME())");
         executeSql(
                 "CREATE TABLE DIM (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
-                        + " ('continuous.discovery-interval'='10 ms')");
+                        + " ('continuous.discovery-interval'='1 ms')");
     }
 
     @Test
