@@ -68,6 +68,12 @@ under the License.
             <scope>provided</scope>
         </dependency>
 
+        <dependency>
+            <groupId>com.ververica</groupId>
+            <artifactId>frocksdbjni</artifactId>
+            <version>6.20.3-ververica-1.0</version>
+        </dependency>
+
         <!-- test dependencies -->
 
         <dependency>
