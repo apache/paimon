@@ -63,7 +63,7 @@ public class JsonSerdeUtil {
 
     public static <T> String toJson(T t) {
         try {
-            return OBJECT_MAPPER_INSTANCE.writer().writeValueAsString(t);
+            return OBJECT_MAPPER_INSTANCE.writerWithDefaultPrettyPrinter().writeValueAsString(t);
         } catch (JsonProcessingException e) {
             throw new UncheckedIOException(e);
         }
