@@ -46,7 +46,7 @@ public class ValueCountMergeFunction implements MergeFunction {
     public void add(KeyValue kv) {
         checkArgument(
                 kv.valueKind() == RowKind.INSERT,
-                "In value count mode, only insert records coming. This is a bug. Please file an issue.");
+                "In value count mode, only insert records come. This is a bug. Please file an issue.");
         total += count(kv.value());
     }
 
