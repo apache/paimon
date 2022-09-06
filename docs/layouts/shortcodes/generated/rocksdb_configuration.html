@@ -1,0 +1,114 @@
+<table class="configuration table table-bordered">
+    <thead>
+        <tr>
+            <th class="text-left" style="width: 20%">Key</th>
+            <th class="text-left" style="width: 15%">Default</th>
+            <th class="text-left" style="width: 10%">Type</th>
+            <th class="text-left" style="width: 55%">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><h5>lookup.cache-rows</h5></td>
+            <td style="word-wrap: break-word;">10000</td>
+            <td>Long</td>
+            <td>The maximum number of rows to store in the cache</td>
+        </tr>
+        <tr>
+            <td><h5>rocksdb.block.blocksize</h5></td>
+            <td style="word-wrap: break-word;">4 kb</td>
+            <td>MemorySize</td>
+            <td>The approximate size (in bytes) of user data packed per block. The default blocksize is '4KB'.</td>
+        </tr>
+        <tr>
+            <td><h5>rocksdb.block.cache-size</h5></td>
+            <td style="word-wrap: break-word;">8 mb</td>
+            <td>MemorySize</td>
+            <td>The amount of the cache for data blocks in RocksDB. The default block-cache size is '8MB'.</td>
+        </tr>
+        <tr>
+            <td><h5>rocksdb.block.metadata-blocksize</h5></td>
+            <td style="word-wrap: break-word;">4 kb</td>
+            <td>MemorySize</td>
+            <td>Approximate size of partitioned metadata packed per block. Currently applied to indexes block when partitioned index/filters option is enabled. The default blocksize is '4KB'.</td>
+        </tr>
+        <tr>
+            <td><h5>rocksdb.bloom-filter.bits-per-key</h5></td>
+            <td style="word-wrap: break-word;">10.0</td>
+            <td>Double</td>
+            <td>Bits per key that bloom filter will use, this only take effect when bloom filter is used. The default value is 10.0.</td>
+        </tr>
+        <tr>
+            <td><h5>rocksdb.bloom-filter.block-based-mode</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, RocksDB will use block-based filter instead of full filter, this only take effect when bloom filter is used. The default value is 'false'.</td>
+        </tr>
+        <tr>
+            <td><h5>rocksdb.compaction.level.max-size-level-base</h5></td>
+            <td style="word-wrap: break-word;">256 mb</td>
+            <td>MemorySize</td>
+            <td>The upper-bound of the total size of level base files in bytes. The default value is '256MB'.</td>
+        </tr>
+        <tr>
+            <td><h5>rocksdb.compaction.level.target-file-size-base</h5></td>
+            <td style="word-wrap: break-word;">64 mb</td>
+            <td>MemorySize</td>
+            <td>The target file size for compaction, which determines a level-1 file size. The default value is '64MB'.</td>
+        </tr>
+        <tr>
+            <td><h5>rocksdb.compaction.level.use-dynamic-size</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, RocksDB will pick target size of each level dynamically. From an empty DB, RocksDB would make last level the base level, which means merging L0 data into the last level, until it exceeds max_bytes_for_level_base. And then repeat this process for second last level and so on. The default value is 'false'. For more information, please refer to <a href="https://github.com/facebook/rocksdb/wiki/Leveled-Compaction#level_compaction_dynamic_level_bytes-is-true">RocksDB's doc.</a></td>
+        </tr>
+        <tr>
+            <td><h5>rocksdb.compaction.style</h5></td>
+            <td style="word-wrap: break-word;">LEVEL</td>
+            <td><p>Enum</p></td>
+            <td>The specified compaction style for DB. Candidate compaction style is LEVEL, FIFO, UNIVERSAL or NONE, and Flink chooses 'LEVEL' as default style.<br /><br />Possible values:<ul><li>"LEVEL"</li><li>"UNIVERSAL"</li><li>"FIFO"</li><li>"NONE"</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>rocksdb.compression.type</h5></td>
+            <td style="word-wrap: break-word;">LZ4_COMPRESSION</td>
+            <td><p>Enum</p></td>
+            <td>The compression type.<br /><br />Possible values:<ul><li>"NO_COMPRESSION"</li><li>"SNAPPY_COMPRESSION"</li><li>"ZLIB_COMPRESSION"</li><li>"BZLIB2_COMPRESSION"</li><li>"LZ4_COMPRESSION"</li><li>"LZ4HC_COMPRESSION"</li><li>"XPRESS_COMPRESSION"</li><li>"ZSTD_COMPRESSION"</li><li>"DISABLE_COMPRESSION_OPTION"</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>rocksdb.files.open</h5></td>
+            <td style="word-wrap: break-word;">-1</td>
+            <td>Integer</td>
+            <td>The maximum number of open files (per stateful operator) that can be used by the DB, '-1' means no limit. The default value is '-1'.</td>
+        </tr>
+        <tr>
+            <td><h5>rocksdb.thread.num</h5></td>
+            <td style="word-wrap: break-word;">2</td>
+            <td>Integer</td>
+            <td>The maximum number of concurrent background flush and compaction jobs (per stateful operator). The default value is '2'.</td>
+        </tr>
+        <tr>
+            <td><h5>rocksdb.use-bloom-filter</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, every newly created SST file will contain a Bloom filter. It is disabled by default.</td>
+        </tr>
+        <tr>
+            <td><h5>rocksdb.writebuffer.count</h5></td>
+            <td style="word-wrap: break-word;">2</td>
+            <td>Integer</td>
+            <td>The maximum number of write buffers that are built up in memory. The default value is '2'.</td>
+        </tr>
+        <tr>
+            <td><h5>rocksdb.writebuffer.number-to-merge</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>The minimum number of write buffers that will be merged together before writing to storage. The default value is '1'.</td>
+        </tr>
+        <tr>
+            <td><h5>rocksdb.writebuffer.size</h5></td>
+            <td style="word-wrap: break-word;">64 mb</td>
+            <td>MemorySize</td>
+            <td>The amount of data built up in memory (backed by an unsorted log on disk) before converting to a sorted on-disk files. The default writebuffer size is '64MB'.</td>
+        </tr>
+    </tbody>
+</table>
