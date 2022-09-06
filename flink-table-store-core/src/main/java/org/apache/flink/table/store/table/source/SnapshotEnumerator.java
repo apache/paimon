@@ -54,7 +54,7 @@ public class SnapshotEnumerator implements Callable<SnapshotEnumerator.Enumerato
             if (!snapshotManager.snapshotExists(nextSnapshotId)) {
                 // TODO check latest snapshot id, expired?
                 LOG.debug(
-                        "Next snapshot id {} not exists, wait for it to be generated.",
+                        "Next snapshot id {} does not exist, wait for the snapshot generation.",
                         nextSnapshotId);
                 return null;
             }
