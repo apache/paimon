@@ -172,7 +172,7 @@ public class SortBufferMemTable implements MemTable {
                     return;
                 }
                 mergeFunctionHelper.reset();
-                mergeFunctionHelper.add(previous.getReusedKv().value());
+                mergeFunctionHelper.add(previous.getReusedKv());
 
                 while (readOnce()) {
                     if (keyComparator.compare(
@@ -180,7 +180,7 @@ public class SortBufferMemTable implements MemTable {
                             != 0) {
                         break;
                     }
-                    mergeFunctionHelper.add(current.getReusedKv().value());
+                    mergeFunctionHelper.add(current.getReusedKv());
                     swapSerializers();
                 }
                 result = mergeFunctionHelper.getValue();
