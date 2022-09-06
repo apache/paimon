@@ -82,6 +82,12 @@ commit to your own Flink branch.
 
 ## RocksDBOptions
 
-Options for rocksdb cache, you can configure options in `WITH`.
+Options for rocksdb cache, you can configure options in `WITH` or dynamic table hints.
+
+```sql
+SELECT o.order_id, o.total, c.country, c.zip
+  FROM Orders AS o JOIN customers /*+ OPTIONS('lookup.cache-rows'='20000') */
+  FOR SYSTEM_TIME AS OF o.proc_time AS c ON o.customer_id = c.id;
+```
 
 {{< generated/rocksdb_configuration >}}
