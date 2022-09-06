@@ -20,6 +20,8 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
 
@@ -41,8 +43,11 @@ public class ValueCountMergeFunction implements MergeFunction {
     }
 
     @Override
-    public void add(RowData value) {
-        total += count(value);
+    public void add(KeyValue kv) {
+        checkArgument(
+                kv.valueKind() == RowKind.INSERT,
+                "In value count mode, only insert records come. This is a bug. Please file an issue.");
+        total += count(kv.value());
     }
 
     @Override

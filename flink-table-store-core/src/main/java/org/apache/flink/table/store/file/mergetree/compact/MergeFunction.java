@@ -31,8 +31,8 @@ public interface MergeFunction extends Serializable {
     /** Reset the merge function to its default state. */
     void reset();
 
-    /** Add the given {@link RowData} to the merge function. */
-    void add(RowData value);
+    /** Add the given {@link KeyValue} to the merge function. */
+    void add(KeyValue kv);
 
     /** Get current merged value. Return null if this merged result should be skipped. */
     @Nullable
