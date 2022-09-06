@@ -29,6 +29,8 @@ import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.FileKind;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 
@@ -40,6 +42,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
@@ -56,7 +59,7 @@ public class FileStoreExpireTest {
     private SnapshotManager snapshotManager;
 
     @BeforeEach
-    public void beforeEach() throws IOException {
+    public void beforeEach() throws Exception {
         gen = new TestKeyValueGenerator();
         store =
                 TestFileStore.create(
@@ -68,6 +71,15 @@ public class FileStoreExpireTest {
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                         new DeduplicateMergeFunction());
         snapshotManager = store.snapshotManager();
+        SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
+        schemaManager.commitNewVersion(
+                new UpdateSchema(
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
+                        TestKeyValueGenerator.getPrimaryKeys(
+                                TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),
+                        Collections.emptyMap(),
+                        null));
     }
 
     @AfterEach

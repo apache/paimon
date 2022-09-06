@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
@@ -28,6 +29,8 @@ import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.table.source.Split;
@@ -42,12 +45,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -222,10 +227,23 @@ public class KeyValueFileStoreReadTest {
     }
 
     private TestFileStore createStore(
-            RowType partitionType,
-            RowType keyType,
-            RowType valueType,
-            MergeFunction mergeFunction) {
+            RowType partitionType, RowType keyType, RowType valueType, MergeFunction mergeFunction)
+            throws Exception {
+        SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
+        boolean valueCountMode = mergeFunction instanceof ValueCountMergeFunction;
+        schemaManager.commitNewVersion(
+                new UpdateSchema(
+                        valueCountMode ? keyType : valueType,
+                        partitionType.getFieldNames(),
+                        valueCountMode
+                                ? Collections.emptyList()
+                                : Stream.concat(
+                                                keyType.getFieldNames().stream()
+                                                        .map(field -> field.replace("key_", "")),
+                                                partitionType.getFieldNames().stream())
+                                        .collect(Collectors.toList()),
+                        Collections.emptyMap(),
+                        null));
         return TestFileStore.create(
                 "avro", tempDir.toString(), 1, partitionType, keyType, valueType, mergeFunction);
     }

@@ -139,8 +139,8 @@ public class FileStoreSource
             long currentSnapshot = snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId;
             return new ContinuousFileSplitEnumerator(
                     context,
+                    table.location(),
                     scan.withIncremental(true), // the subsequent planning is all incremental
-                    snapshotManager,
                     splits,
                     currentSnapshot,
                     discoveryInterval);

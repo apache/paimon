@@ -26,6 +26,8 @@ import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -339,16 +341,25 @@ public class FileStoreCommitTest {
         assertThat(store.snapshotManager().findLatest()).isEqualTo(snapshot.id() + 1);
     }
 
-    private TestFileStore createStore(boolean failing) {
+    private TestFileStore createStore(boolean failing) throws Exception {
         return createStore(failing, 1);
     }
 
-    private TestFileStore createStore(boolean failing, int numBucket) {
+    private TestFileStore createStore(boolean failing, int numBucket) throws Exception {
         String root =
                 failing
                         ? FailingAtomicRenameFileSystem.getFailingPath(
                                 failingName, tempDir.toString())
                         : TestAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString();
+        SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
+        schemaManager.commitNewVersion(
+                new UpdateSchema(
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
+                        TestKeyValueGenerator.getPrimaryKeys(
+                                TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),
+                        Collections.emptyMap(),
+                        null));
         return TestFileStore.create(
                 "avro",
                 root,

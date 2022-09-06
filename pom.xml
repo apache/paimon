@@ -70,7 +70,7 @@ under the License.
     </modules>
 
     <properties>
-        <flink.version>1.15.0</flink.version>
+        <flink.version>1.15.2</flink.version>
         <flink.shaded.version>15.0</flink.shaded.version>
         <flink.shaded.jackson.version>2.12.4</flink.shaded.jackson.version>
         <hadoop.version>2.8.5</hadoop.version>
@@ -119,6 +119,7 @@ under the License.
         <flink.streaming.java>flink-streaming-java</flink.streaming.java>
         <flink.sql.orc>flink-sql-orc</flink.sql.orc>
         <flink.orc>flink-orc</flink.orc>
+        <flink.parquet>flink-parquet</flink.parquet>
         <flink.connector.kafka>flink-connector-kafka</flink.connector.kafka>
         <flink.sql.connector.kafka>flink-sql-connector-kafka</flink.sql.connector.kafka>
         <flink.test.utils>flink-test-utils</flink.test.utils>
@@ -296,6 +297,7 @@ under the License.
                 <flink.streaming.java>flink-streaming-java_${scala.binary.version}</flink.streaming.java>
                 <flink.sql.orc>flink-sql-orc_${scala.binary.version}</flink.sql.orc>
                 <flink.orc>flink-orc_${scala.binary.version}</flink.orc>
+                <flink.parquet>flink-parquet_${scala.binary.version}</flink.parquet>
                 <flink.connector.kafka>flink-connector-kafka_${scala.binary.version}</flink.connector.kafka>
                 <flink.sql.connector.kafka>flink-sql-connector-kafka_${scala.binary.version}</flink.sql.connector.kafka>
                 <flink.test.utils>flink-test-utils_${scala.binary.version}</flink.test.utils>

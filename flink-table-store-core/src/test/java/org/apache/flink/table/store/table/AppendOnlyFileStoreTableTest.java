@@ -190,7 +190,6 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         List<Split> splits =
                 table.newScan().withFilter(partitionFilter).withBucket(bucket).plan().splits;
         TableRead read = table.newRead();
-        getResult(read, splits, binaryRow(partition), bucket, STREAMING_ROW_TO_STRING);
 
         assertThat(getResult(read, splits, binaryRow(partition), bucket, STREAMING_ROW_TO_STRING))
                 .containsExactlyElementsOf(

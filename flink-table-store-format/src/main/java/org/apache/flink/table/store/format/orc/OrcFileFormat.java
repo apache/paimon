@@ -38,6 +38,8 @@ import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.orc.TypeDescription;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -67,7 +69,7 @@ public class OrcFileFormat extends FileFormat {
 
     @Override
     public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
-            RowType type, int[][] projection, List<Predicate> filters) {
+            RowType type, int[][] projection, @Nullable List<Predicate> filters) {
         List<OrcFilters.Predicate> orcPredicates = new ArrayList<>();
 
         if (filters != null) {

@@ -19,10 +19,18 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
+import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.types.logical.BigIntType;
+import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.types.logical.RowType;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Arrays;
 import java.util.Collections;
 
 import static org.apache.flink.table.store.connector.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
@@ -33,6 +41,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class FileStoreSourceReaderTest {
 
     @TempDir java.nio.file.Path tempDir;
+
+    @BeforeEach
+    public void beforeEach() throws Exception {
+        SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
+        schemaManager.commitNewVersion(
+                new UpdateSchema(
+                        new RowType(
+                                Arrays.asList(
+                                        new RowType.RowField("k", new BigIntType()),
+                                        new RowType.RowField("v", new BigIntType()),
+                                        new RowType.RowField("default", new IntType()))),
+                        Collections.singletonList("default"),
+                        Arrays.asList("k", "default"),
+                        Collections.emptyMap(),
+                        null));
+    }
 
     @Test
     public void testRequestSplitWhenNoSplitRestored() throws Exception {

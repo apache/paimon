@@ -55,7 +55,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class PredicateConverterTest {
 
     private static final PredicateBuilder BUILDER =
-            new PredicateBuilder(RowType.of(new BigIntType(), new DoubleType()));
+            new PredicateBuilder(
+                    new RowType(
+                            Arrays.asList(
+                                    new RowType.RowField("long1", new BigIntType()),
+                                    new RowType.RowField("double1", new DoubleType()))));
 
     private static final PredicateConverter CONVERTER = new PredicateConverter(BUILDER);
 
@@ -73,7 +77,8 @@ public class PredicateConverterTest {
 
     public static Stream<Arguments> provideResolvedExpression() {
         FieldReferenceExpression longRefExpr =
-                new FieldReferenceExpression("long1", DataTypes.BIGINT(), 0, 0);
+                new FieldReferenceExpression(
+                        "long1", DataTypes.BIGINT(), Integer.MAX_VALUE, Integer.MAX_VALUE);
         ValueLiteralExpression intLitExpr = new ValueLiteralExpression(10);
         ValueLiteralExpression intLitExpr2 = new ValueLiteralExpression(20);
         long longLit = 10L;
@@ -81,7 +86,8 @@ public class PredicateConverterTest {
                 new ValueLiteralExpression(null, DataTypes.BIGINT());
 
         FieldReferenceExpression doubleRefExpr =
-                new FieldReferenceExpression("double1", DataTypes.DOUBLE(), 0, 1);
+                new FieldReferenceExpression(
+                        "double1", DataTypes.DOUBLE(), Integer.MAX_VALUE, Integer.MAX_VALUE);
         ValueLiteralExpression floatLitExpr = new ValueLiteralExpression(3.14f);
         double doubleLit = 3.14d;
 
@@ -736,7 +742,7 @@ public class PredicateConverterTest {
     }
 
     private static FieldReferenceExpression field(int i, DataType type) {
-        return new FieldReferenceExpression("name", type, 0, i);
+        return new FieldReferenceExpression("f" + i, type, Integer.MAX_VALUE, Integer.MAX_VALUE);
     }
 
     private static CallExpression call(FunctionDefinition function, ResolvedExpression... args) {

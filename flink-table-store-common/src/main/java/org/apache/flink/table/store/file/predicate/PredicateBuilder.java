@@ -49,9 +49,15 @@ import static java.util.Collections.singletonList;
 public class PredicateBuilder {
 
     private final RowType rowType;
+    private final List<String> fieldNames;
 
     public PredicateBuilder(RowType rowType) {
         this.rowType = rowType;
+        this.fieldNames = rowType.getFieldNames();
+    }
+
+    public int indexOf(String field) {
+        return fieldNames.indexOf(field);
     }
 
     public Predicate equal(int idx, Object literal) {
