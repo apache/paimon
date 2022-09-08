@@ -91,7 +91,7 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             for (int i = 1; i < children.size(); i++) {
                 literals.add(extractLiteral(fieldRefExpr.getOutputDataType(), children.get(i)));
             }
-            return builder.in(fieldRefExpr.getInputIndex(), literals);
+            return builder.in(fieldRefExpr.getFieldIndex(), literals);
         } else if (func == BuiltInFunctionDefinitions.IS_NULL) {
             return extractFieldReference(children.get(0))
                     .map(FieldReferenceExpression::getFieldIndex)
