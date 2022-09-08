@@ -115,7 +115,7 @@ under the License.
                                     </excludes>
                                 </filter>
                                 <filter>
-                                    <artifact>org.apache.flink:${flink.sql.connector.kafka}</artifact>
+                                    <artifact>org.apache.flink:${flink.connector.kafka}</artifact>
                                     <excludes>
                                         <exclude>META-INF/services/**</exclude>
                                     </excludes>
