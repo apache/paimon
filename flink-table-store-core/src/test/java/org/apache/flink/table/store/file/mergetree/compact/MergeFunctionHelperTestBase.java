@@ -105,7 +105,8 @@ public abstract class MergeFunctionHelperTestBase {
                             () ->
                                     mergeFunctionHelper.add(
                                             new KeyValue().replace(null, RowKind.DELETE, row(1))))
-                    .hasMessageContaining("Value count only accept insert only records");
+                    .hasMessageContaining(
+                            "In value count mode, only insert records come. This is a bug. Please file an issue.");
         }
     }
 }
