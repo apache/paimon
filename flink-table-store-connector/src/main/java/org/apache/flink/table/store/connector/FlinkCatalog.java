@@ -54,6 +54,7 @@ import java.util.Optional;
 
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.flink.table.store.CoreOptions.PATH;
+import static org.apache.flink.table.store.connector.FlinkCatalogFactory.IDENTIFIER;
 
 /** Catalog for table store. */
 public class FlinkCatalog extends AbstractCatalog {
@@ -174,7 +175,8 @@ public class FlinkCatalog extends AbstractCatalog {
         }
         CatalogTable catalogTable = (CatalogTable) table;
         Map<String, String> options = table.getOptions();
-        if (options.containsKey(CONNECTOR.key())) {
+        if (options.containsKey(CONNECTOR.key())
+                && !options.get(CONNECTOR.key()).equals(IDENTIFIER)) {
             throw new CatalogException(
                     String.format(
                             "Table Store Catalog only supports table store tables, not '%s' connector."
