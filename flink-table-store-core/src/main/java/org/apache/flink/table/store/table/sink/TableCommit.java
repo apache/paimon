@@ -85,9 +85,20 @@ public class TableCommit implements AutoCloseable {
                 commit.commit(committable, new HashMap<>());
             }
         } else {
-            for (ManifestCommittable committable : committables) {
-                commit.overwrite(overwritePartition, committable, new HashMap<>());
+            ManifestCommittable committable;
+            if (committables.size() > 1) {
+                throw new RuntimeException(
+                        "Multiple committables appear in overwrite mode, this may be a bug, please report it: "
+                                + committables);
+            } else if (committables.size() == 1) {
+                committable = committables.get(0);
+            } else {
+                // create an empty committable
+                // identifier is Long.MAX_VALUE, come from batch job
+                // TODO maybe it can be produced by CommitterOperator
+                committable = new ManifestCommittable(String.valueOf(Long.MAX_VALUE));
             }
+            commit.overwrite(overwritePartition, committable, new HashMap<>());
         }
         expire.expire();
     }
