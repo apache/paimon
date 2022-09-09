@@ -77,8 +77,6 @@ public abstract class AbstractTableStoreFactory
         return new TableStoreSink(
                 context.getObjectIdentifier(),
                 buildFileStoreTable(context),
-                context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
-                        == RuntimeExecutionMode.STREAMING,
                 context,
                 createOptionalLogStoreFactory(context).orElse(null));
     }

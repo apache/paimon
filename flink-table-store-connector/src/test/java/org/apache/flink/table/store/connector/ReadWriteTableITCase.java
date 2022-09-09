@@ -1502,7 +1502,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                                 tEnv.executeSql(
                                         "INSERT OVERWRITE rates VALUES('US Dollar', 102, '2022-06-20')"))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("INSERT OVERWRITE only supports batch mode, not streaming mode.");
+                .hasMessage("Table store doesn't support streaming INSERT OVERWRITE.");
     }
 
     // ------------------------ Tools ----------------------------------

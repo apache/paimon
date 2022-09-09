@@ -83,7 +83,7 @@ public class ChangelogModeTest {
                 new TableStoreSource(identifier, table, true, null, logStoreTableFactory);
         assertThat(source.getChangelogMode()).isEqualTo(expectSource);
 
-        TableStoreSink sink = new TableStoreSink(identifier, table, true, null, null);
+        TableStoreSink sink = new TableStoreSink(identifier, table, null, null);
         assertThat(sink.getChangelogMode(ChangelogMode.all())).isEqualTo(expectSink);
     }
 

@@ -53,7 +53,6 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
 
     private final ObjectIdentifier tableIdentifier;
     private final FileStoreTable table;
-    private final boolean streaming;
     private final DynamicTableFactory.Context context;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
@@ -64,12 +63,10 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
     public TableStoreSink(
             ObjectIdentifier tableIdentifier,
             FileStoreTable table,
-            boolean streaming,
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
-        this.streaming = streaming;
         this.context = context;
         this.logStoreTableFactory = logStoreTableFactory;
     }
@@ -107,6 +104,11 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
 
     @Override
     public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
+        if (overwrite && !context.isBounded()) {
+            throw new UnsupportedOperationException(
+                    "Table store doesn't support streaming INSERT OVERWRITE.");
+        }
+
         LogSinkProvider logSinkProvider = null;
         if (logStoreTableFactory != null) {
             logSinkProvider = logStoreTableFactory.createSinkProvider(this.context, context);
@@ -135,8 +137,7 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
     @Override
     public DynamicTableSink copy() {
         TableStoreSink copied =
-                new TableStoreSink(
-                        tableIdentifier, table, streaming, context, logStoreTableFactory);
+                new TableStoreSink(tableIdentifier, table, context, logStoreTableFactory);
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
         copied.lockFactory = lockFactory;
@@ -163,10 +164,6 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
 
     @Override
     public void applyOverwrite(boolean overwrite) {
-        if (overwrite && streaming) {
-            throw new UnsupportedOperationException(
-                    "INSERT OVERWRITE only supports batch mode, not streaming mode.");
-        }
         this.overwrite = overwrite;
     }
 
