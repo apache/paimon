@@ -1479,6 +1479,32 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                 Collections.nCopies(2, changelogRow("+I", "Yen", 1L)));
     }
 
+    @Test
+    public void testStreamingInsertOverwrite() throws Exception {
+        rootPath = TEMPORARY_FOLDER.newFolder().getPath();
+        tEnv =
+                StreamTableEnvironment.create(
+                        buildStreamEnv(), EnvironmentSettings.inStreamingMode());
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE IF NOT EXISTS rates (\n"
+                                + "currency STRING,\n"
+                                + " rate BIGINT,\n"
+                                + " dt STRING\n"
+                                + ") PARTITIONED BY (dt)\n"
+                                + "WITH (\n"
+                                + " 'bucket' = '2',\n"
+                                + " 'root-path' = '%s'\n"
+                                + ")",
+                        rootPath));
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql(
+                                        "INSERT OVERWRITE rates VALUES('US Dollar', 102, '2022-06-20')"))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("INSERT OVERWRITE only supports batch mode, not streaming mode.");
+    }
+
     // ------------------------ Tools ----------------------------------
 
     private String collectAndCheckBatchReadWrite(
