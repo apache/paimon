@@ -104,6 +104,11 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
 
     @Override
     public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
+        if (overwrite && !context.isBounded()) {
+            throw new UnsupportedOperationException(
+                    "Table store doesn't support streaming INSERT OVERWRITE.");
+        }
+
         LogSinkProvider logSinkProvider = null;
         if (logStoreTableFactory != null) {
             logSinkProvider = logStoreTableFactory.createSinkProvider(this.context, context);
