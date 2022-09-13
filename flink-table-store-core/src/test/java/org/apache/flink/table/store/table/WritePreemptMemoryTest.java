@@ -93,7 +93,10 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
         Configuration conf = new Configuration();
         conf.set(CoreOptions.PATH, tablePath.toString());
         conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
-        conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(30 * 1024));
+        // Run with minimal memory to ensure a more intense preempt
+        // Currently a writer needs at least one page
+        int pages = 10;
+        conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(pages * 1024));
         conf.set(CoreOptions.PAGE_SIZE, new MemorySize(1024));
         configure.accept(conf);
         SchemaManager schemaManager = new SchemaManager(tablePath);
