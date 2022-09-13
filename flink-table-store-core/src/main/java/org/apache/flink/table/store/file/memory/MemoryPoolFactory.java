@@ -40,8 +40,11 @@ public class MemoryPoolFactory {
     }
 
     public void notifyNewOwner(MemoryOwner owner) {
-        MemorySegmentPool memoryPool = new OwnerMemoryPool(owner);
-        owner.setMemoryPool(memoryPool);
+        owner.setMemoryPool(createSubPool(owner));
+    }
+
+    MemorySegmentPool createSubPool(MemoryOwner owner) {
+        return new OwnerMemoryPool(owner);
     }
 
     private void preemptMemory(MemoryOwner owner) {
@@ -88,6 +91,9 @@ public class MemoryPoolFactory {
 
         @Override
         public int freePages() {
+            // Actually, other owners still keep 1 page
+            // TODO We need to optimize this one page later.
+            // See BinaryInMemorySortBuffer.reset
             return totalPages - allocatedPages;
         }
 
