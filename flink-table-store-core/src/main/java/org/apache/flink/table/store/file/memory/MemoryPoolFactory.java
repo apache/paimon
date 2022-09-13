@@ -30,10 +30,12 @@ import java.util.List;
 public class MemoryPoolFactory {
 
     private final MemorySegmentPool innerPool;
+    private final int totalPages;
     private final Iterable<MemoryOwner> owners;
 
     public MemoryPoolFactory(MemorySegmentPool innerPool, Iterable<MemoryOwner> owners) {
         this.innerPool = innerPool;
+        this.totalPages = innerPool.freePages();
         this.owners = owners;
     }
 
@@ -67,6 +69,8 @@ public class MemoryPoolFactory {
 
         private final MemoryOwner owner;
 
+        private int allocatedPages = 0;
+
         public OwnerMemoryPool(MemoryOwner owner) {
             this.owner = owner;
         }
@@ -78,12 +82,13 @@ public class MemoryPoolFactory {
 
         @Override
         public void returnAll(List<MemorySegment> memory) {
+            allocatedPages -= memory.size();
             innerPool.returnAll(memory);
         }
 
         @Override
         public int freePages() {
-            return innerPool.freePages();
+            return totalPages - allocatedPages;
         }
 
         @Override
@@ -91,7 +96,10 @@ public class MemoryPoolFactory {
             MemorySegment segment = innerPool.nextSegment();
             if (segment == null) {
                 preemptMemory(owner);
-                return innerPool.nextSegment();
+                segment = innerPool.nextSegment();
+            }
+            if (segment != null) {
+                allocatedPages++;
             }
             return segment;
         }
