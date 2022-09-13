@@ -191,7 +191,8 @@ The following parameters determine when to stop writing:
 
 There are three main places in the Table Store's sink writer that take up memory:
 - MemTable's write buffer, shared and preempted by all writers of a single task.
-  This memory value can be adjusted by the `write-buffer-size` option.
+  This memory value can be adjusted by the `write-buffer-size` option. You need
+  to ensure that the number of pages is at least greater than the number of writers.
 - The memory consumed by compaction for reading files, can be adjusted by the
   `num-sorted-run.compaction-trigger` option to change the maximum number of files to be merged.
 - The memory consumed by writing columnar (ORC) file, which is not adjustable.
