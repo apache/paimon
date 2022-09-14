@@ -25,12 +25,15 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
+import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
+import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
@@ -55,6 +58,7 @@ import java.util.function.Function;
 import static org.apache.flink.table.store.CoreOptions.BUCKET;
 import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assumptions.assumeThat;
 
 /** Base test class for {@link FileStoreTable}. */
 public abstract class FileStoreTableTestBase {
@@ -173,6 +177,45 @@ public abstract class FileStoreTableTestBase {
         TableRead read = table.newRead().withFilter(builder.equal(2, 300L));
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(Arrays.asList("1|30|300", "1|40|400"));
+    }
+
+    @Test
+    public void testPartitionEmptyWriter() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        assumeThat(writeMode(table)).isEqualTo(WriteMode.CHANGE_LOG);
+
+        TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
+
+        for (int i = 0; i < 4; i++) {
+            // write lots of records, let compaction be slower
+            for (int j = 0; j < 1000; j++) {
+                write.write(GenericRowData.of(1, 10 * i * j, 100L * i * j));
+            }
+            commit.commit(String.valueOf(i), write.prepareCommit(false));
+        }
+
+        write.write(GenericRowData.of(1, 40, 400L));
+        List<FileCommittable> commit4 = write.prepareCommit(false);
+
+        write.write(GenericRowData.of(2, 20, 200L));
+        List<FileCommittable> commit5 = write.prepareCommit(true);
+        // commit5 should be a compaction commit
+
+        write.write(GenericRowData.of(1, 60, 600L));
+        List<FileCommittable> commit6 = write.prepareCommit(true);
+        // commit6 should be a compaction commit
+
+        commit.commit("4", commit4);
+        commit.commit("5", commit5);
+        commit.commit("6", commit6);
+
+        write.close();
+    }
+
+    private WriteMode writeMode(FileStoreTable table) {
+        Configuration conf = Configuration.fromMap(table.schema().options());
+        return conf.get(CoreOptions.WRITE_MODE);
     }
 
     protected List<String> getResult(
