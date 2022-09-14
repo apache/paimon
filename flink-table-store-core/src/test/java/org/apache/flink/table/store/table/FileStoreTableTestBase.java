@@ -25,8 +25,6 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
-import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
@@ -58,7 +56,6 @@ import java.util.function.Function;
 import static org.apache.flink.table.store.CoreOptions.BUCKET;
 import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assumptions.assumeThat;
 
 /** Base test class for {@link FileStoreTable}. */
 public abstract class FileStoreTableTestBase {
@@ -182,8 +179,6 @@ public abstract class FileStoreTableTestBase {
     @Test
     public void testPartitionEmptyWriter() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        assumeThat(writeMode(table)).isEqualTo(WriteMode.CHANGE_LOG);
-
         TableWrite write = table.newWrite();
         TableCommit commit = table.newCommit("user");
 
@@ -211,11 +206,6 @@ public abstract class FileStoreTableTestBase {
         commit.commit("6", commit6);
 
         write.close();
-    }
-
-    private WriteMode writeMode(FileStoreTable table) {
-        Configuration conf = Configuration.fromMap(table.schema().options());
-        return conf.get(CoreOptions.WRITE_MODE);
     }
 
     protected List<String> getResult(
