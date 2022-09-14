@@ -50,7 +50,7 @@ public class SortMergeReader implements RecordReader<KeyValue> {
     protected SortMergeReader(
             List<RecordReader<KeyValue>> readers,
             Comparator<RowData> userKeyComparator,
-            MergeFunction mergeFunction) {
+            MergeFunction<KeyValue> mergeFunction) {
         this.nextBatchReaders = new ArrayList<>(readers);
         this.userKeyComparator = userKeyComparator;
         this.mergeFunctionHelper = new MergeFunctionHelper(mergeFunction);
@@ -70,7 +70,7 @@ public class SortMergeReader implements RecordReader<KeyValue> {
     public static RecordReader<KeyValue> create(
             List<RecordReader<KeyValue>> readers,
             Comparator<RowData> userKeyComparator,
-            MergeFunction mergeFunction) {
+            MergeFunction<KeyValue> mergeFunction) {
         return readers.size() == 1
                 ? readers.get(0)
                 : new SortMergeReader(readers, userKeyComparator, mergeFunction);
@@ -130,9 +130,9 @@ public class SortMergeReader implements RecordReader<KeyValue> {
                 if (!hasMore) {
                     return null;
                 }
-                RowData mergedValue = mergeFunctionHelper.getValue();
-                if (mergedValue != null) {
-                    return polled.get(polled.size() - 1).kv.setValue(mergedValue);
+                KeyValue result = mergeFunctionHelper.getResult();
+                if (result != null) {
+                    return result;
                 }
             }
         }

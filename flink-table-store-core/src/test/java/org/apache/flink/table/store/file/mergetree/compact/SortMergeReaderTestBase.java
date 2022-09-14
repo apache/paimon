@@ -32,7 +32,7 @@ import java.util.List;
 /** Tests for {@link SortMergeReader}. */
 public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestBase {
 
-    protected abstract MergeFunction createMergeFunction();
+    protected abstract MergeFunction<KeyValue> createMergeFunction();
 
     @Override
     protected RecordReader<KeyValue> createRecordReader(List<TestReusingRecordReader> readers) {
@@ -85,7 +85,7 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
         }
 
         @Override
-        protected MergeFunction createMergeFunction() {
+        protected MergeFunction<KeyValue> createMergeFunction() {
             return new DeduplicateMergeFunction();
         }
     }
@@ -104,7 +104,7 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
         }
 
         @Override
-        protected MergeFunction createMergeFunction() {
+        protected MergeFunction<KeyValue> createMergeFunction() {
             return new ValueCountMergeFunction();
         }
 

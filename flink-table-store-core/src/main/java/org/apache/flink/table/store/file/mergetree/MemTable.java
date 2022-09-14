@@ -56,7 +56,7 @@ public interface MemTable {
      * MergeFunction}.
      */
     Iterator<KeyValue> mergeIterator(
-            Comparator<RowData> keyComparator, MergeFunction mergeFunction);
+            Comparator<RowData> keyComparator, MergeFunction<KeyValue> mergeFunction);
 
     /** Removes all records from this table. The table will be empty after this call returns. */
     void clear();

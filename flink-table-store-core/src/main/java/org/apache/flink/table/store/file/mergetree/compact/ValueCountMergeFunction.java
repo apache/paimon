@@ -31,14 +31,17 @@ import static org.apache.flink.util.Preconditions.checkArgument;
  * A {@link MergeFunction} where key is the full record and value is a count which represents number
  * of records of the exact same fields.
  */
-public class ValueCountMergeFunction implements MergeFunction {
+public class ValueCountMergeFunction implements MergeFunction<KeyValue> {
 
     private static final long serialVersionUID = 1L;
 
-    private long total;
+    private transient KeyValue latestKv;
+    private transient long total;
+    private transient KeyValue reused;
 
     @Override
     public void reset() {
+        latestKv = null;
         total = 0;
     }
 
@@ -47,17 +50,29 @@ public class ValueCountMergeFunction implements MergeFunction {
         checkArgument(
                 kv.valueKind() == RowKind.INSERT,
                 "In value count mode, only insert records come. This is a bug. Please file an issue.");
+        latestKv = kv;
         total += count(kv.value());
     }
 
     @Override
     @Nullable
-    public RowData getValue() {
-        return total == 0 ? null : GenericRowData.of(total);
+    public KeyValue getResult() {
+        if (total == 0) {
+            return null;
+        }
+
+        if (reused == null) {
+            reused = new KeyValue();
+        }
+        return reused.replace(
+                latestKv.key(),
+                latestKv.sequenceNumber(),
+                RowKind.INSERT,
+                GenericRowData.of(total));
     }
 
     @Override
-    public MergeFunction copy() {
+    public MergeFunction<KeyValue> copy() {
         return new ValueCountMergeFunction();
     }
 

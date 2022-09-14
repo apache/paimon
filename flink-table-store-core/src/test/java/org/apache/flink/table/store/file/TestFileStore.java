@@ -92,7 +92,7 @@ public class TestFileStore extends KeyValueFileStore {
             RowType partitionType,
             RowType keyType,
             RowType valueType,
-            MergeFunction mergeFunction) {
+            MergeFunction<KeyValue> mergeFunction) {
         Configuration conf = new Configuration();
 
         conf.set(CoreOptions.WRITE_BUFFER_SIZE, WRITE_BUFFER_SIZE);
@@ -118,7 +118,7 @@ public class TestFileStore extends KeyValueFileStore {
             RowType partitionType,
             RowType keyType,
             RowType valueType,
-            MergeFunction mergeFunction) {
+            MergeFunction<KeyValue> mergeFunction) {
         super(
                 new SchemaManager(options.path()),
                 0L,

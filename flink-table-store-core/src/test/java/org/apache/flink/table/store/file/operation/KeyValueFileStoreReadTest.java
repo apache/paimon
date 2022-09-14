@@ -227,7 +227,10 @@ public class KeyValueFileStoreReadTest {
     }
 
     private TestFileStore createStore(
-            RowType partitionType, RowType keyType, RowType valueType, MergeFunction mergeFunction)
+            RowType partitionType,
+            RowType keyType,
+            RowType valueType,
+            MergeFunction<KeyValue> mergeFunction)
             throws Exception {
         SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
         boolean valueCountMode = mergeFunction instanceof ValueCountMergeFunction;

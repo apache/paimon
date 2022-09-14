@@ -48,7 +48,7 @@ public class MergeTreeReader implements RecordReader<KeyValue> {
             boolean dropDelete,
             KeyValueFileReaderFactory readerFactory,
             Comparator<RowData> userKeyComparator,
-            MergeFunction mergeFunction)
+            MergeFunction<KeyValue> mergeFunction)
             throws IOException {
         this.dropDelete = dropDelete;
 
@@ -113,7 +113,7 @@ public class MergeTreeReader implements RecordReader<KeyValue> {
             List<SortedRun> section,
             KeyValueFileReaderFactory readerFactory,
             Comparator<RowData> userKeyComparator,
-            MergeFunction mergeFunction)
+            MergeFunction<KeyValue> mergeFunction)
             throws IOException {
         List<RecordReader<KeyValue>> readers = new ArrayList<>();
         for (SortedRun run : section) {

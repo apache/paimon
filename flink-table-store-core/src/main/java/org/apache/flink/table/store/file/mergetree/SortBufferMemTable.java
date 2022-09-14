@@ -106,7 +106,7 @@ public class SortBufferMemTable implements MemTable {
 
     @Override
     public Iterator<KeyValue> mergeIterator(
-            Comparator<RowData> keyComparator, MergeFunction mergeFunction) {
+            Comparator<RowData> keyComparator, MergeFunction<KeyValue> mergeFunction) {
         new QuickSort().sort(buffer);
         return new MergeIterator(buffer.getIterator(), keyComparator, mergeFunction);
     }
@@ -126,18 +126,20 @@ public class SortBufferMemTable implements MemTable {
         private final Comparator<RowData> keyComparator;
         private final MergeFunctionHelper mergeFunctionHelper;
 
-        // holds the merged value
+        // previously read kv
         private KeyValueSerializer previous;
         private BinaryRowData previousRow;
         // reads the next kv
         private KeyValueSerializer current;
         private BinaryRowData currentRow;
+
+        private KeyValue result;
         private boolean advanced;
 
         private MergeIterator(
                 MutableObjectIterator<BinaryRowData> kvIter,
                 Comparator<RowData> keyComparator,
-                MergeFunction mergeFunction) {
+                MergeFunction<KeyValue> mergeFunction) {
             this.kvIter = kvIter;
             this.keyComparator = keyComparator;
             this.mergeFunctionHelper = new MergeFunctionHelper(mergeFunction);
@@ -164,7 +166,7 @@ public class SortBufferMemTable implements MemTable {
                 return null;
             }
             advanced = false;
-            return previous.getReusedKv();
+            return result;
         }
 
         private void advanceIfNeeded() {
@@ -173,7 +175,6 @@ public class SortBufferMemTable implements MemTable {
             }
             advanced = true;
 
-            RowData result;
             do {
                 swapSerializers();
                 if (previousRow == null) {
@@ -191,9 +192,8 @@ public class SortBufferMemTable implements MemTable {
                     mergeFunctionHelper.add(current.getReusedKv());
                     swapSerializers();
                 }
-                result = mergeFunctionHelper.getValue();
+                result = mergeFunctionHelper.getResult();
             } while (result == null);
-            previous.getReusedKv().setValue(result);
         }
 
         private boolean readOnce() {

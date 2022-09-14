@@ -40,7 +40,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final RowType keyType;
     private final RowType valueType;
     private final Supplier<Comparator<RowData>> keyComparatorSupplier;
-    private final MergeFunction mergeFunction;
+    private final MergeFunction<KeyValue> mergeFunction;
 
     public KeyValueFileStore(
             SchemaManager schemaManager,
@@ -50,7 +50,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             RowType bucketKeyType,
             RowType keyType,
             RowType valueType,
-            MergeFunction mergeFunction) {
+            MergeFunction<KeyValue> mergeFunction) {
         super(schemaManager, schemaId, options, partitionType);
         this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
