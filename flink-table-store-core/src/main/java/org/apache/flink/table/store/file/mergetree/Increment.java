@@ -75,6 +75,10 @@ public class Increment {
         return compactAfter;
     }
 
+    public boolean isEmpty() {
+        return newFiles.isEmpty() && compactBefore.isEmpty() && compactAfter.isEmpty();
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {

@@ -31,6 +31,7 @@ import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
+import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
@@ -173,6 +174,41 @@ public abstract class FileStoreTableTestBase {
         TableRead read = table.newRead().withFilter(builder.equal(2, 300L));
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(Arrays.asList("1|30|300", "1|40|400"));
+    }
+
+    @Test
+    public void testPartitionEmptyWriter() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
+
+        for (int i = 0; i < 4; i++) {
+            // write lots of records, let compaction be slower
+            for (int j = 0; j < 1000; j++) {
+                write.write(GenericRowData.of(1, 10 * i * j, 100L * i * j));
+            }
+            commit.commit(String.valueOf(i), write.prepareCommit(false));
+        }
+
+        write.write(GenericRowData.of(1, 40, 400L));
+        List<FileCommittable> commit4 = write.prepareCommit(false);
+        // trigger compaction, but not wait it.
+
+        write.write(GenericRowData.of(2, 20, 200L));
+        List<FileCommittable> commit5 = write.prepareCommit(true);
+        // wait compaction finish
+        // commit5 should be a compaction commit
+
+        write.write(GenericRowData.of(1, 60, 600L));
+        List<FileCommittable> commit6 = write.prepareCommit(true);
+        // if remove writer too fast, will see old files, do another compaction
+        // then will be conflicts
+
+        commit.commit("4", commit4);
+        commit.commit("5", commit5);
+        commit.commit("6", commit6);
+
+        write.close();
     }
 
     protected List<String> getResult(
