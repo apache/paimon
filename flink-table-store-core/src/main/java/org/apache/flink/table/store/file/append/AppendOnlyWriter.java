@@ -17,11 +17,13 @@
  * under the License.
  */
 
-package org.apache.flink.table.store.file.data;
+package org.apache.flink.table.store.file.append;
 
 import org.apache.flink.api.common.accumulators.LongCounter;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.compact.CompactManager;
+import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.file.io.RowDataRollingFileWriter;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.utils.RecordWriter;
@@ -34,7 +36,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
-import static org.apache.flink.table.store.file.data.DataFileMeta.getMaxSequenceNumber;
+import static org.apache.flink.table.store.file.io.DataFileMeta.getMaxSequenceNumber;
 
 /**
  * A {@link RecordWriter} implementation that only accepts records which are always insert

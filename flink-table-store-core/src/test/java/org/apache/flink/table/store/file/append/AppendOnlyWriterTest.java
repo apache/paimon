@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.flink.table.store.file.data;
+package org.apache.flink.table.store.file.append;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
@@ -27,6 +27,8 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.RecordWriter;
@@ -49,7 +51,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 
-import static org.apache.flink.table.store.file.data.DataFileMeta.getMaxSequenceNumber;
+import static org.apache.flink.table.store.file.io.DataFileMeta.getMaxSequenceNumber;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test the correctness for {@link AppendOnlyWriter}. */

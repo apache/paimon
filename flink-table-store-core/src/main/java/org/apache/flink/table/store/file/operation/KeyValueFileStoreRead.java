@@ -20,8 +20,8 @@ package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.data.DataFileReader;
+import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
 import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
@@ -47,7 +47,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.file.data.DataFilePathFactory.CHANGELOG_FILE_PREFIX;
+import static org.apache.flink.table.store.file.io.DataFilePathFactory.CHANGELOG_FILE_PREFIX;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.containsFields;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.splitAnd;
 
@@ -58,7 +58,7 @@ import static org.apache.flink.table.store.file.predicate.PredicateBuilder.split
 public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     private final TableSchema tableSchema;
-    private final DataFileReader.Factory dataFileReaderFactory;
+    private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
     private final Comparator<RowData> keyComparator;
     private final MergeFunction mergeFunction;
     private final boolean valueCountMode;
@@ -79,8 +79,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             FileFormat fileFormat,
             FileStorePathFactory pathFactory) {
         this.tableSchema = schemaManager.schema(schemaId);
-        this.dataFileReaderFactory =
-                new DataFileReader.Factory(
+        this.readerFactoryBuilder =
+                KeyValueFileReaderFactory.builder(
                         schemaManager, schemaId, keyType, valueType, fileFormat, pathFactory);
         this.keyComparator = keyComparator;
         this.mergeFunction = mergeFunction;
@@ -88,13 +88,13 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     }
 
     public KeyValueFileStoreRead withKeyProjection(int[][] projectedFields) {
-        dataFileReaderFactory.withKeyProjection(projectedFields);
+        readerFactoryBuilder.withKeyProjection(projectedFields);
         this.keyProjectedFields = projectedFields;
         return this;
     }
 
     public KeyValueFileStoreRead withValueProjection(int[][] projectedFields) {
-        dataFileReaderFactory.withValueProjection(projectedFields);
+        readerFactoryBuilder.withValueProjection(projectedFields);
         return this;
     }
 
@@ -127,14 +127,16 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     @Override
     public RecordReader<KeyValue> createReader(Split split) throws IOException {
         if (split.isIncremental()) {
-            DataFileReader dataFileReader =
-                    dataFileReaderFactory.create(
+            KeyValueFileReaderFactory readerFactory =
+                    readerFactoryBuilder.build(
                             split.partition(), split.bucket(), true, filtersForOverlappedSection);
             // Return the raw file contents without merging
             List<ConcatRecordReader.ReaderSupplier<KeyValue>> suppliers = new ArrayList<>();
             for (DataFileMeta file : split.files()) {
                 suppliers.add(
-                        () -> dataFileReader.read(changelogFile(file).orElse(file.fileName())));
+                        () ->
+                                readerFactory.createRecordReader(
+                                        changelogFile(file).orElse(file.fileName())));
             }
             return ConcatRecordReader.create(suppliers);
         } else {
@@ -154,17 +156,18 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         MergeFunction mergeFunc = mergeFunction.copy();
         for (List<SortedRun> section :
                 new IntervalPartition(split.files(), keyComparator).partition()) {
-            DataFileReader dataFileReader = createDataFileReader(split, section.size() > 1);
+            KeyValueFileReaderFactory readerFactory =
+                    createReaderFactory(split, section.size() > 1);
             sectionReaders.add(
                     () ->
                             MergeTreeReader.readerForSection(
-                                    section, dataFileReader, keyComparator, mergeFunc));
+                                    section, readerFactory, keyComparator, mergeFunc));
         }
         return sectionReaders;
     }
 
-    private DataFileReader createDataFileReader(Split split, boolean overlapped) {
-        return dataFileReaderFactory.create(
+    private KeyValueFileReaderFactory createReaderFactory(Split split, boolean overlapped) {
+        return readerFactoryBuilder.build(
                 split.partition(),
                 split.bucket(),
                 false,

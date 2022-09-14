@@ -21,8 +21,8 @@ package org.apache.flink.table.store.file.mergetree.compact;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.compact.CompactUnit;
-import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.data.DataFileTestUtils;
+import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.io.DataFileTestUtils;
 import org.apache.flink.table.store.file.mergetree.Levels;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 
@@ -42,7 +42,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.file.data.DataFileTestUtils.newFile;
+import static org.apache.flink.table.store.file.io.DataFileTestUtils.newFile;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link MergeTreeCompactManager}. */

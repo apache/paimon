@@ -20,8 +20,8 @@ package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.data.DataFileReader;
+import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
@@ -46,7 +46,7 @@ public class MergeTreeReader implements RecordReader<KeyValue> {
     public MergeTreeReader(
             List<List<SortedRun>> sections,
             boolean dropDelete,
-            DataFileReader dataFileReader,
+            KeyValueFileReaderFactory readerFactory,
             Comparator<RowData> userKeyComparator,
             MergeFunction mergeFunction)
             throws IOException {
@@ -57,7 +57,7 @@ public class MergeTreeReader implements RecordReader<KeyValue> {
             readers.add(
                     () ->
                             readerForSection(
-                                    section, dataFileReader, userKeyComparator, mergeFunction));
+                                    section, readerFactory, userKeyComparator, mergeFunction));
         }
         this.reader = ConcatRecordReader.create(readers);
     }
@@ -111,22 +111,22 @@ public class MergeTreeReader implements RecordReader<KeyValue> {
 
     public static RecordReader<KeyValue> readerForSection(
             List<SortedRun> section,
-            DataFileReader dataFileReader,
+            KeyValueFileReaderFactory readerFactory,
             Comparator<RowData> userKeyComparator,
             MergeFunction mergeFunction)
             throws IOException {
         List<RecordReader<KeyValue>> readers = new ArrayList<>();
         for (SortedRun run : section) {
-            readers.add(readerForRun(run, dataFileReader));
+            readers.add(readerForRun(run, readerFactory));
         }
         return SortMergeReader.create(readers, userKeyComparator, mergeFunction);
     }
 
-    public static RecordReader<KeyValue> readerForRun(SortedRun run, DataFileReader dataFileReader)
-            throws IOException {
+    public static RecordReader<KeyValue> readerForRun(
+            SortedRun run, KeyValueFileReaderFactory readerFactory) throws IOException {
         List<ReaderSupplier<KeyValue>> readers = new ArrayList<>();
         for (DataFileMeta file : run.files()) {
-            readers.add(() -> dataFileReader.read(file.fileName()));
+            readers.add(() -> readerFactory.createRecordReader(file.fileName()));
         }
         return ConcatRecordReader.create(readers);
     }

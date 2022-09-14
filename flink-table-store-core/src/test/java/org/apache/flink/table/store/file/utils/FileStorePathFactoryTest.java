@@ -23,7 +23,7 @@ import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.file.data.DataFilePathFactory;
+import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;

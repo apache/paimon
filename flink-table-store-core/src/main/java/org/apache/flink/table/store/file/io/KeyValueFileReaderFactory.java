@@ -16,14 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.data;
+package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.io.KeyValueDataFileRecordReader;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -38,13 +37,8 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * Reads {@link KeyValue}s from data files.
- *
- * <p>NOTE: If the key exists, the data is sorted according to the key and the key projection will
- * cause the orderliness of the data to fail.
- */
-public class DataFileReader {
+/** Factory to create {@link RecordReader}s for reading {@link KeyValue} files. */
+public class KeyValueFileReaderFactory {
 
     private final SchemaManager schemaManager;
     private final long schemaId;
@@ -55,7 +49,7 @@ public class DataFileReader {
     private final BulkFormat<RowData, FileSourceSplit> readerFactory;
     private final DataFilePathFactory pathFactory;
 
-    private DataFileReader(
+    private KeyValueFileReaderFactory(
             SchemaManager schemaManager,
             long schemaId,
             RowType keyType,
@@ -70,13 +64,23 @@ public class DataFileReader {
         this.pathFactory = pathFactory;
     }
 
-    public RecordReader<KeyValue> read(String fileName) throws IOException {
+    public RecordReader<KeyValue> createRecordReader(String fileName) throws IOException {
         return new KeyValueDataFileRecordReader(
                 readerFactory, pathFactory.toPath(fileName), keyType, valueType);
     }
 
-    /** Creates {@link DataFileReader}. */
-    public static class Factory {
+    public static Builder builder(
+            SchemaManager schemaManager,
+            long schemaId,
+            RowType keyType,
+            RowType valueType,
+            FileFormat fileFormat,
+            FileStorePathFactory pathFactory) {
+        return new Builder(schemaManager, schemaId, keyType, valueType, fileFormat, pathFactory);
+    }
+
+    /** Builder for {@link KeyValueFileReaderFactory}. */
+    public static class Builder {
 
         private final SchemaManager schemaManager;
         private final long schemaId;
@@ -91,7 +95,7 @@ public class DataFileReader {
         private RowType projectedKeyType;
         private RowType projectedValueType;
 
-        public Factory(
+        private Builder(
                 SchemaManager schemaManager,
                 long schemaId,
                 RowType keyType,
@@ -111,23 +115,23 @@ public class DataFileReader {
             applyProjection();
         }
 
-        public Factory withKeyProjection(int[][] projection) {
+        public Builder withKeyProjection(int[][] projection) {
             keyProjection = projection;
             applyProjection();
             return this;
         }
 
-        public Factory withValueProjection(int[][] projection) {
+        public Builder withValueProjection(int[][] projection) {
             valueProjection = projection;
             applyProjection();
             return this;
         }
 
-        public DataFileReader create(BinaryRowData partition, int bucket) {
-            return create(partition, bucket, true, Collections.emptyList());
+        public KeyValueFileReaderFactory build(BinaryRowData partition, int bucket) {
+            return build(partition, bucket, true, Collections.emptyList());
         }
 
-        public DataFileReader create(
+        public KeyValueFileReaderFactory build(
                 BinaryRowData partition,
                 int bucket,
                 boolean projectKeys,
@@ -138,7 +142,7 @@ public class DataFileReader {
             RowType recordType = KeyValue.schema(keyType, valueType);
             int[][] projection =
                     KeyValue.project(keyProjection, valueProjection, keyType.getFieldCount());
-            return new DataFileReader(
+            return new KeyValueFileReaderFactory(
                     schemaManager,
                     schemaId,
                     projectedKeyType,

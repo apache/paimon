@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.Split;

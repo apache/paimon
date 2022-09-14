@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.io.DataFileMeta;
 
 import org.junit.jupiter.api.Test;
 
