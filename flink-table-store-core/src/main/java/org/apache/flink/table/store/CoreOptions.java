@@ -156,8 +156,8 @@ public class CoreOptions implements Serializable {
                     .defaultValue(WriteMode.CHANGE_LOG)
                     .withDescription("Specify the write mode for table.");
 
-    public static final ConfigOption<Boolean> WRITE_SKIP_COMPACTION =
-            ConfigOptions.key("write.skip-compaction")
+    public static final ConfigOption<Boolean> WRITE_COMPACTION_SKIP =
+            ConfigOptions.key("write.compaction-skip")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Whether to skip compaction on write.");
@@ -484,8 +484,8 @@ public class CoreOptions implements Serializable {
         return options.getOptional(SEQUENCE_FIELD);
     }
 
-    public boolean writeSkipCompaction() {
-        return options.get(WRITE_SKIP_COMPACTION);
+    public boolean writeCompactionSkip() {
+        return options.get(WRITE_COMPACTION_SKIP);
     }
 
     /** Specifies the merge engine for table with primary key. */

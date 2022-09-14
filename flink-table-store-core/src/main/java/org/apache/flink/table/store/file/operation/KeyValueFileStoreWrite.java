@@ -134,7 +134,7 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
         DataFileWriter dataFileWriter = dataFileWriterFactory.create(partition, bucket);
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
         CompactManager compactManager;
-        if (options.writeSkipCompaction()) {
+        if (options.writeCompactionSkip()) {
             compactManager = new NoopCompactManager(compactExecutor);
         } else {
             Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());

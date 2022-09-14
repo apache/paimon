@@ -79,7 +79,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
         this.compactionMinFileNum = options.compactionMinFileNum();
         this.compactionMaxFileNum = options.compactionMaxFileNum();
         this.commitForceCompact = options.commitForceCompact();
-        this.skipCompaction = options.writeSkipCompaction();
+        this.skipCompaction = options.writeCompactionSkip();
     }
 
     @Override

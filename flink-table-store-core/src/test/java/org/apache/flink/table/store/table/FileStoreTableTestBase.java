@@ -60,7 +60,7 @@ import java.util.stream.Collectors;
 import static org.apache.flink.table.store.CoreOptions.BUCKET;
 import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
 import static org.apache.flink.table.store.CoreOptions.COMPACTION_MAX_FILE_NUM;
-import static org.apache.flink.table.store.CoreOptions.WRITE_SKIP_COMPACTION;
+import static org.apache.flink.table.store.CoreOptions.WRITE_COMPACTION_SKIP;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base test class for {@link FileStoreTable}. */
@@ -222,7 +222,7 @@ public abstract class FileStoreTableTestBase {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
-                            conf.set(WRITE_SKIP_COMPACTION, true);
+                            conf.set(WRITE_COMPACTION_SKIP, true);
                             conf.set(COMPACTION_MAX_FILE_NUM, 5);
                         });
 
