@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.data;
+package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.connector.file.table.FileSystemConnectorOptions;
 import org.apache.flink.core.fs.FileStatus;
@@ -56,8 +56,8 @@ import java.util.function.Function;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link DataFileReader} and {@link DataFileWriter}. */
-public class DataFileTest {
+/** Tests for reading and writing {@link KeyValue} data files. */
+public class KeyValueFileReadWriteTest {
 
     private final DataFileTestDataGenerator gen =
             DataFileTestDataGenerator.builder().memTableCapacity(20).build();
@@ -66,8 +66,9 @@ public class DataFileTest {
 
     @Test
     public void testReadNonExistentFile() {
-        DataFileReader reader = createDataFileReader(tempDir.toString(), "avro", null, null);
-        assertThatThrownBy(() -> reader.read("dummy_file"))
+        KeyValueFileReaderFactory readerFactory =
+                createReaderFactory(tempDir.toString(), "avro", null, null);
+        assertThatThrownBy(() -> readerFactory.createRecordReader("dummy_file"))
                 .hasMessageContaining(
                         "you can configure 'snapshot.time-retained' option with a larger value.");
     }
@@ -84,27 +85,30 @@ public class DataFileTest {
 
     private void testWriteAndReadDataFileImpl(String format) throws Exception {
         DataFileTestDataGenerator.Data data = gen.next();
-        DataFileWriter writer = createDataFileWriter(tempDir.toString(), format);
+        KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
-        List<DataFileMeta> actualMetas =
-                writer.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
+        KeyValueDataRollingFileWriter writer = writerFactory.createLeveledWriter(0);
+        writer.write(CloseableIterator.fromList(data.content, kv -> {}));
+        writer.close();
+        List<DataFileMeta> actualMetas = writer.result();
 
         checkRollingFiles(
                 TestKeyValueGenerator.KEY_TYPE,
                 TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                 data.meta,
                 actualMetas,
-                writer.suggestedFileSize());
+                writer.targetFileSize());
 
-        DataFileReader reader = createDataFileReader(tempDir.toString(), format, null, null);
+        KeyValueFileReaderFactory readerFactory =
+                createReaderFactory(tempDir.toString(), format, null, null);
         assertData(
                 data,
                 actualMetas,
                 TestKeyValueGenerator.KEY_SERIALIZER,
                 TestKeyValueGenerator.DEFAULT_ROW_SERIALIZER,
                 serializer,
-                reader,
+                readerFactory,
                 kv -> kv);
     }
 
@@ -113,14 +117,20 @@ public class DataFileTest {
         String failingName = UUID.randomUUID().toString();
         FailingAtomicRenameFileSystem.reset(failingName, 1, 10);
         DataFileTestDataGenerator.Data data = gen.next();
-        DataFileWriter writer =
-                createDataFileWriter(
+        KeyValueFileWriterFactory writerFactory =
+                createWriterFactory(
                         FailingAtomicRenameFileSystem.getFailingPath(
                                 failingName, tempDir.toString()),
                         "avro");
 
         try {
-            writer.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
+            FileWriter<KeyValue, ?> writer;
+            if (ThreadLocalRandom.current().nextBoolean()) {
+                writer = writerFactory.createLeveledWriter(0);
+            } else {
+                writer = writerFactory.createLevel0Writer();
+            }
+            writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         } catch (Throwable e) {
             assertThat(e)
                     .isExactlyInstanceOf(FailingAtomicRenameFileSystem.ArtificialException.class);
@@ -136,14 +146,17 @@ public class DataFileTest {
     @Test
     public void testKeyProjection() throws Exception {
         DataFileTestDataGenerator.Data data = gen.next();
-        DataFileWriter dataFileWriter = createDataFileWriter(tempDir.toString(), "avro");
+        KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), "avro");
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
-        List<DataFileMeta> actualMetas =
-                dataFileWriter.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
+
+        KeyValueDataRollingFileWriter writer = writerFactory.createLeveledWriter(0);
+        writer.write(CloseableIterator.fromList(data.content, kv -> {}));
+        writer.close();
+        List<DataFileMeta> actualMetas = writer.result();
 
         // projection: (shopId, orderId) -> (orderId)
-        DataFileReader fileReader =
-                createDataFileReader(tempDir.toString(), "avro", new int[][] {new int[] {1}}, null);
+        KeyValueFileReaderFactory readerFactory =
+                createReaderFactory(tempDir.toString(), "avro", new int[][] {new int[] {1}}, null);
         RowType projectedKeyType =
                 RowType.of(new LogicalType[] {new BigIntType(false)}, new String[] {"key_orderId"});
         RowDataSerializer projectedKeySerializer = new RowDataSerializer(projectedKeyType);
@@ -153,7 +166,7 @@ public class DataFileTest {
                 projectedKeySerializer,
                 TestKeyValueGenerator.DEFAULT_ROW_SERIALIZER,
                 serializer,
-                fileReader,
+                readerFactory,
                 kv ->
                         new KeyValue()
                                 .replace(
@@ -166,16 +179,19 @@ public class DataFileTest {
     @Test
     public void testValueProjection() throws Exception {
         DataFileTestDataGenerator.Data data = gen.next();
-        DataFileWriter dataFileWriter = createDataFileWriter(tempDir.toString(), "avro");
+        KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), "avro");
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
-        List<DataFileMeta> actualMetas =
-                dataFileWriter.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
+
+        KeyValueDataRollingFileWriter writer = writerFactory.createLeveledWriter(0);
+        writer.write(CloseableIterator.fromList(data.content, kv -> {}));
+        writer.close();
+        List<DataFileMeta> actualMetas = writer.result();
 
         // projection:
         // (dt, hr, shopId, orderId, itemId, priceAmount, comment) ->
         // (shopId, itemId, dt, hr)
-        DataFileReader fileReader =
-                createDataFileReader(
+        KeyValueFileReaderFactory readerFactory =
+                createReaderFactory(
                         tempDir.toString(),
                         "avro",
                         null,
@@ -196,7 +212,7 @@ public class DataFileTest {
                 TestKeyValueGenerator.KEY_SERIALIZER,
                 projectedValueSerializer,
                 serializer,
-                fileReader,
+                readerFactory,
                 kv ->
                         new KeyValue()
                                 .replace(
@@ -212,7 +228,7 @@ public class DataFileTest {
                                                 kv.value().getInt(1))));
     }
 
-    protected DataFileWriter createDataFileWriter(String path, String format) {
+    protected KeyValueFileWriterFactory createWriterFactory(String path, String format) {
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
                         new Path(path),
@@ -220,7 +236,7 @@ public class DataFileTest {
                         FileSystemConnectorOptions.PARTITION_DEFAULT_NAME.defaultValue(),
                         format);
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
-        return new DataFileWriter.Factory(
+        return KeyValueFileWriterFactory.builder(
                         0,
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
@@ -230,14 +246,14 @@ public class DataFileTest {
                         new FlushingFileFormat(format),
                         pathFactory,
                         suggestedFileSize)
-                .create(BinaryRowDataUtil.EMPTY_ROW, 0);
+                .build(BinaryRowDataUtil.EMPTY_ROW, 0);
     }
 
-    private DataFileReader createDataFileReader(
+    private KeyValueFileReaderFactory createReaderFactory(
             String path, String format, int[][] keyProjection, int[][] valueProjection) {
         FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(path));
-        DataFileReader.Factory factory =
-                new DataFileReader.Factory(
+        KeyValueFileReaderFactory.Builder builder =
+                KeyValueFileReaderFactory.builder(
                         new SchemaManager(new Path(path)),
                         0,
                         TestKeyValueGenerator.KEY_TYPE,
@@ -245,12 +261,12 @@ public class DataFileTest {
                         new FlushingFileFormat(format),
                         pathFactory);
         if (keyProjection != null) {
-            factory.withKeyProjection(keyProjection);
+            builder.withKeyProjection(keyProjection);
         }
         if (valueProjection != null) {
-            factory.withValueProjection(valueProjection);
+            builder.withValueProjection(valueProjection);
         }
-        return factory.create(BinaryRowDataUtil.EMPTY_ROW, 0);
+        return builder.build(BinaryRowDataUtil.EMPTY_ROW, 0);
     }
 
     private void assertData(
@@ -259,14 +275,14 @@ public class DataFileTest {
             RowDataSerializer keySerializer,
             RowDataSerializer projectedValueSerializer,
             DataFileMetaSerializer dataFileMetaSerializer,
-            DataFileReader fileReader,
+            KeyValueFileReaderFactory readerFactory,
             Function<KeyValue, KeyValue> toExpectedKv)
             throws Exception {
         Iterator<KeyValue> expectedIterator = data.content.iterator();
         for (DataFileMeta meta : actualMetas) {
             // check the contents of data file
             CloseableIterator<KeyValue> actualKvsIterator =
-                    new RecordReaderIterator<>(fileReader.read(meta.fileName()));
+                    new RecordReaderIterator<>(readerFactory.createRecordReader(meta.fileName()));
             while (actualKvsIterator.hasNext()) {
                 assertThat(expectedIterator.hasNext()).isTrue();
                 KeyValue actualKv = actualKvsIterator.next();

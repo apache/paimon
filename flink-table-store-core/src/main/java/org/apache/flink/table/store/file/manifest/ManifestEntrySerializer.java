@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.data.DataFileMetaSerializer;
+import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
 
 import static org.apache.flink.table.store.file.utils.SerializationUtils.deserializeBinaryRow;

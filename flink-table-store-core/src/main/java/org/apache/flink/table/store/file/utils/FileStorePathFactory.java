@@ -23,7 +23,7 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.file.data.DataFilePathFactory;
+import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.utils.PartitionPathUtils;
 import org.apache.flink.util.Preconditions;

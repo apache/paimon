@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.data;
+package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
@@ -26,7 +26,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link DataFilePathFactory}. */
+/** Tests for {@link org.apache.flink.table.store.file.io.DataFilePathFactory}. */
 public class DataFilePathFactoryTest {
 
     @TempDir java.nio.file.Path tempDir;

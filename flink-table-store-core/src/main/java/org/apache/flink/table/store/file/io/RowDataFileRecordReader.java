@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.data;
+package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
@@ -31,20 +31,20 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 
 /** Reads {@link RowData} from data files. */
-public class AppendOnlyReader implements RecordReader<RowData> {
+public class RowDataFileRecordReader implements RecordReader<RowData> {
 
     private final BulkFormat.Reader<RowData> reader;
 
-    public AppendOnlyReader(Path path, BulkFormat<RowData, FileSourceSplit> readerFactory)
+    public RowDataFileRecordReader(Path path, BulkFormat<RowData, FileSourceSplit> readerFactory)
             throws IOException {
         this.reader = FileUtils.createFormatReader(readerFactory, path);
     }
 
     @Nullable
     @Override
-    public RecordIterator<RowData> readBatch() throws IOException {
+    public RecordReader.RecordIterator<RowData> readBatch() throws IOException {
         BulkFormat.RecordIterator<RowData> iterator = reader.readBatch();
-        return iterator == null ? null : new AppendOnlyRecordIterator(iterator);
+        return iterator == null ? null : new RowDataFileRecordIterator(iterator);
     }
 
     @Override
@@ -52,11 +52,11 @@ public class AppendOnlyReader implements RecordReader<RowData> {
         reader.close();
     }
 
-    private static class AppendOnlyRecordIterator implements RecordReader.RecordIterator<RowData> {
+    private static class RowDataFileRecordIterator implements RecordReader.RecordIterator<RowData> {
 
         private final BulkFormat.RecordIterator<RowData> iterator;
 
-        private AppendOnlyRecordIterator(BulkFormat.RecordIterator<RowData> iterator) {
+        private RowDataFileRecordIterator(BulkFormat.RecordIterator<RowData> iterator) {
             this.iterator = iterator;
         }
 

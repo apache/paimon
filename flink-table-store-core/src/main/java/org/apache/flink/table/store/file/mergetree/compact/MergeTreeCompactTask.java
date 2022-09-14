@@ -22,7 +22,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactTask;
 import org.apache.flink.table.store.file.compact.CompactUnit;
-import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 
 import java.util.ArrayList;

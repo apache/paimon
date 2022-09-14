@@ -21,15 +21,17 @@ package org.apache.flink.table.store.file.operation;
 import org.apache.flink.api.common.accumulators.LongCounter;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.append.AppendOnlyCompactManager;
+import org.apache.flink.table.store.file.append.AppendOnlyWriter;
 import org.apache.flink.table.store.file.compact.CompactResult;
-import org.apache.flink.table.store.file.data.AppendOnlyCompactManager;
-import org.apache.flink.table.store.file.data.AppendOnlyWriter;
-import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.data.DataFilePathFactory;
+import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.io.DataFilePathFactory;
+import org.apache.flink.table.store.file.io.RowDataFileWriter;
+import org.apache.flink.table.store.file.io.RowDataRollingFileWriter;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
+import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.types.logical.RowType;
@@ -139,17 +141,26 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
             if (toCompact.isEmpty()) {
                 return Collections.emptyList();
             }
-            AppendOnlyWriter.RowRollingWriter rewriter =
-                    AppendOnlyWriter.RowRollingWriter.createRollingRowWriter(
-                            schemaId,
-                            fileFormat,
-                            targetFileSize,
-                            rowType,
-                            pathFactory.createDataFilePathFactory(partition, bucket),
-                            new LongCounter(toCompact.get(0).minSequenceNumber()));
-            return rewriter.write(
+
+            DataFilePathFactory dataFilePathFactory =
+                    pathFactory.createDataFilePathFactory(partition, bucket);
+            LongCounter seqNumCounter = new LongCounter(toCompact.get(0).minSequenceNumber());
+            RowDataRollingFileWriter rewriter =
+                    new RowDataRollingFileWriter(
+                            () ->
+                                    new RowDataFileWriter(
+                                            fileFormat.createWriterFactory(rowType),
+                                            dataFilePathFactory.newPath(),
+                                            rowType,
+                                            fileFormat.createStatsExtractor(rowType).orElse(null),
+                                            schemaId,
+                                            seqNumCounter),
+                            targetFileSize);
+            rewriter.write(
                     new RecordReaderIterator<>(
                             read.createReader(new Split(partition, bucket, toCompact, false))));
+            rewriter.close();
+            return rewriter.result();
         };
     }
 }

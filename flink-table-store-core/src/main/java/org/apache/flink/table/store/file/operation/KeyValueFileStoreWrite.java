@@ -25,9 +25,10 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactUnit;
-import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.data.DataFileReader;
-import org.apache.flink.table.store.file.data.DataFileWriter;
+import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.io.KeyValueDataRollingFileWriter;
+import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
+import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
 import org.apache.flink.table.store.file.mergetree.Levels;
 import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
@@ -40,8 +41,8 @@ import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
+import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
@@ -56,8 +57,8 @@ import java.util.function.Supplier;
 /** {@link FileStoreWrite} for {@link org.apache.flink.table.store.file.KeyValueFileStore}. */
 public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
 
-    private final DataFileReader.Factory dataFileReaderFactory;
-    private final DataFileWriter.Factory dataFileWriterFactory;
+    private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
+    private final KeyValueFileWriterFactory.Builder writerFactoryBuilder;
     private final Supplier<Comparator<RowData>> keyComparatorSupplier;
     private final MergeFunction mergeFunction;
     private final CoreOptions options;
@@ -74,16 +75,16 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
             FileStoreScan scan,
             CoreOptions options) {
         super(snapshotManager, scan);
-        this.dataFileReaderFactory =
-                new DataFileReader.Factory(
+        this.readerFactoryBuilder =
+                KeyValueFileReaderFactory.builder(
                         schemaManager,
                         schemaId,
                         keyType,
                         valueType,
                         options.fileFormat(),
                         pathFactory);
-        this.dataFileWriterFactory =
-                new DataFileWriter.Factory(
+        this.writerFactoryBuilder =
+                KeyValueFileWriterFactory.builder(
                         schemaId,
                         keyType,
                         valueType,
@@ -128,12 +129,10 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
             int bucket,
             List<DataFileMeta> restoreFiles,
             ExecutorService compactExecutor) {
-        DataFileWriter dataFileWriter = dataFileWriterFactory.create(partition, bucket);
+        KeyValueFileWriterFactory writerFactory = writerFactoryBuilder.build(partition, bucket);
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
         Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
         return new MergeTreeWriter(
-                dataFileWriter.keyType(),
-                dataFileWriter.valueType(),
                 createCompactManager(
                         partition,
                         bucket,
@@ -148,7 +147,7 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
                 getMaxSequenceNumber(restoreFiles),
                 keyComparator,
                 mergeFunction.copy(),
-                dataFileWriter,
+                writerFactory,
                 options.commitForceCompact(),
                 options.numSortedRunStopTrigger(),
                 options.changelogProducer());
@@ -173,16 +172,19 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
 
     private CompactRewriter compactRewriter(
             BinaryRowData partition, int bucket, Comparator<RowData> keyComparator) {
-        DataFileWriter dataFileWriter = dataFileWriterFactory.create(partition, bucket);
-        return (outputLevel, dropDelete, sections) ->
-                dataFileWriter.write(
-                        new RecordReaderIterator<>(
-                                new MergeTreeReader(
-                                        sections,
-                                        dropDelete,
-                                        dataFileReaderFactory.create(partition, bucket),
-                                        keyComparator,
-                                        mergeFunction.copy())),
-                        outputLevel);
+        KeyValueFileWriterFactory writerFactory = writerFactoryBuilder.build(partition, bucket);
+        return (outputLevel, dropDelete, sections) -> {
+            KeyValueDataRollingFileWriter writer = writerFactory.createLeveledWriter(outputLevel);
+            writer.write(
+                    new RecordReaderIterator<>(
+                            new MergeTreeReader(
+                                    sections,
+                                    dropDelete,
+                                    readerFactoryBuilder.build(partition, bucket),
+                                    keyComparator,
+                                    mergeFunction.copy())));
+            writer.close();
+            return writer.result();
+        };
     }
 }

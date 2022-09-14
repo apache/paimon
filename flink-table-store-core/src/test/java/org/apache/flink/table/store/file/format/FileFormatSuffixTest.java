@@ -22,12 +22,12 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.store.file.data.AppendOnlyCompactManager;
-import org.apache.flink.table.store.file.data.AppendOnlyWriter;
-import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.data.DataFilePathFactory;
-import org.apache.flink.table.store.file.data.DataFileTest;
-import org.apache.flink.table.store.file.data.DataFileWriter;
+import org.apache.flink.table.store.file.append.AppendOnlyCompactManager;
+import org.apache.flink.table.store.file.append.AppendOnlyWriter;
+import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.io.DataFilePathFactory;
+import org.apache.flink.table.store.file.io.KeyValueFileReadWriteTest;
+import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -42,7 +42,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 /** test file format suffix. */
-public class FileFormatSuffixTest extends DataFileTest {
+public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
 
     private static final RowType SCHEMA =
             RowType.of(
@@ -52,8 +52,8 @@ public class FileFormatSuffixTest extends DataFileTest {
     @Test
     public void testFileSuffix(@TempDir java.nio.file.Path tempDir) throws Exception {
         String format = "avro";
-        DataFileWriter dataFileWriter = createDataFileWriter(tempDir.toString(), format);
-        Path path = dataFileWriter.pathFactory().newPath();
+        KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
+        Path path = writerFactory.pathFactory().newPath();
         Assertions.assertTrue(path.getPath().endsWith(format));
 
         DataFilePathFactory dataFilePathFactory =

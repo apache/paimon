@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,17 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.mergetree.compact;
+package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.mergetree.SortedRun;
+import org.apache.flink.table.store.file.utils.ObjectSerializerTestBase;
 
-import java.util.List;
+import java.util.Arrays;
 
-/** Rewrite sections to the files. */
-@FunctionalInterface
-public interface CompactRewriter {
+/** Tests for {@link DataFileMetaSerializer}. */
+public class DataFileMetaSerializerTest extends ObjectSerializerTestBase<DataFileMeta> {
 
-    List<DataFileMeta> rewrite(int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
-            throws Exception;
+    private final DataFileTestDataGenerator gen = DataFileTestDataGenerator.builder().build();
+
+    @Override
+    protected DataFileMetaSerializer serializer() {
+        return new DataFileMetaSerializer();
+    }
+
+    @Override
+    protected DataFileMeta object() {
+        return gen.next().meta.copy(Arrays.asList("extra1", "extra2"));
+    }
 }

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.flink.table.store.file.data;
+package org.apache.flink.table.store.file.append;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
@@ -26,9 +26,11 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
-import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.types.logical.IntType;

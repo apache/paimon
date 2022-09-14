@@ -16,9 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.writer;
+package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.Increment;
 
 import java.util.List;

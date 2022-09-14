@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree;
 
-import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.io.DataFileMeta;
 
 import java.util.Collections;
 import java.util.List;

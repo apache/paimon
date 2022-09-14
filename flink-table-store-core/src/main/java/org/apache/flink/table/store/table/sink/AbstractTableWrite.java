@@ -22,7 +22,7 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
-import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.util.concurrent.ExecutorThreadFactory;
 
 import java.util.ArrayList;

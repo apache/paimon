@@ -16,13 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.data;
+package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
 
-/** Utils for {@link DataFileMeta}. */
+/** Utils for {@link org.apache.flink.table.store.file.io.DataFileMeta}. */
 public class DataFileTestUtils {
 
     public static DataFileMeta fromMinMax(String name, int minKey, int maxKey) {

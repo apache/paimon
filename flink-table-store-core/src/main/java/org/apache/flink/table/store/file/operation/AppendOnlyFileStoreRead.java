@@ -21,9 +21,9 @@ package org.apache.flink.table.store.file.operation;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.data.AppendOnlyReader;
-import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.data.DataFilePathFactory;
+import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.io.DataFilePathFactory;
+import org.apache.flink.table.store.file.io.RowDataFileRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -91,7 +91,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
         for (DataFileMeta file : split.files()) {
             suppliers.add(
                     () ->
-                            new AppendOnlyReader(
+                            new RowDataFileRecordReader(
                                     dataFilePathFactory.toPath(file.fileName()), readerFactory));
         }
 

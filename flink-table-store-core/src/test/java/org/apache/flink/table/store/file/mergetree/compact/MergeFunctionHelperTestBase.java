@@ -34,7 +34,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Stream;
 
-import static org.apache.flink.table.store.file.data.DataFileTestUtils.row;
+import static org.apache.flink.table.store.file.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

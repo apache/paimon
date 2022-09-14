@@ -21,8 +21,8 @@ package org.apache.flink.table.store.table.source;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.data.DataFileMetaSerializer;
+import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.SerializationUtils;
 
 import java.io.IOException;
