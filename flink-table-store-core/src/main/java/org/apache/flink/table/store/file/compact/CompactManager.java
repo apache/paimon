@@ -48,7 +48,7 @@ public abstract class CompactManager {
     /** Add a new file. */
     public abstract void addNewFile(DataFileMeta file);
 
-    /** Submit a new compaction task. */
+    /** Trigger a new compaction task. */
     public abstract void triggerCompaction();
 
     /** Get compaction result. Wait finish if {@code blocking} is true. */
