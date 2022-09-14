@@ -192,14 +192,17 @@ public abstract class FileStoreTableTestBase {
 
         write.write(GenericRowData.of(1, 40, 400L));
         List<FileCommittable> commit4 = write.prepareCommit(false);
+        // trigger compaction, but not wait it.
 
         write.write(GenericRowData.of(2, 20, 200L));
         List<FileCommittable> commit5 = write.prepareCommit(true);
+        // wait compaction finish
         // commit5 should be a compaction commit
 
         write.write(GenericRowData.of(1, 60, 600L));
         List<FileCommittable> commit6 = write.prepareCommit(true);
-        // commit6 should be a compaction commit
+        // if remove writer too fast, will see old files, do another compaction
+        // then will be conflicts
 
         commit.commit("4", commit4);
         commit.commit("5", commit5);
