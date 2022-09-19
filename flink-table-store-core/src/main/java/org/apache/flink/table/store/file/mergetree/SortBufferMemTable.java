@@ -32,7 +32,7 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.memory.sort.BinaryInMemorySortBuffer;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
-import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionHelper;
+import org.apache.flink.table.store.file.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -124,7 +124,7 @@ public class SortBufferMemTable implements MemTable {
     private class MergeIterator implements Iterator<KeyValue> {
         private final MutableObjectIterator<BinaryRowData> kvIter;
         private final Comparator<RowData> keyComparator;
-        private final MergeFunctionHelper mergeFunctionHelper;
+        private final MergeFunction<KeyValue> mergeFunction;
 
         // previously read kv
         private KeyValueSerializer previous;
@@ -142,7 +142,7 @@ public class SortBufferMemTable implements MemTable {
                 MergeFunction<KeyValue> mergeFunction) {
             this.kvIter = kvIter;
             this.keyComparator = keyComparator;
-            this.mergeFunctionHelper = new MergeFunctionHelper(mergeFunction);
+            this.mergeFunction = new ReducerMergeFunctionWrapper(mergeFunction);
 
             int totalFieldCount = keyType.getFieldCount() + 2 + valueType.getFieldCount();
             this.previous = new KeyValueSerializer(keyType, valueType);
@@ -180,8 +180,8 @@ public class SortBufferMemTable implements MemTable {
                 if (previousRow == null) {
                     return;
                 }
-                mergeFunctionHelper.reset();
-                mergeFunctionHelper.add(previous.getReusedKv());
+                mergeFunction.reset();
+                mergeFunction.add(previous.getReusedKv());
 
                 while (readOnce()) {
                     if (keyComparator.compare(
@@ -189,10 +189,10 @@ public class SortBufferMemTable implements MemTable {
                             != 0) {
                         break;
                     }
-                    mergeFunctionHelper.add(current.getReusedKv());
+                    mergeFunction.add(current.getReusedKv());
                     swapSerializers();
                 }
-                result = mergeFunctionHelper.getResult();
+                result = mergeFunction.getResult();
             } while (result == null);
         }
 
