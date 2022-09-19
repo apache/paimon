@@ -52,8 +52,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private final CompactManager compactManager;
 
-    private final Levels levels;
-
     private final Comparator<RowData> keyComparator;
 
     private final MergeFunction mergeFunction;
@@ -61,8 +59,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     private final DataFileWriter dataFileWriter;
 
     private final boolean commitForceCompact;
-
-    private final int numSortedRunStopTrigger;
 
     private final ChangelogProducer changelogProducer;
 
@@ -80,24 +76,20 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             RowType keyType,
             RowType valueType,
             CompactManager compactManager,
-            Levels levels,
             long maxSequenceNumber,
             Comparator<RowData> keyComparator,
             MergeFunction mergeFunction,
             DataFileWriter dataFileWriter,
             boolean commitForceCompact,
-            int numSortedRunStopTrigger,
             ChangelogProducer changelogProducer) {
         this.keyType = keyType;
         this.valueType = valueType;
         this.compactManager = compactManager;
-        this.levels = levels;
         this.newSequenceNumber = maxSequenceNumber + 1;
         this.keyComparator = keyComparator;
         this.mergeFunction = mergeFunction;
         this.dataFileWriter = dataFileWriter;
         this.commitForceCompact = commitForceCompact;
-        this.numSortedRunStopTrigger = numSortedRunStopTrigger;
         this.changelogProducer = changelogProducer;
         this.newFiles = new LinkedHashSet<>();
         this.compactBefore = new LinkedHashMap<>();
@@ -109,8 +101,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @VisibleForTesting
-    Levels levels() {
-        return levels;
+    CompactManager compactManager() {
+        return compactManager;
     }
 
     @Override
@@ -142,9 +134,9 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     @Override
     public void flushMemory() throws Exception {
         if (memTable.size() > 0) {
-            if (levels.numberOfSortedRuns() > numSortedRunStopTrigger) {
+            if (compactManager.shouldWaitCompaction()) {
                 // stop writing, wait for compaction finished
-                finishCompaction(true);
+                trySyncLatestCompaction(true);
             }
             List<String> extraFiles = new ArrayList<>();
             if (changelogProducer == ChangelogProducer.INPUT) {
@@ -165,7 +157,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                                         file -> {
                                             DataFileMeta fileMeta = file.copy(extraFiles);
                                             newFiles.add(fileMeta);
-                                            levels.addLevel0File(fileMeta);
+                                            compactManager.addNewFile(fileMeta);
                                             return true;
                                         })
                                 .orElse(false);
@@ -183,13 +175,13 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     public Increment prepareCommit(boolean endOfInput) throws Exception {
         flushMemory();
         boolean blocking = endOfInput || commitForceCompact;
-        finishCompaction(blocking);
+        trySyncLatestCompaction(blocking);
         return drainIncrement();
     }
 
     @Override
     public void sync() throws Exception {
-        finishCompaction(true);
+        trySyncLatestCompaction(true);
     }
 
     private Increment drainIncrement() {
@@ -226,14 +218,12 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     private void submitCompaction() throws Exception {
-        finishCompaction(false);
-        if (compactManager.isCompactionFinished()) {
-            compactManager.submitCompaction();
-        }
+        trySyncLatestCompaction(false);
+        compactManager.triggerCompaction();
     }
 
-    private void finishCompaction(boolean blocking) throws Exception {
-        Optional<CompactResult> result = compactManager.finishCompaction(blocking);
+    private void trySyncLatestCompaction(boolean blocking) throws Exception {
+        Optional<CompactResult> result = compactManager.getCompactionResult(blocking);
         result.ifPresent(this::updateCompactResult);
     }
 

@@ -63,14 +63,10 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
                 newRead(),
                 schemaId,
                 rowType,
-                options.fileFormat(),
                 pathFactory(),
                 snapshotManager(),
                 newScan(true),
-                options.targetFileSize(),
-                options.minFileNum(),
-                options.maxFileNum(),
-                options.commitForceCompact());
+                options);
     }
 
     private AppendOnlyFileStoreScan newScan(boolean checkNumOfBuckets) {

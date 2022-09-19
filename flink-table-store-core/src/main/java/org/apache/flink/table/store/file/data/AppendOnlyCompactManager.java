@@ -31,6 +31,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 
 /** Compact manager for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
@@ -58,16 +59,44 @@ public class AppendOnlyCompactManager extends CompactManager {
     }
 
     @Override
-    public void submitCompaction() {
+    public void triggerCompaction() {
         if (taskFuture != null) {
-            throw new IllegalStateException(
-                    "Please finish the previous compaction before submitting new one.");
+            return;
         }
         pickCompactBefore()
                 .ifPresent(
                         (inputs) ->
                                 taskFuture =
                                         executor.submit(new AutoCompactTask(inputs, rewriter)));
+    }
+
+    @Override
+    public boolean shouldWaitCompaction() {
+        return false;
+    }
+
+    @Override
+    public void addNewFile(DataFileMeta file) {
+        toCompact.add(file);
+    }
+
+    /** Finish current task, and update result files to {@link #toCompact}. */
+    @Override
+    public Optional<CompactResult> getCompactionResult(boolean blocking)
+            throws ExecutionException, InterruptedException {
+        Optional<CompactResult> result = innerGetCompactionResult(blocking);
+        result.ifPresent(
+                r -> {
+                    if (!r.after().isEmpty()) {
+                        // if the last compacted file is still small,
+                        // add it back to the head
+                        DataFileMeta lastFile = r.after().get(r.after().size() - 1);
+                        if (lastFile.fileSize() < targetFileSize) {
+                            toCompact.offerFirst(lastFile);
+                        }
+                    }
+                });
+        return result;
     }
 
     @VisibleForTesting
@@ -80,6 +109,10 @@ public class AppendOnlyCompactManager extends CompactManager {
             long targetFileSize,
             int minFileNum,
             int maxFileNum) {
+        if (toCompact.isEmpty()) {
+            return Optional.empty();
+        }
+
         long totalFileSize = 0L;
         int fileNum = 0;
         LinkedList<DataFileMeta> candidates = new LinkedList<>();
