@@ -136,7 +136,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         if (memTable.size() > 0) {
             if (compactManager.shouldWaitCompaction()) {
                 // stop writing, wait for compaction finished
-                getCompactionResult(true);
+                trySyncLatestCompaction(true);
             }
             List<String> extraFiles = new ArrayList<>();
             if (changelogProducer == ChangelogProducer.INPUT) {
@@ -175,13 +175,13 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     public Increment prepareCommit(boolean endOfInput) throws Exception {
         flushMemory();
         boolean blocking = endOfInput || commitForceCompact;
-        getCompactionResult(blocking);
+        trySyncLatestCompaction(blocking);
         return drainIncrement();
     }
 
     @Override
     public void sync() throws Exception {
-        getCompactionResult(true);
+        trySyncLatestCompaction(true);
     }
 
     private Increment drainIncrement() {
@@ -218,11 +218,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     private void submitCompaction() throws Exception {
-        getCompactionResult(false);
+        trySyncLatestCompaction(false);
         compactManager.triggerCompaction();
     }
 
-    private void getCompactionResult(boolean blocking) throws Exception {
+    private void trySyncLatestCompaction(boolean blocking) throws Exception {
         Optional<CompactResult> result = compactManager.getCompactionResult(blocking);
         result.ifPresent(this::updateCompactResult);
     }

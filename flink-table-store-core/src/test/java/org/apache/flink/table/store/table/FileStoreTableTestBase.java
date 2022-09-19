@@ -218,7 +218,7 @@ public abstract class FileStoreTableTestBase {
     }
 
     @Test
-    public void testWriteNoCompaction() throws Exception {
+    public void testWriteWithoutCompaction() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {

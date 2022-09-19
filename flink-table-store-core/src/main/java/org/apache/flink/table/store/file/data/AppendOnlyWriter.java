@@ -130,14 +130,14 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
         submitCompaction();
 
         boolean blocking = endOnfInput || forceCompact;
-        getCompactionResult(blocking);
+        trySyncLatestCompaction(blocking);
 
         return drainIncrement(newFiles);
     }
 
     @Override
     public void sync() throws Exception {
-        getCompactionResult(true);
+        trySyncLatestCompaction(true);
     }
 
     @Override
@@ -159,11 +159,11 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     }
 
     private void submitCompaction() throws ExecutionException, InterruptedException {
-        getCompactionResult(false);
+        trySyncLatestCompaction(false);
         compactManager.triggerCompaction();
     }
 
-    private void getCompactionResult(boolean blocking)
+    private void trySyncLatestCompaction(boolean blocking)
             throws ExecutionException, InterruptedException {
         compactManager
                 .getCompactionResult(blocking)
