@@ -40,6 +40,7 @@ import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
+import java.util.HashMap;
 import java.util.Optional;
 
 import static org.apache.flink.table.store.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
@@ -128,10 +129,18 @@ public class FlinkSourceBuilder {
     private Source<RowData, ?, ?> buildSource() {
         if (isContinuous) {
             // TODO move validation to a dedicated method
+            MergeEngine mergeEngine = conf.get(MERGE_ENGINE);
+            HashMap<MergeEngine, String> mergeEngineDesc =
+                    new HashMap<MergeEngine, String>() {
+                        {
+                            put(MergeEngine.PARTIAL_UPDATE, "Partial update");
+                            put(MergeEngine.AGGREGATE, "Pre-aggregate");
+                        }
+                    };
             if (table.schema().primaryKeys().size() > 0
-                    && conf.get(MERGE_ENGINE) == MergeEngine.PARTIAL_UPDATE) {
+                    && mergeEngineDesc.containsKey(mergeEngine)) {
                 throw new ValidationException(
-                        "Partial update continuous reading is not supported.");
+                        mergeEngineDesc.get(mergeEngine) + " continuous reading is not supported.");
             }
 
             LogStartupMode startupMode = conf.get(LOG_SCAN);

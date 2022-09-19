@@ -28,6 +28,7 @@ import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -72,19 +73,27 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         RowType rowType = tableSchema.logicalRowType();
         Configuration conf = Configuration.fromMap(tableSchema.options());
         CoreOptions.MergeEngine mergeEngine = conf.get(CoreOptions.MERGE_ENGINE);
+        List<LogicalType> fieldTypes = rowType.getChildren();
+        RowData.FieldGetter[] fieldGetters = new RowData.FieldGetter[fieldTypes.size()];
+        for (int i = 0; i < fieldTypes.size(); i++) {
+            fieldGetters[i] = RowDataUtils.createNullCheckingFieldGetter(fieldTypes.get(i), i);
+        }
         MergeFunction mergeFunction;
         switch (mergeEngine) {
             case DEDUPLICATE:
                 mergeFunction = new DeduplicateMergeFunction();
                 break;
             case PARTIAL_UPDATE:
-                List<LogicalType> fieldTypes = rowType.getChildren();
-                RowData.FieldGetter[] fieldGetters = new RowData.FieldGetter[fieldTypes.size()];
-                for (int i = 0; i < fieldTypes.size(); i++) {
-                    fieldGetters[i] =
-                            RowDataUtils.createNullCheckingFieldGetter(fieldTypes.get(i), i);
-                }
                 mergeFunction = new PartialUpdateMergeFunction(fieldGetters);
+                break;
+            case AGGREGATE:
+                List<String> fieldNames = tableSchema.fieldNames();
+                List<String> primaryKeys = tableSchema.primaryKeys();
+                mergeFunction =
+                        new AggregateMergeFunction(
+                                fieldGetters,
+                                new AggregateMergeFunction.RowAggregator(
+                                        conf, fieldNames, fieldTypes, primaryKeys));
                 break;
             default:
                 throw new UnsupportedOperationException("Unsupported merge engine: " + mergeEngine);
