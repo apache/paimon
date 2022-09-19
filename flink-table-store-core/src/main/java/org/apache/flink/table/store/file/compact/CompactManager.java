@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.file.compact;
 
+import org.apache.flink.table.store.file.data.DataFileMeta;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,14 +42,28 @@ public abstract class CompactManager {
         this.executor = executor;
     }
 
-    /** Submit a new compaction task. */
-    public abstract void submitCompaction();
+    /** Should wait compaction finish. */
+    public abstract boolean shouldWaitCompaction();
 
-    public boolean isCompactionFinished() {
-        return taskFuture == null;
+    /** Add a new file. */
+    public abstract void addNewFile(DataFileMeta file);
+
+    /** Trigger a new compaction task. */
+    public abstract void triggerCompaction();
+
+    /** Get compaction result. Wait finish if {@code blocking} is true. */
+    public abstract Optional<CompactResult> getCompactionResult(boolean blocking)
+            throws ExecutionException, InterruptedException;
+
+    public void cancelCompaction() {
+        // TODO this method may leave behind orphan files if compaction is actually finished
+        //  but some CPU work still needs to be done
+        if (taskFuture != null && !taskFuture.isCancelled()) {
+            taskFuture.cancel(true);
+        }
     }
 
-    public Optional<CompactResult> finishCompaction(boolean blocking)
+    protected final Optional<CompactResult> innerGetCompactionResult(boolean blocking)
             throws ExecutionException, InterruptedException {
         if (taskFuture != null) {
             if (blocking || taskFuture.isDone()) {
@@ -64,13 +80,5 @@ public abstract class CompactManager {
             }
         }
         return Optional.empty();
-    }
-
-    public void cancelCompaction() {
-        // TODO this method may leave behind orphan files if compaction is actually finished
-        //  but some CPU work still needs to be done
-        if (taskFuture != null && !taskFuture.isCancelled()) {
-            taskFuture.cancel(true);
-        }
     }
 }

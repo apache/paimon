@@ -156,6 +156,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(WriteMode.CHANGE_LOG)
                     .withDescription("Specify the write mode for table.");
 
+    public static final ConfigOption<Boolean> WRITE_COMPACTION_SKIP =
+            ConfigOptions.key("write.compaction-skip")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to skip compaction on write.");
+
     public static final ConfigOption<MemorySize> SOURCE_SPLIT_TARGET_SIZE =
             ConfigOptions.key("source.split.target-size")
                     .memoryType()
@@ -458,11 +464,11 @@ public class CoreOptions implements Serializable {
         return options.get(COMPACTION_SIZE_RATIO);
     }
 
-    public int minFileNum() {
+    public int compactionMinFileNum() {
         return options.get(COMPACTION_MIN_FILE_NUM);
     }
 
-    public int maxFileNum() {
+    public int compactionMaxFileNum() {
         return options.get(COMPACTION_MAX_FILE_NUM);
     }
 
@@ -476,6 +482,10 @@ public class CoreOptions implements Serializable {
 
     public Optional<String> sequenceField() {
         return options.getOptional(SEQUENCE_FIELD);
+    }
+
+    public boolean writeCompactionSkip() {
+        return options.get(WRITE_COMPACTION_SKIP);
     }
 
     /** Specifies the merge engine for table with primary key. */

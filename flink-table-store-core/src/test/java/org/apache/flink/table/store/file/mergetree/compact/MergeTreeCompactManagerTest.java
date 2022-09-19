@@ -197,9 +197,15 @@ public class MergeTreeCompactManagerTest {
         Levels levels = new Levels(comparator, files, 3);
         MergeTreeCompactManager manager =
                 new MergeTreeCompactManager(
-                        service, levels, strategy, comparator, 2, testRewriter(expectedDropDelete));
-        manager.submitCompaction();
-        manager.finishCompaction(true);
+                        service,
+                        levels,
+                        strategy,
+                        comparator,
+                        2,
+                        Integer.MAX_VALUE,
+                        testRewriter(expectedDropDelete));
+        manager.triggerCompaction();
+        manager.getCompactionResult(true);
         List<LevelMinMax> outputs =
                 levels.allFiles().stream().map(LevelMinMax::new).collect(Collectors.toList());
         assertThat(outputs).isEqualTo(expected);
