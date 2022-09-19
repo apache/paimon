@@ -20,6 +20,7 @@ package org.apache.flink.table.store.utils;
 
 import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.data.DecimalData;
+import org.apache.flink.table.data.DecimalDataUtils;
 import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.GenericMapData;
 import org.apache.flink.table.data.GenericRowData;
@@ -27,6 +28,7 @@ import org.apache.flink.table.data.MapData;
 import org.apache.flink.table.data.RawValueData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.data.binary.BinaryArrayData;
 import org.apache.flink.table.data.binary.BinaryMapData;
 import org.apache.flink.table.data.binary.BinaryRawValueData;
@@ -38,6 +40,7 @@ import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LocalZonedTimestampType;
 import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.LogicalTypeRoot;
 import org.apache.flink.table.types.logical.MapType;
 import org.apache.flink.table.types.logical.MultisetType;
 import org.apache.flink.table.types.logical.RowType;
@@ -294,5 +297,49 @@ public class RowDataUtils {
                 return getter.getFieldOrNull(row);
             };
         }
+    }
+
+    public static int compare(Object x, Object y, LogicalTypeRoot type) {
+        int ret;
+        switch (type) {
+            case DECIMAL:
+                DecimalData xDD = (DecimalData) x;
+                DecimalData yDD = (DecimalData) y;
+                assert xDD.scale() == yDD.scale() : "Inconsistent scale of aggregate DecimalData!";
+                assert xDD.precision() == yDD.precision()
+                        : "Inconsistent precision of aggregate DecimalData!";
+                ret = DecimalDataUtils.compare(xDD, yDD);
+                break;
+            case TINYINT:
+                ret = Byte.compare((byte) x, (byte) y);
+                break;
+            case SMALLINT:
+                ret = Short.compare((short) x, (short) y);
+                break;
+            case INTEGER:
+            case DATE:
+                ret = Integer.compare((int) x, (int) y);
+                break;
+            case BIGINT:
+                ret = Long.compare((long) x, (long) y);
+                break;
+            case FLOAT:
+                ret = Float.compare((float) x, (float) y);
+                break;
+            case DOUBLE:
+                ret = Double.compare((double) x, (double) y);
+                break;
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                TimestampData xDD1 = (TimestampData) x;
+                TimestampData yDD1 = (TimestampData) y;
+                ret = xDD1.compareTo(yDD1);
+                break;
+            case TIMESTAMP_WITH_TIME_ZONE:
+                throw new UnsupportedOperationException();
+            default:
+                throw new IllegalArgumentException();
+        }
+        return ret;
     }
 }

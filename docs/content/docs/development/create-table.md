@@ -275,6 +275,48 @@ __Note:__
 - It is best not to have NULL values in the fields, NULL will not overwrite data.
 {{< /hint >}}
 
+## Pre-aggregate
+You can configure pre-aggregate for each value field from options:
+
+```sql
+CREATE TABLE MyTable (
+  product_id BIGINT,
+  price DOUBLE,
+  sales BIGINT,
+  PRIMARY KEY (product_id) NOT ENFORCED
+) WITH (
+  'merge-engine' = 'aggregation',
+  'fields.price.aggregate-function'='max',
+  'fields.sales.aggregate-function'='sum'
+);
+```
+Each value field is aggregated with the latest data one by one
+under the same primary key according to the aggregate function.
+
+For example, the inputs:
+- <1, 23.0, 15>
+- <1, 30.2, 20>
+
+Output:
+- <1, 30.2, 35>
+
+### Supported Aggregate Functions and Related Data Types
+Supported aggregate functions include `sum`, `max/min`, `last_non_null_value`, `last_value`,  `listagg`, `bool_or/bool_and`. 
+These functions support different data types.
+
+- `sum` supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE data types.
+- `max/min` support DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, TIMESTAMP_LTZ data types.
+- `last_non_null_value/last_value` support all data types.
+- `listagg` supports STRING  data types.
+- `bool_and/bool_or` support BOOLEAN data type.
+
+{{< hint info >}}
+__Note:__
+- Pre-aggregate is only supported for table with primary key.
+- Pre-aggregate is not supported for streaming consuming.
+- Pre-aggregate currently only support INSERT changes. 
+{{< /hint >}}
+
 ## Append-only Table
 
 Append-only tables are a performance feature that only accepts `INSERT_ONLY` data to append to the storage instead of 
