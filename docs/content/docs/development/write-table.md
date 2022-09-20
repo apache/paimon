@@ -41,6 +41,10 @@ column_list:
 __IMPORTANT:__ Checkpointing needs to be enabled when writing to the Table Store in STREAMING mode.
 {{< /hint >}}
 
+{{< hint info >}}
+__IMPORTANT:__ `execution.checkpointing.unaligned` is not supported when writing to the Table Store in STREAMING mode.
+{{< /hint >}}
+
 ## Parallelism
 
 It is recommended that the parallelism of sink should be less than or
