@@ -170,4 +170,9 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
     public void setLockFactory(@Nullable CatalogLock.Factory lockFactory) {
         this.lockFactory = lockFactory;
     }
+
+    @Override
+    public boolean requiresPartitionGrouping(boolean supportsGrouping) {
+        return supportsGrouping;
+    }
 }
