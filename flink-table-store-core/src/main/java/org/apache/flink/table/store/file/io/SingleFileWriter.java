@@ -31,6 +31,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.function.Function;
 
 /**
@@ -43,29 +44,38 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
 
     private static final Logger LOG = LoggerFactory.getLogger(SingleFileWriter.class);
 
-    private final BulkWriter.Factory<RowData> factory;
     protected final Path path;
     private final Function<T, RowData> converter;
+
+    private final BulkWriter<RowData> writer;
+    private FSDataOutputStream out;
 
     private long recordCount;
     private long length;
     protected boolean closed;
 
-    private BulkWriter<RowData> writer;
-    private FSDataOutputStream out;
-
     public SingleFileWriter(
             BulkWriter.Factory<RowData> factory, Path path, Function<T, RowData> converter) {
-        this.factory = factory;
         this.path = path;
         this.converter = converter;
+
+        try {
+            FileSystem fs = path.getFileSystem();
+            out = fs.create(path, FileSystem.WriteMode.NO_OVERWRITE);
+            writer = factory.create(out);
+        } catch (IOException e) {
+            LOG.warn(
+                    "Failed to open the bulk writer, closing the output stream and throw the error.",
+                    e);
+            if (out != null) {
+                abort();
+            }
+            throw new UncheckedIOException(e);
+        }
 
         this.recordCount = 0;
         this.length = 0;
         this.closed = false;
-
-        this.writer = null;
-        this.out = null;
     }
 
     public Path path() {
@@ -83,9 +93,6 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         }
 
         try {
-            if (writer == null) {
-                writer = createWriter();
-            }
             RowData rowData = converter.apply(record);
             writer.addElement(rowData);
             recordCount++;
@@ -128,36 +135,18 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         }
 
         try {
-            if (writer != null) {
-                writer.flush();
-                writer.finish();
-            }
+            writer.flush();
+            writer.finish();
 
-            if (out != null) {
-                out.flush();
-                length = out.getPos();
-                out.close();
-            }
+            out.flush();
+            length = out.getPos();
+            out.close();
         } catch (IOException e) {
             LOG.warn("Exception occurs when closing file " + path + ". Cleaning up.", e);
             abort();
             throw e;
         } finally {
             closed = true;
-        }
-    }
-
-    private BulkWriter<RowData> createWriter() throws IOException {
-        FileSystem fs = path.getFileSystem();
-        out = fs.create(path, FileSystem.WriteMode.NO_OVERWRITE);
-        try {
-            return factory.create(out);
-        } catch (Throwable e) {
-            LOG.warn(
-                    "Failed to open the bulk writer, closing the output stream and throw the error.",
-                    e);
-            IOUtils.closeQuietly(out);
-            throw e;
         }
     }
 }

@@ -36,6 +36,9 @@ public interface FileWriter<T, R> extends Closeable {
     /**
      * Add only one record to this file writer.
      *
+     * <p>NOTE: If any exception occurs during writing, the writer should clean up useless files for
+     * the user.
+     *
      * @param record to write.
      * @throws IOException if encounter any IO error.
      */
@@ -43,6 +46,9 @@ public interface FileWriter<T, R> extends Closeable {
 
     /**
      * Add records from {@link Iterator} to this file writer.
+     *
+     * <p>NOTE: If any exception occurs during writing, the writer should clean up useless files for
+     * the user.
      *
      * @param records to write
      * @throws IOException if encounter any IO error.
@@ -55,6 +61,9 @@ public interface FileWriter<T, R> extends Closeable {
 
     /**
      * Add records from {@link CloseableIterator} to this file writer.
+     *
+     * <p>NOTE: If any exception occurs during writing, the writer should clean up useless files for
+     * the user.
      *
      * @param records to write
      * @throws IOException if encounter any IO error.
@@ -71,6 +80,9 @@ public interface FileWriter<T, R> extends Closeable {
 
     /**
      * Add records from {@link Iterable} to file writer.
+     *
+     * <p>NOTE: If any exception occurs during writing, the writer should clean up useless files for
+     * the user.
      *
      * @param records to write.
      * @throws IOException if encounter any IO error.
@@ -96,7 +108,11 @@ public interface FileWriter<T, R> extends Closeable {
      */
     long length() throws IOException;
 
-    /** Abort to clear orphan file(s) if encounter any error. */
+    /**
+     * Abort to clear orphan file(s) if encounter any error.
+     *
+     * <p>NOTE: This implementation must be reentrant.
+     */
     void abort();
 
     /** @return the result for this closed file writer. */

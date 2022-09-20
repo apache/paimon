@@ -24,7 +24,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.io.RowDataRollingFileWriter;
 import org.apache.flink.table.store.file.mergetree.Increment;
-import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.types.logical.RowType;
@@ -115,24 +114,15 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     }
 
     @Override
-    public List<DataFileMeta> close() throws Exception {
+    public void close() throws Exception {
         // cancel compaction so that it does not block job cancelling
         compactManager.cancelCompaction();
         sync();
 
-        List<DataFileMeta> result = new ArrayList<>();
         if (writer != null) {
-            writer.close();
-            result.addAll(writer.result());
+            writer.abort();
             writer = null;
         }
-
-        // delete uncommitted files
-        for (DataFileMeta fileMeta : result) {
-            FileUtils.deleteOrWarn(pathFactory.toPath(fileMeta.fileName()));
-        }
-
-        return result;
     }
 
     private RowDataRollingFileWriter createRollingRowWriter() {

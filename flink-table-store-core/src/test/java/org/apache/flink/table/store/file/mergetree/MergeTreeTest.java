@@ -175,16 +175,6 @@ public class MergeTreeTest {
         assertRecords(expected);
     }
 
-    @Test
-    public void testClose() throws Exception {
-        doTestWriteRead(6);
-        List<DataFileMeta> files = writer.close();
-        for (DataFileMeta file : files) {
-            Path path = dataFileWriter.pathFactory().toPath(file.fileName());
-            assertThat(path.getFileSystem().exists(path)).isFalse();
-        }
-    }
-
     @ParameterizedTest
     @ValueSource(longs = {1, 1024 * 1024})
     public void testCloseUpgrade(long targetFileSize) throws Exception {
@@ -252,6 +242,8 @@ public class MergeTreeTest {
 
         // assert records from increment compacted files
         assertRecords(expected, compactedFiles, true);
+
+        writer.close();
 
         Path bucketDir = dataFileWriter.pathFactory().toPath("ignore").getParent();
         Set<String> files =

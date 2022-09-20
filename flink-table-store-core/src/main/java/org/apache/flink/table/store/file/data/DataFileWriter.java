@@ -26,7 +26,7 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.io.KeyValueDataFileWriter;
-import org.apache.flink.table.store.file.io.KeyValueDataRollingFileWriter;
+import org.apache.flink.table.store.file.io.RollingFileWriter;
 import org.apache.flink.table.store.file.io.SingleFileWriter;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
@@ -128,9 +128,8 @@ public class DataFileWriter {
             throws Exception {
         // Don't roll file for level 0
         long suggestedFileSize = level == 0 ? Long.MAX_VALUE : this.suggestedFileSize;
-        KeyValueDataRollingFileWriter writer =
-                new KeyValueDataRollingFileWriter(
-                        () -> createDataFileWriter(level), suggestedFileSize);
+        RollingFileWriter<KeyValue, DataFileMeta> writer =
+                new RollingFileWriter<>(() -> createDataFileWriter(level), suggestedFileSize);
         writer.write(iterator);
         writer.close();
         return writer.result();
