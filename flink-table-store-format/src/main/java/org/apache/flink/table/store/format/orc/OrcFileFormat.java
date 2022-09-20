@@ -50,16 +50,21 @@ import static org.apache.flink.table.store.format.orc.OrcFileFormatFactory.IDENT
 /** Orc {@link FileFormat}. The main code is copied from Flink {@code OrcFileFormatFactory}. */
 public class OrcFileFormat extends FileFormat {
 
-    private final Configuration formatOptions;
+    private final Properties properties;
+    private final org.apache.hadoop.conf.Configuration readerConf;
+    private final org.apache.hadoop.conf.Configuration writerConf;
 
     public OrcFileFormat(Configuration formatOptions) {
         super(org.apache.flink.orc.OrcFileFormatFactory.IDENTIFIER);
-        this.formatOptions = formatOptions;
+        this.properties = getOrcProperties(formatOptions);
+        this.readerConf = new org.apache.hadoop.conf.Configuration();
+        this.properties.forEach((k, v) -> readerConf.set(k.toString(), v.toString()));
+        this.writerConf = new org.apache.hadoop.conf.Configuration();
     }
 
     @VisibleForTesting
-    Configuration formatOptions() {
-        return formatOptions;
+    Properties formatOptions() {
+        return properties;
     }
 
     @Override
@@ -81,12 +86,8 @@ public class OrcFileFormat extends FileFormat {
             }
         }
 
-        Properties properties = getOrcProperties(formatOptions);
-        org.apache.hadoop.conf.Configuration conf = new org.apache.hadoop.conf.Configuration();
-        properties.forEach((k, v) -> conf.set(k.toString(), v.toString()));
-
         return OrcInputFormatFactory.create(
-                conf, type, Projection.of(projection).toTopLevelIndexes(), orcPredicates);
+                readerConf, type, Projection.of(projection).toTopLevelIndexes(), orcPredicates);
     }
 
     @Override
@@ -97,8 +98,8 @@ public class OrcFileFormat extends FileFormat {
 
         return new OrcBulkWriterFactory<>(
                 new RowDataVectorizer(typeDescription.toString(), orcTypes),
-                getOrcProperties(formatOptions),
-                new org.apache.hadoop.conf.Configuration());
+                properties,
+                writerConf);
     }
 
     private static Properties getOrcProperties(ReadableConfig options) {
