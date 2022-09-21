@@ -17,13 +17,12 @@
  * under the License.
  */
 
-package org.apache.flink.table.store.file.writer;
+package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.core.fs.Path;
+import org.apache.flink.util.CloseableIterator;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.io.Serializable;
 import java.util.Iterator;
 
 /**
@@ -37,6 +36,9 @@ public interface FileWriter<T, R> extends Closeable {
     /**
      * Add only one record to this file writer.
      *
+     * <p>NOTE: If any exception occurs during writing, the writer should clean up useless files for
+     * the user.
+     *
      * @param record to write.
      * @throws IOException if encounter any IO error.
      */
@@ -45,17 +47,42 @@ public interface FileWriter<T, R> extends Closeable {
     /**
      * Add records from {@link Iterator} to this file writer.
      *
+     * <p>NOTE: If any exception occurs during writing, the writer should clean up useless files for
+     * the user.
+     *
      * @param records to write
      * @throws IOException if encounter any IO error.
      */
-    default void write(Iterator<T> records) throws IOException {
+    default void write(Iterator<T> records) throws Exception {
         while (records.hasNext()) {
             write(records.next());
         }
     }
 
     /**
+     * Add records from {@link CloseableIterator} to this file writer.
+     *
+     * <p>NOTE: If any exception occurs during writing, the writer should clean up useless files for
+     * the user.
+     *
+     * @param records to write
+     * @throws IOException if encounter any IO error.
+     */
+    default void write(CloseableIterator<T> records) throws Exception {
+        try {
+            while (records.hasNext()) {
+                write(records.next());
+            }
+        } finally {
+            records.close();
+        }
+    }
+
+    /**
      * Add records from {@link Iterable} to file writer.
+     *
+     * <p>NOTE: If any exception occurs during writing, the writer should clean up useless files for
+     * the user.
      *
      * @param records to write.
      * @throws IOException if encounter any IO error.
@@ -81,22 +108,13 @@ public interface FileWriter<T, R> extends Closeable {
      */
     long length() throws IOException;
 
-    /** Abort to clear orphan file(s) if encounter any error. */
+    /**
+     * Abort to clear orphan file(s) if encounter any error.
+     *
+     * <p>NOTE: This implementation must be reentrant.
+     */
     void abort();
 
     /** @return the result for this closed file writer. */
     R result() throws IOException;
-
-    /** A factory that creates a {@link FileWriter}. */
-    interface Factory<T, R> extends Serializable {
-
-        /**
-         * Creates a writer that writes to the given stream.
-         *
-         * @param path the path to write records.
-         * @return the file format writer.
-         * @throws IOException if any IO error was encountered then open the writer.
-         */
-        FileWriter<T, R> create(Path path) throws IOException;
-    }
 }

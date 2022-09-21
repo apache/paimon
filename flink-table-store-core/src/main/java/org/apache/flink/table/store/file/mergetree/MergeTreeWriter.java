@@ -29,7 +29,7 @@ import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFileWriter;
 import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
-import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.CloseableIterator;
 
@@ -228,7 +228,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @Override
-    public List<DataFileMeta> close() throws Exception {
+    public void close() throws Exception {
         // cancel compaction so that it does not block job cancelling
         compactManager.cancelCompaction();
         sync();
@@ -247,6 +247,5 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         }
         newFiles.clear();
         compactAfter.clear();
-        return delete;
     }
 }

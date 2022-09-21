@@ -28,6 +28,7 @@ import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.store.file.data.DataFileTest;
 import org.apache.flink.table.store.file.data.DataFileWriter;
+import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -39,7 +40,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.LinkedList;
-import java.util.List;
 
 /** test file format suffix. */
 public class FileFormatSuffixTest extends DataFileTest {
@@ -72,9 +72,10 @@ public class FileFormatSuffixTest extends DataFileTest {
                         dataFilePathFactory);
         appendOnlyWriter.write(
                 GenericRowData.of(1, StringData.fromString("aaa"), StringData.fromString("1")));
-        List<DataFileMeta> result = appendOnlyWriter.close();
+        Increment increment = appendOnlyWriter.prepareCommit(true);
+        appendOnlyWriter.close();
 
-        DataFileMeta meta = result.get(0);
+        DataFileMeta meta = increment.newFiles().get(0);
         Assertions.assertTrue(meta.fileName().endsWith(format));
     }
 }
