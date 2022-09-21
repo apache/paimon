@@ -25,17 +25,22 @@ import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.orc.OrcFilters;
-import org.apache.flink.orc.OrcSplitReaderUtil;
 import org.apache.flink.orc.vector.RowDataVectorizer;
 import org.apache.flink.orc.vector.Vectorizer;
 import org.apache.flink.orc.writer.ThreadLocalClassLoaderConfiguration;
+import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.store.utils.Projection;
+import org.apache.flink.table.types.logical.ArrayType;
+import org.apache.flink.table.types.logical.CharType;
+import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.MapType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.logical.VarCharType;
 
 import org.apache.orc.OrcFile;
 import org.apache.orc.TypeDescription;
@@ -46,6 +51,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.format.orc.OrcFileFormatFactory.IDENTIFIER;
 
@@ -92,14 +98,17 @@ public class OrcFileFormat extends FileFormat {
         }
 
         return OrcInputFormatFactory.create(
-                readerConf, type, Projection.of(projection).toTopLevelIndexes(), orcPredicates);
+                readerConf,
+                (RowType) convertLogicalType(type),
+                Projection.of(projection).toTopLevelIndexes(),
+                orcPredicates);
     }
 
     @Override
     public BulkWriter.Factory<RowData> createWriterFactory(RowType type) {
         LogicalType[] orcTypes = type.getChildren().toArray(new LogicalType[0]);
 
-        TypeDescription typeDescription = OrcSplitReaderUtil.logicalTypeToOrcType(type);
+        TypeDescription typeDescription = logicalTypeToOrcType(type);
         Vectorizer<RowData> vectorizer =
                 new RowDataVectorizer(typeDescription.toString(), orcTypes);
         OrcFile.WriterOptions writerOptions = OrcFile.writerOptions(orcProperties, writerConf);
@@ -114,5 +123,97 @@ public class OrcFileFormat extends FileFormat {
         ((org.apache.flink.configuration.Configuration) options).addAllToProperties(properties);
         properties.forEach((k, v) -> orcProperties.put(IDENTIFIER + "." + k, v));
         return orcProperties;
+    }
+
+    private static LogicalType convertLogicalType(LogicalType type) {
+        switch (type.getTypeRoot()) {
+            case BINARY:
+            case VARBINARY:
+                return DataTypes.BYTES().getLogicalType();
+            case ARRAY:
+                ArrayType arrayType = (ArrayType) type;
+                return new ArrayType(
+                        arrayType.isNullable(), convertLogicalType(arrayType.getElementType()));
+            case MAP:
+                MapType mapType = (MapType) type;
+                return new MapType(
+                        convertLogicalType(mapType.getKeyType()),
+                        convertLogicalType(mapType.getValueType()));
+            case ROW:
+                RowType rowType = (RowType) type;
+                return new RowType(
+                        rowType.isNullable(),
+                        rowType.getFields().stream()
+                                .map(
+                                        f ->
+                                                new RowType.RowField(
+                                                        f.getName(),
+                                                        convertLogicalType(f.getType()),
+                                                        f.getDescription().orElse(null)))
+                                .collect(Collectors.toList()));
+            default:
+                return type;
+        }
+    }
+
+    /** See {@code org.apache.flink.table.catalog.hive.util.HiveTypeUtil}. */
+    private static TypeDescription logicalTypeToOrcType(LogicalType type) {
+        type = type.copy(true);
+        switch (type.getTypeRoot()) {
+            case CHAR:
+                return TypeDescription.createChar().withMaxLength(((CharType) type).getLength());
+            case VARCHAR:
+                int len = ((VarCharType) type).getLength();
+                if (len == VarCharType.MAX_LENGTH) {
+                    return TypeDescription.createString();
+                } else {
+                    return TypeDescription.createVarchar().withMaxLength(len);
+                }
+            case BOOLEAN:
+                return TypeDescription.createBoolean();
+            case BINARY:
+            case VARBINARY:
+                return TypeDescription.createBinary();
+            case DECIMAL:
+                DecimalType decimalType = (DecimalType) type;
+                return TypeDescription.createDecimal()
+                        .withScale(decimalType.getScale())
+                        .withPrecision(decimalType.getPrecision());
+            case TINYINT:
+                return TypeDescription.createByte();
+            case SMALLINT:
+                return TypeDescription.createShort();
+            case INTEGER:
+                return TypeDescription.createInt();
+            case BIGINT:
+                return TypeDescription.createLong();
+            case FLOAT:
+                return TypeDescription.createFloat();
+            case DOUBLE:
+                return TypeDescription.createDouble();
+            case DATE:
+                return TypeDescription.createDate();
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return TypeDescription.createTimestamp();
+            case ARRAY:
+                ArrayType arrayType = (ArrayType) type;
+                return TypeDescription.createList(logicalTypeToOrcType(arrayType.getElementType()));
+            case MAP:
+                MapType mapType = (MapType) type;
+                return TypeDescription.createMap(
+                        logicalTypeToOrcType(mapType.getKeyType()),
+                        logicalTypeToOrcType(mapType.getValueType()));
+            case ROW:
+                RowType rowType = (RowType) type;
+                TypeDescription struct = TypeDescription.createStruct();
+                for (int i = 0; i < rowType.getFieldCount(); i++) {
+                    struct.addField(
+                            rowType.getFieldNames().get(i),
+                            logicalTypeToOrcType(rowType.getChildren().get(i)));
+                }
+                return struct;
+            default:
+                throw new UnsupportedOperationException("Unsupported type: " + type);
+        }
     }
 }
