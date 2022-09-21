@@ -181,11 +181,12 @@ public class StoreWriteOperator extends PrepareCommitOperator {
     }
 
     @Override
-    protected List<Committable> prepareCommit(boolean endOfInput) throws IOException {
+    protected List<Committable> prepareCommit(boolean endOfInput, long checkpointId)
+            throws IOException {
         List<Committable> committables = new ArrayList<>();
         try {
             for (FileCommittable committable : write.prepareCommit(endOfInput)) {
-                committables.add(new Committable(Committable.Kind.FILE, committable));
+                committables.add(new Committable(checkpointId, Committable.Kind.FILE, committable));
             }
         } catch (Exception e) {
             throw new IOException(e);
@@ -203,6 +204,7 @@ public class StoreWriteOperator extends PrepareCommitOperator {
                             (k, v) ->
                                     committables.add(
                                             new Committable(
+                                                    checkpointId,
                                                     Committable.Kind.LOG_OFFSET,
                                                     new LogOffsetCommittable(k, v))));
         }

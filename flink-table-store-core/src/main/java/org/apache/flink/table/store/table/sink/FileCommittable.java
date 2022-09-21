@@ -68,4 +68,16 @@ public class FileCommittable {
     public int hashCode() {
         return Objects.hash(partition, bucket, increment);
     }
+
+    @Override
+    public String toString() {
+        return "FileCommittable{"
+                + "partition="
+                + partition
+                + ", bucket="
+                + bucket
+                + ", increment="
+                + increment
+                + '}';
+    }
 }

@@ -21,13 +21,20 @@ package org.apache.flink.table.store.connector.sink;
 /** Committable produced by {@link PrepareCommitOperator}. */
 public class Committable {
 
+    private final long checkpointId;
+
     private final Kind kind;
 
     private final Object wrappedCommittable;
 
-    public Committable(Kind kind, Object wrappedCommittable) {
+    public Committable(long checkpointId, Kind kind, Object wrappedCommittable) {
+        this.checkpointId = checkpointId;
         this.kind = kind;
         this.wrappedCommittable = wrappedCommittable;
+    }
+
+    public long checkpointId() {
+        return checkpointId;
     }
 
     public Kind kind() {
@@ -36,6 +43,18 @@ public class Committable {
 
     public Object wrappedCommittable() {
         return wrappedCommittable;
+    }
+
+    @Override
+    public String toString() {
+        return "Committable{"
+                + "checkpointId="
+                + checkpointId
+                + ", kind="
+                + kind
+                + ", wrappedCommittable="
+                + wrappedCommittable
+                + '}';
     }
 
     enum Kind {

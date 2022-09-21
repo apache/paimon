@@ -47,7 +47,7 @@ public class CommittableSerializerTest {
                                         1,
                                         serializer.serialize(
                                                 new Committable(
-                                                        Committable.Kind.FILE, committable)))
+                                                        9, Committable.Kind.FILE, committable)))
                                 .wrappedCommittable();
         assertThat(newCommittable).isEqualTo(committable);
     }
@@ -62,7 +62,9 @@ public class CommittableSerializerTest {
                                         1,
                                         serializer.serialize(
                                                 new Committable(
-                                                        Committable.Kind.LOG_OFFSET, committable)))
+                                                        8,
+                                                        Committable.Kind.LOG_OFFSET,
+                                                        committable)))
                                 .wrappedCommittable();
         assertThat(newCommittable).isEqualTo(committable);
     }

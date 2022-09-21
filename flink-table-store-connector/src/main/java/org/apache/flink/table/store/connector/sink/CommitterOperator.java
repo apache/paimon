@@ -37,7 +37,9 @@ import org.apache.flink.util.function.SerializableSupplier;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 import java.util.UUID;
@@ -161,11 +163,7 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     @Override
     public void snapshotState(StateSnapshotContext context) throws Exception {
         super.snapshotState(context);
-        List<Committable> poll = pollInputs();
-        if (poll.size() > 0) {
-            committablesPerCheckpoint.put(
-                    context.getCheckpointId(), toCommittables(context.getCheckpointId(), poll));
-        }
+        pollInputs();
         streamingCommitterState.update(committables(committablesPerCheckpoint));
     }
 
@@ -179,12 +177,8 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
             return;
         }
 
-        long checkpointId = Long.MAX_VALUE;
-        List<Committable> poll = pollInputs();
-        if (!poll.isEmpty()) {
-            committablesPerCheckpoint.put(checkpointId, toCommittables(checkpointId, poll));
-        }
-        commitUpToCheckpoint(checkpointId);
+        pollInputs();
+        commitUpToCheckpoint(Long.MAX_VALUE);
     }
 
     @Override
@@ -213,9 +207,27 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
         super.close();
     }
 
-    private List<Committable> pollInputs() {
-        List<Committable> poll = new ArrayList<>(this.inputs);
+    private void pollInputs() throws Exception {
+        Map<Long, List<Committable>> grouped = new HashMap<>();
+        for (Committable c : inputs) {
+            grouped.computeIfAbsent(c.checkpointId(), k -> new ArrayList<>()).add(c);
+        }
+
+        for (Map.Entry<Long, List<Committable>> entry : grouped.entrySet()) {
+            Long cp = entry.getKey();
+            List<Committable> committables = entry.getValue();
+            if (committablesPerCheckpoint.containsKey(cp)) {
+                throw new RuntimeException(
+                        String.format(
+                                "Repeatedly commit the same checkpoint files. \n"
+                                        + "The previous files is %s, \n"
+                                        + "and the subsequent files is %s",
+                                committablesPerCheckpoint.get(cp), committables));
+            }
+
+            committablesPerCheckpoint.put(cp, toCommittables(cp, committables));
+        }
+
         this.inputs.clear();
-        return poll;
     }
 }
