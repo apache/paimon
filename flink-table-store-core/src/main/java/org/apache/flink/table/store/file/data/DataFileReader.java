@@ -20,16 +20,13 @@ package org.apache.flink.table.store.file.data;
 
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
-import org.apache.flink.connector.file.src.util.RecordAndPosition;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.KeyValueSerializer;
+import org.apache.flink.table.store.file.io.KeyValueDataFileRecordReader;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.utils.Projection;
@@ -74,55 +71,8 @@ public class DataFileReader {
     }
 
     public RecordReader<KeyValue> read(String fileName) throws IOException {
-        return new DataFileRecordReader(pathFactory.toPath(fileName));
-    }
-
-    private class DataFileRecordReader implements RecordReader<KeyValue> {
-
-        private final BulkFormat.Reader<RowData> reader;
-        private final KeyValueSerializer serializer;
-
-        private DataFileRecordReader(Path path) throws IOException {
-            this.reader = FileUtils.createFormatReader(readerFactory, path);
-            this.serializer = new KeyValueSerializer(keyType, valueType);
-        }
-
-        @Nullable
-        @Override
-        public RecordIterator<KeyValue> readBatch() throws IOException {
-            BulkFormat.RecordIterator<RowData> iterator = reader.readBatch();
-            return iterator == null ? null : new DataFileRecordIterator(iterator, serializer);
-        }
-
-        @Override
-        public void close() throws IOException {
-            reader.close();
-        }
-    }
-
-    private static class DataFileRecordIterator implements RecordReader.RecordIterator<KeyValue> {
-
-        private final BulkFormat.RecordIterator<RowData> iterator;
-        private final KeyValueSerializer serializer;
-
-        private DataFileRecordIterator(
-                BulkFormat.RecordIterator<RowData> iterator, KeyValueSerializer serializer) {
-            this.iterator = iterator;
-            this.serializer = serializer;
-        }
-
-        @Override
-        public KeyValue next() throws IOException {
-            RecordAndPosition<RowData> result = iterator.next();
-
-            // TODO schema evolution
-            return result == null ? null : serializer.fromRow(result.getRecord());
-        }
-
-        @Override
-        public void releaseBatch() {
-            iterator.releaseBatch();
-        }
+        return new KeyValueDataFileRecordReader(
+                readerFactory, pathFactory.toPath(fileName), keyType, valueType);
     }
 
     /** Creates {@link DataFileReader}. */

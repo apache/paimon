@@ -122,8 +122,15 @@ public class DataFileTest {
         try {
             writer.write(CloseableIterator.fromList(data.content, kv -> {}), 0);
         } catch (Throwable e) {
-            assertThat(e)
-                    .isExactlyInstanceOf(FailingAtomicRenameFileSystem.ArtificialException.class);
+            if (e.getCause() != null) {
+                assertThat(e)
+                        .hasRootCauseExactlyInstanceOf(
+                                FailingAtomicRenameFileSystem.ArtificialException.class);
+            } else {
+                assertThat(e)
+                        .isExactlyInstanceOf(
+                                FailingAtomicRenameFileSystem.ArtificialException.class);
+            }
             Path root = new Path(tempDir.toString());
             FileSystem fs = root.getFileSystem();
             for (FileStatus bucketStatus : fs.listStatus(root)) {

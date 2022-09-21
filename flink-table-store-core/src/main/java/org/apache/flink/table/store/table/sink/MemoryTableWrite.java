@@ -23,7 +23,7 @@ import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.memory.MemoryPoolFactory;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
-import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.file.utils.RecordWriter;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
 

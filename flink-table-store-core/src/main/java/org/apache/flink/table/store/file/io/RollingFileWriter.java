@@ -17,13 +17,15 @@
  * under the License.
  */
 
-package org.apache.flink.table.store.file.writer;
+package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.util.IOUtils;
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.util.Preconditions;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
@@ -36,36 +38,53 @@ import java.util.function.Supplier;
  */
 public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
 
-    private final Supplier<? extends FileWriter<T, R>> writerFactory;
+    private static final Logger LOG = LoggerFactory.getLogger(RollingFileWriter.class);
+
+    private final Supplier<? extends SingleFileWriter<T, R>> writerFactory;
     private final long targetFileSize;
-    private final List<FileWriter<T, R>> openedWriters;
+    private final List<SingleFileWriter<T, R>> openedWriters;
     private final List<R> results;
 
-    private FileWriter<T, R> currentWriter = null;
+    private SingleFileWriter<T, R> currentWriter = null;
     private long lengthOfClosedFiles = 0L;
     private long recordCount = 0;
     private boolean closed = false;
 
     public RollingFileWriter(
-            Supplier<? extends FileWriter<T, R>> writerFactory, long targetFileSize) {
+            Supplier<? extends SingleFileWriter<T, R>> writerFactory, long targetFileSize) {
         this.writerFactory = writerFactory;
         this.targetFileSize = targetFileSize;
         this.openedWriters = new ArrayList<>();
         this.results = new ArrayList<>();
     }
 
+    @VisibleForTesting
+    public long targetFileSize() {
+        return targetFileSize;
+    }
+
     @Override
     public void write(T row) throws IOException {
-        // Open the current writer if write the first record or roll over happen before.
-        if (currentWriter == null) {
-            openCurrentWriter();
-        }
+        try {
+            // Open the current writer if write the first record or roll over happen before.
+            if (currentWriter == null) {
+                openCurrentWriter();
+            }
 
-        currentWriter.write(row);
-        recordCount += 1;
+            currentWriter.write(row);
+            recordCount += 1;
 
-        if (currentWriter.length() >= targetFileSize) {
-            closeCurrentWriter();
+            if (currentWriter.length() >= targetFileSize) {
+                closeCurrentWriter();
+            }
+        } catch (Throwable e) {
+            LOG.warn(
+                    "Exception occurs when writing file "
+                            + (currentWriter == null ? null : currentWriter.path())
+                            + ". Cleaning up.",
+                    e);
+            abort();
+            throw e;
         }
     }
 
@@ -74,19 +93,15 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
         openedWriters.add(currentWriter);
     }
 
-    private void closeCurrentWriter() {
-        if (currentWriter != null) {
-            try {
-                lengthOfClosedFiles += currentWriter.length();
-
-                currentWriter.close();
-                results.add(currentWriter.result());
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-
-            currentWriter = null;
+    private void closeCurrentWriter() throws IOException {
+        if (currentWriter == null) {
+            return;
         }
+
+        lengthOfClosedFiles += currentWriter.length();
+        currentWriter.close();
+        results.add(currentWriter.result());
+        currentWriter = null;
     }
 
     @Override
@@ -106,9 +121,6 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
 
     @Override
     public void abort() {
-        IOUtils.closeQuietly(this);
-
-        // Abort all those writers.
         for (FileWriter<T, R> writer : openedWriters) {
             writer.abort();
         }
@@ -117,15 +129,24 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
     @Override
     public List<R> result() {
         Preconditions.checkState(closed, "Cannot access the results unless close all writers.");
-
         return results;
     }
 
     @Override
     public void close() throws IOException {
-        if (!closed) {
-            closeCurrentWriter();
+        if (closed) {
+            return;
+        }
 
+        try {
+            closeCurrentWriter();
+        } catch (IOException e) {
+            LOG.warn(
+                    "Exception occurs when writing file " + currentWriter.path() + ". Cleaning up.",
+                    e);
+            abort();
+            throw e;
+        } finally {
             closed = true;
         }
     }

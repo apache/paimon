@@ -16,12 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.writer;
+package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.Increment;
-
-import java.util.List;
 
 /**
  * The {@code RecordWriter} is responsible for writing data and handling in-progress files used to
@@ -49,10 +46,6 @@ public interface RecordWriter<T> {
      */
     void sync() throws Exception;
 
-    /**
-     * Close this writer, the call will delete newly generated but not committed files.
-     *
-     * @return Deleted files.
-     */
-    List<DataFileMeta> close() throws Exception;
+    /** Close this writer, the call will delete newly generated but not committed files. */
+    void close() throws Exception;
 }

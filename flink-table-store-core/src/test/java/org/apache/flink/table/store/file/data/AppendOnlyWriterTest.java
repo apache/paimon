@@ -29,7 +29,7 @@ import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
-import org.apache.flink.table.store.file.writer.RecordWriter;
+import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.types.logical.IntType;
@@ -95,15 +95,15 @@ public class AppendOnlyWriterTest {
     public void testSingleWrite() throws Exception {
         RecordWriter<RowData> writer = createEmptyWriter(1024 * 1024L);
         writer.write(row(1, "AAA", PART));
+        Increment increment = writer.prepareCommit(true);
+        writer.close();
 
-        List<DataFileMeta> result = writer.close();
-
-        assertThat(result.size()).isEqualTo(1);
-        DataFileMeta meta = result.get(0);
+        assertThat(increment.newFiles().size()).isEqualTo(1);
+        DataFileMeta meta = increment.newFiles().get(0);
         assertThat(meta).isNotNull();
 
         Path path = pathFactory.toPath(meta.fileName());
-        assertThat(path.getFileSystem().exists(path)).isFalse();
+        assertThat(path.getFileSystem().exists(path)).isTrue();
 
         assertThat(meta.rowCount()).isEqualTo(1L);
         assertThat(meta.minKey()).isEqualTo(EMPTY_ROW);
