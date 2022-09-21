@@ -68,8 +68,7 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
         Random random = new Random();
         List<String> expected = new ArrayList<>();
         for (int i = 0; i < 10_000; i++) {
-            GenericRowData row =
-                    GenericRowData.of(singlePartition ? 0 : random.nextInt(5), i, i * 10L);
+            GenericRowData row = rowData(singlePartition ? 0 : random.nextInt(5), i, i * 10L);
             write.write(row);
             expected.add(BATCH_ROW_TO_STRING.apply(row));
         }

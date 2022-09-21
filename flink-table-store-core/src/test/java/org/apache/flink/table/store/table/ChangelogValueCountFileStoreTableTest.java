@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -53,9 +52,17 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         List<Split> splits = table.newScan().plan().splits;
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
-                .isEqualTo(Arrays.asList("1|11|101", "1|11|101", "1|12|102"));
+                .isEqualTo(
+                        Arrays.asList(
+                                "1|11|101|binary|varbinary",
+                                "1|11|101|binary|varbinary",
+                                "1|12|102|binary|varbinary"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
-                .isEqualTo(Arrays.asList("2|20|200", "2|21|201", "2|22|202"));
+                .isEqualTo(
+                        Arrays.asList(
+                                "2|20|200|binary|varbinary",
+                                "2|21|201|binary|varbinary",
+                                "2|22|202|binary|varbinary"));
     }
 
     @Test
@@ -84,9 +91,9 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
                 .isEqualTo(
                         Arrays.asList(
-                                "2|21|201",
+                                "2|21|201|binary|varbinary",
                                 // this record is in the same file with "delete 2|21|201"
-                                "2|22|202"));
+                                "2|22|202|binary|varbinary"));
     }
 
     @Test
@@ -97,9 +104,14 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         List<Split> splits = table.newScan().withIncremental(true).plan().splits;
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
-                .isEqualTo(Arrays.asList("-1|10|100", "+1|11|101"));
+                .isEqualTo(
+                        Arrays.asList("-1|10|100|binary|varbinary", "+1|11|101|binary|varbinary"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
-                .isEqualTo(Arrays.asList("-2|21|201", "-2|21|201", "+2|22|202"));
+                .isEqualTo(
+                        Arrays.asList(
+                                "-2|21|201|binary|varbinary",
+                                "-2|21|201|binary|varbinary",
+                                "+2|22|202|binary|varbinary"));
     }
 
     @Test
@@ -129,10 +141,10 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
                         Arrays.asList(
-                                "-2|21|201",
-                                "-2|21|201",
+                                "-2|21|201|binary|varbinary",
+                                "-2|21|201|binary|varbinary",
                                 // this record is in the same file with "delete 2|21|201"
-                                "+2|22|202"));
+                                "+2|22|202|binary|varbinary"));
     }
 
     private void writeData() throws Exception {
@@ -140,22 +152,22 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         TableWrite write = table.newWrite();
         TableCommit commit = table.newCommit("user");
 
-        write.write(GenericRowData.of(1, 10, 100L));
-        write.write(GenericRowData.of(2, 20, 200L));
-        write.write(GenericRowData.of(1, 11, 101L));
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(2, 20, 200L));
+        write.write(rowData(1, 11, 101L));
         commit.commit("0", write.prepareCommit(true));
 
-        write.write(GenericRowData.of(2, 21, 201L));
-        write.write(GenericRowData.of(1, 12, 102L));
-        write.write(GenericRowData.of(2, 21, 201L));
-        write.write(GenericRowData.of(2, 21, 201L));
+        write.write(rowData(2, 21, 201L));
+        write.write(rowData(1, 12, 102L));
+        write.write(rowData(2, 21, 201L));
+        write.write(rowData(2, 21, 201L));
         commit.commit("1", write.prepareCommit(true));
 
-        write.write(GenericRowData.of(1, 11, 101L));
-        write.write(GenericRowData.of(2, 22, 202L));
-        write.write(GenericRowData.ofKind(RowKind.DELETE, 2, 21, 201L));
-        write.write(GenericRowData.ofKind(RowKind.DELETE, 1, 10, 100L));
-        write.write(GenericRowData.ofKind(RowKind.DELETE, 2, 21, 201L));
+        write.write(rowData(1, 11, 101L));
+        write.write(rowData(2, 22, 202L));
+        write.write(rowDataWithKind(RowKind.DELETE, 2, 21, 201L));
+        write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 100L));
+        write.write(rowDataWithKind(RowKind.DELETE, 2, 21, 201L));
         commit.commit("2", write.prepareCommit(true));
 
         write.close();
