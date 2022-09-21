@@ -30,11 +30,13 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.data.binary.BinaryStringData;
 import org.apache.flink.table.types.logical.ArrayType;
+import org.apache.flink.table.types.logical.BinaryType;
 import org.apache.flink.table.types.logical.CharType;
 import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.TimestampType;
+import org.apache.flink.table.types.logical.VarBinaryType;
 import org.apache.flink.table.types.logical.VarCharType;
 
 import org.junit.jupiter.api.Test;
@@ -128,6 +130,12 @@ public abstract class FileStatsExtractorTestBase {
                         randomString(random.nextInt(varCharType.getLength()) + 1));
             case BOOLEAN:
                 return random.nextBoolean();
+            case BINARY:
+                BinaryType binaryType = (BinaryType) type;
+                return randomString(binaryType.getLength()).getBytes();
+            case VARBINARY:
+                VarBinaryType varBinaryType = (VarBinaryType) type;
+                return randomString(varBinaryType.getLength()).getBytes();
             case TINYINT:
                 return (byte) random.nextInt(10);
             case SMALLINT:

@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
@@ -63,9 +62,19 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
-                        Arrays.asList("1|10|100", "1|11|101", "1|12|102", "1|11|101", "1|12|102"));
+                        Arrays.asList(
+                                "1|10|100|binary|varbinary",
+                                "1|11|101|binary|varbinary",
+                                "1|12|102|binary|varbinary",
+                                "1|11|101|binary|varbinary",
+                                "1|12|102|binary|varbinary"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
-                .hasSameElementsAs(Arrays.asList("2|20|200", "2|21|201", "2|22|202", "2|21|201"));
+                .hasSameElementsAs(
+                        Arrays.asList(
+                                "2|20|200|binary|varbinary",
+                                "2|21|201|binary|varbinary",
+                                "2|22|202|binary|varbinary",
+                                "2|21|201|binary|varbinary"));
     }
 
     @Test
@@ -94,10 +103,10 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
                         Arrays.asList(
-                                "2|21|201",
+                                "2|21|201|binary|varbinary",
                                 // this record is in the same file with the first "2|21|201"
-                                "2|22|202",
-                                "2|21|201"));
+                                "2|22|202|binary|varbinary",
+                                "2|21|201|binary|varbinary"));
     }
 
     @Test
@@ -108,9 +117,10 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         List<Split> splits = table.newScan().withIncremental(true).plan().splits;
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
-                .isEqualTo(Arrays.asList("+1|11|101", "+1|12|102"));
+                .isEqualTo(
+                        Arrays.asList("+1|11|101|binary|varbinary", "+1|12|102|binary|varbinary"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
-                .isEqualTo(Collections.singletonList("+2|21|201"));
+                .isEqualTo(Collections.singletonList("+2|21|201|binary|varbinary"));
     }
 
     @Test
@@ -139,9 +149,9 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
                         Arrays.asList(
-                                "+1|11|101",
+                                "+1|11|101|binary|varbinary",
                                 // this record is in the same file with "+1|11|101"
-                                "+1|12|102"));
+                                "+1|12|102|binary|varbinary"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING)).isEmpty();
     }
 
@@ -161,8 +171,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
             for (int j = 0; j < Math.max(random.nextInt(200), 1); j++) {
                 BinaryRowData data =
                         serializer
-                                .toBinaryRow(
-                                        GenericRowData.of(i, random.nextInt(), random.nextLong()))
+                                .toBinaryRow(rowData(i, random.nextInt(), random.nextLong()))
                                 .copy();
                 int bucket = bucket(hashcode(data), numOfBucket);
                 dataPerBucket.compute(
@@ -203,19 +212,19 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         TableWrite write = table.newWrite();
         TableCommit commit = table.newCommit("user");
 
-        write.write(GenericRowData.of(1, 10, 100L));
-        write.write(GenericRowData.of(2, 20, 200L));
-        write.write(GenericRowData.of(1, 11, 101L));
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(2, 20, 200L));
+        write.write(rowData(1, 11, 101L));
         commit.commit("0", write.prepareCommit(true));
 
-        write.write(GenericRowData.of(1, 12, 102L));
-        write.write(GenericRowData.of(2, 21, 201L));
-        write.write(GenericRowData.of(2, 22, 202L));
+        write.write(rowData(1, 12, 102L));
+        write.write(rowData(2, 21, 201L));
+        write.write(rowData(2, 22, 202L));
         commit.commit("1", write.prepareCommit(true));
 
-        write.write(GenericRowData.of(1, 11, 101L));
-        write.write(GenericRowData.of(2, 21, 201L));
-        write.write(GenericRowData.of(1, 12, 102L));
+        write.write(rowData(1, 11, 101L));
+        write.write(rowData(2, 21, 201L));
+        write.write(rowData(1, 12, 102L));
         commit.commit("2", write.prepareCommit(true));
 
         write.close();

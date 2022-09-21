@@ -23,6 +23,7 @@ import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractorTestBase;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
+import org.apache.flink.table.types.logical.BinaryType;
 import org.apache.flink.table.types.logical.BooleanType;
 import org.apache.flink.table.types.logical.CharType;
 import org.apache.flink.table.types.logical.DateType;
@@ -34,6 +35,7 @@ import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.SmallIntType;
 import org.apache.flink.table.types.logical.TimestampType;
 import org.apache.flink.table.types.logical.TinyIntType;
+import org.apache.flink.table.types.logical.VarBinaryType;
 import org.apache.flink.table.types.logical.VarCharType;
 
 /** Tests for {@link OrcFileStatsExtractor}. */
@@ -50,6 +52,8 @@ public class OrcFileStatsExtractorTest extends FileStatsExtractorTestBase {
                 new CharType(8),
                 new VarCharType(8),
                 new BooleanType(),
+                new BinaryType(8),
+                new VarBinaryType(8),
                 new TinyIntType(),
                 new SmallIntType(),
                 new IntType(),
