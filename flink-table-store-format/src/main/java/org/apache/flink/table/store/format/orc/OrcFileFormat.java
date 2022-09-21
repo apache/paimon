@@ -29,12 +29,15 @@ import org.apache.flink.orc.OrcSplitReaderUtil;
 import org.apache.flink.orc.vector.RowDataVectorizer;
 import org.apache.flink.orc.vector.Vectorizer;
 import org.apache.flink.orc.writer.ThreadLocalClassLoaderConfiguration;
+import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.store.utils.Projection;
+import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.MapType;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.orc.OrcFile;
@@ -44,6 +47,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.format.orc.OrcFileFormatFactory.IDENTIFIER;
 
@@ -90,14 +94,18 @@ public class OrcFileFormat extends FileFormat {
         }
 
         return OrcInputFormatFactory.create(
-                readerConf, type, Projection.of(projection).toTopLevelIndexes(), orcPredicates);
+                readerConf,
+                (RowType) refineLogicalType(type),
+                Projection.of(projection).toTopLevelIndexes(),
+                orcPredicates);
     }
 
     @Override
     public BulkWriter.Factory<RowData> createWriterFactory(RowType type) {
         LogicalType[] orcTypes = type.getChildren().toArray(new LogicalType[0]);
 
-        TypeDescription typeDescription = OrcSplitReaderUtil.logicalTypeToOrcType(type);
+        TypeDescription typeDescription =
+                OrcSplitReaderUtil.logicalTypeToOrcType(refineLogicalType(type));
         Vectorizer<RowData> vectorizer =
                 new RowDataVectorizer(typeDescription.toString(), orcTypes);
         OrcFile.WriterOptions writerOptions = OrcFile.writerOptions(orcProperties, writerConf);
@@ -112,5 +120,38 @@ public class OrcFileFormat extends FileFormat {
         ((org.apache.flink.configuration.Configuration) options).addAllToProperties(properties);
         properties.forEach((k, v) -> orcProperties.put(IDENTIFIER + "." + k, v));
         return orcProperties;
+    }
+
+    private static LogicalType refineLogicalType(LogicalType type) {
+        switch (type.getTypeRoot()) {
+            case BINARY:
+            case VARBINARY:
+                // OrcSplitReaderUtil#logicalTypeToOrcType() only supports the DataTypes.BYTES()
+                // logical type for BINARY and VARBINARY.
+                return DataTypes.BYTES().getLogicalType();
+            case ARRAY:
+                ArrayType arrayType = (ArrayType) type;
+                return new ArrayType(
+                        arrayType.isNullable(), refineLogicalType(arrayType.getElementType()));
+            case MAP:
+                MapType mapType = (MapType) type;
+                return new MapType(
+                        refineLogicalType(mapType.getKeyType()),
+                        refineLogicalType(mapType.getValueType()));
+            case ROW:
+                RowType rowType = (RowType) type;
+                return new RowType(
+                        rowType.isNullable(),
+                        rowType.getFields().stream()
+                                .map(
+                                        f ->
+                                                new RowType.RowField(
+                                                        f.getName(),
+                                                        refineLogicalType(f.getType()),
+                                                        f.getDescription().orElse(null)))
+                                .collect(Collectors.toList()));
+            default:
+                return type;
+        }
     }
 }
