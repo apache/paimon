@@ -44,7 +44,7 @@ public class CommittableSerializerTest {
                 (FileCommittable)
                         serializer
                                 .deserialize(
-                                        1,
+                                        2,
                                         serializer.serialize(
                                                 new Committable(
                                                         9, Committable.Kind.FILE, committable)))
@@ -59,7 +59,7 @@ public class CommittableSerializerTest {
                 (LogOffsetCommittable)
                         serializer
                                 .deserialize(
-                                        1,
+                                        2,
                                         serializer.serialize(
                                                 new Committable(
                                                         8,

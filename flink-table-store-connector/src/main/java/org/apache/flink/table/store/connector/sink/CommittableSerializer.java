@@ -57,7 +57,7 @@ public class CommittableSerializer implements SimpleVersionedSerializer<Committa
                 throw new UnsupportedOperationException("Unsupported kind: " + committable.kind());
         }
 
-        return ByteBuffer.allocate(4 + 1 + wrapped.length + 4)
+        return ByteBuffer.allocate(8 + 1 + wrapped.length + 4)
                 .putLong(committable.checkpointId())
                 .put(committable.kind().toByteValue())
                 .put(wrapped)
@@ -74,7 +74,7 @@ public class CommittableSerializer implements SimpleVersionedSerializer<Committa
         ByteBuffer buffer = ByteBuffer.wrap(bytes);
         long checkpointId = buffer.getLong();
         Committable.Kind kind = Committable.Kind.fromByteValue(buffer.get());
-        byte[] wrapped = new byte[bytes.length - 9];
+        byte[] wrapped = new byte[bytes.length - 13];
         buffer.get(wrapped);
         int version = buffer.getInt();
 
