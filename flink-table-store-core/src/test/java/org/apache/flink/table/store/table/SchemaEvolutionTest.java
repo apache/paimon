@@ -34,6 +34,7 @@ import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.types.logical.BigIntType;
+import org.apache.flink.table.types.logical.FloatType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.utils.TypeConversions;
@@ -51,6 +52,8 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.filter;
 
 /** Test for schema evolution. */
 public class SchemaEvolutionTest {
@@ -118,6 +121,29 @@ public class SchemaEvolutionTest {
         // read where f3 = 3 (filter on new field)
         rows = readRecords(table, builder.equal(2, 3L));
         assertThat(rows).containsExactlyInAnyOrder(Row.of(3, 3L, 3L), Row.of(4, 4L, 4L));
+    }
+
+    @Test
+    public void testAddDuplicateField() throws Exception {
+        final String columnName = "f3";
+        UpdateSchema updateSchema =
+                new UpdateSchema(
+                        RowType.of(new IntType(), new BigIntType()),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        schemaManager.commitNewVersion(updateSchema);
+        schemaManager.commitChanges(
+                Collections.singletonList(SchemaChange.addColumn(columnName, new BigIntType())));
+        assertThatThrownBy(
+                        () -> {
+                            schemaManager.commitChanges(
+                                    Collections.singletonList(
+                                            SchemaChange.addColumn(columnName, new FloatType())));
+                        })
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("The column [%s] exists in the table[%s].", columnName, tablePath);
     }
 
     private List<Row> readRecords(FileStoreTable table, Predicate filter) throws IOException {
