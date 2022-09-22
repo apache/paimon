@@ -46,6 +46,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -173,6 +174,15 @@ public class SchemaManager implements Serializable {
                     newOptions.remove(removeOption.key());
                 } else if (change instanceof AddColumn) {
                     AddColumn addColumn = (AddColumn) change;
+                    Set<String> fieldNames =
+                            newFields.stream().map(DataField::name).collect(Collectors.toSet());
+                    if (fieldNames.contains(addColumn.fieldName())) {
+                        throw new IllegalArgumentException(
+                                "The column["
+                                        + addColumn.fieldName()
+                                        + "] is exist in "
+                                        + tableRoot);
+                    }
                     int id = highestFieldId.incrementAndGet();
                     DataType dataType =
                             TableSchema.toDataType(addColumn.logicalType(), highestFieldId);
