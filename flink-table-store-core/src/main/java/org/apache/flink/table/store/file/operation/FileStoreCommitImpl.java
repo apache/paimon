@@ -45,6 +45,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -66,12 +67,16 @@ import java.util.stream.Collectors;
  *   <li>Before calling {@link FileStoreCommitImpl#commit}, if user cannot determine if this commit
  *       is done before, user should first call {@link FileStoreCommitImpl#filterCommitted}.
  *   <li>Before committing, it will first check for conflicts by checking if all files to be removed
- *       currently exists.
+ *       currently exists, and if modified files have overlapping key ranges with existing files.
  *   <li>After that it use the external {@link FileStoreCommitImpl#lock} (if provided) or the atomic
  *       rename of the file system to ensure atomicity.
  *   <li>If commit fails due to conflicts or exception it tries its best to clean up and aborts.
  *   <li>If atomic rename fails it tries again after reading the latest snapshot from step 2.
  * </ol>
+ *
+ * <p>NOTE: If you want to modify this class, any exception during commit MUST NOT BE IGNORED. They
+ * must be thrown to restart the job. It is recommended to run FileStoreCommitTest thousands of
+ * times to make sure that your changes is correct.
  */
 public class FileStoreCommitImpl implements FileStoreCommit {
 
@@ -182,26 +187,60 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             LOG.debug("Ready to commit\n" + committable.toString());
         }
 
+        Long safeLatestSnapshotId = null;
+        List<ManifestEntry> baseEntries = new ArrayList<>();
+
         List<ManifestEntry> appendChanges = collectChanges(committable.newFiles(), FileKind.ADD);
+        List<ManifestEntry> compactChanges = new ArrayList<>();
+        compactChanges.addAll(collectChanges(committable.compactBefore(), FileKind.DELETE));
+        compactChanges.addAll(collectChanges(committable.compactAfter(), FileKind.ADD));
+
         if (createEmptyCommit || !appendChanges.isEmpty()) {
+            // Optimization for common path.
+            // Step 1:
+            // Read manifest entries from changed partitions here and check for conflicts.
+            // If there are no other jobs committing at the same time,
+            // we can skip conflict checking in tryCommit method.
+            // This optimization is mainly used to decrease the number of times we read from files.
+            Long latestSnapshotId = snapshotManager.latestSnapshotId();
+            if (latestSnapshotId != null) {
+                // it is possible that some partitions only have compact changes,
+                // so we need to contain all changes
+                baseEntries.addAll(
+                        readAllEntriesFromChangedPartitions(
+                                latestSnapshotId, appendChanges, compactChanges));
+                noConflictsOrFail(baseEntries, appendChanges);
+                safeLatestSnapshotId = latestSnapshotId;
+            }
+
             tryCommit(
                     appendChanges,
                     committable.identifier(),
                     committable.logOffsets(),
                     Snapshot.CommitKind.APPEND,
-                    false);
+                    safeLatestSnapshotId);
         }
 
-        List<ManifestEntry> compactChanges = new ArrayList<>();
-        compactChanges.addAll(collectChanges(committable.compactBefore(), FileKind.DELETE));
-        compactChanges.addAll(collectChanges(committable.compactAfter(), FileKind.ADD));
         if (!compactChanges.isEmpty()) {
+            // Optimization for common path.
+            // Step 2:
+            // Add appendChanges to the manifest entries read above and check for conflicts.
+            // If there are no other jobs committing at the same time,
+            // we can skip conflict checking in tryCommit method.
+            // This optimization is mainly used to decrease the number of times we read from files.
+            if (safeLatestSnapshotId != null) {
+                baseEntries.addAll(appendChanges);
+                noConflictsOrFail(baseEntries, compactChanges);
+                // assume this compact commit follows just after the append commit created above
+                safeLatestSnapshotId += 1;
+            }
+
             tryCommit(
                     compactChanges,
                     committable.identifier(),
                     committable.logOffsets(),
                     Snapshot.CommitKind.COMPACT,
-                    true);
+                    safeLatestSnapshotId);
         }
     }
 
@@ -246,7 +285,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     committable.identifier(),
                     committable.logOffsets(),
                     Snapshot.CommitKind.COMPACT,
-                    true);
+                    null);
         }
     }
 
@@ -255,11 +294,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             String hash,
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
-            boolean checkFileConflicts) {
+            Long safeLatestSnapshotId) {
         while (true) {
             Long latestSnapshotId = snapshotManager.latestSnapshotId();
             if (tryCommitOnce(
-                    changes, hash, logOffsets, commitKind, latestSnapshotId, checkFileConflicts)) {
+                    changes,
+                    hash,
+                    logOffsets,
+                    commitKind,
+                    latestSnapshotId,
+                    safeLatestSnapshotId)) {
                 break;
             }
         }
@@ -298,7 +342,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     logOffsets,
                     Snapshot.CommitKind.OVERWRITE,
                     latestSnapshotId,
-                    false)) {
+                    null)) {
                 break;
             }
         }
@@ -333,7 +377,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
             Long latestSnapshotId,
-            boolean checkFileConflicts) {
+            Long safeLatestSnapshotId) {
         long newSnapshotId =
                 latestSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshotId + 1;
         Path newSnapshotPath = snapshotManager.snapshotPath(newSnapshotId);
@@ -347,7 +391,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         Snapshot latestSnapshot = null;
         if (latestSnapshotId != null) {
-            if (checkFileConflicts) {
+            if (!latestSnapshotId.equals(safeLatestSnapshotId)) {
+                // latestSnapshotId is different from the snapshot id we've checked for conflicts,
+                // so we have to check again
                 noConflictsOrFail(latestSnapshotId, changes);
             }
             latestSnapshot = snapshotManager.snapshot(latestSnapshotId);
@@ -479,23 +525,31 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return false;
     }
 
-    private void noConflictsOrFail(long snapshotId, List<ManifestEntry> changes) {
+    @SafeVarargs
+    private final List<ManifestEntry> readAllEntriesFromChangedPartitions(
+            long snapshotId, List<ManifestEntry>... changes) {
         List<BinaryRowData> changedPartitions =
-                changes.stream()
+                Arrays.stream(changes)
+                        .flatMap(Collection::stream)
                         .map(ManifestEntry::partition)
                         .distinct()
                         .collect(Collectors.toList());
-        List<ManifestEntry> allEntries;
         try {
-            allEntries =
-                    new ArrayList<>(
-                            scan.withSnapshot(snapshotId)
-                                    .withPartitionFilter(changedPartitions)
-                                    .plan()
-                                    .files());
+            return scan.withSnapshot(snapshotId)
+                    .withPartitionFilter(changedPartitions)
+                    .plan()
+                    .files();
         } catch (Throwable e) {
-            throw new RuntimeException("Cannot determine if conflicts exist.", e);
+            throw new RuntimeException("Cannot read manifest entries from changed partitions.", e);
         }
+    }
+
+    private void noConflictsOrFail(long snapshotId, List<ManifestEntry> changes) {
+        noConflictsOrFail(readAllEntriesFromChangedPartitions(snapshotId, changes), changes);
+    }
+
+    private void noConflictsOrFail(List<ManifestEntry> baseEntries, List<ManifestEntry> changes) {
+        List<ManifestEntry> allEntries = new ArrayList<>(baseEntries);
         allEntries.addAll(changes);
 
         Collection<ManifestEntry> mergedEntries;
@@ -503,8 +557,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             // merge manifest entries and also check if the files we want to delete are still there
             mergedEntries = ManifestEntry.mergeManifestEntries(allEntries);
         } catch (Throwable e) {
-            throw new RuntimeException(
-                    "File deletion conflicts detected! Give up committing compact changes.", e);
+            LOG.warn("File deletion conflicts detected! Give up committing.", e);
+            throw createConflictException(
+                    "File deletion conflicts detected! Give up committing.", baseEntries, changes);
         }
 
         // fast exit for file store without keys
@@ -531,14 +586,48 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 ManifestEntry a = entries.get(i);
                 ManifestEntry b = entries.get(i + 1);
                 if (keyComparator.compare(a.file().maxKey(), b.file().minKey()) >= 0) {
-                    throw new RuntimeException(
-                            "LSM conflicts detected! Give up committing compact changes. Conflict files are:\n"
+                    throw createConflictException(
+                            "LSM conflicts detected! Give up committing. Conflict files are:\n"
                                     + a.identifier().toString(pathFactory)
                                     + "\n"
-                                    + b.identifier().toString(pathFactory));
+                                    + b.identifier().toString(pathFactory),
+                            baseEntries,
+                            changes);
                 }
             }
         }
+    }
+
+    private RuntimeException createConflictException(
+            String message, List<ManifestEntry> baseEntries, List<ManifestEntry> changes) {
+        String possibleCauses =
+                String.join(
+                        "\n",
+                        "Conflicts during commits are normal and this failure is intended to resolve the conflicts.",
+                        "Conflicts are mainly caused by the following scenarios:",
+                        "1. Multiple jobs are writing into the same partition at the same time.",
+                        "2. You're recovering from an old savepoint, or you're creating multiple jobs from a savepoint.",
+                        "   The job will fail continuously in this scenario to protect metadata from corruption.",
+                        "   You can either recover from the latest savepoint, "
+                                + "or you can revert the table to the snapshot corresponding to the old savepoint.");
+        String baseEntriesString =
+                "Base entries are:\n"
+                        + baseEntries.stream()
+                                .map(ManifestEntry::toString)
+                                .collect(Collectors.joining("\n"));
+        String changesString =
+                "Changes are:\n"
+                        + changes.stream()
+                                .map(ManifestEntry::toString)
+                                .collect(Collectors.joining("\n"));
+        return new RuntimeException(
+                message
+                        + "\n\n"
+                        + possibleCauses
+                        + "\n\n"
+                        + baseEntriesString
+                        + "\n\n"
+                        + changesString);
     }
 
     private void cleanUpTmpManifests(

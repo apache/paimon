@@ -34,6 +34,7 @@ import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
+import org.apache.flink.table.store.file.operation.FileStoreCommitImpl;
 import org.apache.flink.table.store.file.operation.FileStoreExpireImpl;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
@@ -133,6 +134,10 @@ public class TestFileStore extends KeyValueFileStore {
         this.user = UUID.randomUUID().toString();
     }
 
+    public FileStoreCommitImpl newCommit() {
+        return super.newCommit(user);
+    }
+
     public FileStoreExpireImpl newExpire(
             int numRetainedMin, int numRetainedMax, long millisRetained) {
         return new FileStoreExpireImpl(
@@ -164,6 +169,7 @@ public class TestFileStore extends KeyValueFileStore {
                 partitionCalculator,
                 bucketCalculator,
                 false,
+                null,
                 (commit, committable) -> {
                     logOffsets.forEach(committable::addLogOffset);
                     commit.commit(committable, Collections.emptyMap());
@@ -181,6 +187,7 @@ public class TestFileStore extends KeyValueFileStore {
                 partitionCalculator,
                 bucketCalculator,
                 true,
+                null,
                 (commit, committable) ->
                         commit.overwrite(partition, committable, Collections.emptyMap()));
     }
@@ -190,6 +197,7 @@ public class TestFileStore extends KeyValueFileStore {
             Function<KeyValue, BinaryRowData> partitionCalculator,
             Function<KeyValue, Integer> bucketCalculator,
             boolean emptyWriter,
+            String identifier,
             BiConsumer<FileStoreCommit, ManifestCommittable> commitFunction)
             throws Exception {
         FileStoreWrite<KeyValue> write = newWrite();
@@ -224,7 +232,8 @@ public class TestFileStore extends KeyValueFileStore {
 
         FileStoreCommit commit = newCommit(user);
         ManifestCommittable committable =
-                new ManifestCommittable(String.valueOf(new Random().nextLong()));
+                new ManifestCommittable(
+                        identifier == null ? String.valueOf(new Random().nextLong()) : identifier);
         for (Map.Entry<BinaryRowData, Map<Integer, RecordWriter<KeyValue>>> entryWithPartition :
                 writers.entrySet()) {
             for (Map.Entry<Integer, RecordWriter<KeyValue>> entryWithBucket :

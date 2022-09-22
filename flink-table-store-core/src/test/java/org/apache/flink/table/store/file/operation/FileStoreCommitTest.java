@@ -26,6 +26,8 @@ import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -52,6 +54,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Tests for {@link FileStoreCommitImpl}. */
 public class FileStoreCommitTest {
@@ -323,6 +326,7 @@ public class FileStoreCommitTest {
                 gen::getPartition,
                 kv -> 0,
                 false,
+                null,
                 (commit, committable) -> commit.commit(committable, Collections.emptyMap()));
         assertThat(store.snapshotManager().findLatest()).isEqualTo(snapshot.id());
 
@@ -332,6 +336,7 @@ public class FileStoreCommitTest {
                 gen::getPartition,
                 kv -> 0,
                 false,
+                null,
                 (commit, committable) -> {
                     commit.withCreateEmptyCommit(true);
                     commit.commit(committable, Collections.emptyMap());
@@ -339,16 +344,57 @@ public class FileStoreCommitTest {
         assertThat(store.snapshotManager().findLatest()).isEqualTo(snapshot.id() + 1);
     }
 
-    private TestFileStore createStore(boolean failing) {
+    @Test
+    public void testCommitOldSnapshotAgain() throws Exception {
+        TestFileStore store = createStore(false, 2);
+        List<ManifestCommittable> committables = new ArrayList<>();
+
+        // commit 3 snapshots
+        for (int i = 0; i < 3; i++) {
+            store.commitDataImpl(
+                    generateDataList(10),
+                    gen::getPartition,
+                    kv -> 0,
+                    false,
+                    String.valueOf(i),
+                    (commit, committable) -> {
+                        commit.commit(committable, Collections.emptyMap());
+                        committables.add(committable);
+                    });
+        }
+
+        // commit the first snapshot again, should throw exception due to conflicts
+        for (int i = 0; i < 3; i++) {
+            RuntimeException e =
+                    assertThrows(
+                            RuntimeException.class,
+                            () ->
+                                    store.newCommit()
+                                            .commit(committables.get(0), Collections.emptyMap()),
+                            "Expecting RuntimeException, but nothing is thrown.");
+            assertThat(e).hasMessageContaining("Give up committing.");
+        }
+    }
+
+    private TestFileStore createStore(boolean failing) throws Exception {
         return createStore(failing, 1);
     }
 
-    private TestFileStore createStore(boolean failing, int numBucket) {
+    private TestFileStore createStore(boolean failing, int numBucket) throws Exception {
         String root =
                 failing
                         ? FailingAtomicRenameFileSystem.getFailingPath(
                                 failingName, tempDir.toString())
                         : TestAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString();
+        SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
+        schemaManager.commitNewVersion(
+                new UpdateSchema(
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
+                        TestKeyValueGenerator.getPrimaryKeys(
+                                TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),
+                        Collections.emptyMap(),
+                        null));
         return TestFileStore.create(
                 "avro",
                 root,
