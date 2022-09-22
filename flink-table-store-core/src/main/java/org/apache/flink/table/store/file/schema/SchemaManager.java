@@ -33,6 +33,8 @@ import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
+import org.apache.commons.lang3.StringUtils;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -173,6 +175,16 @@ public class SchemaManager implements Serializable {
                     newOptions.remove(removeOption.key());
                 } else if (change instanceof AddColumn) {
                     AddColumn addColumn = (AddColumn) change;
+                    if (newFields.stream()
+                            .anyMatch(
+                                    f ->
+                                            StringUtils.equalsIgnoreCase(
+                                                    f.name(), addColumn.fieldName()))) {
+                        throw new IllegalArgumentException(
+                                String.format(
+                                        "The column [%s] exists in the table[%s].",
+                                        addColumn.fieldName(), tableRoot));
+                    }
                     int id = highestFieldId.incrementAndGet();
                     DataType dataType =
                             TableSchema.toDataType(addColumn.logicalType(), highestFieldId);
