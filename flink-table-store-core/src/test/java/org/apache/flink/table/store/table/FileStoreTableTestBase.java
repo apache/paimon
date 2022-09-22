@@ -206,19 +206,33 @@ public abstract class FileStoreTableTestBase {
         List<FileCommittable> commit4 = write.prepareCommit(false);
         // trigger compaction, but not wait it.
 
-        write.write(rowData(2, 20, 200L));
-        List<FileCommittable> commit5 = write.prepareCommit(true);
-        // wait compaction finish
-        // commit5 should be a compaction commit
+        if (commit4.get(0).increment().compactBefore().isEmpty()) {
+            // commit4 is not a compaction commit
+            // do compaction commit5 and compaction commit6
+            write.write(rowData(2, 20, 200L));
+            List<FileCommittable> commit5 = write.prepareCommit(true);
+            // wait compaction finish
+            // commit5 should be a compaction commit
 
-        write.write(rowData(1, 60, 600L));
-        List<FileCommittable> commit6 = write.prepareCommit(true);
-        // if remove writer too fast, will see old files, do another compaction
-        // then will be conflicts
+            write.write(rowData(1, 60, 600L));
+            List<FileCommittable> commit6 = write.prepareCommit(true);
+            // if remove writer too fast, will see old files, do another compaction
+            // then will be conflicts
 
-        commit.commit("4", commit4);
-        commit.commit("5", commit5);
-        commit.commit("6", commit6);
+            commit.commit("4", commit4);
+            commit.commit("5", commit5);
+            commit.commit("6", commit6);
+        } else {
+            // commit4 is a compaction commit
+            // do compaction commit5
+            write.write(rowData(2, 20, 200L));
+            List<FileCommittable> commit5 = write.prepareCommit(true);
+            // wait compaction finish
+            // commit5 should be a compaction commit
+
+            commit.commit("4", commit4);
+            commit.commit("5", commit5);
+        }
 
         write.close();
     }
