@@ -53,6 +53,7 @@ import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.filter;
 
 /** Test for schema evolution. */
 public class SchemaEvolutionTest {
@@ -124,6 +125,7 @@ public class SchemaEvolutionTest {
 
     @Test
     public void testAddDuplicateField() throws Exception {
+        final String columnName = "f3";
         UpdateSchema updateSchema =
                 new UpdateSchema(
                         RowType.of(new IntType(), new BigIntType()),
@@ -133,15 +135,15 @@ public class SchemaEvolutionTest {
                         "");
         schemaManager.commitNewVersion(updateSchema);
         schemaManager.commitChanges(
-                Collections.singletonList(SchemaChange.addColumn("f3", new BigIntType())));
+                Collections.singletonList(SchemaChange.addColumn(columnName, new BigIntType())));
         assertThatThrownBy(
                         () -> {
                             schemaManager.commitChanges(
                                     Collections.singletonList(
-                                            SchemaChange.addColumn("f3", new FloatType())));
+                                            SchemaChange.addColumn(columnName, new FloatType())));
                         })
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageStartingWith("The column[f3] is exist in");
+                .hasMessage("The column [%s] exists in the table[%s].", columnName, tablePath);
     }
 
     private List<Row> readRecords(FileStoreTable table, Predicate filter) throws IOException {
