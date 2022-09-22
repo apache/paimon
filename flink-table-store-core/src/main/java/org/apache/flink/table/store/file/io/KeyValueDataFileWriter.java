@@ -118,7 +118,12 @@ public class KeyValueDataFileWriter
     }
 
     @Override
+    @Nullable
     public DataFileMeta result() throws IOException {
+        if (recordCount() == 0) {
+            return null;
+        }
+
         FieldStats[] rowStats = fieldStats();
         int numKeyFields = keyType.getFieldCount();
 

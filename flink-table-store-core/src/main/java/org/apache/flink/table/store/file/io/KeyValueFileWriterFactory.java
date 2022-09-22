@@ -96,7 +96,7 @@ public class KeyValueFileWriterFactory {
                 level);
     }
 
-    public SingleFileWriter<KeyValue, Void> createExtraFileWriter() throws IOException {
+    public SingleFileWriter<KeyValue, Void> createExtraFileWriter() {
         Path changelogPath = pathFactory.newChangelogPath();
         KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
         return new SingleFileWriter<KeyValue, Void>(

@@ -154,9 +154,20 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 writer.write(iterator);
                 writer.close();
 
-                DataFileMeta fileMeta = writer.result().copy(extraFiles);
-                newFiles.add(fileMeta);
-                compactManager.addNewFile(fileMeta);
+                // In theory, this fileMeta should contain statistics from both lsm file extra file.
+                // However for level 0 files, as we do not drop DELETE records, keys appear in one
+                // file will also appear in the other. So we just need to use statistics from one of
+                // them.
+                //
+                // For value count merge function, it is possible that we have changelog first
+                // adding one record then remove one record, but after merging this record will not
+                // appear in lsm file. This is OK because we can also skip this changelog.
+                DataFileMeta fileMeta = writer.result();
+                if (fileMeta != null) {
+                    fileMeta = fileMeta.copy(extraFiles);
+                    newFiles.add(fileMeta);
+                    compactManager.addNewFile(fileMeta);
+                }
             } catch (Throwable e) {
                 // exception occurs, clean up changelog file if needed
                 for (String extraFile : extraFiles) {
