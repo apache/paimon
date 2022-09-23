@@ -81,6 +81,8 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
      */
     private Committer committer;
 
+    private boolean endInput = false;
+
     public CommitterOperator(
             boolean streamingCheckpointEnabled,
             SerializableFunction<String, Committer> committerFactory,
@@ -173,6 +175,7 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
 
     @Override
     public void endInput() throws Exception {
+        endInput = true;
         if (streamingCheckpointEnabled) {
             return;
         }
@@ -184,7 +187,7 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     @Override
     public void notifyCheckpointComplete(long checkpointId) throws Exception {
         super.notifyCheckpointComplete(checkpointId);
-        commitUpToCheckpoint(checkpointId);
+        commitUpToCheckpoint(endInput ? Long.MAX_VALUE : checkpointId);
     }
 
     private void commitUpToCheckpoint(long checkpointId) throws Exception {
