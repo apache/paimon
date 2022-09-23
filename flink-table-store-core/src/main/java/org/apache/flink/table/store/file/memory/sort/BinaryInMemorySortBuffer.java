@@ -106,6 +106,10 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable {
         this.recordBufferSegments.clear();
     }
 
+    public int getBufferSegmentCount() {
+        return this.recordBufferSegments.size();
+    }
+
     /** Try to initialize the sort buffer if all contained data is discarded. */
     public void tryInitialize() {
         if (!isInitialized) {
