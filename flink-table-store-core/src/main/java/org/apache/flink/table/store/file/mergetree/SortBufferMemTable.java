@@ -18,18 +18,19 @@
 
 package org.apache.flink.table.store.file.mergetree;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.runtime.operators.sort.QuickSort;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.generated.NormalizedKeyComputer;
 import org.apache.flink.table.runtime.generated.RecordComparator;
-import org.apache.flink.table.runtime.operators.sort.BinaryInMemorySortBuffer;
 import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.runtime.typeutils.InternalSerializers;
 import org.apache.flink.table.runtime.util.MemorySegmentPool;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
+import org.apache.flink.table.store.file.memory.sort.BinaryInMemorySortBuffer;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionHelper;
 import org.apache.flink.table.types.logical.BigIntType;
@@ -43,6 +44,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
+
+import static org.apache.flink.util.Preconditions.checkState;
 
 /** A {@link MemTable} which stores records in {@link BinaryInMemorySortBuffer}. */
 public class SortBufferMemTable implements MemTable {
@@ -110,7 +113,12 @@ public class SortBufferMemTable implements MemTable {
 
     @Override
     public void clear() {
-        buffer.reset();
+        buffer.clear();
+    }
+
+    @VisibleForTesting
+    void assertBufferEmpty() {
+        checkState(buffer.getBufferSegmentCount() == 0, "The sort buffer is not empty");
     }
 
     private class MergeIterator implements Iterator<KeyValue> {

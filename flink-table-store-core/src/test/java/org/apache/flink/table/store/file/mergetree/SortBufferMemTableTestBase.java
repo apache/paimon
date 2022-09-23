@@ -67,6 +67,7 @@ public abstract class SortBufferMemTableTestBase {
     public void testAndClear() throws IOException {
         testRandom(100);
         table.clear();
+        table.assertBufferEmpty();
         testRandom(200);
     }
 
