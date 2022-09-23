@@ -40,10 +40,14 @@ import static org.apache.flink.util.Preconditions.checkArgument;
  * In memory sort buffer for binary row. The main code is copied from Flink {@code
  * BinaryInMemorySortBuffer} instead of extended because it's a final class.
  *
- * <p>The main differences in the new sort buffer are: a) Add clear method to clean all memory; b)
- * Add tryInitialized() method to initialize memory before write and read in buffer, while the old
- * buffer will do it in the constructor and reset(); c) Remove reset() and ect. methods which are
- * not used in flink table store.
+ * <p>The main differences in the new sort buffer are:
+ *
+ * <ul>
+ *   <li>1. Add clear method to clean all memory.
+ *   <li>2. Add tryInitialized() method to initialize memory before write and read in buffer, while
+ *       the old buffer will do it in the constructor and reset().
+ *   <li>3. Remove reset() and etc. methods which are not used in flink table store.
+ * </ul>
  */
 public class BinaryInMemorySortBuffer extends BinaryIndexedSortable {
 
