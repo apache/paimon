@@ -38,7 +38,12 @@ import static org.apache.flink.util.Preconditions.checkArgument;
 
 /**
  * In memory sort buffer for binary row. The main code is copied from Flink {@code
- * BinaryInMemorySortBuffer}.
+ * BinaryInMemorySortBuffer} instead of extended because it's a final class.
+ *
+ * <p>The main differences in the new sort buffer are: a) Add clear method to clean all memory; b)
+ * Add tryInitialized() method to initialize memory before write and read in buffer, while the old
+ * buffer will do it in the constructor and reset(); c) Remove reset() and ect. methods which are
+ * not used in flink table store.
  */
 public class BinaryInMemorySortBuffer extends BinaryIndexedSortable {
 
@@ -84,7 +89,9 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable {
         this.inputSerializer = inputSerializer;
         this.recordBufferSegments = recordBufferSegments;
         this.recordCollector = recordCollector;
+        // The memory will be initialized in super()
         this.isInitialized = true;
+        this.clear();
     }
 
     // -------------------------------------------------------------------------
@@ -102,15 +109,20 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable {
     /** Try to initialize the sort buffer if all contained data is discarded. */
     public void tryInitialize() {
         if (!isInitialized) {
-            // grab first buffers
+            // grab first buffer
             this.currentSortIndexSegment = nextMemorySegment();
             this.sortIndex.add(this.currentSortIndexSegment);
+            // grab second buffer
             this.recordCollector.reset();
             this.isInitialized = true;
         }
     }
 
-    /** Release all memory segments. */
+    /**
+     * We add clear() method here instead of reset() to release all memory segments. The reset()
+     * method in flink sort buffer will clear memory and grab two buffers for
+     * currentSortIndexSegment and recordCollector.
+     */
     public void clear() {
         if (this.isInitialized) {
             // reset all offsets

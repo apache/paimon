@@ -91,9 +91,6 @@ public class MemoryPoolFactory {
 
         @Override
         public int freePages() {
-            // Actually, other owners still keep 1 page
-            // TODO We need to optimize this one page later.
-            // See BinaryInMemorySortBuffer.reset
             return totalPages - allocatedPages;
         }
 
