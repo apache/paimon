@@ -32,8 +32,11 @@ import javax.annotation.concurrent.GuardedBy;
 import java.io.IOException;
 import java.net.URI;
 import java.util.HashSet;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -63,7 +66,7 @@ public class ConnectionsFileSystem extends FileSystem {
 
     @Override
     public FSDataOutputStream create(Path f, WriteMode overwriteMode) throws IOException {
-        return createOutputStream(() -> originalFs.create(f, overwriteMode));
+        return createOutputStream(f, () -> originalFs.create(f, overwriteMode));
     }
 
     @Override
@@ -74,35 +77,35 @@ public class ConnectionsFileSystem extends FileSystem {
             throws IOException {
 
         return createOutputStream(
-                () -> originalFs.create(f, overwrite, bufferSize, replication, blockSize));
+                f, () -> originalFs.create(f, overwrite, bufferSize, replication, blockSize));
     }
 
     @Override
     public FSDataInputStream open(Path f, int bufferSize) throws IOException {
-        return createInputStream(() -> originalFs.open(f, bufferSize));
+        return createInputStream(f, () -> originalFs.open(f, bufferSize));
     }
 
     @Override
     public FSDataInputStream open(Path f) throws IOException {
-        return createInputStream(() -> originalFs.open(f));
+        return createInputStream(f, () -> originalFs.open(f));
     }
 
     private FSDataOutputStream createOutputStream(
-            final SupplierWithException<FSDataOutputStream, IOException> streamOpener)
+            Path f, SupplierWithException<FSDataOutputStream, IOException> streamOpener)
             throws IOException {
 
         final SupplierWithException<OutStream, IOException> wrappedStreamOpener =
-                () -> new OutStream(streamOpener.get(), this);
+                () -> new OutStream(f, streamOpener.get(), this);
 
         return createStream(wrappedStreamOpener, openOutputStreams);
     }
 
     private FSDataInputStream createInputStream(
-            final SupplierWithException<FSDataInputStream, IOException> streamOpener)
+            Path f, SupplierWithException<FSDataInputStream, IOException> streamOpener)
             throws IOException {
 
         final SupplierWithException<InStream, IOException> wrappedStreamOpener =
-                () -> new InStream(streamOpener.get(), this);
+                () -> new InStream(f, streamOpener.get(), this);
 
         return createStream(wrappedStreamOpener, openInputStreams);
     }
@@ -212,6 +215,8 @@ public class ConnectionsFileSystem extends FileSystem {
 
     private static final class OutStream extends FSDataOutputStream {
 
+        private final Path file;
+
         private final FSDataOutputStream originalStream;
 
         private final ConnectionsFileSystem fs;
@@ -219,9 +224,14 @@ public class ConnectionsFileSystem extends FileSystem {
         /** Flag tracking whether the stream was already closed, for proper inactivity tracking. */
         private final AtomicBoolean closed = new AtomicBoolean();
 
-        OutStream(FSDataOutputStream originalStream, ConnectionsFileSystem fs) {
+        OutStream(Path file, FSDataOutputStream originalStream, ConnectionsFileSystem fs) {
+            this.file = file;
             this.originalStream = checkNotNull(originalStream);
             this.fs = checkNotNull(fs);
+        }
+
+        private Path file() {
+            return file;
         }
 
         @Override
@@ -263,6 +273,8 @@ public class ConnectionsFileSystem extends FileSystem {
 
     private static final class InStream extends FSDataInputStream {
 
+        private final Path file;
+
         private final FSDataInputStream originalStream;
 
         private final ConnectionsFileSystem fs;
@@ -270,9 +282,14 @@ public class ConnectionsFileSystem extends FileSystem {
         /** Flag tracking whether the stream was already closed, for proper inactivity tracking. */
         private final AtomicBoolean closed = new AtomicBoolean();
 
-        InStream(FSDataInputStream originalStream, ConnectionsFileSystem fs) {
+        InStream(Path file, FSDataInputStream originalStream, ConnectionsFileSystem fs) {
             this.originalStream = checkNotNull(originalStream);
             this.fs = checkNotNull(fs);
+            this.file = file;
+        }
+
+        public Path file() {
+            return file;
         }
 
         @Override
@@ -337,7 +354,15 @@ public class ConnectionsFileSystem extends FileSystem {
         }
     }
 
-    public int openStreams() {
-        return openInputStreams.size() + openOutputStreams.size();
+    public List<FSDataInputStream> openInputStreams(Predicate<Path> filter) {
+        return openInputStreams.stream()
+                .filter(s -> filter.test(s.file))
+                .collect(Collectors.toList());
+    }
+
+    public List<FSDataOutputStream> openOutputStreams(Predicate<Path> filter) {
+        return openOutputStreams.stream()
+                .filter(s -> filter.test(s.file))
+                .collect(Collectors.toList());
     }
 }

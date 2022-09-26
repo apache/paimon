@@ -59,6 +59,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.CoreOptions.BUCKET;
@@ -121,7 +122,10 @@ public abstract class FileStoreTableTestBase {
         FileSystem fileSystem = tablePath.getFileSystem();
         assertThat(fileSystem).isInstanceOf(ConnectionsFileSystem.class);
         ConnectionsFileSystem connectionsFileSystem = (ConnectionsFileSystem) fileSystem;
-        assertThat(connectionsFileSystem.openStreams()).isEqualTo(0);
+
+        Predicate<Path> pathPredicate = path -> path.toString().contains(tempDir.toString());
+        assertThat(connectionsFileSystem.openInputStreams(pathPredicate)).isEmpty();
+        assertThat(connectionsFileSystem.openOutputStreams(pathPredicate)).isEmpty();
     }
 
     @Test
