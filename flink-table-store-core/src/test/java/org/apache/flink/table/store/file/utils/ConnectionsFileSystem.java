@@ -195,7 +195,6 @@ public class ConnectionsFileSystem extends FileSystem {
     void unregisterOutputStream(OutStream stream) {
         lock.lock();
         try {
-            // only decrement if we actually remove the stream
             openOutputStreams.remove(stream);
         } finally {
             lock.unlock();
@@ -205,7 +204,6 @@ public class ConnectionsFileSystem extends FileSystem {
     void unregisterInputStream(InStream stream) {
         lock.lock();
         try {
-            // only decrement if we actually remove the stream
             openInputStreams.remove(stream);
         } finally {
             lock.unlock();
