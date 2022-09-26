@@ -184,11 +184,11 @@ public class AppendOnlyWriterTest {
 
     @Test
     public void testRollingWrite() throws Exception {
-        // Set a very small target file size, so that we will roll over to a new file even if
-        // writing one record.
+        // Set a very small target file size, so the threshold to trigger rolling becomes record
+        // count instead of file size, because we check rolling per 1000 records.
         AppendOnlyWriter writer = createEmptyWriter(10L);
 
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < 10 * 1000; i++) {
             writer.write(row(i, String.format("%03d", i), PART));
         }
 
@@ -204,21 +204,23 @@ public class AppendOnlyWriterTest {
             Path path = pathFactory.toPath(meta.fileName());
             assertThat(path.getFileSystem().exists(path)).isTrue();
 
-            assertThat(meta.rowCount()).isEqualTo(1L);
+            assertThat(meta.rowCount()).isEqualTo(1000L);
             assertThat(meta.minKey()).isEqualTo(EMPTY_ROW);
             assertThat(meta.maxKey()).isEqualTo(EMPTY_ROW);
             assertThat(meta.keyStats()).isEqualTo(DataFileMeta.EMPTY_KEY_STATS);
 
+            int min = id * 1000;
+            int max = id * 1000 + 999;
             FieldStats[] expected =
                     new FieldStats[] {
-                        initStats(id, id, 0),
-                        initStats(String.format("%03d", id), String.format("%03d", id), 0),
+                        initStats(min, max, 0),
+                        initStats(String.format("%03d", min), String.format("%03d", max), 0),
                         initStats(PART, PART, 0)
                     };
             assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinary(expected));
 
-            assertThat(meta.minSequenceNumber()).isEqualTo(id);
-            assertThat(meta.maxSequenceNumber()).isEqualTo(id);
+            assertThat(meta.minSequenceNumber()).isEqualTo(min);
+            assertThat(meta.maxSequenceNumber()).isEqualTo(max);
             assertThat(meta.level()).isEqualTo(DataFileMeta.DUMMY_LEVEL);
 
             id += 1;
