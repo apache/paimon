@@ -40,6 +40,8 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
 
     private static final Logger LOG = LoggerFactory.getLogger(RollingFileWriter.class);
 
+    private static final int CHECK_ROLLING_RECORD_CNT = 1000;
+
     private final Supplier<? extends SingleFileWriter<T, R>> writerFactory;
     private final long targetFileSize;
     private final List<SingleFileWriter<T, R>> openedWriters;
@@ -63,6 +65,13 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
         return targetFileSize;
     }
 
+    @VisibleForTesting
+    boolean rollingFile() throws IOException {
+        // query writer's length per 1000 records
+        return recordCount % CHECK_ROLLING_RECORD_CNT == 0
+                && currentWriter.length() >= targetFileSize;
+    }
+
     @Override
     public void write(T row) throws IOException {
         try {
@@ -74,7 +83,7 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
             currentWriter.write(row);
             recordCount += 1;
 
-            if (currentWriter.length() >= targetFileSize) {
+            if (rollingFile()) {
                 closeCurrentWriter();
             }
         } catch (Throwable e) {
