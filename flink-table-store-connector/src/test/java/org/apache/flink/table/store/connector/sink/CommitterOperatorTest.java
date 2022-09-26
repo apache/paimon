@@ -33,6 +33,7 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.sink.FileCommittable;
@@ -87,7 +88,7 @@ public class CommitterOperatorTest {
         long timestamp = 1;
         for (FileCommittable committable : write.prepareCommit(false)) {
             testHarness.processElement(
-                    new Committable(Committable.Kind.FILE, committable), timestamp++);
+                    new Committable(8, Committable.Kind.FILE, committable), timestamp++);
         }
         // checkpoint is completed but not notified, so no snapshot is committed
         OperatorSubtaskState snapshot = testHarness.snapshot(0, timestamp++);
@@ -114,6 +115,37 @@ public class CommitterOperatorTest {
         testHarness.initializeState(snapshot);
         testHarness.open();
         assertResults(table, "1, 10", "2, 20");
+    }
+
+    @Test
+    public void testCheckpointAbort() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createTestHarness(table);
+        testHarness.open();
+
+        // files from multiple checkpoint
+        // but no snapshot
+        long cpId = 0;
+        for (int i = 0; i < 10; i++) {
+            cpId++;
+            TableWrite write = table.newWrite();
+            write.write(GenericRowData.of(1, 10L));
+            write.write(GenericRowData.of(2, 20L));
+            for (FileCommittable committable : write.prepareCommit(false)) {
+                testHarness.processElement(
+                        new Committable(cpId, Committable.Kind.FILE, committable), 1);
+            }
+        }
+
+        // checkpoint is completed but not notified, so no snapshot is committed
+        testHarness.snapshot(cpId, 1);
+        testHarness.notifyOfCompletedCheckpoint(cpId);
+
+        SnapshotManager snapshotManager = new SnapshotManager(tablePath);
+
+        // should create 10 snapshots
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(cpId);
     }
 
     private void assertResults(FileStoreTable table, String... expected) {
