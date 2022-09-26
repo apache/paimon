@@ -117,7 +117,7 @@ public class TestAtomicRenameFileSystem extends LocalFileSystem {
 
         @Override
         public FileSystem create(URI uri) throws IOException {
-            return new TestAtomicRenameFileSystem();
+            return new ConnectionsFileSystem(new TestAtomicRenameFileSystem());
         }
     }
 }

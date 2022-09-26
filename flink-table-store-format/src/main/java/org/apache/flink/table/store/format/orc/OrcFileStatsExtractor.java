@@ -57,22 +57,24 @@ public class OrcFileStatsExtractor implements FileStatsExtractor {
 
     @Override
     public FieldStats[] extract(Path path) throws IOException {
-        Reader reader = OrcShimImpl.createReader(new Configuration(), path);
-        long rowCount = reader.getNumberOfRows();
-        ColumnStatistics[] columnStatistics = reader.getStatistics();
-        TypeDescription schema = reader.getSchema();
-        List<String> columnNames = schema.getFieldNames();
-        List<TypeDescription> columnTypes = schema.getChildren();
+        try (Reader reader = OrcShimImpl.createReader(new Configuration(), path)) {
+            long rowCount = reader.getNumberOfRows();
+            ColumnStatistics[] columnStatistics = reader.getStatistics();
+            TypeDescription schema = reader.getSchema();
 
-        return IntStream.range(0, rowType.getFieldCount())
-                .mapToObj(
-                        i -> {
-                            RowType.RowField field = rowType.getFields().get(i);
-                            int fieldIdx = columnNames.indexOf(field.getName());
-                            int colId = columnTypes.get(fieldIdx).getId();
-                            return toFieldStats(field, columnStatistics[colId], rowCount);
-                        })
-                .toArray(FieldStats[]::new);
+            List<String> columnNames = schema.getFieldNames();
+            List<TypeDescription> columnTypes = schema.getChildren();
+
+            return IntStream.range(0, rowType.getFieldCount())
+                    .mapToObj(
+                            i -> {
+                                RowType.RowField field = rowType.getFields().get(i);
+                                int fieldIdx = columnNames.indexOf(field.getName());
+                                int colId = columnTypes.get(fieldIdx).getId();
+                                return toFieldStats(field, columnStatistics[colId], rowCount);
+                            })
+                    .toArray(FieldStats[]::new);
+        }
     }
 
     private FieldStats toFieldStats(RowType.RowField field, ColumnStatistics stats, long rowCount) {

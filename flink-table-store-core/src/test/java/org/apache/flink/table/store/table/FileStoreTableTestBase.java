@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.GenericRowData;
@@ -30,6 +31,7 @@ import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
+import org.apache.flink.table.store.file.utils.ConnectionsFileSystem;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -43,10 +45,12 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -109,6 +113,15 @@ public abstract class FileStoreTableTestBase {
     @BeforeEach
     public void before() {
         tablePath = new Path(TestAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString());
+    }
+
+    @AfterEach
+    public void after() throws IOException {
+        // assert all connections are closed
+        FileSystem fileSystem = tablePath.getFileSystem();
+        assertThat(fileSystem).isInstanceOf(ConnectionsFileSystem.class);
+        ConnectionsFileSystem connectionsFileSystem = (ConnectionsFileSystem) fileSystem;
+        assertThat(connectionsFileSystem.openStreams()).isEqualTo(0);
     }
 
     @Test
