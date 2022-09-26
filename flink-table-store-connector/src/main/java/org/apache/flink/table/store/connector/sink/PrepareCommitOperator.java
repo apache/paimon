@@ -44,7 +44,7 @@ public abstract class PrepareCommitOperator extends AbstractStreamOperator<Commi
     @Override
     public void prepareSnapshotPreBarrier(long checkpointId) throws Exception {
         if (!endOfInput) {
-            emitCommittables(false);
+            emitCommittables(false, checkpointId);
         }
         // no records are expected to emit after endOfInput
     }
@@ -52,13 +52,14 @@ public abstract class PrepareCommitOperator extends AbstractStreamOperator<Commi
     @Override
     public void endInput() throws Exception {
         endOfInput = true;
-        emitCommittables(true);
+        emitCommittables(true, Long.MAX_VALUE);
     }
 
-    private void emitCommittables(boolean endOfInput) throws IOException {
-        prepareCommit(endOfInput)
+    private void emitCommittables(boolean endOfInput, long checkpointId) throws IOException {
+        prepareCommit(endOfInput, checkpointId)
                 .forEach(committable -> output.collect(new StreamRecord<>(committable)));
     }
 
-    protected abstract List<Committable> prepareCommit(boolean endOfInput) throws IOException;
+    protected abstract List<Committable> prepareCommit(boolean endOfInput, long checkpointId)
+            throws IOException;
 }

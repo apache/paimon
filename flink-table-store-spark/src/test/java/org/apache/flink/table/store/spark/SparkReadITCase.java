@@ -650,8 +650,11 @@ public class SparkReadITCase {
                 .isInstanceOf(NamespaceAlreadyExistsException.class)
                 .hasMessageContaining("Namespace 'bar' already exists");
 
-        assertThat(spark.sql("SHOW NAMESPACES").collectAsList().toString())
-                .isEqualTo("[[bar], [default]]");
+        assertThat(
+                        spark.sql("SHOW NAMESPACES").collectAsList().stream()
+                                .map(row -> row.getString(0))
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("bar", "default");
 
         Path nsPath = new Path(warehousePath, "bar.db");
         assertThat(new File(nsPath.toUri())).exists();

@@ -97,4 +97,16 @@ public class Increment {
     public int hashCode() {
         return Objects.hash(newFiles, compactBefore, compactAfter);
     }
+
+    @Override
+    public String toString() {
+        return "Increment{"
+                + "newFiles="
+                + newFiles
+                + ", compactBefore="
+                + compactBefore
+                + ", compactAfter="
+                + compactAfter
+                + '}';
+    }
 }
