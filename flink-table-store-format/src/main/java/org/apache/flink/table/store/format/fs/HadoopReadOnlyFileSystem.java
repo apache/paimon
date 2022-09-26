@@ -191,5 +191,10 @@ public class HadoopReadOnlyFileSystem extends FileSystem {
         public boolean seekToNewSource(long targetPos) {
             return false;
         }
+
+        @Override
+        public void close() throws IOException {
+            fsDataInputStream.close();
+        }
     }
 }
