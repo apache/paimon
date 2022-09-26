@@ -41,7 +41,7 @@ import java.util.stream.Collectors;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /** A file system that tracks the number of concurrently open input streams, output streams. */
-public class ConnectionsFileSystem extends FileSystem {
+public class TraceableFileSystem extends FileSystem {
 
     private final FileSystem originalFs;
 
@@ -56,7 +56,7 @@ public class ConnectionsFileSystem extends FileSystem {
     @GuardedBy("lock")
     private final HashSet<InStream> openInputStreams;
 
-    public ConnectionsFileSystem(FileSystem originalFs) {
+    public TraceableFileSystem(FileSystem originalFs) {
 
         this.originalFs = checkNotNull(originalFs, "originalFs");
         this.lock = new ReentrantLock(true);
@@ -219,12 +219,12 @@ public class ConnectionsFileSystem extends FileSystem {
 
         private final FSDataOutputStream originalStream;
 
-        private final ConnectionsFileSystem fs;
+        private final TraceableFileSystem fs;
 
         /** Flag tracking whether the stream was already closed, for proper inactivity tracking. */
         private final AtomicBoolean closed = new AtomicBoolean();
 
-        OutStream(Path file, FSDataOutputStream originalStream, ConnectionsFileSystem fs) {
+        OutStream(Path file, FSDataOutputStream originalStream, TraceableFileSystem fs) {
             this.file = file;
             this.originalStream = checkNotNull(originalStream);
             this.fs = checkNotNull(fs);
@@ -277,12 +277,12 @@ public class ConnectionsFileSystem extends FileSystem {
 
         private final FSDataInputStream originalStream;
 
-        private final ConnectionsFileSystem fs;
+        private final TraceableFileSystem fs;
 
         /** Flag tracking whether the stream was already closed, for proper inactivity tracking. */
         private final AtomicBoolean closed = new AtomicBoolean();
 
-        InStream(Path file, FSDataInputStream originalStream, ConnectionsFileSystem fs) {
+        InStream(Path file, FSDataInputStream originalStream, TraceableFileSystem fs) {
             this.originalStream = checkNotNull(originalStream);
             this.fs = checkNotNull(fs);
             this.file = file;

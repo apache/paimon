@@ -31,11 +31,11 @@ import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.file.utils.ConnectionsFileSystem;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
+import org.apache.flink.table.store.file.utils.TraceableFileSystem;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
@@ -120,12 +120,12 @@ public abstract class FileStoreTableTestBase {
     public void after() throws IOException {
         // assert all connections are closed
         FileSystem fileSystem = tablePath.getFileSystem();
-        assertThat(fileSystem).isInstanceOf(ConnectionsFileSystem.class);
-        ConnectionsFileSystem connectionsFileSystem = (ConnectionsFileSystem) fileSystem;
+        assertThat(fileSystem).isInstanceOf(TraceableFileSystem.class);
+        TraceableFileSystem traceableFileSystem = (TraceableFileSystem) fileSystem;
 
         Predicate<Path> pathPredicate = path -> path.toString().contains(tempDir.toString());
-        assertThat(connectionsFileSystem.openInputStreams(pathPredicate)).isEmpty();
-        assertThat(connectionsFileSystem.openOutputStreams(pathPredicate)).isEmpty();
+        assertThat(traceableFileSystem.openInputStreams(pathPredicate)).isEmpty();
+        assertThat(traceableFileSystem.openOutputStreams(pathPredicate)).isEmpty();
     }
 
     @Test
