@@ -16,14 +16,14 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.table.sink;
+package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.memory.MemoryPoolFactory;
-import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.utils.RecordWriter;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
 
@@ -31,16 +31,17 @@ import java.util.Iterator;
 import java.util.Map;
 
 /**
- * A {@link TableWrite} which supports using shared memory and preempting memory from other writers.
+ * Base {@link FileStoreWrite} implementation which supports using shared memory and preempting
+ * memory from other writers.
+ *
+ * @param <T> type of record to write.
  */
-public abstract class MemoryTableWrite<T> extends AbstractTableWrite<T> {
-
+public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> {
     private final MemoryPoolFactory memoryPoolFactory;
 
-    protected MemoryTableWrite(
-            FileStoreWrite<T> write, SinkRecordConverter recordConverter, CoreOptions options) {
-        super(write, recordConverter);
-
+    public MemoryFileStoreWrite(
+            SnapshotManager snapshotManager, FileStoreScan scan, CoreOptions options) {
+        super(snapshotManager, scan);
         HeapMemorySegmentPool memoryPool =
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize());
         this.memoryPoolFactory = new MemoryPoolFactory(memoryPool, this::memoryOwners);

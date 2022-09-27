@@ -33,11 +33,11 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecordWriter;
-import org.apache.flink.table.store.table.sink.MemoryTableWrite;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.TableWriteImpl;
+import org.apache.flink.table.store.table.sink.WriteRecordConverter;
 import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.MergeTreeSplitGenerator;
 import org.apache.flink.table.store.table.source.SplitGenerator;
@@ -122,33 +122,44 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     public TableWrite newWrite() {
         SinkRecordConverter recordConverter =
                 new SinkRecordConverter(store.options().bucket(), tableSchema);
-        return new MemoryTableWrite<KeyValue>(store.newWrite(), recordConverter, store.options()) {
-
-            private final KeyValue kv = new KeyValue();
-
-            @Override
-            protected void writeSinkRecord(SinkRecord record, RecordWriter<KeyValue> writer)
-                    throws Exception {
-                switch (record.row().getRowKind()) {
-                    case INSERT:
-                    case UPDATE_AFTER:
-                        kv.replace(record.row(), RowKind.INSERT, GenericRowData.of(1L));
-                        break;
-                    case UPDATE_BEFORE:
-                    case DELETE:
-                        kv.replace(record.row(), RowKind.INSERT, GenericRowData.of(-1L));
-                        break;
-                    default:
-                        throw new UnsupportedOperationException(
-                                "Unknown row kind " + record.row().getRowKind());
-                }
-                writer.write(kv);
-            }
-        };
+        return new TableWriteImpl<>(
+                store.newWrite(), recordConverter, new ChangelogValueCountWriteRecordConverter());
     }
 
     @Override
     public KeyValueFileStore store() {
         return store;
+    }
+
+    /**
+     * {@link WriteRecordConverter} implementation for {@link ChangelogValueCountFileStoreTable}.
+     */
+    private static class ChangelogValueCountWriteRecordConverter
+            implements WriteRecordConverter<KeyValue> {
+        private static final long serialVersionUID = 1L;
+
+        private transient KeyValue kv;
+
+        @Override
+        public KeyValue write(SinkRecord record) throws Exception {
+            if (kv == null) {
+                kv = new KeyValue();
+            }
+
+            switch (record.row().getRowKind()) {
+                case INSERT:
+                case UPDATE_AFTER:
+                    kv.replace(record.row(), RowKind.INSERT, GenericRowData.of(1L));
+                    break;
+                case UPDATE_BEFORE:
+                case DELETE:
+                    kv.replace(record.row(), RowKind.INSERT, GenericRowData.of(-1L));
+                    break;
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unknown row kind " + record.row().getRowKind());
+            }
+            return kv;
+        }
     }
 }

@@ -58,7 +58,7 @@ import java.util.function.Supplier;
 import static org.apache.flink.table.store.file.io.DataFileMeta.getMaxSequenceNumber;
 
 /** {@link FileStoreWrite} for {@link org.apache.flink.table.store.file.KeyValueFileStore}. */
-public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
+public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
 
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
     private final KeyValueFileWriterFactory.Builder writerFactoryBuilder;
@@ -77,7 +77,7 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options) {
-        super(snapshotManager, scan);
+        super(snapshotManager, scan, options);
         this.readerFactoryBuilder =
                 KeyValueFileReaderFactory.builder(
                         schemaManager,
