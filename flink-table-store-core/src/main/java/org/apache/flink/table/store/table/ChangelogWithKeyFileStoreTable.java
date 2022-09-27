@@ -35,12 +35,12 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecordWriter;
-import org.apache.flink.table.store.table.sink.MemoryTableWrite;
 import org.apache.flink.table.store.table.sink.SequenceGenerator;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.TableWriteImpl;
+import org.apache.flink.table.store.table.sink.WriteRecordConverter;
 import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.MergeTreeSplitGenerator;
 import org.apache.flink.table.store.table.source.SplitGenerator;
@@ -102,11 +102,12 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                 throw new UnsupportedOperationException("Unsupported merge engine: " + mergeEngine);
         }
 
+        CoreOptions options = new CoreOptions(conf);
         this.store =
                 new KeyValueFileStore(
                         schemaManager,
                         tableSchema.id(),
-                        new CoreOptions(conf),
+                        options,
                         tableSchema.logicalPartitionType(),
                         addKeyNamePrefix(tableSchema.logicalBucketKeyType()),
                         addKeyNamePrefix(tableSchema.logicalTrimmedPrimaryKeysType()),
@@ -190,34 +191,48 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     public TableWrite newWrite() {
         SinkRecordConverter recordConverter =
                 new SinkRecordConverter(store.options().bucket(), tableSchema);
-        SequenceGenerator sequenceGenerator =
-                store.options()
-                        .sequenceField()
-                        .map(field -> new SequenceGenerator(field, schema().logicalRowType()))
-                        .orElse(null);
-        return new MemoryTableWrite<KeyValue>(store.newWrite(), recordConverter, store.options()) {
-
-            private final KeyValue kv = new KeyValue();
-
-            @Override
-            protected void writeSinkRecord(SinkRecord record, RecordWriter<KeyValue> writer)
-                    throws Exception {
-                long sequenceNumber =
-                        sequenceGenerator == null
-                                ? KeyValue.UNKNOWN_SEQUENCE
-                                : sequenceGenerator.generate(record.row());
-                writer.write(
-                        kv.replace(
-                                record.primaryKey(),
-                                sequenceNumber,
-                                record.row().getRowKind(),
-                                record.row()));
-            }
-        };
+        return new TableWriteImpl<>(
+                store.newWrite(),
+                recordConverter,
+                new ChangelogWithKeyWriteRecordConverter(store.options(), schema()));
     }
 
     @Override
     public KeyValueFileStore store() {
         return store;
+    }
+
+    /** {@link WriteRecordConverter} implementation for {@link ChangelogWithKeyFileStoreTable}. */
+    private static class ChangelogWithKeyWriteRecordConverter
+            implements WriteRecordConverter<KeyValue> {
+        private final CoreOptions options;
+        private final TableSchema schema;
+        private transient SequenceGenerator sequenceGenerator;
+        private transient KeyValue kv;
+
+        private ChangelogWithKeyWriteRecordConverter(CoreOptions options, TableSchema schema) {
+            this.options = options;
+            this.schema = schema;
+        }
+
+        @Override
+        public KeyValue write(SinkRecord record) throws Exception {
+            if (sequenceGenerator == null) {
+                sequenceGenerator =
+                        options.sequenceField()
+                                .map(field -> new SequenceGenerator(field, schema.logicalRowType()))
+                                .orElse(null);
+            }
+            if (kv == null) {
+                kv = new KeyValue();
+            }
+
+            long sequenceNumber =
+                    sequenceGenerator == null
+                            ? KeyValue.UNKNOWN_SEQUENCE
+                            : sequenceGenerator.generate(record.row());
+            return kv.replace(
+                    record.primaryKey(), sequenceNumber, record.row().getRowKind(), record.row());
+        }
     }
 }
