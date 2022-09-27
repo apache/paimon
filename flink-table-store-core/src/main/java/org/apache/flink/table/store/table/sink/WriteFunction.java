@@ -23,12 +23,14 @@ import org.apache.flink.table.store.table.AppendOnlyFileStoreTable;
 import org.apache.flink.table.store.table.ChangelogValueCountFileStoreTable;
 import org.apache.flink.table.store.table.ChangelogWithKeyFileStoreTable;
 
+import java.io.Serializable;
+
 /**
  * Write operation of the record with the given writer.
  *
  * @param <T> type of record to write.
  */
-public interface WriteFunction<T> {
+public interface WriteFunction<T> extends Serializable {
     /**
      * Write the record with given writer, operations in {@link AppendOnlyFileStoreTable}, {@link
      * ChangelogValueCountFileStoreTable} and {@link ChangelogWithKeyFileStoreTable} are different.

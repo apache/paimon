@@ -24,6 +24,9 @@ import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreRead;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreScan;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreWrite;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.utils.RecordWriter;
+import org.apache.flink.table.store.table.sink.SinkRecord;
+import org.apache.flink.table.store.table.sink.WriteFunction;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Preconditions;
@@ -69,13 +72,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
                 snapshotManager(),
                 newScan(true),
                 options,
-                (record, writer) -> {
-                    Preconditions.checkState(
-                            record.row().getRowKind() == RowKind.INSERT,
-                            "Append only writer can not accept row with RowKind %s",
-                            record.row().getRowKind());
-                    writer.write(record.row());
-                });
+                new AppendOnlyWriteFunction());
     }
 
     private AppendOnlyFileStoreScan newScan(boolean checkNumOfBuckets) {
@@ -93,5 +90,19 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
     @Override
     public Comparator<RowData> newKeyComparator() {
         return null;
+    }
+
+    /** {@link WriteFunction} implementation in {@link AppendOnlyFileStore}. */
+    private static class AppendOnlyWriteFunction implements WriteFunction<RowData> {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public void write(SinkRecord record, RecordWriter<RowData> writer) throws Exception {
+            Preconditions.checkState(
+                    record.row().getRowKind() == RowKind.INSERT,
+                    "Append only writer can not accept row with RowKind %s",
+                    record.row().getRowKind());
+            writer.write(record.row());
+        }
     }
 }

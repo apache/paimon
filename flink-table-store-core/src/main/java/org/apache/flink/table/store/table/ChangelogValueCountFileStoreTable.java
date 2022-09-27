@@ -74,34 +74,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                         tableSchema.logicalRowType(),
                         countType,
                         mergeFunction,
-                        new WriteFunction<KeyValue>() {
-                            private final KeyValue kv = new KeyValue();
-
-                            @Override
-                            public void write(SinkRecord record, RecordWriter<KeyValue> writer)
-                                    throws Exception {
-                                switch (record.row().getRowKind()) {
-                                    case INSERT:
-                                    case UPDATE_AFTER:
-                                        kv.replace(
-                                                record.row(),
-                                                RowKind.INSERT,
-                                                GenericRowData.of(1L));
-                                        break;
-                                    case UPDATE_BEFORE:
-                                    case DELETE:
-                                        kv.replace(
-                                                record.row(),
-                                                RowKind.INSERT,
-                                                GenericRowData.of(-1L));
-                                        break;
-                                    default:
-                                        throw new UnsupportedOperationException(
-                                                "Unknown row kind " + record.row().getRowKind());
-                                }
-                                writer.write(kv);
-                            }
-                        });
+                        new ChangelogValueCountWriteFunction());
     }
 
     @Override
@@ -157,5 +130,30 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     @Override
     public KeyValueFileStore store() {
         return store;
+    }
+
+    /** {@link WriteFunction} implementation for {@link ChangelogValueCountFileStoreTable}. */
+    private static class ChangelogValueCountWriteFunction implements WriteFunction<KeyValue> {
+        private static final long serialVersionUID = 1L;
+
+        private final KeyValue kv = new KeyValue();
+
+        @Override
+        public void write(SinkRecord record, RecordWriter<KeyValue> writer) throws Exception {
+            switch (record.row().getRowKind()) {
+                case INSERT:
+                case UPDATE_AFTER:
+                    kv.replace(record.row(), RowKind.INSERT, GenericRowData.of(1L));
+                    break;
+                case UPDATE_BEFORE:
+                case DELETE:
+                    kv.replace(record.row(), RowKind.INSERT, GenericRowData.of(-1L));
+                    break;
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unknown row kind " + record.row().getRowKind());
+            }
+            writer.write(kv);
+        }
     }
 }

@@ -118,24 +118,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                         addKeyNamePrefix(tableSchema.logicalTrimmedPrimaryKeysType()),
                         rowType,
                         mergeFunction,
-                        new WriteFunction<KeyValue>() {
-                            private final KeyValue kv = new KeyValue();
-
-                            @Override
-                            public void write(SinkRecord record, RecordWriter<KeyValue> writer)
-                                    throws Exception {
-                                long sequenceNumber =
-                                        sequenceGenerator == null
-                                                ? KeyValue.UNKNOWN_SEQUENCE
-                                                : sequenceGenerator.generate(record.row());
-                                writer.write(
-                                        kv.replace(
-                                                record.primaryKey(),
-                                                sequenceNumber,
-                                                record.row().getRowKind(),
-                                                record.row()));
-                            }
-                        });
+                        new ChangelogWithKeyWriteFunction(sequenceGenerator));
     }
 
     private RowType addKeyNamePrefix(RowType type) {
@@ -220,5 +203,30 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public KeyValueFileStore store() {
         return store;
+    }
+
+    /** {@link WriteFunction} implementation for {@link ChangelogWithKeyFileStoreTable}. */
+    private static class ChangelogWithKeyWriteFunction implements WriteFunction<KeyValue> {
+        private final SequenceGenerator sequenceGenerator;
+
+        private ChangelogWithKeyWriteFunction(SequenceGenerator sequenceGenerator) {
+            this.sequenceGenerator = sequenceGenerator;
+        }
+
+        private final KeyValue kv = new KeyValue();
+
+        @Override
+        public void write(SinkRecord record, RecordWriter<KeyValue> writer) throws Exception {
+            long sequenceNumber =
+                    sequenceGenerator == null
+                            ? KeyValue.UNKNOWN_SEQUENCE
+                            : sequenceGenerator.generate(record.row());
+            writer.write(
+                    kv.replace(
+                            record.primaryKey(),
+                            sequenceNumber,
+                            record.row().getRowKind(),
+                            record.row()));
+        }
     }
 }
