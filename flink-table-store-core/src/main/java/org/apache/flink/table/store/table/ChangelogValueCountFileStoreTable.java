@@ -136,10 +136,14 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     private static class ChangelogValueCountWriteFunction implements WriteFunction<KeyValue> {
         private static final long serialVersionUID = 1L;
 
-        private final KeyValue kv = new KeyValue();
+        private transient KeyValue kv;
 
         @Override
         public void write(SinkRecord record, RecordWriter<KeyValue> writer) throws Exception {
+            if (kv == null) {
+                kv = new KeyValue();
+            }
+
             switch (record.row().getRowKind()) {
                 case INSERT:
                 case UPDATE_AFTER:

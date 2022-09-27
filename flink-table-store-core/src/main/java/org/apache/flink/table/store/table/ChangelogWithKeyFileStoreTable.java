@@ -104,10 +104,6 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         }
 
         CoreOptions options = new CoreOptions(conf);
-        SequenceGenerator sequenceGenerator =
-                options.sequenceField()
-                        .map(field -> new SequenceGenerator(field, schema().logicalRowType()))
-                        .orElse(null);
         this.store =
                 new KeyValueFileStore(
                         schemaManager,
@@ -118,7 +114,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                         addKeyNamePrefix(tableSchema.logicalTrimmedPrimaryKeysType()),
                         rowType,
                         mergeFunction,
-                        new ChangelogWithKeyWriteFunction(sequenceGenerator));
+                        new ChangelogWithKeyWriteFunction(options, schema()));
     }
 
     private RowType addKeyNamePrefix(RowType type) {
@@ -207,16 +203,28 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
     /** {@link WriteFunction} implementation for {@link ChangelogWithKeyFileStoreTable}. */
     private static class ChangelogWithKeyWriteFunction implements WriteFunction<KeyValue> {
-        private final SequenceGenerator sequenceGenerator;
+        private final CoreOptions options;
+        private final TableSchema schema;
+        private transient SequenceGenerator sequenceGenerator;
+        private transient KeyValue kv;
 
-        private ChangelogWithKeyWriteFunction(SequenceGenerator sequenceGenerator) {
-            this.sequenceGenerator = sequenceGenerator;
+        private ChangelogWithKeyWriteFunction(CoreOptions options, TableSchema schema) {
+            this.options = options;
+            this.schema = schema;
         }
-
-        private final KeyValue kv = new KeyValue();
 
         @Override
         public void write(SinkRecord record, RecordWriter<KeyValue> writer) throws Exception {
+            if (sequenceGenerator == null) {
+                sequenceGenerator =
+                        options.sequenceField()
+                                .map(field -> new SequenceGenerator(field, schema.logicalRowType()))
+                                .orElse(null);
+            }
+            if (kv == null) {
+                kv = new KeyValue();
+            }
+
             long sequenceNumber =
                     sequenceGenerator == null
                             ? KeyValue.UNKNOWN_SEQUENCE
