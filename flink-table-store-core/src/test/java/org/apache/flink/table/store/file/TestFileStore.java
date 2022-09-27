@@ -44,6 +44,7 @@ import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.sink.FileCommittable;
+import org.apache.flink.table.store.table.sink.WriteRecordConverter;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -91,7 +92,8 @@ public class TestFileStore extends KeyValueFileStore {
             RowType partitionType,
             RowType keyType,
             RowType valueType,
-            MergeFunction<KeyValue> mergeFunction) {
+            MergeFunction<KeyValue> mergeFunction,
+            WriteRecordConverter<KeyValue> writeRecordConverter) {
         super(
                 new SchemaManager(options.path()),
                 0L,
@@ -100,7 +102,8 @@ public class TestFileStore extends KeyValueFileStore {
                 keyType,
                 keyType,
                 valueType,
-                mergeFunction);
+                mergeFunction,
+                writeRecordConverter);
         this.root = root;
         this.keySerializer = new RowDataSerializer(keyType);
         this.valueSerializer = new RowDataSerializer(valueType);

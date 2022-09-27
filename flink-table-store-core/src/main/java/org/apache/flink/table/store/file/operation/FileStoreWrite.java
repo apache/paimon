@@ -20,9 +20,12 @@ package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.utils.RecordWriter;
+import org.apache.flink.table.store.table.sink.FileCommittable;
+import org.apache.flink.table.store.table.sink.SinkRecord;
 
 import javax.annotation.Nullable;
 
@@ -31,7 +34,8 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 
 /**
- * Write operation which provides {@link RecordWriter} creation.
+ * Write operation which provides {@link RecordWriter} creation and writes {@link SinkRecord} to
+ * {@link FileStore}.
  *
  * @param <T> type of record to write.
  */
@@ -55,4 +59,35 @@ public interface FileStoreWrite<T> {
      */
     Callable<CompactResult> createCompactWriter(
             BinaryRowData partition, int bucket, @Nullable List<DataFileMeta> compactFiles);
+
+    /**
+     * If overwrite is true, the writer will overwrite the store, otherwise it won't.
+     *
+     * @param overwrite the overwrite flag
+     */
+    void withOverwrite(boolean overwrite);
+
+    /**
+     * Write the record to the store.
+     *
+     * @param record the given record
+     * @throws Exception the thrown exception when writing the record
+     */
+    void write(SinkRecord record) throws Exception;
+
+    /**
+     * Prepare commit in the write.
+     *
+     * @param endOfInput if true, the data writing is ended
+     * @return the file committable list
+     * @throws Exception the thrown exception
+     */
+    List<FileCommittable> prepareCommit(boolean endOfInput) throws Exception;
+
+    /**
+     * Close the writer.
+     *
+     * @throws Exception the thrown exception
+     */
+    void close() throws Exception;
 }

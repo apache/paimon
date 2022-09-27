@@ -159,7 +159,8 @@ public class TestChangelogDataReadWrite {
                                 pathFactory,
                                 snapshotManager,
                                 null, // not used, we only create an empty writer
-                                options)
+                                options,
+                                (r, w) -> {})
                         .createEmptyWriter(partition, bucket, service);
         ((MemoryOwner) writer)
                 .setMemoryPool(

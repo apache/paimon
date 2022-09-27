@@ -44,6 +44,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.table.sink.WriteFunction;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
@@ -58,7 +59,7 @@ import java.util.function.Supplier;
 import static org.apache.flink.table.store.file.io.DataFileMeta.getMaxSequenceNumber;
 
 /** {@link FileStoreWrite} for {@link org.apache.flink.table.store.file.KeyValueFileStore}. */
-public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
+public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
 
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
     private final KeyValueFileWriterFactory.Builder writerFactoryBuilder;
@@ -76,8 +77,9 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
-            CoreOptions options) {
-        super(snapshotManager, scan);
+            CoreOptions options,
+            WriteFunction<KeyValue> writeFunction) {
+        super(snapshotManager, scan, writeFunction);
         this.readerFactoryBuilder =
                 KeyValueFileReaderFactory.builder(
                         schemaManager,

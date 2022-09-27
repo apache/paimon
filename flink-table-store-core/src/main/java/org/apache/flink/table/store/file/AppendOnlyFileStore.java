@@ -25,6 +25,8 @@ import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreScan;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreWrite;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.types.RowKind;
+import org.apache.flink.util.Preconditions;
 
 import java.util.Comparator;
 
@@ -66,7 +68,14 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
                 pathFactory(),
                 snapshotManager(),
                 newScan(true),
-                options);
+                options,
+                (record, writer) -> {
+                    Preconditions.checkState(
+                            record.row().getRowKind() == RowKind.INSERT,
+                            "Append only writer can not accept row with RowKind %s",
+                            record.row().getRowKind());
+                    writer.write(record.row());
+                });
     }
 
     private AppendOnlyFileStoreScan newScan(boolean checkNumOfBuckets) {
