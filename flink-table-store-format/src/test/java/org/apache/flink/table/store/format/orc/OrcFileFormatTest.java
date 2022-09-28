@@ -22,7 +22,6 @@ import org.apache.flink.configuration.Configuration;
 
 import org.junit.jupiter.api.Test;
 
-import static org.apache.flink.table.store.format.orc.OrcFileFormatFactory.IDENTIFIER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link OrcFileFormatFactory}. */
@@ -33,8 +32,8 @@ public class OrcFileFormatTest {
         Configuration options = new Configuration();
         options.setString("haha", "1");
         OrcFileFormat orc = new OrcFileFormatFactory().create(options);
-        assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".haha", "")).isEqualTo("1");
-        assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", "")).isEqualTo("lz4");
+        assertThat(orc.formatOptions().getString("haha", "")).isEqualTo("1");
+        assertThat(orc.formatOptions().getString("compress", "")).isEqualTo("lz4");
     }
 
     @Test
@@ -43,7 +42,7 @@ public class OrcFileFormatTest {
         options.setString("haha", "1");
         options.setString("compress", "zlib");
         OrcFileFormat orc = new OrcFileFormatFactory().create(options);
-        assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".haha", "")).isEqualTo("1");
-        assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", "")).isEqualTo("zlib");
+        assertThat(orc.formatOptions().getString("haha", "")).isEqualTo("1");
+        assertThat(orc.formatOptions().getString("compress", "")).isEqualTo("zlib");
     }
 }
