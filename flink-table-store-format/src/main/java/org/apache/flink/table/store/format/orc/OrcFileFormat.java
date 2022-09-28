@@ -27,8 +27,7 @@ import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.orc.OrcFilters;
 import org.apache.flink.orc.OrcSplitReaderUtil;
 import org.apache.flink.orc.vector.RowDataVectorizer;
-import org.apache.flink.orc.vector.Vectorizer;
-import org.apache.flink.orc.writer.ThreadLocalClassLoaderConfiguration;
+import org.apache.flink.orc.writer.OrcBulkWriterFactory;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -40,7 +39,6 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.MapType;
 import org.apache.flink.table.types.logical.RowType;
 
-import org.apache.orc.OrcFile;
 import org.apache.orc.TypeDescription;
 
 import java.util.ArrayList;
@@ -54,24 +52,16 @@ import static org.apache.flink.table.store.format.orc.OrcFileFormatFactory.IDENT
 /** Orc {@link FileFormat}. The main code is copied from Flink {@code OrcFileFormatFactory}. */
 public class OrcFileFormat extends FileFormat {
 
-    private final Properties orcProperties;
-    private final org.apache.hadoop.conf.Configuration readerConf;
-    private final org.apache.hadoop.conf.Configuration writerConf;
+    private final Configuration formatOptions;
 
     public OrcFileFormat(Configuration formatOptions) {
         super(org.apache.flink.orc.OrcFileFormatFactory.IDENTIFIER);
-        this.orcProperties = getOrcProperties(formatOptions);
-        this.readerConf = new org.apache.hadoop.conf.Configuration();
-        this.orcProperties.forEach((k, v) -> readerConf.set(k.toString(), v.toString()));
-
-        org.apache.hadoop.conf.Configuration conf = new org.apache.hadoop.conf.Configuration();
-        this.writerConf = new ThreadLocalClassLoaderConfiguration();
-        conf.forEach(entry -> writerConf.set(entry.getKey(), entry.getValue()));
+        this.formatOptions = formatOptions;
     }
 
     @VisibleForTesting
-    Properties orcProperties() {
-        return orcProperties;
+    Configuration formatOptions() {
+        return formatOptions;
     }
 
     @Override
@@ -93,8 +83,12 @@ public class OrcFileFormat extends FileFormat {
             }
         }
 
+        Properties properties = getOrcProperties(formatOptions);
+        org.apache.hadoop.conf.Configuration conf = new org.apache.hadoop.conf.Configuration();
+        properties.forEach((k, v) -> conf.set(k.toString(), v.toString()));
+
         return OrcInputFormatFactory.create(
-                readerConf,
+                conf,
                 (RowType) refineLogicalType(type),
                 Projection.of(projection).toTopLevelIndexes(),
                 orcPredicates);
@@ -106,12 +100,11 @@ public class OrcFileFormat extends FileFormat {
 
         TypeDescription typeDescription =
                 OrcSplitReaderUtil.logicalTypeToOrcType(refineLogicalType(type));
-        Vectorizer<RowData> vectorizer =
-                new RowDataVectorizer(typeDescription.toString(), orcTypes);
-        OrcFile.WriterOptions writerOptions = OrcFile.writerOptions(orcProperties, writerConf);
-        writerOptions.setSchema(vectorizer.getSchema());
 
-        return new OrcBulkWriterFactory<>(vectorizer, writerOptions);
+        return new OrcBulkWriterFactory<>(
+                new RowDataVectorizer(typeDescription.toString(), orcTypes),
+                getOrcProperties(formatOptions),
+                new org.apache.hadoop.conf.Configuration());
     }
 
     private static Properties getOrcProperties(ReadableConfig options) {
