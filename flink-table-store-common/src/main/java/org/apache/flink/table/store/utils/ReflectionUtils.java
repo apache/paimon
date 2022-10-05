@@ -24,7 +24,7 @@ import java.lang.reflect.Method;
 /** Utils for java reflection. */
 public class ReflectionUtils {
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
+    @SuppressWarnings("rawtypes")
     public static <T> T invokeStaticMethod(Class clz, String methodName, Object... args)
             throws NoSuchMethodException, InvocationTargetException, IllegalAccessException {
         Method method = null;
@@ -39,6 +39,12 @@ public class ReflectionUtils {
         if (method == null) {
             throw new NoSuchMethodException(methodName);
         }
+        return invokeStaticMethod(method, args);
+    }
+
+    @SuppressWarnings("unchecked")
+    public static <T> T invokeStaticMethod(Method method, Object... args)
+            throws InvocationTargetException, IllegalAccessException {
         return (T) method.invoke(null, args);
     }
 }
