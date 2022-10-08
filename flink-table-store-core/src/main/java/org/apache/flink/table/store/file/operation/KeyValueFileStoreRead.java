@@ -60,7 +60,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     private final TableSchema tableSchema;
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
     private final Comparator<RowData> keyComparator;
-    private final MergeFunction mergeFunction;
+    private final MergeFunction<KeyValue> mergeFunction;
     private final boolean valueCountMode;
 
     @Nullable private int[][] keyProjectedFields;
@@ -75,7 +75,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             RowType keyType,
             RowType valueType,
             Comparator<RowData> keyComparator,
-            MergeFunction mergeFunction,
+            MergeFunction<KeyValue> mergeFunction,
             FileFormat fileFormat,
             FileStorePathFactory pathFactory) {
         this.tableSchema = schemaManager.schema(schemaId);
@@ -153,7 +153,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     private List<ConcatRecordReader.ReaderSupplier<KeyValue>> createSectionReaders(Split split) {
         List<ConcatRecordReader.ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
-        MergeFunction mergeFunc = mergeFunction.copy();
+        MergeFunction<KeyValue> mergeFunc = mergeFunction.copy();
         for (List<SortedRun> section :
                 new IntervalPartition(split.files(), keyComparator).partition()) {
             KeyValueFileReaderFactory readerFactory =

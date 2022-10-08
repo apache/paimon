@@ -45,11 +45,6 @@ public class KeyValue {
     private RowKind valueKind;
     private RowData value;
 
-    public KeyValue setValue(RowData value) {
-        this.value = value;
-        return this;
-    }
-
     public KeyValue replace(RowData key, RowKind valueKind, RowData value) {
         return replace(key, UNKNOWN_SEQUENCE, valueKind, value);
     }

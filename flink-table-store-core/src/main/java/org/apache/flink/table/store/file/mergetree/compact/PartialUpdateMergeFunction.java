@@ -26,18 +26,21 @@ import org.apache.flink.types.RowKind;
 import javax.annotation.Nullable;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
  * A {@link MergeFunction} where key is primary key (unique) and value is the partial record, update
  * non-null fields on merge.
  */
-public class PartialUpdateMergeFunction implements MergeFunction {
+public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
     private static final long serialVersionUID = 1L;
 
     private final RowData.FieldGetter[] getters;
 
+    private transient KeyValue latestKv;
     private transient GenericRowData row;
+    private transient KeyValue reused;
 
     public PartialUpdateMergeFunction(RowData.FieldGetter[] getters) {
         this.getters = getters;
@@ -45,6 +48,7 @@ public class PartialUpdateMergeFunction implements MergeFunction {
 
     @Override
     public void reset() {
+        this.latestKv = null;
         this.row = new GenericRowData(getters.length);
     }
 
@@ -53,6 +57,7 @@ public class PartialUpdateMergeFunction implements MergeFunction {
         checkArgument(
                 kv.valueKind() == RowKind.INSERT || kv.valueKind() == RowKind.UPDATE_AFTER,
                 "Partial update can not accept delete records. Partial delete is not supported!");
+        latestKv = kv;
         for (int i = 0; i < getters.length; i++) {
             Object field = getters[i].getFieldOrNull(kv.value());
             if (field != null) {
@@ -63,12 +68,19 @@ public class PartialUpdateMergeFunction implements MergeFunction {
 
     @Override
     @Nullable
-    public RowData getValue() {
-        return row;
+    public KeyValue getResult() {
+        checkNotNull(
+                latestKv,
+                "Trying to get result from merge function without any input. This is unexpected.");
+
+        if (reused == null) {
+            reused = new KeyValue();
+        }
+        return reused.replace(latestKv.key(), latestKv.sequenceNumber(), RowKind.INSERT, row);
     }
 
     @Override
-    public MergeFunction copy() {
+    public MergeFunction<KeyValue> copy() {
         // RowData.FieldGetter is thread safe
         return new PartialUpdateMergeFunction(getters);
     }

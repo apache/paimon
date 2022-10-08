@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.types.RowKind;
 
@@ -43,40 +42,53 @@ public abstract class MergeFunctionHelperTestBase {
 
     protected MergeFunctionHelper mergeFunctionHelper;
 
-    protected abstract MergeFunction createMergeFunction();
+    protected abstract MergeFunction<KeyValue> createMergeFunction();
 
-    protected abstract RowData getExpected(List<RowData> rows);
+    protected abstract KeyValue getExpected(List<KeyValue> kvs);
 
     @BeforeEach
     void setUp() {
         mergeFunctionHelper = new MergeFunctionHelper(createMergeFunction());
     }
 
-    @MethodSource("provideMergedRowData")
+    @MethodSource("provideMergedKeyValues")
     @ParameterizedTest
-    public void testMergeFunctionHelper(List<RowData> rows) {
-        rows.forEach(r -> mergeFunctionHelper.add(new KeyValue().replace(null, RowKind.INSERT, r)));
-        assertEquals(getExpected(rows), mergeFunctionHelper.getValue());
+    public void testMergeFunctionHelper(List<KeyValue> kvs) {
+        KeyValue expectedKv = getExpected(kvs);
+        kvs.forEach(kv -> mergeFunctionHelper.add(kv));
+        KeyValue mergedKv = mergeFunctionHelper.getResult();
+        assertEquals(expectedKv.key(), mergedKv.key());
+        assertEquals(expectedKv.sequenceNumber(), mergedKv.sequenceNumber());
+        assertEquals(expectedKv.valueKind(), mergedKv.valueKind());
+        assertEquals(expectedKv.value(), mergedKv.value());
     }
 
-    public static Stream<Arguments> provideMergedRowData() {
+    public static Stream<Arguments> provideMergedKeyValues() {
         return Stream.of(
-                Arguments.of(Collections.singletonList(row(1))),
-                Arguments.of(Arrays.asList(row(-1), row(1))),
-                Arguments.of(Arrays.asList(row(1), row(2))));
+                Arguments.of(
+                        Collections.singletonList(
+                                new KeyValue().replace(row(1), 1, RowKind.INSERT, row(1)))),
+                Arguments.of(
+                        Arrays.asList(
+                                new KeyValue().replace(row(2), 2, RowKind.INSERT, row(-1)),
+                                new KeyValue().replace(row(2), 3, RowKind.INSERT, row(1)))),
+                Arguments.of(
+                        Arrays.asList(
+                                new KeyValue().replace(row(3), 4, RowKind.INSERT, row(1)),
+                                new KeyValue().replace(row(3), 5, RowKind.INSERT, row(2)))));
     }
 
     /** Tests for {@link MergeFunctionHelper} with {@link DeduplicateMergeFunction}. */
     public static class WithDeduplicateMergeFunctionTest extends MergeFunctionHelperTestBase {
 
         @Override
-        protected MergeFunction createMergeFunction() {
+        protected MergeFunction<KeyValue> createMergeFunction() {
             return new DeduplicateMergeFunction();
         }
 
         @Override
-        protected RowData getExpected(List<RowData> rows) {
-            return rows.get(rows.size() - 1);
+        protected KeyValue getExpected(List<KeyValue> kvs) {
+            return kvs.get(kvs.size() - 1);
         }
     }
 
@@ -84,17 +96,27 @@ public abstract class MergeFunctionHelperTestBase {
     public static class WithValueRecordMergeFunctionTest extends MergeFunctionHelperTestBase {
 
         @Override
-        protected MergeFunction createMergeFunction() {
+        protected MergeFunction<KeyValue> createMergeFunction() {
             return new ValueCountMergeFunction();
         }
 
         @Override
-        protected RowData getExpected(List<RowData> rows) {
-            if (rows.size() == 1) {
-                return rows.get(0);
+        protected KeyValue getExpected(List<KeyValue> kvs) {
+            if (kvs.size() == 1) {
+                return kvs.get(0);
             } else {
-                long total = rows.stream().mapToLong(r -> r.getLong(0)).sum();
-                return total == 0 ? null : GenericRowData.of(total);
+                long total = kvs.stream().mapToLong(kv -> kv.value().getLong(0)).sum();
+                if (total == 0) {
+                    return null;
+                } else {
+                    KeyValue result = kvs.get(kvs.size() - 1);
+                    return new KeyValue()
+                            .replace(
+                                    result.key(),
+                                    result.sequenceNumber(),
+                                    RowKind.INSERT,
+                                    GenericRowData.of(total));
+                }
             }
         }
 

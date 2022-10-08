@@ -63,7 +63,7 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
     private final KeyValueFileWriterFactory.Builder writerFactoryBuilder;
     private final Supplier<Comparator<RowData>> keyComparatorSupplier;
-    private final MergeFunction mergeFunction;
+    private final MergeFunction<KeyValue> mergeFunction;
     private final CoreOptions options;
 
     public KeyValueFileStoreWrite(
@@ -72,7 +72,7 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
             RowType keyType,
             RowType valueType,
             Supplier<Comparator<RowData>> keyComparatorSupplier,
-            MergeFunction mergeFunction,
+            MergeFunction<KeyValue> mergeFunction,
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,

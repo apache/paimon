@@ -55,7 +55,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private final Comparator<RowData> keyComparator;
 
-    private final MergeFunction mergeFunction;
+    private final MergeFunction<KeyValue> mergeFunction;
 
     private final KeyValueFileWriterFactory writerFactory;
 
@@ -77,7 +77,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             CompactManager compactManager,
             long maxSequenceNumber,
             Comparator<RowData> keyComparator,
-            MergeFunction mergeFunction,
+            MergeFunction<KeyValue> mergeFunction,
             KeyValueFileWriterFactory writerFactory,
             boolean commitForceCompact,
             ChangelogProducer changelogProducer) {

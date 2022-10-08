@@ -62,7 +62,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
         RowType countType =
                 RowType.of(
                         new LogicalType[] {new BigIntType(false)}, new String[] {"_VALUE_COUNT"});
-        MergeFunction mergeFunction = new ValueCountMergeFunction();
+        MergeFunction<KeyValue> mergeFunction = new ValueCountMergeFunction();
         this.store =
                 new KeyValueFileStore(
                         schemaManager,

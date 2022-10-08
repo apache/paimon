@@ -70,6 +70,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     ChangelogWithKeyFileStoreTable(
             Path path, SchemaManager schemaManager, TableSchema tableSchema) {
         super(path, tableSchema);
+
         RowType rowType = tableSchema.logicalRowType();
         Configuration conf = Configuration.fromMap(tableSchema.options());
         CoreOptions.MergeEngine mergeEngine = conf.get(CoreOptions.MERGE_ENGINE);
@@ -78,7 +79,8 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         for (int i = 0; i < fieldTypes.size(); i++) {
             fieldGetters[i] = RowDataUtils.createNullCheckingFieldGetter(fieldTypes.get(i), i);
         }
-        MergeFunction mergeFunction;
+
+        MergeFunction<KeyValue> mergeFunction;
         switch (mergeEngine) {
             case DEDUPLICATE:
                 mergeFunction = new DeduplicateMergeFunction();

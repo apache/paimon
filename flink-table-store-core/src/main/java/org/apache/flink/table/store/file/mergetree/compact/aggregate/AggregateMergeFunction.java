@@ -33,20 +33,22 @@ import java.util.List;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
 import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
  * A {@link MergeFunction} where key is primary key (unique) and value is the partial record,
  * pre-aggregate non-null fields on merge.
  */
-public class AggregateMergeFunction implements MergeFunction {
+public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
     private static final long serialVersionUID = 1L;
 
     private final RowData.FieldGetter[] getters;
-
     private final RowAggregator rowAggregator;
 
+    private transient KeyValue latestKv;
     private transient GenericRowData row;
+    private transient KeyValue reused;
 
     public AggregateMergeFunction(RowData.FieldGetter[] getters, RowAggregator rowAggregator) {
         this.getters = getters;
@@ -55,6 +57,7 @@ public class AggregateMergeFunction implements MergeFunction {
 
     @Override
     public void reset() {
+        this.latestKv = null;
         this.row = new GenericRowData(getters.length);
     }
 
@@ -63,6 +66,7 @@ public class AggregateMergeFunction implements MergeFunction {
         checkArgument(
                 kv.valueKind() == RowKind.INSERT || kv.valueKind() == RowKind.UPDATE_AFTER,
                 "Pre-aggregate can not accept delete records!");
+        latestKv = kv;
         for (int i = 0; i < getters.length; i++) {
             FieldAggregator fieldAggregator = rowAggregator.getFieldAggregatorAtPos(i);
             Object accumulator = getters[i].getFieldOrNull(row);
@@ -74,12 +78,19 @@ public class AggregateMergeFunction implements MergeFunction {
 
     @Nullable
     @Override
-    public RowData getValue() {
-        return row;
+    public KeyValue getResult() {
+        checkNotNull(
+                latestKv,
+                "Trying to get result from merge function without any input. This is unexpected.");
+
+        if (reused == null) {
+            reused = new KeyValue();
+        }
+        return reused.replace(latestKv.key(), latestKv.sequenceNumber(), RowKind.INSERT, row);
     }
 
     @Override
-    public MergeFunction copy() {
+    public MergeFunction<KeyValue> copy() {
         // RowData.FieldGetter is thread safe
         return new AggregateMergeFunction(getters, rowAggregator);
     }
