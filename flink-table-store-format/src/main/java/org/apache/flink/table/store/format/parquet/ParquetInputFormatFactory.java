@@ -28,6 +28,8 @@ import org.apache.flink.table.types.logical.RowType;
 import org.apache.hadoop.conf.Configuration;
 
 import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.Collections;
 
 /** Factory to create parquet input format for different Flink versions. */
@@ -38,25 +40,27 @@ public class ParquetInputFormatFactory {
             RowType producedRowType,
             TypeInformation<RowData> producedTypeInfo,
             boolean isUtcTimestamp) {
-        Class<?> formatClass = null;
+        Class<?> formatClass;
         try {
             formatClass =
                     Class.forName("org.apache.flink.formats.parquet.ParquetColumnarRowInputFormat");
-            return createFromLatestFlinkVersion(
-                    formatClass, conf, producedRowType, producedTypeInfo, isUtcTimestamp);
-        } catch (ClassNotFoundException e) {
+
+            Method method =
+                    Arrays.stream(formatClass.getDeclaredMethods())
+                            .filter(m -> "createPartitionedFormat".equals(m.getName()))
+                            .findAny()
+                            .orElseThrow(NoSuchMethodException::new);
+            int paramCnt = method.getParameterCount();
+            return paramCnt == 8
+                    ? createFrom115(method, conf, producedRowType, producedTypeInfo, isUtcTimestamp)
+                    : createFrom114(method, conf, producedRowType, isUtcTimestamp);
+        } catch (ClassNotFoundException | NoSuchMethodException e) {
             throw new RuntimeException(e);
-        } catch (NoSuchMethodException e) {
-            try {
-                return createFrom114(formatClass, conf, producedRowType, isUtcTimestamp);
-            } catch (NoSuchMethodException ex) {
-                throw new RuntimeException(ex);
-            }
         }
     }
 
-    private static BulkFormat<RowData, FileSourceSplit> createFromLatestFlinkVersion(
-            Class<?> formatClass,
+    private static BulkFormat<RowData, FileSourceSplit> createFrom115(
+            Method method,
             Configuration conf,
             RowType producedRowType,
             TypeInformation<RowData> producedTypeInfo,
@@ -64,8 +68,7 @@ public class ParquetInputFormatFactory {
             throws NoSuchMethodException {
         try {
             return ReflectionUtils.invokeStaticMethod(
-                    formatClass,
-                    "createPartitionedFormat",
+                    method,
                     conf,
                     producedRowType,
                     producedTypeInfo,
@@ -80,15 +83,11 @@ public class ParquetInputFormatFactory {
     }
 
     private static BulkFormat<RowData, FileSourceSplit> createFrom114(
-            Class<?> formatClass,
-            Configuration conf,
-            RowType producedRowType,
-            boolean isUtcTimestamp)
+            Method method, Configuration conf, RowType producedRowType, boolean isUtcTimestamp)
             throws NoSuchMethodException {
         try {
             return ReflectionUtils.invokeStaticMethod(
-                    formatClass,
-                    "createPartitionedFormat",
+                    method,
                     conf,
                     producedRowType,
                     Collections.emptyList(),
