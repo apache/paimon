@@ -53,7 +53,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
         Collections.shuffle(data);
 
         String testDataSourceDdl =
-                "CREATE TABLE test_source (\n"
+                "CREATE TEMPORARY TABLE test_source (\n"
                         + "    dt VARCHAR,\n"
                         + "    hr VARCHAR,\n"
                         + "    person VARCHAR,\n"
@@ -64,38 +64,47 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
                         + "    'format' = 'csv',\n"
                         + "    'path' = '%s'\n"
                         + ");";
-        String testDataSourceFile = UUID.randomUUID().toString() + ".csv";
+        String testDataSourceFile = UUID.randomUUID() + ".csv";
         testDataSourceDdl =
                 String.format(testDataSourceDdl, TEST_DATA_DIR + "/" + testDataSourceFile);
 
+        String catalogDdl =
+                String.format(
+                        "CREATE CATALOG ts_catalog WITH (\n"
+                                + "    'type' = 'table-store',\n"
+                                + "    'warehouse' = '%s'\n"
+                                + ");",
+                        TEST_DATA_DIR + "/" + UUID.randomUUID() + ".store");
+
+        String useCatalogCmd = "USE CATALOG ts_catalog;";
+
         String tableStoreDdl =
-                "CREATE TABLE IF NOT EXISTS table_store (\n"
+                "CREATE TABLE IF NOT EXISTS ts_table (\n"
                         + "    dt VARCHAR,\n"
                         + "    hr VARCHAR,\n"
                         + "    person VARCHAR,\n"
                         + "    category VARCHAR,\n"
                         + "    price INT\n"
                         + ") PARTITIONED BY (dt, hr) WITH (\n"
-                        + "    'bucket' = '3',\n"
-                        + "    'root-path' = '%s'\n"
+                        + "    'bucket' = '3'\n"
                         + ");";
-        tableStoreDdl =
-                String.format(
-                        tableStoreDdl,
-                        TEST_DATA_DIR + "/" + UUID.randomUUID().toString() + ".store");
 
         // prepare test data
         writeSharedFile(testDataSourceFile, String.join("\n", data));
 
         // insert data into table store
         runSql(
-                "INSERT INTO table_store SELECT * FROM test_source;",
+                "INSERT INTO ts_table SELECT * FROM test_source;",
+                catalogDdl,
+                useCatalogCmd,
                 testDataSourceDdl,
                 tableStoreDdl);
 
         // test #1: read all data from table store
         runSql(
-                "INSERT INTO result1 SELECT * FROM table_store;",
+                "INSERT INTO result1 SELECT * FROM ts_table;",
+                catalogDdl,
+                useCatalogCmd,
                 tableStoreDdl,
                 createResultSink(
                         "result1",
@@ -121,7 +130,9 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
 
         // test #2: partition filter
         runSql(
-                "INSERT INTO result2 SELECT * FROM table_store WHERE dt > '20211110' AND hr < '09';",
+                "INSERT INTO result2 SELECT * FROM ts_table WHERE dt > '20211110' AND hr < '09';",
+                catalogDdl,
+                useCatalogCmd,
                 tableStoreDdl,
                 createResultSink(
                         "result2",
@@ -135,7 +146,9 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
 
         // test #3: value filter
         runSql(
-                "INSERT INTO result3 SELECT * FROM table_store WHERE person = 'Alice' AND category = 'Food';",
+                "INSERT INTO result3 SELECT * FROM ts_table WHERE person = 'Alice' AND category = 'Food';",
+                catalogDdl,
+                useCatalogCmd,
                 tableStoreDdl,
                 createResultSink(
                         "result3",
@@ -149,7 +162,9 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
 
         // test #4: aggregation
         runSql(
-                "INSERT INTO result4 SELECT dt, category, sum(price) AS total FROM table_store GROUP BY dt, category;",
+                "INSERT INTO result4 SELECT dt, category, sum(price) AS total FROM ts_table GROUP BY dt, category;",
+                catalogDdl,
+                useCatalogCmd,
                 tableStoreDdl,
                 createResultSink("result4", "dt VARCHAR, hr VARCHAR, total INT"));
         checkResult(

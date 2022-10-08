@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.tests;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
@@ -25,83 +26,102 @@ import java.util.UUID;
 /** Tests for reading and writing log store in stream jobs. */
 public class LogStoreE2eTest extends E2eTestBase {
 
+    private String topicName;
+
+    private int bucketNum;
+
     public LogStoreE2eTest() {
         super(true, false);
     }
 
+    @Override
+    @BeforeEach
+    public void before() throws Exception {
+        super.before();
+        topicName = "ts-topic-" + UUID.randomUUID();
+        bucketNum = 3;
+        createKafkaTopic(topicName, bucketNum);
+    }
+
     @Test
     public void testWithPk() throws Exception {
-        String tableStoreBatchDdl =
-                "CREATE TABLE IF NOT EXISTS table_store (\n"
-                        + "    k VARCHAR,\n"
-                        + "    v INT,\n"
-                        + "    PRIMARY KEY (k) NOT ENFORCED\n"
-                        + ") WITH (\n"
-                        + "    'bucket' = '3',\n"
-                        + "    'root-path' = '%s'\n"
-                        + ");";
-        String tableStoreDir = UUID.randomUUID().toString() + ".store";
-        tableStoreBatchDdl = String.format(tableStoreBatchDdl, TEST_DATA_DIR + "/" + tableStoreDir);
+        String catalogDdl =
+                String.format(
+                        "CREATE CATALOG ts_catalog WITH (\n"
+                                + "    'type' = 'table-store',\n"
+                                + "    'warehouse' = '%s'\n"
+                                + ");",
+                        TEST_DATA_DIR + "/" + UUID.randomUUID() + ".store");
+
+        String useCatalogCmd = "USE CATALOG ts_catalog;";
+
+        String streamTableDdl =
+                String.format(
+                        "CREATE TABLE IF NOT EXISTS ts_table (\n"
+                                + "    k VARCHAR,\n"
+                                + "    v INT,\n"
+                                + "    PRIMARY KEY (k) NOT ENFORCED\n"
+                                + ") WITH (\n"
+                                + "    'bucket' = '%d',\n"
+                                + "    'log.consistency' = 'eventual',\n"
+                                + "    'log.system' = 'kafka',\n"
+                                + "    'kafka.bootstrap.servers' = 'kafka:9092',\n"
+                                + "    'kafka.topic' = '%s'\n"
+                                + ");",
+                        bucketNum, topicName);
 
         // prepare data only in file store
         runSql(
                 "SET 'execution.runtime-mode' = 'batch';\n"
                         + "SET 'table.dml-sync' = 'true';\n"
-                        + "INSERT INTO table_store VALUES ('A', 1), ('B', 2), ('C', 3)",
-                tableStoreBatchDdl);
-
-        String testDataSourceDdl =
-                "CREATE TABLE test_source (\n"
-                        + "    k VARCHAR,\n"
-                        + "    v INT\n"
-                        + ") WITH (\n"
-                        + "    'connector' = 'filesystem',\n"
-                        + "    'format' = 'csv',\n"
-                        + "    'path' = '%s'\n,"
-                        + "    'source.monitor-interval' = '3s'\n"
-                        + ");";
-        String testDataSourceDir = UUID.randomUUID().toString() + ".data";
-        testDataSourceDdl =
-                String.format(testDataSourceDdl, TEST_DATA_DIR + "/" + testDataSourceDir);
-
-        String tableStoreStreamDdl =
-                "CREATE TABLE IF NOT EXISTS table_store (\n"
-                        + "    k VARCHAR,\n"
-                        + "    v INT,\n"
-                        + "    PRIMARY KEY (k) NOT ENFORCED\n"
-                        + ") WITH (\n"
-                        + "    'bucket' = '3',\n"
-                        + "    'root-path' = '%s',\n"
-                        + "    'log.consistency' = 'eventual',\n"
-                        + "    'log.system' = 'kafka',\n"
-                        + "    'kafka.bootstrap.servers' = '%s'\n"
-                        + ");";
-        tableStoreStreamDdl =
-                String.format(
-                        tableStoreStreamDdl, TEST_DATA_DIR + "/" + tableStoreDir, "kafka:9092");
+                        + "INSERT INTO ts_table VALUES ('A', 1), ('B', 2), ('C', 3)",
+                catalogDdl,
+                useCatalogCmd,
+                streamTableDdl);
 
         // prepare first part of test data
-        writeSharedFile(testDataSourceDir + "/1.csv", "A,10\nC,30\nD,40\n");
+        String testTopicName = "ts-topic-" + UUID.randomUUID();
+        createKafkaTopic(testTopicName, 1);
+        sendKafkaMessage("1.csv", "A,10\nC,30\nD,40", testTopicName);
+
+        String testDataSourceDdl =
+                String.format(
+                        "CREATE TEMPORARY TABLE test_source (\n"
+                                + "    k VARCHAR,\n"
+                                + "    v INT\n"
+                                + ") WITH (\n"
+                                + "    'connector' = 'kafka',\n"
+                                + "    'properties.bootstrap.servers' = 'kafka:9092',\n"
+                                + "    'properties.group.id' = 'testGroup',\n"
+                                + "    'scan.startup.mode' = 'earliest-offset',\n"
+                                + "    'topic' = '%s',\n"
+                                + "    'format' = 'csv'\n"
+                                + ");",
+                        testTopicName);
 
         // insert data into table store
         runSql(
                 // long checkpoint interval ensures that new data are only visible from log store
                 "SET 'execution.checkpointing.interval' = '9999s';\n"
-                        + "INSERT INTO table_store SELECT * FROM test_source;",
-                testDataSourceDdl,
-                tableStoreStreamDdl);
+                        + "INSERT INTO ts_table SELECT * FROM test_source;",
+                catalogDdl,
+                useCatalogCmd,
+                streamTableDdl,
+                testDataSourceDdl);
 
         // read all data from table store
         runSql(
-                "INSERT INTO result1 SELECT * FROM table_store;",
-                tableStoreStreamDdl,
+                "INSERT INTO result1 SELECT * FROM ts_table;",
+                catalogDdl,
+                useCatalogCmd,
+                streamTableDdl,
                 createResultSink("result1", "k VARCHAR, v INT"));
 
         // check that we can read data both from file store and log store
         checkResult(s -> s.split(",")[0], "A, 10", "B, 2", "C, 30", "D, 40");
 
         // prepare second part of test data
-        writeSharedFile(testDataSourceDir + "/2.csv", "A,100\nD,400\n");
+        sendKafkaMessage("2.csv", "A,100\nD,400", testTopicName);
 
         // check that we can receive data from log store quickly
         checkResult(s -> s.split(",")[0], "A, 100", "B, 2", "C, 30", "D, 400");

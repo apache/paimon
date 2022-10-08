@@ -49,23 +49,28 @@ public class TypeE2eTest extends E2eTestBase {
                                 "f14 TIMESTAMP(3),",
                                 "f15 ARRAY<STRING>,",
                                 "f16 ROW<a INT, b BIGINT, c STRING>"));
-        String tableStoreDdl =
+        String catalogDdl =
+                String.format(
+                        "CREATE CATALOG ts_catalog WITH (\n"
+                                + "    'type' = 'table-store',\n"
+                                + "    'warehouse' = '%s'\n"
+                                + ");",
+                        TEST_DATA_DIR + "/" + UUID.randomUUID() + ".store");
+
+        String useCatalogCmd = "USE CATALOG ts_catalog;";
+
+        String tableDdl =
                 String.join(
                         "\n",
                         Arrays.asList(
-                                "CREATE TABLE IF NOT EXISTS table_store(",
+                                "CREATE TABLE IF NOT EXISTS ts_table(",
                                 schema,
                                 ") WITH (",
-                                "  'bucket' = '1',",
-                                "  'root-path' = '%s'",
+                                "  'bucket' = '1'",
                                 ");"));
-        tableStoreDdl =
-                String.format(
-                        tableStoreDdl,
-                        TEST_DATA_DIR + "/" + UUID.randomUUID().toString() + ".store");
 
         runSql(
-                "INSERT INTO table_store VALUES ("
+                "INSERT INTO ts_table VALUES ("
                         + "true, cast(1 as tinyint), cast(10 as smallint), "
                         + "100, 1000, cast(1.1 as float), 1.11, 12.456, "
                         + "cast('123456789123456789.12345678' as decimal(26, 8)), "
@@ -81,15 +86,29 @@ public class TypeE2eTest extends E2eTestBase {
                         + "cast(null as bytes), cast(null as date), cast(null as timestamp(3)), "
                         + "cast(null as array<string>), cast(null as row<a int, b bigint, c string>)"
                         + ");",
-                tableStoreDdl);
+                catalogDdl,
+                useCatalogCmd,
+                tableDdl);
         runSql(
-                "INSERT INTO result1 SELECT * FROM table_store;",
-                tableStoreDdl,
+                "INSERT INTO result1 SELECT f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, "
+                        + "f10, f11, f12, f13, f14, f15, f16 FROM ts_table;",
+                catalogDdl,
+                useCatalogCmd,
+                tableDdl,
                 createResultSink("result1", schema));
+
+        String flinkVersion = System.getProperty("flink.version");
+        String expected =
+                flinkVersion.startsWith("1.14")
+                        ? "true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
+                                + "123456789123456789.12345678, hi, hello, table桌子store商店, "
+                                + "[116, 97, 98, 108, 101, -26, -95, -116, -27, -83, -112, 115, 116, 111, 114, 101, -27, -107, -122, -27, -70, -105], "
+                                + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试]"
+                        : "true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
+                                + "123456789123456789.12345678, hi, hello, table桌子store商店, [116], "
+                                + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试]";
         checkResult(
-                "true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
-                        + "123456789123456789.12345678, hi, hello, table桌子store商店, [116], "
-                        + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试]",
+                expected,
                 "null, null, null, null, null, null, null, null, null, "
                         + "null, null, null, null, null, null, null, null");
     }
@@ -119,24 +138,30 @@ public class TypeE2eTest extends E2eTestBase {
                                 "f15 ARRAY<STRING>,",
                                 "f16 ROW<a INT, b BIGINT, c STRING>,",
                                 "f17 MAP<STRING, BIGINT>"));
-        String tableStoreDdl =
+
+        String catalogDdl =
+                String.format(
+                        "CREATE CATALOG ts_catalog WITH (\n"
+                                + "    'type' = 'table-store',\n"
+                                + "    'warehouse' = '%s'\n"
+                                + ");",
+                        TEST_DATA_DIR + "/" + UUID.randomUUID() + ".store");
+
+        String useCatalogCmd = "USE CATALOG ts_catalog;";
+
+        String tableDdl =
                 String.join(
                         "\n",
                         Arrays.asList(
-                                "CREATE TABLE IF NOT EXISTS table_store(",
+                                "CREATE TABLE IF NOT EXISTS ts_table(",
                                 schema + ",",
                                 "PRIMARY KEY (pk) NOT ENFORCED",
                                 ") WITH (",
-                                "  'bucket' = '1',",
-                                "  'root-path' = '%s'",
+                                "  'bucket' = '1'",
                                 ");"));
-        tableStoreDdl =
-                String.format(
-                        tableStoreDdl,
-                        TEST_DATA_DIR + "/" + UUID.randomUUID().toString() + ".store");
 
         runSql(
-                "INSERT INTO table_store VALUES (1,"
+                "INSERT INTO ts_table VALUES (1,"
                         + "true, cast(1 as tinyint), cast(10 as smallint), "
                         + "100, 1000, cast(1.1 as float), 1.11, 12.456, "
                         + "cast('123456789123456789.12345678' as decimal(26, 8)), "
@@ -154,16 +179,30 @@ public class TypeE2eTest extends E2eTestBase {
                         + "cast(null as array<string>), cast(null as row<a int, b bigint, c string>), "
                         + "cast(null as map<string, bigint>)"
                         + ");",
-                tableStoreDdl);
+                catalogDdl,
+                useCatalogCmd,
+                tableDdl);
         runSql(
-                "INSERT INTO result1 SELECT * FROM table_store;",
-                tableStoreDdl,
+                "INSERT INTO result1 SELECT * FROM ts_table;",
+                catalogDdl,
+                useCatalogCmd,
+                tableDdl,
                 createResultSink("result1", schema));
+
+        String flinkVersion = System.getProperty("flink.version");
+        String expected =
+                flinkVersion.startsWith("1.14")
+                        ? "1, true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
+                                + "123456789123456789.12345678, hi, hello, table桌子store商店, "
+                                + "[116, 97, 98, 108, 101, -26, -95, -116, -27, -83, -112, 115, 116, 111, 114, 101, -27, -107, -122, -27, -70, -105], "
+                                + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试], "
+                                + "{hi=1, test=3, hello=null}"
+                        : "1, true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
+                                + "123456789123456789.12345678, hi, hello, table桌子store商店, [116], "
+                                + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试], "
+                                + "{hi=1, test=3, hello=null}";
         checkResult(
-                "1, true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
-                        + "123456789123456789.12345678, hi, hello, table桌子store商店, [116], "
-                        + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试], "
-                        + "{hi=1, test=3, hello=null}",
+                expected,
                 "2, null, null, null, null, null, null, null, null, null, "
                         + "null, null, null, null, null, null, null, null, null");
     }

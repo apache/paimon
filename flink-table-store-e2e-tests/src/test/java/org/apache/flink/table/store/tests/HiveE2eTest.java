@@ -20,6 +20,7 @@ package org.apache.flink.table.store.tests;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 import org.testcontainers.containers.Container;
 import org.testcontainers.containers.ContainerState;
 
@@ -33,6 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>NOTE: This test runs a complete Hadoop cluster in Docker, which requires a lot of memory. If
  * you're running this test locally, make sure that the memory limit of your Docker is at least 8GB.
  */
+@DisabledIfSystemProperty(named = "flink.version", matches = "1.14.*")
 public class HiveE2eTest extends E2eTestBase {
 
     private static final String TABLE_STORE_HIVE_CONNECTOR_JAR_NAME =

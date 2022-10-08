@@ -42,20 +42,25 @@ public class FileStoreBuiltInFormatE2eTest extends E2eTestBase {
                         + "f5 VARCHAR(10),\n"
                         + "f6 STRING,\n"
                         + "f7 DATE\n";
+        String catalogDdl =
+                String.format(
+                        "CREATE CATALOG ts_catalog WITH (\n"
+                                + "    'type' = 'table-store',\n"
+                                + "    'warehouse' = '%s'\n"
+                                + ");",
+                        TEST_DATA_DIR + "/" + UUID.randomUUID() + ".store");
+
+        String useCatalogCmd = "USE CATALOG ts_catalog;";
         String tableStoreDdl =
-                "CREATE TABLE IF NOT EXISTS table_store (\n"
+                "CREATE TABLE IF NOT EXISTS ts_table (\n"
                         + schema
                         + ") WITH (\n"
                         + "    'bucket' = '3',\n"
-                        + "    'root-path' = '%s',\n"
                         + "    'file.format' = 'parquet'\n"
                         + ");";
-        tableStoreDdl =
-                String.format(
-                        tableStoreDdl,
-                        TEST_DATA_DIR + "/" + UUID.randomUUID().toString() + ".store");
+
         String insertDml =
-                "INSERT INTO table_store VALUES ("
+                "INSERT INTO ts_table VALUES ("
                         + "1,"
                         + "true,"
                         + "cast(1 as tinyint),"
@@ -86,12 +91,15 @@ public class FileStoreBuiltInFormatE2eTest extends E2eTestBase {
                         + "'这是一个 built in parquet format',"
                         + "DATE '2022-05-23'"
                         + ")";
-        String resultDdl = createResultSink("result1", schema);
-        runSql(insertDml, tableStoreDdl);
+
+        runSql(insertDml, catalogDdl, useCatalogCmd, tableStoreDdl);
+
         runSql(
-                "INSERT INTO result1 SELECT * FROM table_store where id > 1;",
+                "INSERT INTO result1 SELECT * FROM ts_table where id > 1;",
+                catalogDdl,
+                useCatalogCmd,
                 tableStoreDdl,
-                resultDdl);
+                createResultSink("result1", schema));
         checkResult(
                 "2, "
                         + "false, "
