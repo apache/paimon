@@ -24,7 +24,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.data.DataFileMeta;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.FileUtils;
@@ -119,7 +118,12 @@ public class KeyValueDataFileWriter
     }
 
     @Override
+    @Nullable
     public DataFileMeta result() throws IOException {
+        if (recordCount() == 0) {
+            return null;
+        }
+
         FieldStats[] rowStats = fieldStats();
         int numKeyFields = keyType.getFieldCount();
 

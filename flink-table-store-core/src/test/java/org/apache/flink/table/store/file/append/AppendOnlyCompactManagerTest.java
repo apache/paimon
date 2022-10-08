@@ -16,7 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.data;
+package org.apache.flink.table.store.file.append;
+
+import org.apache.flink.table.store.file.io.DataFileMeta;
 
 import org.junit.jupiter.api.Test;
 
@@ -26,10 +28,10 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 
-import static org.apache.flink.table.store.file.data.DataFileTestUtils.newFile;
+import static org.apache.flink.table.store.file.io.DataFileTestUtils.newFile;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link org.apache.flink.table.store.file.data.AppendOnlyCompactManager}. */
+/** Test for {@link AppendOnlyCompactManager}. */
 public class AppendOnlyCompactManagerTest {
 
     @Test

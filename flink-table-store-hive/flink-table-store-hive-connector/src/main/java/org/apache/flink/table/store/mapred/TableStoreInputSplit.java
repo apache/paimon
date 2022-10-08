@@ -20,7 +20,7 @@ package org.apache.flink.table.store.mapred;
 
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputSerializer;
-import org.apache.flink.table.store.file.data.DataFileMeta;
+import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.table.source.Split;
 
 import org.apache.hadoop.fs.Path;
