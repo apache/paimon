@@ -13,12 +13,21 @@ jobs:
         uses: actions/setup-java@v1
         with:
           java-version: 1.8
-      - name: Build
+      - name: Build Flink 1.15
         run: mvn clean install -DskipTests
-      - name: Test
+      - name: Test Flink 1.15
         run: |
           # run tests with random timezone to find out timezone related bugs
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
           mvn test -pl flink-table-store-e2e-tests -Duser.timezone=$jvm_timezone
+      - name: Build Flink 1.14
+        run: mvn clean install -Dmaven.test.skip=true -Pflink-1.14
+      - name: Test Flink 1.14
+        run: |
+          # run tests with random timezone to find out timezone related bugs
+          . .github/workflows/utils.sh
+          jvm_timezone=$(random_timezone)
+          echo "JVM timezone is set to $jvm_timezone"
+          mvn test -pl flink-table-store-e2e-tests -Duser.timezone=$jvm_timezone -Pflink-1.14
