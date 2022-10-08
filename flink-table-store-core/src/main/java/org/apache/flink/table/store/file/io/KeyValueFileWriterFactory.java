@@ -32,6 +32,7 @@ import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
+
 import java.io.IOException;
 
 /** A factory to create {@link FileWriter}s for writing {@link KeyValue} files. */
