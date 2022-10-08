@@ -27,7 +27,9 @@ import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.orc.OrcFilters;
 import org.apache.flink.orc.OrcSplitReaderUtil;
 import org.apache.flink.orc.vector.RowDataVectorizer;
+import org.apache.flink.orc.vector.Vectorizer;
 import org.apache.flink.orc.writer.OrcBulkWriterFactory;
+import org.apache.flink.orc.writer.ThreadLocalClassLoaderConfiguration;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -54,16 +56,21 @@ import static org.apache.flink.table.store.format.orc.OrcFileFormatFactory.IDENT
 /** Orc {@link FileFormat}. The main code is copied from Flink {@code OrcFileFormatFactory}. */
 public class OrcFileFormat extends FileFormat {
 
-    private final Configuration formatOptions;
+    private final Properties orcProperties;
+    private final org.apache.hadoop.conf.Configuration readerConf;
+    private final org.apache.hadoop.conf.Configuration writerConf;
 
     public OrcFileFormat(Configuration formatOptions) {
         super(org.apache.flink.orc.OrcFileFormatFactory.IDENTIFIER);
-        this.formatOptions = formatOptions;
+        this.orcProperties = getOrcProperties(formatOptions);
+        this.readerConf = new org.apache.hadoop.conf.Configuration();
+        this.orcProperties.forEach((k, v) -> readerConf.set(k.toString(), v.toString()));
+        this.writerConf = new org.apache.hadoop.conf.Configuration();
     }
 
     @VisibleForTesting
-    Configuration formatOptions() {
-        return formatOptions;
+    Properties orcProperties() {
+        return orcProperties;
     }
 
     @Override
@@ -85,28 +92,33 @@ public class OrcFileFormat extends FileFormat {
             }
         }
 
-        Properties properties = getOrcProperties(formatOptions);
-        org.apache.hadoop.conf.Configuration conf = new org.apache.hadoop.conf.Configuration();
-        properties.forEach((k, v) -> conf.set(k.toString(), v.toString()));
-
         return OrcInputFormatFactory.create(
-                conf,
+                readerConf,
                 (RowType) refineLogicalType(type),
                 Projection.of(projection).toTopLevelIndexes(),
                 orcPredicates);
     }
 
+    /**
+     * The {@link OrcBulkWriterFactory} will create {@link ThreadLocalClassLoaderConfiguration} from
+     * the input writer config to avoid classloader leaks.
+     *
+     * <p>TODO: The {@link ThreadLocalClassLoaderConfiguration} in {@link OrcBulkWriterFactory}
+     * should be removed after https://issues.apache.org/jira/browse/ORC-653 is fixed.
+     *
+     * @param type The data type for the {@link BulkWriter}
+     * @return The factory of the {@link BulkWriter}
+     */
     @Override
     public BulkWriter.Factory<RowData> createWriterFactory(RowType type) {
         LogicalType[] orcTypes = type.getChildren().toArray(new LogicalType[0]);
 
         TypeDescription typeDescription =
                 OrcSplitReaderUtil.logicalTypeToOrcType(refineLogicalType(type));
+        Vectorizer<RowData> vectorizer =
+                new RowDataVectorizer(typeDescription.toString(), orcTypes);
 
-        return new OrcBulkWriterFactory<>(
-                new RowDataVectorizer(typeDescription.toString(), orcTypes),
-                getOrcProperties(formatOptions),
-                new org.apache.hadoop.conf.Configuration());
+        return new OrcBulkWriterFactory<>(vectorizer, orcProperties, writerConf);
     }
 
     private static Properties getOrcProperties(ReadableConfig options) {
