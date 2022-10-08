@@ -28,10 +28,11 @@ import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.data.DataFileReader;
-import org.apache.flink.table.store.file.data.DataFileWriter;
 import org.apache.flink.table.store.file.format.FlushingFileFormat;
+import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
+import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
+import org.apache.flink.table.store.file.io.RollingFileWriter;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.mergetree.compact.CompactRewriter;
 import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
@@ -84,8 +85,8 @@ public class MergeTreeTest {
     private Comparator<RowData> comparator;
 
     private CoreOptions options;
-    private DataFileReader dataFileReader;
-    private DataFileWriter dataFileWriter;
+    private KeyValueFileReaderFactory readerFactory;
+    private KeyValueFileWriterFactory writerFactory;
     private RecordWriter<KeyValue> writer;
 
     @BeforeEach
@@ -94,7 +95,7 @@ public class MergeTreeTest {
         pathFactory = new FileStorePathFactory(path);
         comparator = Comparator.comparingInt(o -> o.getInt(0));
         recreateMergeTree(1024 * 1024);
-        Path bucketDir = dataFileWriter.pathFactory().toPath("ignore").getParent();
+        Path bucketDir = writerFactory.pathFactory().toPath("ignore").getParent();
         bucketDir.getFileSystem().mkdirs(bucketDir);
     }
 
@@ -107,24 +108,24 @@ public class MergeTreeTest {
         RowType keyType = new RowType(singletonList(new RowType.RowField("k", new IntType())));
         RowType valueType = new RowType(singletonList(new RowType.RowField("v", new IntType())));
         FileFormat flushingAvro = new FlushingFileFormat("avro");
-        dataFileReader =
-                new DataFileReader.Factory(
+        readerFactory =
+                KeyValueFileReaderFactory.builder(
                                 new SchemaManager(path),
                                 0,
                                 keyType,
                                 valueType,
                                 flushingAvro,
                                 pathFactory)
-                        .create(BinaryRowDataUtil.EMPTY_ROW, 0);
-        dataFileWriter =
-                new DataFileWriter.Factory(
+                        .build(BinaryRowDataUtil.EMPTY_ROW, 0);
+        writerFactory =
+                KeyValueFileWriterFactory.builder(
                                 0,
                                 keyType,
                                 valueType,
                                 flushingAvro,
                                 pathFactory,
                                 options.targetFileSize())
-                        .create(BinaryRowDataUtil.EMPTY_ROW, 0);
+                        .build(BinaryRowDataUtil.EMPTY_ROW, 0);
         writer = createMergeTreeWriter(Collections.emptyList());
     }
 
@@ -245,7 +246,7 @@ public class MergeTreeTest {
 
         writer.close();
 
-        Path bucketDir = dataFileWriter.pathFactory().toPath("ignore").getParent();
+        Path bucketDir = writerFactory.pathFactory().toPath("ignore").getParent();
         Set<String> files =
                 Arrays.stream(bucketDir.getFileSystem().listStatus(bucketDir))
                         .map(FileStatus::getPath)
@@ -261,13 +262,11 @@ public class MergeTreeTest {
                 files.stream().map(DataFileMeta::maxSequenceNumber).max(Long::compare).orElse(-1L);
         MergeTreeWriter writer =
                 new MergeTreeWriter(
-                        dataFileWriter.keyType(),
-                        dataFileWriter.valueType(),
-                        createCompactManager(dataFileWriter, service, files),
+                        createCompactManager(writerFactory, service, files),
                         maxSequenceNumber,
                         comparator,
                         new DeduplicateMergeFunction(),
-                        dataFileWriter,
+                        writerFactory,
                         options.commitForceCompact(),
                         ChangelogProducer.NONE);
         writer.setMemoryPool(
@@ -276,7 +275,7 @@ public class MergeTreeTest {
     }
 
     private MergeTreeCompactManager createCompactManager(
-            DataFileWriter dataFileWriter,
+            KeyValueFileWriterFactory writerFactory,
             ExecutorService compactExecutor,
             List<DataFileMeta> files) {
         CompactStrategy strategy =
@@ -286,16 +285,20 @@ public class MergeTreeTest {
                         options.numSortedRunCompactionTrigger(),
                         options.maxSortedRunNum());
         CompactRewriter rewriter =
-                (outputLevel, dropDelete, sections) ->
-                        dataFileWriter.write(
-                                new RecordReaderIterator<>(
-                                        new MergeTreeReader(
-                                                sections,
-                                                dropDelete,
-                                                dataFileReader,
-                                                comparator,
-                                                new DeduplicateMergeFunction())),
-                                outputLevel);
+                (outputLevel, dropDelete, sections) -> {
+                    RollingFileWriter<KeyValue, DataFileMeta> writer =
+                            writerFactory.createLeveledWriter(outputLevel);
+                    writer.write(
+                            new RecordReaderIterator<>(
+                                    new MergeTreeReader(
+                                            sections,
+                                            dropDelete,
+                                            readerFactory,
+                                            comparator,
+                                            new DeduplicateMergeFunction())));
+                    writer.close();
+                    return writer.result();
+                };
         return new MergeTreeCompactManager(
                 compactExecutor,
                 new Levels(comparator, files, options.numLevels()),
@@ -319,7 +322,7 @@ public class MergeTreeTest {
             assertThat(remove).isTrue();
             // See MergeTreeWriter.updateCompactResult
             if (!newFileNames.contains(file.fileName()) && !afterFiles.contains(file.fileName())) {
-                dataFileWriter.delete(file);
+                writerFactory.deleteFile(file.fileName());
             }
         }
         compactedFiles.addAll(increment.compactAfter());
@@ -376,11 +379,11 @@ public class MergeTreeTest {
                 new MergeTreeReader(
                         new IntervalPartition(files, comparator).partition(),
                         dropDelete,
-                        dataFileReader,
+                        readerFactory,
                         comparator,
                         new DeduplicateMergeFunction());
         List<TestRecord> records = new ArrayList<>();
-        try (RecordReaderIterator<KeyValue> iterator = new RecordReaderIterator<KeyValue>(reader)) {
+        try (RecordReaderIterator<KeyValue> iterator = new RecordReaderIterator<>(reader)) {
             while (iterator.hasNext()) {
                 KeyValue kv = iterator.next();
                 records.add(

@@ -42,7 +42,6 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
-import java.util.function.Supplier;
 
 /**
  * This file includes several {@link ManifestEntry}s, representing the additional changes since last
@@ -116,13 +115,17 @@ public class ManifestFile {
      * <p>NOTE: This method is atomic.
      */
     public List<ManifestFileMeta> write(List<ManifestEntry> entries) {
-        ManifestRollingWriter rollingWriter = createManifestRollingWriter(suggestedFileSize);
-        try (ManifestRollingWriter writer = rollingWriter) {
+        RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
+                new RollingFileWriter<>(
+                        () -> new ManifestEntryWriter(writerFactory, pathFactory.newManifestFile()),
+                        suggestedFileSize);
+        try {
             writer.write(entries);
+            writer.close();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        return rollingWriter.result();
+        return writer.result();
     }
 
     public void delete(String fileName) {
@@ -172,23 +175,6 @@ public class ManifestFile {
                     partitionStatsSerializer.toBinary(partitionStatsCollector.extract()),
                     schemaId);
         }
-    }
-
-    private static class ManifestRollingWriter
-            extends RollingFileWriter<ManifestEntry, ManifestFileMeta> {
-
-        public ManifestRollingWriter(
-                Supplier<ManifestEntryWriter> writerFactory, long targetFileSize) {
-            super(writerFactory, targetFileSize);
-        }
-    }
-
-    private Supplier<ManifestEntryWriter> createWriterFactory() {
-        return () -> new ManifestEntryWriter(writerFactory, pathFactory.newManifestFile());
-    }
-
-    private ManifestRollingWriter createManifestRollingWriter(long targetFileSize) {
-        return new ManifestRollingWriter(createWriterFactory(), targetFileSize);
     }
 
     /**

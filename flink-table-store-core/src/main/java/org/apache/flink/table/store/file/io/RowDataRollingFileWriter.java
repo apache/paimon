@@ -21,8 +21,6 @@ package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.api.common.accumulators.LongCounter;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.data.DataFileMeta;
-import org.apache.flink.table.store.file.data.DataFilePathFactory;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.types.logical.RowType;
 

@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.manifest;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
-import org.apache.flink.table.store.file.data.DataFileTestDataGenerator;
+import org.apache.flink.table.store.file.io.DataFileTestDataGenerator;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.format.FieldStatsCollector;
 import org.apache.flink.util.Preconditions;

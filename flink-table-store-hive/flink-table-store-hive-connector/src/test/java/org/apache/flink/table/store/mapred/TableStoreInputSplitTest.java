@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.mapred;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.data.DataFileTestDataGenerator;
+import org.apache.flink.table.store.file.io.DataFileTestDataGenerator;
 import org.apache.flink.table.store.table.source.Split;
 
 import org.junit.jupiter.api.Test;

@@ -19,8 +19,10 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
+import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -171,6 +173,26 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         commit.commit("2", write.prepareCommit(true));
 
         write.close();
+    }
+
+    @Test
+    public void testChangelogWithoutDataFile() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
+
+        // no data file should be produced from this commit
+        write.write(rowData(1, 10, 100L));
+        write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 100L));
+        commit.commit("0", write.prepareCommit(true));
+        write.close();
+
+        // check that no data file is produced
+        List<Split> splits = table.newScan().withIncremental(true).plan().splits;
+        assertThat(splits).isEmpty();
+        // check that no changelog file is produced
+        Path bucketPath = DataFilePathFactory.bucketPath(table.location(), "1", 0);
+        assertThat(bucketPath.getFileSystem().listStatus(bucketPath)).isNullOrEmpty();
     }
 
     @Override
