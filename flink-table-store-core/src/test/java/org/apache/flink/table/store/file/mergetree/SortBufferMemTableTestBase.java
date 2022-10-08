@@ -61,7 +61,7 @@ public abstract class SortBufferMemTableTestBase {
 
     protected abstract List<ReusingTestData> getExpected(List<ReusingTestData> input);
 
-    protected abstract MergeFunction createMergeFunction();
+    protected abstract MergeFunction<KeyValue> createMergeFunction();
 
     @Test
     public void testAndClear() throws IOException {
@@ -147,7 +147,7 @@ public abstract class SortBufferMemTableTestBase {
         }
 
         @Override
-        protected MergeFunction createMergeFunction() {
+        protected MergeFunction<KeyValue> createMergeFunction() {
             return new DeduplicateMergeFunction();
         }
     }
@@ -166,7 +166,7 @@ public abstract class SortBufferMemTableTestBase {
         }
 
         @Override
-        protected MergeFunction createMergeFunction() {
+        protected MergeFunction<KeyValue> createMergeFunction() {
             return new ValueCountMergeFunction();
         }
 

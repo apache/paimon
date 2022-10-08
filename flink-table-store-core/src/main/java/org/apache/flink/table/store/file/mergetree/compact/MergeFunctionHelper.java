@@ -18,18 +18,17 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
 
 /** Helper functions for the interaction with {@link MergeFunction}. */
 public class MergeFunctionHelper {
 
-    private final MergeFunction mergeFunction;
+    private final MergeFunction<KeyValue> mergeFunction;
 
     private KeyValue initialKV;
     private boolean isInitialized;
 
-    public MergeFunctionHelper(MergeFunction mergeFunction) {
+    public MergeFunctionHelper(MergeFunction<KeyValue> mergeFunction) {
         this.mergeFunction = mergeFunction;
     }
 
@@ -58,7 +57,7 @@ public class MergeFunctionHelper {
     }
 
     /** Get current value of the {@link MergeFunction} helper. */
-    public RowData getValue() {
-        return isInitialized ? mergeFunction.getValue() : initialKV.value();
+    public KeyValue getResult() {
+        return isInitialized ? mergeFunction.getResult() : initialKV;
     }
 }

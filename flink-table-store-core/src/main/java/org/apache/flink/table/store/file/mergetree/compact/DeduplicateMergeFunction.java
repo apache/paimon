@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
 
 import javax.annotation.Nullable;
@@ -27,30 +26,30 @@ import javax.annotation.Nullable;
  * A {@link MergeFunction} where key is primary key (unique) and value is the full record, only keep
  * the latest one.
  */
-public class DeduplicateMergeFunction implements MergeFunction {
+public class DeduplicateMergeFunction implements MergeFunction<KeyValue> {
 
     private static final long serialVersionUID = 1L;
 
-    private RowData latestValue;
+    private transient KeyValue latestKv;
 
     @Override
     public void reset() {
-        latestValue = null;
+        latestKv = null;
     }
 
     @Override
     public void add(KeyValue kv) {
-        latestValue = kv.value();
+        latestKv = kv;
     }
 
     @Override
     @Nullable
-    public RowData getValue() {
-        return latestValue;
+    public KeyValue getResult() {
+        return latestKv;
     }
 
     @Override
-    public MergeFunction copy() {
+    public MergeFunction<KeyValue> copy() {
         return new DeduplicateMergeFunction();
     }
 }
