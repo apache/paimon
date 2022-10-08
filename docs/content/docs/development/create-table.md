@@ -75,10 +75,12 @@ CREATE TABLE [IF NOT EXISTS] [catalog_name.][db_name.]table_name
 ```
 
 {{< hint info >}}
-__Note:__ 
+__Note:__
 - To ensure the uniqueness of the primary key, the primary key must contain the partition field.
-- Metadata column is not supported yet.
-{{< /hint >}}
+- If your actual primary key does not contain partition fields, but the input is complete CDC data,
+  including `UPDATE_BEFORE` records, even if you declare the primary key containing partition
+  field, you can achieve the unique effect.
+  {{< /hint >}}
 
 This will create a directory under `${warehouse}/${database_name}.db/${table_name}`.
 
