@@ -26,6 +26,7 @@ import org.apache.flink.types.RowKind;
 import javax.annotation.Nullable;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
  * A {@link MergeFunction} where key is primary key (unique) and value is the partial record, update
@@ -68,9 +69,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     @Override
     @Nullable
     public KeyValue getResult() {
-        if (latestKv == null) {
-            return null;
-        }
+        checkNotNull(
+                latestKv,
+                "Trying to get result from merge function without any input. This is unexpected.");
 
         if (reused == null) {
             reused = new KeyValue();

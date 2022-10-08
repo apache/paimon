@@ -33,6 +33,7 @@ import java.util.List;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
 import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
  * A {@link MergeFunction} where key is primary key (unique) and value is the partial record,
@@ -78,9 +79,9 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
     @Nullable
     @Override
     public KeyValue getResult() {
-        if (latestKv == null) {
-            return null;
-        }
+        checkNotNull(
+                latestKv,
+                "Trying to get result from merge function without any input. This is unexpected.");
 
         if (reused == null) {
             reused = new KeyValue();
