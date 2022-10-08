@@ -31,6 +31,7 @@ import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.types.logical.RowType;
 
+import javax.annotation.Nullable;
 import java.io.IOException;
 
 /** A factory to create {@link FileWriter}s for writing {@link KeyValue} files. */
@@ -40,7 +41,7 @@ public class KeyValueFileWriterFactory {
     private final RowType keyType;
     private final RowType valueType;
     private final BulkWriter.Factory<RowData> writerFactory;
-    private final FileStatsExtractor fileStatsExtractor;
+    @Nullable private final FileStatsExtractor fileStatsExtractor;
     private final DataFilePathFactory pathFactory;
     private final long suggestedFileSize;
 
@@ -49,7 +50,7 @@ public class KeyValueFileWriterFactory {
             RowType keyType,
             RowType valueType,
             BulkWriter.Factory<RowData> writerFactory,
-            FileStatsExtractor fileStatsExtractor,
+            @Nullable FileStatsExtractor fileStatsExtractor,
             DataFilePathFactory pathFactory,
             long suggestedFileSize) {
         this.schemaId = schemaId;
@@ -96,7 +97,7 @@ public class KeyValueFileWriterFactory {
                 level);
     }
 
-    public SingleFileWriter<KeyValue, Void> createExtraFileWriter() {
+    public SingleFileWriter<KeyValue, Void> createChangelogFileWriter() {
         Path changelogPath = pathFactory.newChangelogPath();
         KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
         return new SingleFileWriter<KeyValue, Void>(

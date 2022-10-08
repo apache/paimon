@@ -141,7 +141,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             // write changelog file
             List<String> extraFiles = new ArrayList<>();
             if (changelogProducer == ChangelogProducer.INPUT) {
-                SingleFileWriter<KeyValue, Void> writer = writerFactory.createExtraFileWriter();
+                SingleFileWriter<KeyValue, Void> writer = writerFactory.createChangelogFileWriter();
                 writer.write(memTable.rawIterator());
                 writer.close();
                 extraFiles.add(writer.path().getName());
@@ -163,7 +163,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 // adding one record then remove one record, but after merging this record will not
                 // appear in lsm file. This is OK because we can also skip this changelog.
                 DataFileMeta fileMeta = writer.result();
-                if (fileMeta != null) {
+                if (fileMeta == null) {
+                    for (String extraFile : extraFiles) {
+                        writerFactory.deleteFile(extraFile);
+                    }
+                } else {
                     fileMeta = fileMeta.copy(extraFiles);
                     newFiles.add(fileMeta);
                     compactManager.addNewFile(fileMeta);
