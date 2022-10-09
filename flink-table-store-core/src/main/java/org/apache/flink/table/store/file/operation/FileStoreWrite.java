@@ -68,12 +68,14 @@ public interface FileStoreWrite<T> {
     void withOverwrite(boolean overwrite);
 
     /**
-     * Write the record to the store.
+     * Write the data to the store according to the partition and bucket.
      *
-     * @param record the given record
+     * @param partition the partition of the data
+     * @param bucket the bucket id of the data
+     * @param data the given data
      * @throws Exception the thrown exception when writing the record
      */
-    void write(SinkRecord record) throws Exception;
+    void write(BinaryRowData partition, int bucket, T data) throws Exception;
 
     /**
      * Prepare commit in the write.

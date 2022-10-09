@@ -33,7 +33,6 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
@@ -73,8 +72,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                         tableSchema.logicalBucketKeyType(),
                         tableSchema.logicalRowType(),
                         countType,
-                        mergeFunction,
-                        new ChangelogValueCountWriteFunction());
+                        mergeFunction);
     }
 
     @Override
@@ -124,7 +122,8 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     public TableWrite newWrite() {
         SinkRecordConverter recordConverter =
                 new SinkRecordConverter(store.options().bucket(), tableSchema);
-        return new TableWriteImpl<>(store.newWrite(), recordConverter);
+        return new TableWriteImpl<>(
+                store.newWrite(), recordConverter, new ChangelogValueCountWriteFunction());
     }
 
     @Override
@@ -139,7 +138,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
         private transient KeyValue kv;
 
         @Override
-        public void write(SinkRecord record, RecordWriter<KeyValue> writer) throws Exception {
+        public KeyValue write(SinkRecord record) throws Exception {
             if (kv == null) {
                 kv = new KeyValue();
             }
@@ -157,7 +156,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                     throw new UnsupportedOperationException(
                             "Unknown row kind " + record.row().getRowKind());
             }
-            writer.write(kv);
+            return kv;
         }
     }
 }

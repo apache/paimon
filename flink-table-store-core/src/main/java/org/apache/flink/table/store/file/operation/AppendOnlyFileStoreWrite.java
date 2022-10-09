@@ -35,7 +35,6 @@ import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.format.FileFormat;
-import org.apache.flink.table.store.table.sink.WriteFunction;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -70,9 +69,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
-            CoreOptions options,
-            WriteFunction<RowData> writeFunction) {
-        super(snapshotManager, scan, writeFunction);
+            CoreOptions options) {
+        super(snapshotManager, scan);
         this.read = read;
         this.schemaId = schemaId;
         this.rowType = rowType;

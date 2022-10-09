@@ -30,14 +30,18 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
+import org.apache.flink.table.store.table.sink.WriteFunction;
 import org.apache.flink.table.store.table.source.AppendOnlySplitGenerator;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.SplitGenerator;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
+import org.apache.flink.types.RowKind;
+import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
 
@@ -104,11 +108,26 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     public TableWrite newWrite() {
         SinkRecordConverter recordConverter =
                 new SinkRecordConverter(store.options().bucket(), tableSchema);
-        return new TableWriteImpl<>(store.newWrite(), recordConverter);
+        return new TableWriteImpl<>(
+                store.newWrite(), recordConverter, new AppendOnlyWriteFunction());
     }
 
     @Override
     public AppendOnlyFileStore store() {
         return store;
+    }
+
+    /** {@link WriteFunction} implementation in {@link AppendOnlyFileStore}. */
+    private static class AppendOnlyWriteFunction implements WriteFunction<RowData> {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public RowData write(SinkRecord record) throws Exception {
+            Preconditions.checkState(
+                    record.row().getRowKind() == RowKind.INSERT,
+                    "Append only writer can not accept row with RowKind %s",
+                    record.row().getRowKind());
+            return record.row();
+        }
     }
 }

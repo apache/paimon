@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.table.AppendOnlyFileStoreTable;
 import org.apache.flink.table.store.table.ChangelogValueCountFileStoreTable;
 import org.apache.flink.table.store.table.ChangelogWithKeyFileStoreTable;
@@ -26,18 +25,19 @@ import org.apache.flink.table.store.table.ChangelogWithKeyFileStoreTable;
 import java.io.Serializable;
 
 /**
- * Write operation of the record with the given writer.
+ * Validate and convert the {@link SinkRecord} to the record supported in different store tables.
  *
- * @param <T> type of record to write.
+ * @param <T> type of record in store table.
  */
 public interface WriteFunction<T> extends Serializable {
     /**
-     * Write the record with given writer, operations in {@link AppendOnlyFileStoreTable}, {@link
-     * ChangelogValueCountFileStoreTable} and {@link ChangelogWithKeyFileStoreTable} are different.
+     * Validate and convert the {@link SinkRecord} to the record, operations in {@link
+     * AppendOnlyFileStoreTable}, {@link ChangelogValueCountFileStoreTable} and {@link
+     * ChangelogWithKeyFileStoreTable} are different.
      *
      * @param record the record to write
-     * @param writer the writer
+     * @return The data in different store tables
      * @throws Exception the thrown exception
      */
-    void write(SinkRecord record, RecordWriter<T> writer) throws Exception;
+    T write(SinkRecord record) throws Exception;
 }

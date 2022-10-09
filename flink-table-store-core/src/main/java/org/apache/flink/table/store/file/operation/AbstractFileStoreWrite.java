@@ -25,8 +25,6 @@ import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.sink.FileCommittable;
-import org.apache.flink.table.store.table.sink.SinkRecord;
-import org.apache.flink.table.store.table.sink.WriteFunction;
 import org.apache.flink.util.concurrent.ExecutorThreadFactory;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Lists;
@@ -56,11 +54,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     protected final Map<BinaryRowData, Map<Integer, RecordWriter<T>>> writers;
     private final ExecutorService compactExecutor;
-    private final WriteFunction<T> writeFunction;
 
     private boolean overwrite = false;
 
-    protected AbstractFileStoreWrite(SnapshotManager snapshotManager, FileStoreScan scan, WriteFunction<T> writeFunction) {
+    protected AbstractFileStoreWrite(SnapshotManager snapshotManager, FileStoreScan scan) {
         this.snapshotManager = snapshotManager;
         this.scan = scan;
 
@@ -68,7 +65,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         this.compactExecutor =
                 Executors.newSingleThreadScheduledExecutor(
                         new ExecutorThreadFactory("compaction-thread"));
-        this.writeFunction = writeFunction;
     }
 
     @Override
@@ -95,9 +91,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         this.overwrite = overwrite;
     }
 
-    public void write(SinkRecord record) throws Exception {
-        RecordWriter<T> writer = getWriter(record.partition(), record.bucket());
-        writeFunction.write(record, writer);
+    @Override
+    public void write(BinaryRowData partition, int bucket, T data) throws Exception {
+        RecordWriter<T> writer = getWriter(partition, bucket);
+        writer.write(data);
     }
 
     public List<FileCommittable> prepareCommit(boolean endOfInput) throws Exception {

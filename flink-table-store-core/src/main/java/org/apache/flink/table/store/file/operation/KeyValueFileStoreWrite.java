@@ -44,7 +44,6 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.table.sink.WriteFunction;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
@@ -77,9 +76,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
-            CoreOptions options,
-            WriteFunction<KeyValue> writeFunction) {
-        super(snapshotManager, scan, writeFunction);
+            CoreOptions options) {
+        super(snapshotManager, scan, options);
         this.readerFactoryBuilder =
                 KeyValueFileReaderFactory.builder(
                         schemaManager,

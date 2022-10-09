@@ -35,7 +35,6 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.table.sink.SequenceGenerator;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
@@ -113,8 +112,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                         addKeyNamePrefix(tableSchema.logicalBucketKeyType()),
                         addKeyNamePrefix(tableSchema.logicalTrimmedPrimaryKeysType()),
                         rowType,
-                        mergeFunction,
-                        new ChangelogWithKeyWriteFunction(options, schema()));
+                        mergeFunction);
     }
 
     private RowType addKeyNamePrefix(RowType type) {
@@ -193,7 +191,10 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     public TableWrite newWrite() {
         SinkRecordConverter recordConverter =
                 new SinkRecordConverter(store.options().bucket(), tableSchema);
-        return new TableWriteImpl<>(store.newWrite(), recordConverter);
+        return new TableWriteImpl<>(
+                store.newWrite(),
+                recordConverter,
+                new ChangelogWithKeyWriteFunction(store.options(), schema()));
     }
 
     @Override
@@ -214,7 +215,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         }
 
         @Override
-        public void write(SinkRecord record, RecordWriter<KeyValue> writer) throws Exception {
+        public KeyValue write(SinkRecord record) throws Exception {
             if (sequenceGenerator == null) {
                 sequenceGenerator =
                         options.sequenceField()
@@ -229,12 +230,8 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                     sequenceGenerator == null
                             ? KeyValue.UNKNOWN_SEQUENCE
                             : sequenceGenerator.generate(record.row());
-            writer.write(
-                    kv.replace(
-                            record.primaryKey(),
-                            sequenceNumber,
-                            record.row().getRowKind(),
-                            record.row()));
+            return kv.replace(
+                    record.primaryKey(), sequenceNumber, record.row().getRowKind(), record.row());
         }
     }
 }
