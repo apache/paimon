@@ -27,6 +27,10 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionWrapper;
 import org.apache.flink.table.store.file.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.flink.table.store.file.mergetree.compact.SortMergeReader;
+import org.apache.flink.table.store.file.mergetree.region.RecordReaderRegion;
+import org.apache.flink.table.store.file.mergetree.region.RecordReaderRegionManager;
+import org.apache.flink.table.store.file.mergetree.region.RecordReaderSubRegion;
+import org.apache.flink.table.store.file.mergetree.region.SortedRegionDataRecordReader;
 import org.apache.flink.table.store.file.utils.RecordReader;
 
 import java.io.IOException;
@@ -69,23 +73,35 @@ public class MergeTreeReaders {
             Comparator<RowData> userKeyComparator,
             MergeFunctionWrapper<KeyValue> mergeFunctionWrapper)
             throws IOException {
-        List<RecordReader<KeyValue>> readers = new ArrayList<>();
+        List<RecordReaderSubRegion<KeyValue>> readerSubRegions = new ArrayList<>();
+        int index = 0;
         for (SortedRun run : section) {
-            readers.add(readerForRun(run, readerFactory));
+            readerSubRegions.add(readerSubRegionForRun(index++, run, readerFactory));
         }
-        if (readers.size() == 1) {
-            return readers.get(0);
-        } else {
-            return new SortMergeReader<>(readers, userKeyComparator, mergeFunctionWrapper);
+        RecordReaderRegionManager<KeyValue> regionManager =
+                new RecordReaderRegionManager<>(readerSubRegions, userKeyComparator);
+        List<RecordReaderRegion<KeyValue>> regions = regionManager.getRegionList();
+        List<ConcatRecordReader.ReaderSupplier<KeyValue>> supplierList = new ArrayList<>();
+        for (RecordReaderRegion<KeyValue> region : regions) {
+            List<RecordReader<KeyValue>> readerList = region.getReaders();
+            supplierList.add(
+                    () ->
+                            readerList.size() == 1 ? readerList.get(0) : new SortMergeReader.create(
+                                    readerList, userKeyComparator, mergeFunctionWrapper));
         }
+        return ConcatRecordReader.create(supplierList);
     }
 
-    public static RecordReader<KeyValue> readerForRun(
-            SortedRun run, KeyValueFileReaderFactory readerFactory) throws IOException {
-        List<ConcatRecordReader.ReaderSupplier<KeyValue>> readers = new ArrayList<>();
+    public static RecordReaderSubRegion<KeyValue> readerSubRegionForRun(
+            int index, SortedRun run, KeyValueFileReaderFactory readerFactory) {
+        List<SortedRegionDataRecordReader<KeyValue>> readers = new ArrayList<>();
         for (DataFileMeta file : run.files()) {
-            readers.add(() -> readerFactory.createRecordReader(file.fileName(), file.level()));
+            readers.add(
+                    new SortedRegionDataRecordReader<>(
+                            () -> readerFactory.createRecordReader(file.fileName(), file.level()),
+                            file.minKey(),
+                            file.maxKey()));
         }
-        return ConcatRecordReader.create(readers);
+        return new RecordReaderSubRegion<>(index, readers);
     }
 }

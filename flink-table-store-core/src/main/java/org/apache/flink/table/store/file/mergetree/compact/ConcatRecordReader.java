@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.util.Preconditions;
 
@@ -74,6 +75,11 @@ public class ConcatRecordReader<T> implements RecordReader<T> {
         if (current != null) {
             current.close();
         }
+    }
+
+    @VisibleForTesting
+    public int getReaderCount() {
+        return queue.size();
     }
 
     /** Supplier to get {@link RecordReader}. */
