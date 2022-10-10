@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
+import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.ReusingTestData;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Preconditions;
@@ -25,6 +26,8 @@ import org.apache.flink.util.Preconditions;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test utils for {@link MergeFunction}s. */
 public class MergeFunctionTestUtils {
@@ -64,5 +67,16 @@ public class MergeFunctionTestUtils {
             }
         }
         return expected;
+    }
+
+    public static void assertKvEquals(KeyValue expected, KeyValue actual) {
+        if (expected == null) {
+            assertThat(actual).isNull();
+        } else {
+            assertThat(actual.key()).isEqualTo(expected.key());
+            assertThat(actual.sequenceNumber()).isEqualTo(expected.sequenceNumber());
+            assertThat(actual.valueKind()).isEqualTo(expected.valueKind());
+            assertThat(actual.value()).isEqualTo(expected.value());
+        }
     }
 }

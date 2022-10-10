@@ -35,12 +35,11 @@ import java.util.stream.Stream;
 
 import static org.apache.flink.table.store.file.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/** Tests for {@link MergeFunctionHelper}. */
-public abstract class MergeFunctionHelperTestBase {
+/** Tests for {@link ReducerMergeFunctionWrapper}. */
+public abstract class ReducerMergeFunctionWrapperTestBase {
 
-    protected MergeFunctionHelper mergeFunctionHelper;
+    protected ReducerMergeFunctionWrapper wrapper;
 
     protected abstract MergeFunction<KeyValue> createMergeFunction();
 
@@ -48,22 +47,19 @@ public abstract class MergeFunctionHelperTestBase {
 
     @BeforeEach
     void setUp() {
-        mergeFunctionHelper = new MergeFunctionHelper(createMergeFunction());
+        wrapper = new ReducerMergeFunctionWrapper(createMergeFunction());
     }
 
-    @MethodSource("provideMergedKeyValues")
+    @MethodSource("provideKeyValuesToMerge")
     @ParameterizedTest
-    public void testMergeFunctionHelper(List<KeyValue> kvs) {
+    public void testReducerMergeFunctionWrapper(List<KeyValue> kvs) {
         KeyValue expectedKv = getExpected(kvs);
-        kvs.forEach(kv -> mergeFunctionHelper.add(kv));
-        KeyValue mergedKv = mergeFunctionHelper.getResult();
-        assertEquals(expectedKv.key(), mergedKv.key());
-        assertEquals(expectedKv.sequenceNumber(), mergedKv.sequenceNumber());
-        assertEquals(expectedKv.valueKind(), mergedKv.valueKind());
-        assertEquals(expectedKv.value(), mergedKv.value());
+        kvs.forEach(kv -> wrapper.add(kv));
+        KeyValue mergedKv = wrapper.getResult();
+        MergeFunctionTestUtils.assertKvEquals(expectedKv, mergedKv);
     }
 
-    public static Stream<Arguments> provideMergedKeyValues() {
+    public static Stream<Arguments> provideKeyValuesToMerge() {
         return Stream.of(
                 Arguments.of(
                         Collections.singletonList(
@@ -78,8 +74,9 @@ public abstract class MergeFunctionHelperTestBase {
                                 new KeyValue().replace(row(3), 5, RowKind.INSERT, row(2)))));
     }
 
-    /** Tests for {@link MergeFunctionHelper} with {@link DeduplicateMergeFunction}. */
-    public static class WithDeduplicateMergeFunctionTest extends MergeFunctionHelperTestBase {
+    /** Tests for {@link ReducerMergeFunctionWrapper} with {@link DeduplicateMergeFunction}. */
+    public static class WithDeduplicateMergeFunctionTest
+            extends ReducerMergeFunctionWrapperTestBase {
 
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
@@ -92,8 +89,9 @@ public abstract class MergeFunctionHelperTestBase {
         }
     }
 
-    /** Tests for {@link MergeFunctionHelper} with {@link ValueCountMergeFunction}. */
-    public static class WithValueRecordMergeFunctionTest extends MergeFunctionHelperTestBase {
+    /** Tests for {@link ReducerMergeFunctionWrapper} with {@link ValueCountMergeFunction}. */
+    public static class WithValueRecordMergeFunctionTest
+            extends ReducerMergeFunctionWrapperTestBase {
 
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
@@ -122,11 +120,9 @@ public abstract class MergeFunctionHelperTestBase {
 
         @Test
         public void testIllegalInput() {
-            mergeFunctionHelper.add(new KeyValue().replace(null, RowKind.INSERT, row(1)));
+            wrapper.add(new KeyValue().replace(null, RowKind.INSERT, row(1)));
             assertThatThrownBy(
-                            () ->
-                                    mergeFunctionHelper.add(
-                                            new KeyValue().replace(null, RowKind.DELETE, row(1))))
+                            () -> wrapper.add(new KeyValue().replace(null, RowKind.DELETE, row(1))))
                     .hasMessageContaining(
                             "In value count mode, only insert records come. This is a bug. Please file an issue.");
         }

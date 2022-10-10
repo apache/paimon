@@ -20,44 +20,55 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.store.file.KeyValue;
 
-/** Helper functions for the interaction with {@link MergeFunction}. */
-public class MergeFunctionHelper {
+/**
+ * Wrapper for {@link MergeFunction}s which works like a reducer.
+ *
+ * <p>A reducer is a type of function. If there is only one input the result is equal to that input;
+ * Otherwise the result is calculated by merging all the inputs in some way.
+ *
+ * <p>This wrapper optimize the wrapped {@link MergeFunction}. If there is only one input, the input
+ * will be stored and the inner merge function will not be called, thus saving some computing time.
+ */
+public class ReducerMergeFunctionWrapper implements MergeFunctionWrapper<KeyValue> {
 
     private final MergeFunction<KeyValue> mergeFunction;
 
-    private KeyValue initialKV;
-    private boolean isInitialized;
+    private transient KeyValue initialKv;
+    private transient boolean isInitialized;
 
-    public MergeFunctionHelper(MergeFunction<KeyValue> mergeFunction) {
+    public ReducerMergeFunctionWrapper(MergeFunction<KeyValue> mergeFunction) {
         this.mergeFunction = mergeFunction;
     }
 
     /** Resets the {@link MergeFunction} helper to its default state. */
+    @Override
     public void reset() {
-        initialKV = null;
+        initialKv = null;
         mergeFunction.reset();
         isInitialized = false;
     }
 
     /** Adds the given {@link KeyValue} to the {@link MergeFunction} helper. */
+    @Override
     public void add(KeyValue kv) {
-        if (initialKV == null) {
-            initialKV = kv;
+        if (initialKv == null) {
+            initialKv = kv;
         } else {
             if (!isInitialized) {
-                merge(initialKV);
+                merge(initialKv);
                 isInitialized = true;
             }
             merge(kv);
         }
     }
 
-    protected void merge(KeyValue kv) {
+    private void merge(KeyValue kv) {
         mergeFunction.add(kv);
     }
 
     /** Get current value of the {@link MergeFunction} helper. */
+    @Override
     public KeyValue getResult() {
-        return isInitialized ? mergeFunction.getResult() : initialKV;
+        return isInitialized ? mergeFunction.getResult() : initialKv;
     }
 }
