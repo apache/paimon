@@ -29,7 +29,7 @@ import org.apache.flink.table.store.file.KeyValue;
  * <p>This wrapper optimize the wrapped {@link MergeFunction}. If there is only one input, the input
  * will be stored and the inner merge function will not be called, thus saving some computing time.
  */
-public class ReducerMergeFunctionWrapper implements MergeFunction<KeyValue> {
+public class ReducerMergeFunctionWrapper implements MergeFunctionWrapper<KeyValue> {
 
     private final MergeFunction<KeyValue> mergeFunction;
 
@@ -70,10 +70,5 @@ public class ReducerMergeFunctionWrapper implements MergeFunction<KeyValue> {
     @Override
     public KeyValue getResult() {
         return isInitialized ? mergeFunction.getResult() : initialKv;
-    }
-
-    @Override
-    public MergeFunction<KeyValue> copy() {
-        return new ReducerMergeFunctionWrapper(mergeFunction.copy());
     }
 }

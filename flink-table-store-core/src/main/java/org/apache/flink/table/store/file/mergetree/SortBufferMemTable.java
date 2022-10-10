@@ -124,7 +124,7 @@ public class SortBufferMemTable implements MemTable {
     private class MergeIterator implements Iterator<KeyValue> {
         private final MutableObjectIterator<BinaryRowData> kvIter;
         private final Comparator<RowData> keyComparator;
-        private final MergeFunction<KeyValue> mergeFunction;
+        private final ReducerMergeFunctionWrapper mergeFunctionWrapper;
 
         // previously read kv
         private KeyValueSerializer previous;
@@ -142,7 +142,7 @@ public class SortBufferMemTable implements MemTable {
                 MergeFunction<KeyValue> mergeFunction) {
             this.kvIter = kvIter;
             this.keyComparator = keyComparator;
-            this.mergeFunction = new ReducerMergeFunctionWrapper(mergeFunction);
+            this.mergeFunctionWrapper = new ReducerMergeFunctionWrapper(mergeFunction);
 
             int totalFieldCount = keyType.getFieldCount() + 2 + valueType.getFieldCount();
             this.previous = new KeyValueSerializer(keyType, valueType);
@@ -180,8 +180,8 @@ public class SortBufferMemTable implements MemTable {
                 if (previousRow == null) {
                     return;
                 }
-                mergeFunction.reset();
-                mergeFunction.add(previous.getReusedKv());
+                mergeFunctionWrapper.reset();
+                mergeFunctionWrapper.add(previous.getReusedKv());
 
                 while (readOnce()) {
                     if (keyComparator.compare(
@@ -189,10 +189,10 @@ public class SortBufferMemTable implements MemTable {
                             != 0) {
                         break;
                     }
-                    mergeFunction.add(current.getReusedKv());
+                    mergeFunctionWrapper.add(current.getReusedKv());
                     swapSerializers();
                 }
-                result = mergeFunction.getResult();
+                result = mergeFunctionWrapper.getResult();
             } while (result == null);
         }
 

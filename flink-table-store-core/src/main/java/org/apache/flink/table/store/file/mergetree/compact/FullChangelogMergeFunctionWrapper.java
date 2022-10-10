@@ -37,7 +37,7 @@ import javax.annotation.Nullable;
  * </ul>
  */
 public class FullChangelogMergeFunctionWrapper
-        implements MergeFunction<FullChangelogMergeFunctionWrapper.Result> {
+        implements MergeFunctionWrapper<FullChangelogMergeFunctionWrapper.Result> {
 
     private final MergeFunction<KeyValue> mergeFunction;
     private final int maxLevel;
@@ -141,11 +141,6 @@ public class FullChangelogMergeFunctionWrapper
         return kv.valueKind() == RowKind.INSERT || kv.valueKind() == RowKind.UPDATE_AFTER;
     }
 
-    @Override
-    public MergeFunction<Result> copy() {
-        return new FullChangelogMergeFunctionWrapper(mergeFunction, maxLevel);
-    }
-
     /** Changelog and final result for the same key. */
     public static class Result {
 
@@ -165,16 +160,25 @@ public class FullChangelogMergeFunctionWrapper
             return this;
         }
 
+        /**
+         * Previous full compaction result for this key. Null if this key does not appear in the
+         * previous result or its value remains unchanged.
+         */
         @Nullable
         public KeyValue before() {
             return before;
         }
 
+        /**
+         * Latest full compaction result for this key. Null if this key does not appear in the
+         * latest result or its value remains unchanged.
+         */
         @Nullable
         public KeyValue after() {
             return after;
         }
 
+        /** Latest full compaction result (result of merge function) for this key. */
         @Nullable
         public KeyValue result() {
             return result;
