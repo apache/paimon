@@ -38,22 +38,25 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
 
     private final BulkFormat.Reader<RowData> reader;
     private final KeyValueSerializer serializer;
+    private final int level;
 
     public KeyValueDataFileRecordReader(
             BulkFormat<RowData, FileSourceSplit> readerFactory,
             Path path,
             RowType keyType,
-            RowType valueType)
+            RowType valueType,
+            int level)
             throws IOException {
         this.reader = FileUtils.createFormatReader(readerFactory, path);
         this.serializer = new KeyValueSerializer(keyType, valueType);
+        this.level = level;
     }
 
     @Nullable
     @Override
     public RecordIterator<KeyValue> readBatch() throws IOException {
         BulkFormat.RecordIterator<RowData> iterator = reader.readBatch();
-        return iterator == null ? null : new KeyValueDataFileRecordIterator(iterator, serializer);
+        return iterator == null ? null : new KeyValueDataFileRecordIterator(iterator);
     }
 
     @Override
@@ -61,16 +64,12 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
         reader.close();
     }
 
-    private static class KeyValueDataFileRecordIterator
-            implements RecordReader.RecordIterator<KeyValue> {
+    private class KeyValueDataFileRecordIterator implements RecordReader.RecordIterator<KeyValue> {
 
         private final BulkFormat.RecordIterator<RowData> iterator;
-        private final KeyValueSerializer serializer;
 
-        private KeyValueDataFileRecordIterator(
-                BulkFormat.RecordIterator<RowData> iterator, KeyValueSerializer serializer) {
+        private KeyValueDataFileRecordIterator(BulkFormat.RecordIterator<RowData> iterator) {
             this.iterator = iterator;
-            this.serializer = serializer;
         }
 
         @Override
@@ -78,7 +77,11 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
             RecordAndPosition<RowData> result = iterator.next();
 
             // TODO schema evolution
-            return result == null ? null : serializer.fromRow(result.getRecord());
+            if (result == null) {
+                return null;
+            } else {
+                return serializer.fromRow(result.getRecord()).setLevel(level);
+            }
         }
 
         @Override

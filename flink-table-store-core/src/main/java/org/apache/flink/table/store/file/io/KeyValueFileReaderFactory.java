@@ -64,9 +64,10 @@ public class KeyValueFileReaderFactory {
         this.pathFactory = pathFactory;
     }
 
-    public RecordReader<KeyValue> createRecordReader(String fileName) throws IOException {
+    public RecordReader<KeyValue> createRecordReader(String fileName, int level)
+            throws IOException {
         return new KeyValueDataFileRecordReader(
-                readerFactory, pathFactory.toPath(fileName), keyType, valueType);
+                readerFactory, pathFactory.toPath(fileName), keyType, valueType, level);
     }
 
     public static Builder builder(
