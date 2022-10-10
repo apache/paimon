@@ -136,7 +136,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                 suppliers.add(
                         () ->
                                 readerFactory.createRecordReader(
-                                        changelogFile(file).orElse(file.fileName())));
+                                        changelogFile(file).orElse(file.fileName()), file.level()));
             }
             return ConcatRecordReader.create(suppliers);
         } else {

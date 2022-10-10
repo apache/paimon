@@ -39,11 +39,15 @@ import java.util.stream.IntStream;
 public class KeyValue {
 
     public static final long UNKNOWN_SEQUENCE = -1;
+    public static final int UNKNOWN_LEVEL = -1;
 
     private RowData key;
+    // determined after written into memory table or read from file
     private long sequenceNumber;
     private RowKind valueKind;
     private RowData value;
+    // determined after read from file
+    private int level;
 
     public KeyValue replace(RowData key, RowKind valueKind, RowData value) {
         return replace(key, UNKNOWN_SEQUENCE, valueKind, value);
@@ -54,6 +58,7 @@ public class KeyValue {
         this.sequenceNumber = sequenceNumber;
         this.valueKind = valueKind;
         this.value = value;
+        this.level = UNKNOWN_LEVEL;
         return this;
     }
 
@@ -76,6 +81,15 @@ public class KeyValue {
 
     public RowData value() {
         return value;
+    }
+
+    public int level() {
+        return level;
+    }
+
+    public KeyValue setLevel(int level) {
+        this.level = level;
+        return this;
     }
 
     public static RowType schema(RowType keyType, RowType valueType) {
@@ -120,22 +134,17 @@ public class KeyValue {
                         keySerializer.copy(key),
                         sequenceNumber,
                         valueKind,
-                        valueSerializer.copy(value));
+                        valueSerializer.copy(value))
+                .setLevel(level);
     }
 
     @VisibleForTesting
     public String toString(RowType keyType, RowType valueType) {
         String keyString = rowDataToString(key, keyType);
         String valueString = rowDataToString(value, valueType);
-        return "{kind: "
-                + valueKind.name()
-                + ", seq: "
-                + sequenceNumber
-                + ", key: ("
-                + keyString
-                + "), value: ("
-                + valueString
-                + ")}";
+        return String.format(
+                "{kind: %s, seq: %d, key: (%s), value: (%s), level: %d}",
+                valueKind.name(), sequenceNumber, keyString, valueString, level);
     }
 
     public static String rowDataToString(RowData row, RowType type) {
