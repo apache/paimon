@@ -22,25 +22,17 @@ import org.apache.flink.table.store.file.KeyValue;
 
 import javax.annotation.Nullable;
 
-import java.io.Serializable;
-
 /**
- * Merge function to merge multiple {@link KeyValue}s.
+ * A wrapper for {@link MergeFunction}, which adds new functionalities or optimizations.
  *
  * @param <T> result type
  */
-public interface MergeFunction<T> extends Serializable {
+public interface MergeFunctionWrapper<T> {
 
-    /** Reset the merge function to its default state. */
     void reset();
 
-    /** Add the given {@link KeyValue} to the merge function. */
     void add(KeyValue kv);
 
-    /** Get current merged value. Return null if this merged result should be skipped. */
     @Nullable
     T getResult();
-
-    /** Create a new merge function object with the same functionality as this one. */
-    MergeFunction<T> copy();
 }
