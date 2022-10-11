@@ -75,6 +75,12 @@
             <td>Specify the message format of data files.</td>
         </tr>
         <tr>
+            <td><h5>local-sort.max-num-file-handles</h5></td>
+            <td style="word-wrap: break-word;">128</td>
+            <td>Integer</td>
+            <td>The maximal fan-in for external merge sort. It limits the number of file handles. If it is too small, may cause intermediate merging. But if it is too large, it will cause too many files opened at the same time, consume memory and lead to random reading.</td>
+        </tr>
+        <tr>
             <td><h5>log.changelog-mode</h5></td>
             <td style="word-wrap: break-word;">auto</td>
             <td><p>Enum</p></td>
@@ -229,6 +235,12 @@
             <td style="word-wrap: break-word;">256 mb</td>
             <td>MemorySize</td>
             <td>Amount of data to build up in memory before converting to a sorted on-disk file.</td>
+        </tr>
+        <tr>
+            <td><h5>write-buffer-spillable</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Boolean</td>
+            <td>Whether the write buffer can be spillable.<ul><li>When `input` changelog-producer is not enabled, it is enabled by default.</li><li>When `input` changelog-producer is started, it is closed by default, because it currently does not support changelog producer input as input.</li></ul></td>
         </tr>
         <tr>
             <td><h5>write-mode</h5></td>

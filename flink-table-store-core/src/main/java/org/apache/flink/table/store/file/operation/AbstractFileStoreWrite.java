@@ -18,12 +18,15 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Lists;
+
+import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.List;
@@ -38,9 +41,17 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private final SnapshotManager snapshotManager;
     private final FileStoreScan scan;
 
+    @Nullable protected IOManager ioManager;
+
     protected AbstractFileStoreWrite(SnapshotManager snapshotManager, FileStoreScan scan) {
         this.snapshotManager = snapshotManager;
         this.scan = scan;
+    }
+
+    @Override
+    public FileStoreWrite<T> withIOManager(IOManager ioManager) {
+        this.ioManager = ioManager;
+        return this;
     }
 
     protected List<DataFileMeta> scanExistingFileMetas(BinaryRowData partition, int bucket) {

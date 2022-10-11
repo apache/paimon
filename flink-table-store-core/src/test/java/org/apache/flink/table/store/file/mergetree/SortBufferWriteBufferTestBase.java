@@ -25,6 +25,7 @@ import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunct
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionTestUtils;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
+import org.apache.flink.table.store.file.sort.BinaryInMemorySortBuffer;
 import org.apache.flink.table.store.file.utils.ReusingKeyValue;
 import org.apache.flink.table.store.file.utils.ReusingTestData;
 import org.apache.flink.table.types.logical.BigIntType;
@@ -40,22 +41,26 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 
+import static org.apache.flink.util.Preconditions.checkState;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link SortBufferMemTable}. */
-public abstract class SortBufferMemTableTestBase {
+/** Test for {@link SortBufferWriteBuffer}. */
+public abstract class SortBufferWriteBufferTestBase {
 
     private static final RecordComparator KEY_COMPARATOR =
             (a, b) -> Integer.compare(a.getInt(0), b.getInt(0));
 
-    protected final SortBufferMemTable table =
-            new SortBufferMemTable(
+    protected final SortBufferWriteBuffer table =
+            new SortBufferWriteBuffer(
                     new RowType(
                             Collections.singletonList(new RowType.RowField("key", new IntType()))),
                     new RowType(
                             Collections.singletonList(
                                     new RowType.RowField("value", new BigIntType()))),
-                    new HeapMemorySegmentPool(32 * 1024 * 3L, 32 * 1024));
+                    new HeapMemorySegmentPool(32 * 1024 * 3L, 32 * 1024),
+                    false,
+                    128,
+                    null);
 
     protected abstract boolean addOnly();
 
@@ -67,7 +72,9 @@ public abstract class SortBufferMemTableTestBase {
     public void testAndClear() throws IOException {
         testRandom(100);
         table.clear();
-        table.assertBufferEmpty();
+        checkState(
+                ((BinaryInMemorySortBuffer) table.buffer()).getBufferSegmentCount() == 0,
+                "The sort buffer is not empty");
         testRandom(200);
     }
 
@@ -133,8 +140,8 @@ public abstract class SortBufferMemTableTestBase {
         assertThat(table.size()).isEqualTo(input.size());
     }
 
-    /** Test for {@link SortBufferMemTable} with {@link DeduplicateMergeFunction}. */
-    public static class WithDeduplicateMergeFunctionTest extends SortBufferMemTableTestBase {
+    /** Test for {@link SortBufferWriteBuffer} with {@link DeduplicateMergeFunction}. */
+    public static class WithDeduplicateMergeFunctionTest extends SortBufferWriteBufferTestBase {
 
         @Override
         protected boolean addOnly() {
@@ -152,8 +159,8 @@ public abstract class SortBufferMemTableTestBase {
         }
     }
 
-    /** Test for {@link SortBufferMemTable} with {@link ValueCountMergeFunction}. */
-    public static class WithValueCountMergeFunctionTest extends SortBufferMemTableTestBase {
+    /** Test for {@link SortBufferWriteBuffer} with {@link ValueCountMergeFunction}. */
+    public static class WithValueCountMergeFunctionTest extends SortBufferWriteBufferTestBase {
 
         @Override
         protected boolean addOnly() {

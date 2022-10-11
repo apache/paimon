@@ -16,28 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.table.sink;
+package org.apache.flink.table.store.file.sort;
 
-import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.util.MutableObjectIterator;
 
-import java.util.List;
+import java.io.IOException;
 
-/**
- * An abstraction layer above {@link org.apache.flink.table.store.file.operation.FileStoreWrite} to
- * provide {@link RowData} writing.
- */
-public interface TableWrite {
+/** Sort buffer to sort records. */
+public interface SortBuffer {
 
-    TableWrite withOverwrite(boolean overwrite);
+    int size();
 
-    TableWrite withIOManager(IOManager ioManager);
+    void clear();
 
-    SinkRecordConverter recordConverter();
+    long getOccupancy();
 
-    SinkRecord write(RowData rowData) throws Exception;
+    /** Flush memory, return false if not supported. */
+    boolean flushMemory() throws IOException;
 
-    List<FileCommittable> prepareCommit(boolean endOfInput) throws Exception;
+    /** @return false if the buffer is full. */
+    boolean write(RowData record) throws IOException;
 
-    void close() throws Exception;
+    /** @return iterator with sorting. */
+    MutableObjectIterator<BinaryRowData> sortedIterator() throws IOException;
 }

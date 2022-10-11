@@ -74,18 +74,15 @@ public class KeyValueFileWriterFactory {
         return pathFactory;
     }
 
-    public KeyValueDataFileWriter createMergeTreeFileWriter(int level) {
-        Path path = pathFactory.newPath();
-        return createDataFileWriter(path, level);
-    }
-
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(int level) {
-        return new RollingFileWriter<>(() -> createMergeTreeFileWriter(level), suggestedFileSize);
+        return new RollingFileWriter<>(
+                () -> createDataFileWriter(pathFactory.newPath(), level), suggestedFileSize);
     }
 
-    public KeyValueDataFileWriter createChangelogFileWriter(int level) {
-        Path path = pathFactory.newChangelogPath();
-        return createDataFileWriter(path, level);
+    public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {
+        return new RollingFileWriter<>(
+                () -> createDataFileWriter(pathFactory.newChangelogPath(), level),
+                suggestedFileSize);
     }
 
     private KeyValueDataFileWriter createDataFileWriter(Path path, int level) {

@@ -26,6 +26,7 @@ import org.apache.flink.table.store.file.mergetree.SortedRun;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -39,9 +40,9 @@ public class UniversalCompactionTest {
     @Test
     public void testOutputLevel() {
         assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 1, Integer.MAX_VALUE).outputLevel())
-                .isEqualTo(0);
+                .isEqualTo(1);
         assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 2, Integer.MAX_VALUE).outputLevel())
-                .isEqualTo(0);
+                .isEqualTo(1);
         assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 3, Integer.MAX_VALUE).outputLevel())
                 .isEqualTo(2);
         assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 4, Integer.MAX_VALUE).outputLevel())
@@ -61,13 +62,17 @@ public class UniversalCompactionTest {
         assertThat(results).isEqualTo(new long[] {1, 2, 3, 3});
 
         // by size ratio
-        pick = compaction.pick(3, level0(1, 1, 1, 50));
+        pick =
+                compaction.pick(
+                        4, Arrays.asList(level(0, 1), level(1, 1), level(2, 1), level(3, 50)));
         assertThat(pick.isPresent()).isTrue();
         results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
         assertThat(results).isEqualTo(new long[] {1, 1, 1});
 
         // by file num
-        pick = compaction.pick(3, level0(1, 2, 3, 50));
+        pick =
+                compaction.pick(
+                        4, Arrays.asList(level(0, 1), level(1, 2), level(2, 3), level(3, 50)));
         assertThat(pick.isPresent()).isTrue();
         results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
         // 3 should be in the candidate, by size ratio after picking by file num
@@ -85,17 +90,43 @@ public class UniversalCompactionTest {
         assertThat(results).isEqualTo(new long[] {1, 2, 3, 3});
 
         // by size ratio
-        pick = compaction.pick(3, level0(1, 1, 1, 50));
+        pick =
+                compaction.pick(
+                        4, Arrays.asList(level(0, 1), level(1, 1), level(2, 1), level(3, 50)));
         assertThat(pick.isPresent()).isTrue();
         results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
         assertThat(results).isEqualTo(new long[] {1, 1});
 
         // by file num
-        pick = compaction.pick(3, level0(1, 2, 3, 50));
+        pick =
+                compaction.pick(
+                        4, Arrays.asList(level(0, 1), level(1, 2), level(2, 3), level(3, 50)));
         assertThat(pick.isPresent()).isTrue();
         results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
         // 3 should be in the candidate, by size ratio after picking by file num
+        System.out.println(pick.get().outputLevel());
         assertThat(results).isEqualTo(new long[] {1, 2});
+    }
+
+    @Test
+    public void testNoOutputLevel0() {
+        UniversalCompaction compaction = new UniversalCompaction(25, 1, 3, 2);
+
+        Optional<CompactUnit> pick =
+                compaction.pick(
+                        3, Arrays.asList(level(0, 1), level(0, 1), level(1, 1), level(2, 50)));
+        assertThat(pick.isPresent()).isTrue();
+        long[] results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
+        assertThat(results).isEqualTo(new long[] {1, 1, 1});
+
+        pick =
+                compaction.pick(
+                        3, Arrays.asList(level(0, 1), level(0, 2), level(1, 3), level(2, 50)));
+        assertThat(pick.isPresent()).isTrue();
+        results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
+        // 3 should be in the candidate, by size ratio after picking by file num
+        System.out.println(pick.get().outputLevel());
+        assertThat(results).isEqualTo(new long[] {1, 2, 3});
     }
 
     @Test
@@ -226,7 +257,11 @@ public class UniversalCompactionTest {
     }
 
     private long[] pickForSizeRatio(UniversalCompaction compaction, long... sizes) {
-        CompactUnit unit = compaction.pickForSizeRatio(3, level0(sizes));
+        List<LevelSortedRun> runs = new ArrayList<>();
+        for (int i = 0; i < sizes.length; i++) {
+            runs.add(level(i, sizes[i]));
+        }
+        CompactUnit unit = compaction.pickForSizeRatio(sizes.length, runs);
         if (unit != null) {
             List<Long> compact =
                     unit.files().stream().map(DataFileMeta::fileSize).collect(Collectors.toList());
@@ -254,6 +289,10 @@ public class UniversalCompactionTest {
             runs.add(new LevelSortedRun(0, SortedRun.fromSingle(file(size))));
         }
         return runs;
+    }
+
+    private LevelSortedRun level(int level, long size) {
+        return new LevelSortedRun(level, SortedRun.fromSingle(file(size)));
     }
 
     private DataFileMeta file(long size) {

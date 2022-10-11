@@ -19,25 +19,30 @@
 package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.runtime.operators.sort.QuickSort;
+import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.generated.NormalizedKeyComputer;
 import org.apache.flink.table.runtime.generated.RecordComparator;
 import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.runtime.typeutils.InternalSerializers;
+import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.runtime.util.MemorySegmentPool;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
-import org.apache.flink.table.store.file.memory.sort.BinaryInMemorySortBuffer;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ReducerMergeFunctionWrapper;
+import org.apache.flink.table.store.file.sort.BinaryExternalSortBuffer;
+import org.apache.flink.table.store.file.sort.BinaryInMemorySortBuffer;
+import org.apache.flink.table.store.file.sort.SortBuffer;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.MutableObjectIterator;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -45,17 +50,21 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 
-import static org.apache.flink.util.Preconditions.checkState;
-
-/** A {@link MemTable} which stores records in {@link BinaryInMemorySortBuffer}. */
-public class SortBufferMemTable implements MemTable {
+/** A {@link WriteBuffer} which stores records in {@link BinaryInMemorySortBuffer}. */
+public class SortBufferWriteBuffer implements WriteBuffer {
 
     private final RowType keyType;
     private final RowType valueType;
     private final KeyValueSerializer serializer;
-    private final BinaryInMemorySortBuffer buffer;
+    private final SortBuffer buffer;
 
-    public SortBufferMemTable(RowType keyType, RowType valueType, MemorySegmentPool memoryPool) {
+    public SortBufferWriteBuffer(
+            RowType keyType,
+            RowType valueType,
+            MemorySegmentPool memoryPool,
+            boolean spillable,
+            int sortMaxFan,
+            IOManager ioManager) {
         this.keyType = keyType;
         this.valueType = valueType;
         this.serializer = new KeyValueSerializer(keyType, valueType);
@@ -74,13 +83,21 @@ public class SortBufferMemTable implements MemTable {
             throw new IllegalArgumentException(
                     "Write buffer requires a minimum of 3 page memory, please increase write buffer memory size.");
         }
-        this.buffer =
+        RowDataSerializer serializer =
+                InternalSerializers.create(KeyValue.schema(keyType, valueType));
+        BinaryInMemorySortBuffer inMemorySortBuffer =
                 BinaryInMemorySortBuffer.createBuffer(
-                        normalizedKeyComputer,
-                        InternalSerializers.create(KeyValue.schema(keyType, valueType)),
-                        new BinaryRowDataSerializer(sortKeyTypes.size()),
-                        keyComparator,
-                        memoryPool);
+                        normalizedKeyComputer, serializer, keyComparator, memoryPool);
+        this.buffer =
+                ioManager != null && spillable
+                        ? new BinaryExternalSortBuffer(
+                                new BinaryRowDataSerializer(serializer.getArity()),
+                                keyComparator,
+                                memoryPool.pageSize(),
+                                inMemorySortBuffer,
+                                ioManager,
+                                sortMaxFan)
+                        : inMemorySortBuffer;
     }
 
     @Override
@@ -100,15 +117,24 @@ public class SortBufferMemTable implements MemTable {
     }
 
     @Override
-    public Iterator<KeyValue> rawIterator() {
-        return new RawIterator(buffer.getIterator());
+    public boolean flushMemory() throws IOException {
+        return buffer.flushMemory();
     }
 
     @Override
-    public Iterator<KeyValue> mergeIterator(
-            Comparator<RowData> keyComparator, MergeFunction<KeyValue> mergeFunction) {
-        new QuickSort().sort(buffer);
-        return new MergeIterator(buffer.getIterator(), keyComparator, mergeFunction);
+    public void forEach(
+            Comparator<RowData> keyComparator,
+            MergeFunction<KeyValue> mergeFunction,
+            @Nullable KvConsumer rawConsumer,
+            KvConsumer mergedConsumer)
+            throws IOException {
+        // TODO do not use iterator
+        MergeIterator mergeIterator =
+                new MergeIterator(
+                        rawConsumer, buffer.sortedIterator(), keyComparator, mergeFunction);
+        while (mergeIterator.hasNext()) {
+            mergedConsumer.accept(mergeIterator.next());
+        }
     }
 
     @Override
@@ -117,11 +143,12 @@ public class SortBufferMemTable implements MemTable {
     }
 
     @VisibleForTesting
-    void assertBufferEmpty() {
-        checkState(buffer.getBufferSegmentCount() == 0, "The sort buffer is not empty");
+    SortBuffer buffer() {
+        return buffer;
     }
 
-    private class MergeIterator implements Iterator<KeyValue> {
+    private class MergeIterator {
+        @Nullable private final KvConsumer rawConsumer;
         private final MutableObjectIterator<BinaryRowData> kvIter;
         private final Comparator<RowData> keyComparator;
         private final ReducerMergeFunctionWrapper mergeFunctionWrapper;
@@ -137,9 +164,12 @@ public class SortBufferMemTable implements MemTable {
         private boolean advanced;
 
         private MergeIterator(
+                @Nullable KvConsumer rawConsumer,
                 MutableObjectIterator<BinaryRowData> kvIter,
                 Comparator<RowData> keyComparator,
-                MergeFunction<KeyValue> mergeFunction) {
+                MergeFunction<KeyValue> mergeFunction)
+                throws IOException {
+            this.rawConsumer = rawConsumer;
             this.kvIter = kvIter;
             this.keyComparator = keyComparator;
             this.mergeFunctionWrapper = new ReducerMergeFunctionWrapper(mergeFunction);
@@ -153,14 +183,12 @@ public class SortBufferMemTable implements MemTable {
             this.advanced = false;
         }
 
-        @Override
-        public boolean hasNext() {
+        public boolean hasNext() throws IOException {
             advanceIfNeeded();
             return previousRow != null;
         }
 
-        @Override
-        public KeyValue next() {
+        public KeyValue next() throws IOException {
             advanceIfNeeded();
             if (previousRow == null) {
                 return null;
@@ -169,7 +197,7 @@ public class SortBufferMemTable implements MemTable {
             return result;
         }
 
-        private void advanceIfNeeded() {
+        private void advanceIfNeeded() throws IOException {
             if (advanced) {
                 return;
             }
@@ -196,7 +224,7 @@ public class SortBufferMemTable implements MemTable {
             } while (result == null);
         }
 
-        private boolean readOnce() {
+        private boolean readOnce() throws IOException {
             try {
                 currentRow = kvIter.next(currentRow);
             } catch (IOException e) {
@@ -204,6 +232,9 @@ public class SortBufferMemTable implements MemTable {
             }
             if (currentRow != null) {
                 current.fromRow(currentRow);
+                if (rawConsumer != null) {
+                    rawConsumer.accept(current.getReusedKv());
+                }
             }
             return currentRow != null;
         }
