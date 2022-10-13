@@ -170,6 +170,35 @@ services:
         aliases:
           - hive-metastore-postgresql
 
+  # ----------------------------------------
+  # Spark services, copied and modified from https://github.com/big-data-europe/docker-spark
+  # ----------------------------------------
+
+  spark-master:
+    image: bde2020/spark-master:3.3.0-hadoop3.3
+    volumes:
+      - testdata:/test-data
+      - /tmp/flink-table-store-e2e-tests-jars:/jars
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    entrypoint: /bin/bash -c "cp /jars/flink-table-store.jar /jars/flink-table-store-spark.jar /spark/jars/ && sh /master.sh"
+    environment:
+      - INIT_DAEMON_STEP=setup_spark
+
+  spark-worker:
+    image: bde2020/spark-worker:3.3.0-hadoop3.3
+    depends_on:
+      - spark-master
+    volumes:
+      - testdata:/test-data
+      - /tmp/flink-table-store-e2e-tests-jars:/jars
+    ports:
+      - "8081:8081"
+    entrypoint: /bin/bash -c "cp /jars/flink-table-store.jar /jars/flink-table-store-spark.jar /spark/jars/ && sh /worker.sh"
+    environment:
+      - "SPARK_MASTER=spark://spark-master:7077"
+
 volumes:
   testdata:
   namenode:

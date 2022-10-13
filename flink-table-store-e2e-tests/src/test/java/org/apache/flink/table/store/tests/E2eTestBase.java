@@ -52,14 +52,20 @@ public abstract class E2eTestBase {
 
     private final boolean withKafka;
     private final boolean withHive;
+    private final boolean withSpark;
 
     protected E2eTestBase() {
         this(false, false);
     }
 
     protected E2eTestBase(boolean withKafka, boolean withHive) {
+        this(withKafka, withHive, false);
+    }
+
+    protected E2eTestBase(boolean withKafka, boolean withHive, boolean withSpark) {
         this.withKafka = withKafka;
         this.withHive = withHive;
+        this.withSpark = withSpark;
     }
 
     protected static final String TEST_DATA_DIR = "/test-data";
@@ -108,6 +114,17 @@ public abstract class E2eTestBase {
             }
             environment.waitingFor(
                     "hive-server_1", Wait.forLogMessage(".*Starting HiveServer2.*", 1));
+        }
+        if (withSpark) {
+            List<String> sparkServices = Arrays.asList("spark-master", "spark-worker");
+            services.addAll(sparkServices);
+            for (String s : sparkServices) {
+                environment.withLogConsumer(s + "_1", new Slf4jLogConsumer(LOG));
+            }
+            environment.waitingFor(
+                    "spark-master_1",
+                    Wait.forLogMessage(
+                            ".*Master: I have been elected leader! New state: ALIVE.*", 1));
         }
         environment.withServices(services.toArray(new String[0])).withLocalCompose(true);
 
