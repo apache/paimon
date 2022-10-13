@@ -26,8 +26,6 @@ import org.testcontainers.containers.ContainerState;
 
 import java.util.UUID;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
 /**
  * Tests for reading table store from Hive.
  *
@@ -35,13 +33,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * you're running this test locally, make sure that the memory limit of your Docker is at least 8GB.
  */
 @DisabledIfSystemProperty(named = "flink.version", matches = "1.14.*")
-public class HiveE2eTest extends E2eTestBase {
+public class HiveE2eTest extends E2eReaderTestBase {
 
     private static final String TABLE_STORE_HIVE_CONNECTOR_JAR_NAME =
             "flink-table-store-hive-connector.jar";
 
     public HiveE2eTest() {
-        super(false, true);
+        super(false, true, false);
     }
 
     @BeforeEach
@@ -59,116 +57,50 @@ public class HiveE2eTest extends E2eTestBase {
 
     @Test
     public void testReadExternalTable() throws Exception {
-        String tableStorePkDdl =
-                "CREATE TABLE IF NOT EXISTS table_store_pk (\n"
-                        + "  a int,\n"
-                        + "  b bigint,\n"
-                        + "  c string,\n"
-                        + "  PRIMARY KEY (a, b) NOT ENFORCED\n"
-                        + ") WITH (\n"
-                        + "  'bucket' = '2',\n"
-                        + "  'root-path' = '%s'\n"
-                        + ");";
+        final String table = "table_store_pk";
         String tableStorePkPath = HDFS_ROOT + "/" + UUID.randomUUID().toString() + ".store";
-        tableStorePkDdl = String.format(tableStorePkDdl, tableStorePkPath);
-        runSql(
-                "INSERT INTO table_store_pk VALUES "
-                        + "(1, 10, 'Hi'), "
-                        + "(1, 100, 'Hi Again'), "
-                        + "(2, 20, 'Hello'), "
-                        + "(3, 30, 'Table'), "
-                        + "(4, 40, 'Store');",
-                tableStorePkDdl);
+        String tableStorePkDdl =
+                String.format(
+                        "CREATE TABLE IF NOT EXISTS %s (\n"
+                                + "  a int,\n"
+                                + "  b bigint,\n"
+                                + "  c string,\n"
+                                + "  PRIMARY KEY (a, b) NOT ENFORCED\n"
+                                + ") WITH (\n"
+                                + "  'bucket' = '2',\n"
+                                + "  'root-path' = '%s'\n"
+                                + ");",
+                        table, tableStorePkPath);
+        runSql(createInsertSql(table), tableStorePkDdl);
 
         String externalTablePkDdl =
-                "CREATE EXTERNAL TABLE IF NOT EXISTS table_store_pk\n"
-                        + "STORED BY 'org.apache.flink.table.store.hive.TableStoreHiveStorageHandler'\n"
-                        + "LOCATION '"
-                        + tableStorePkPath
-                        + "/default_catalog.catalog/default_database.db/table_store_pk';\n";
+                String.format(
+                        "CREATE EXTERNAL TABLE IF NOT EXISTS %s\n"
+                                + "STORED BY 'org.apache.flink.table.store.hive.TableStoreHiveStorageHandler'\n"
+                                + "LOCATION '%s/default_catalog.catalog/default_database.db/%s';\n",
+                        table, tableStorePkPath, table);
 
-        checkQueryResult(
-                externalTablePkDdl + "SELECT * FROM table_store_pk ORDER BY b;",
-                "1\t10\tHi\n"
-                        + "2\t20\tHello\n"
-                        + "3\t30\tTable\n"
-                        + "4\t40\tStore\n"
-                        + "1\t100\tHi Again\n");
-        checkQueryResult(
-                externalTablePkDdl + "SELECT b, a FROM table_store_pk ORDER BY b;",
-                "10\t1\n" + "20\t2\n" + "30\t3\n" + "40\t4\n" + "100\t1\n");
-        checkQueryResult(
-                externalTablePkDdl + "SELECT * FROM table_store_pk WHERE a > 1 ORDER BY b;",
-                "2\t20\tHello\n" + "3\t30\tTable\n" + "4\t40\tStore\n");
-        checkQueryResult(
-                externalTablePkDdl
-                        + "SELECT a, SUM(b), MIN(c) FROM table_store_pk GROUP BY a ORDER BY a;",
-                "1\t110\tHi\n" + "2\t20\tHello\n" + "3\t30\tTable\n" + "4\t40\tStore\n");
-        checkQueryResult(
-                externalTablePkDdl
-                        + "SELECT T1.a, T1.b, T2.b FROM table_store_pk T1 JOIN table_store_pk T2 "
-                        + "ON T1.a = T2.a WHERE T1.a <= 2 ORDER BY T1.a, T1.b, T2.b;",
-                "1\t10\t10\n" + "1\t10\t100\n" + "1\t100\t10\n" + "1\t100\t100\n" + "2\t20\t20\n");
+        checkQueryResults(table, this::executeQuery, externalTablePkDdl);
     }
 
     @Test
     public void testFlinkWriteAndHiveRead() throws Exception {
-        String sql =
+        final String warehouse = HDFS_ROOT + "/" + UUID.randomUUID().toString() + ".warehouse";
+        final String table = "T";
+        runSql(
                 String.join(
                         "\n",
-                        "CREATE CATALOG my_hive WITH (",
-                        "  'type' = 'table-store',",
-                        "  'metastore' = 'hive',",
-                        "  'uri' = 'thrift://hive-metastore:9083',",
-                        "  'warehouse' = '"
-                                + HDFS_ROOT
-                                + "/"
-                                + UUID.randomUUID().toString()
-                                + ".warehouse'",
-                        ");",
-                        "",
-                        "USE CATALOG my_hive;",
-                        "",
-                        "CREATE TABLE T (",
-                        "  a int,",
-                        "  b bigint,",
-                        "  c string",
-                        ") WITH (",
-                        "  'bucket' = '2'",
-                        ");",
-                        "",
-                        "INSERT INTO T VALUES "
-                                + "(1, 10, 'Hi'), "
-                                + "(1, 100, 'Hi Again'), "
-                                + "(2, 20, 'Hello'), "
-                                + "(3, 30, 'Table'), "
-                                + "(4, 40, 'Store');");
-        runSql(sql);
-
-        checkQueryResult(
-                "SELECT * FROM t ORDER BY b;",
-                "1\t10\tHi\n"
-                        + "2\t20\tHello\n"
-                        + "3\t30\tTable\n"
-                        + "4\t40\tStore\n"
-                        + "1\t100\tHi Again\n");
-        checkQueryResult(
-                "SELECT b, a FROM t ORDER BY b;",
-                "10\t1\n" + "20\t2\n" + "30\t3\n" + "40\t4\n" + "100\t1\n");
-        checkQueryResult(
-                "SELECT * FROM t WHERE a > 1 ORDER BY b;",
-                "2\t20\tHello\n" + "3\t30\tTable\n" + "4\t40\tStore\n");
-        checkQueryResult(
-                "SELECT a, SUM(b), MIN(c) FROM t GROUP BY a ORDER BY a;",
-                "1\t110\tHi\n" + "2\t20\tHello\n" + "3\t30\tTable\n" + "4\t40\tStore\n");
-        checkQueryResult(
-                "SELECT T1.a, T1.b, T2.b FROM t T1 JOIN t T2 "
-                        + "ON T1.a = T2.a WHERE T1.a <= 2 ORDER BY T1.a, T1.b, T2.b;",
-                "1\t10\t10\n" + "1\t10\t100\n" + "1\t100\t10\n" + "1\t100\t100\n" + "2\t20\t20\n");
+                        createCatalogSql(
+                                "my_hive",
+                                warehouse,
+                                "'metastore' = 'hive'",
+                                "'uri' = 'thrift://hive-metastore:9083'"),
+                        createTableSql(table),
+                        createInsertSql(table)));
+        checkQueryResults(table, this::executeQuery);
     }
 
-    private void checkQueryResult(String query, String expected) throws Exception {
-        writeSharedFile("pk.hql", query);
+    private String executeQuery(String sql) throws Exception {
         Container.ExecResult execResult =
                 getHive()
                         .execInContainer(
@@ -176,11 +108,11 @@ public class HiveE2eTest extends E2eTestBase {
                                 "--hiveconf",
                                 "hive.root.logger=INFO,console",
                                 "-f",
-                                TEST_DATA_DIR + "/pk.hql");
+                                TEST_DATA_DIR + "/" + sql);
         if (execResult.getExitCode() != 0) {
             throw new AssertionError("Failed when running hive sql.");
         }
-        assertThat(execResult.getStdout()).isEqualTo(expected);
+        return execResult.getStdout();
     }
 
     private ContainerState getHive() {
