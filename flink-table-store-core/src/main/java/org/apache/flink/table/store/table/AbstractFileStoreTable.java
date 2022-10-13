@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -39,6 +40,11 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     protected abstract FileStore<?> store();
+
+    @Override
+    public CoreOptions options() {
+        return store().options();
+    }
 
     @Override
     public Path location() {

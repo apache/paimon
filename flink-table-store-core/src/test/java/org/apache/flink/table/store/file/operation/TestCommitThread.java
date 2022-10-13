@@ -25,6 +25,8 @@ import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
+import org.apache.flink.table.store.file.utils.RecordWriter;
+import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.slf4j.Logger;
@@ -125,7 +127,10 @@ public class TestCommitThread extends Thread {
         ManifestCommittable committable =
                 new ManifestCommittable(String.valueOf(new Random().nextLong()));
         for (Map.Entry<BinaryRowData, MergeTreeWriter> entry : writers.entrySet()) {
-            committable.addFileCommittable(entry.getKey(), 0, entry.getValue().prepareCommit(true));
+            RecordWriter.CommitIncrement inc = entry.getValue().prepareCommit(true);
+            committable.addFileCommittable(
+                    new FileCommittable(
+                            entry.getKey(), 0, inc.newFilesIncrement(), inc.compactIncrement()));
         }
 
         runWithRetry(committable, () -> commit.commit(committable, Collections.emptyMap()));
@@ -135,7 +140,9 @@ public class TestCommitThread extends Thread {
         BinaryRowData partition = overwriteData();
         ManifestCommittable committable =
                 new ManifestCommittable(String.valueOf(new Random().nextLong()));
-        committable.addFileCommittable(partition, 0, writers.get(partition).prepareCommit(true));
+        RecordWriter.CommitIncrement inc = writers.get(partition).prepareCommit(true);
+        committable.addFileCommittable(
+                new FileCommittable(partition, 0, inc.newFilesIncrement(), inc.compactIncrement()));
 
         runWithRetry(
                 committable,

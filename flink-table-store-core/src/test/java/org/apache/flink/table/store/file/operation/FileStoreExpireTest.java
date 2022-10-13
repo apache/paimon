@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.operation;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestFileStore;
@@ -61,15 +62,7 @@ public class FileStoreExpireTest {
     @BeforeEach
     public void beforeEach() throws Exception {
         gen = new TestKeyValueGenerator();
-        store =
-                TestFileStore.create(
-                        "avro",
-                        tempDir.toString(),
-                        1,
-                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
-                        new DeduplicateMergeFunction());
+        store = createStore();
         snapshotManager = store.snapshotManager();
         SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
         schemaManager.commitNewVersion(
@@ -80,6 +73,28 @@ public class FileStoreExpireTest {
                                 TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),
                         Collections.emptyMap(),
                         null));
+    }
+
+    private TestFileStore createStore() {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+
+        CoreOptions.ChangelogProducer changelogProducer;
+        if (random.nextBoolean()) {
+            changelogProducer = CoreOptions.ChangelogProducer.INPUT;
+        } else {
+            changelogProducer = CoreOptions.ChangelogProducer.NONE;
+        }
+
+        return new TestFileStore.Builder(
+                        "avro",
+                        tempDir.toString(),
+                        1,
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                        TestKeyValueGenerator.KEY_TYPE,
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                        new DeduplicateMergeFunction())
+                .changelogProducer(changelogProducer)
+                .build();
     }
 
     @AfterEach
@@ -121,7 +136,7 @@ public class FileStoreExpireTest {
         ManifestEntry delete = new ManifestEntry(FileKind.DELETE, partition, 0, 1, dataFile);
 
         // expire
-        expire.expireDataFiles(Arrays.asList(add, delete));
+        expire.expireMergeTreeFiles(Arrays.asList(add, delete));
 
         // check
         FileSystem fs = myDataFile.getFileSystem();
@@ -273,7 +288,7 @@ public class FileStoreExpireTest {
                 store.toKvMap(allData.subList(0, snapshotPositions.get(snapshotId - 1)));
         List<KeyValue> actualKvs =
                 store.readKvsFromManifestEntries(
-                        store.newScan().withSnapshot(snapshotId).plan().files());
+                        store.newScan().withSnapshot(snapshotId).plan().files(), false);
         gen.sort(actualKvs);
         Map<BinaryRowData, BinaryRowData> actual = store.toKvMap(actualKvs);
         assertThat(actual).isEqualTo(expected);

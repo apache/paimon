@@ -101,7 +101,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 manifestFileFactory(),
                 manifestListFactory(),
                 options.bucket(),
-                checkNumOfBuckets);
+                checkNumOfBuckets,
+                options.changelogProducer());
     }
 
     @Override

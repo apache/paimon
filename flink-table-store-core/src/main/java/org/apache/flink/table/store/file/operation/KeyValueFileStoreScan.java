@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
@@ -48,7 +49,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
-            boolean checkNumOfBuckets) {
+            boolean checkNumOfBuckets,
+            CoreOptions.ChangelogProducer changelogProducer) {
         super(
                 partitionType,
                 bucketKeyType,
@@ -56,7 +58,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 manifestFileFactory,
                 manifestListFactory,
                 numOfBuckets,
-                checkNumOfBuckets);
+                checkNumOfBuckets,
+                changelogProducer);
         this.keyStatsConverter = new FieldStatsArraySerializer(keyType);
         this.keyType = keyType;
     }

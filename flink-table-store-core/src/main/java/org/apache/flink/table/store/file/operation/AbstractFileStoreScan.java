@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
@@ -56,6 +57,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private final ManifestList manifestList;
     private final int numOfBuckets;
     private final boolean checkNumOfBuckets;
+    private final CoreOptions.ChangelogProducer changelogProducer;
 
     private Predicate partitionFilter;
     private BucketSelector bucketSelector;
@@ -72,7 +74,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
-            boolean checkNumOfBuckets) {
+            boolean checkNumOfBuckets,
+            CoreOptions.ChangelogProducer changelogProducer) {
         this.partitionStatsConverter = new FieldStatsArraySerializer(partitionType);
         this.partitionConverter = new RowDataToObjectArrayConverter(partitionType);
         Preconditions.checkArgument(
@@ -83,6 +86,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         this.manifestList = manifestListFactory.create();
         this.numOfBuckets = numOfBuckets;
         this.checkNumOfBuckets = checkNumOfBuckets;
+        this.changelogProducer = changelogProducer;
     }
 
     @Override
@@ -165,8 +169,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 Snapshot snapshot = snapshotManager.snapshot(snapshotId);
                 manifests =
                         isIncremental
-                                ? readIncremental(snapshotId)
-                                : snapshot.readAllManifests(manifestList);
+                                ? readIncremental(snapshot)
+                                : snapshot.readAllDataManifests(manifestList);
             }
         }
 
@@ -264,13 +268,32 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return manifestFileFactory.create().read(manifest.fileName());
     }
 
-    private List<ManifestFileMeta> readIncremental(Long snapshotId) {
-        Snapshot snapshot = snapshotManager.snapshot(snapshotId);
-        if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
-            return manifestList.read(snapshot.deltaManifestList());
+    private List<ManifestFileMeta> readIncremental(Snapshot snapshot) {
+        switch (changelogProducer) {
+            case INPUT:
+                if (snapshot.changelogManifestList() != null) {
+                    return manifestList.read(snapshot.changelogManifestList());
+                }
+                // compatible with Table Store 0.2, we'll read extraFiles in DataFileMeta
+                // see comments on DataFileMeta#extraFiles
+                if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
+                    return manifestList.read(snapshot.deltaManifestList());
+                }
+                throw new IllegalStateException(
+                        String.format(
+                                "Incremental scan does not accept %s snapshot",
+                                snapshot.commitKind()));
+            case NONE:
+                if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
+                    return manifestList.read(snapshot.deltaManifestList());
+                }
+                throw new IllegalStateException(
+                        String.format(
+                                "Incremental scan does not accept %s snapshot",
+                                snapshot.commitKind()));
+            default:
+                throw new UnsupportedOperationException(
+                        "Unknown changelog producer " + changelogProducer.name());
         }
-        throw new IllegalStateException(
-                String.format(
-                        "Incremental scan does not accept %s snapshot", snapshot.commitKind()));
     }
 }

@@ -19,7 +19,8 @@
 package org.apache.flink.table.store.table.sink;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.mergetree.Increment;
+import org.apache.flink.table.store.file.io.CompactIncrement;
+import org.apache.flink.table.store.file.io.NewFilesIncrement;
 
 import java.util.Objects;
 
@@ -27,15 +28,19 @@ import java.util.Objects;
 public class FileCommittable {
 
     private final BinaryRowData partition;
-
     private final int bucket;
+    private final NewFilesIncrement newFilesIncrement;
+    private final CompactIncrement compactIncrement;
 
-    private final Increment increment;
-
-    public FileCommittable(BinaryRowData partition, int bucket, Increment increment) {
+    public FileCommittable(
+            BinaryRowData partition,
+            int bucket,
+            NewFilesIncrement newFilesIncrement,
+            CompactIncrement compactIncrement) {
         this.partition = partition;
         this.bucket = bucket;
-        this.increment = increment;
+        this.newFilesIncrement = newFilesIncrement;
+        this.compactIncrement = compactIncrement;
     }
 
     public BinaryRowData partition() {
@@ -46,8 +51,16 @@ public class FileCommittable {
         return bucket;
     }
 
-    public Increment increment() {
-        return increment;
+    public NewFilesIncrement newFilesIncrement() {
+        return newFilesIncrement;
+    }
+
+    public CompactIncrement compactIncrement() {
+        return compactIncrement;
+    }
+
+    public boolean isEmpty() {
+        return newFilesIncrement.isEmpty() && compactIncrement.isEmpty();
     }
 
     @Override
@@ -58,26 +71,27 @@ public class FileCommittable {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
+
         FileCommittable that = (FileCommittable) o;
         return bucket == that.bucket
                 && Objects.equals(partition, that.partition)
-                && Objects.equals(increment, that.increment);
+                && Objects.equals(newFilesIncrement, that.newFilesIncrement)
+                && Objects.equals(compactIncrement, that.compactIncrement);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(partition, bucket, increment);
+        return Objects.hash(partition, bucket, newFilesIncrement, compactIncrement);
     }
 
     @Override
     public String toString() {
-        return "FileCommittable{"
-                + "partition="
-                + partition
-                + ", bucket="
-                + bucket
-                + ", increment="
-                + increment
-                + '}';
+        return String.format(
+                "FileCommittable {"
+                        + "partition = %s, "
+                        + "bucket = %d, "
+                        + "newFilesIncrement = %s, "
+                        + "compactIncrement = %s}",
+                partition, bucket, newFilesIncrement, compactIncrement);
     }
 }

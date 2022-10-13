@@ -31,7 +31,6 @@ import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.memory.MemoryOwner;
-import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.FileStoreCommitImpl;
@@ -44,6 +43,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -84,33 +84,6 @@ public class TestFileStore extends KeyValueFileStore {
     private final RowDataSerializer keySerializer;
     private final RowDataSerializer valueSerializer;
     private final String user;
-
-    public static TestFileStore create(
-            String format,
-            String root,
-            int numBuckets,
-            RowType partitionType,
-            RowType keyType,
-            RowType valueType,
-            MergeFunction<KeyValue> mergeFunction) {
-        Configuration conf = new Configuration();
-
-        conf.set(CoreOptions.WRITE_BUFFER_SIZE, WRITE_BUFFER_SIZE);
-        conf.set(CoreOptions.PAGE_SIZE, PAGE_SIZE);
-        conf.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.parse("1 kb"));
-
-        conf.set(
-                CoreOptions.MANIFEST_TARGET_FILE_SIZE,
-                MemorySize.parse((ThreadLocalRandom.current().nextInt(16) + 1) + "kb"));
-
-        conf.set(CoreOptions.FILE_FORMAT, format);
-        conf.set(CoreOptions.MANIFEST_FORMAT, format);
-        conf.set(CoreOptions.PATH, root);
-        conf.set(CoreOptions.BUCKET, numBuckets);
-
-        return new TestFileStore(
-                root, new CoreOptions(conf), partitionType, keyType, valueType, mergeFunction);
-    }
 
     private TestFileStore(
             String root,
@@ -238,9 +211,14 @@ public class TestFileStore extends KeyValueFileStore {
                 writers.entrySet()) {
             for (Map.Entry<Integer, RecordWriter<KeyValue>> entryWithBucket :
                     entryWithPartition.getValue().entrySet()) {
-                Increment increment = entryWithBucket.getValue().prepareCommit(emptyWriter);
+                RecordWriter.CommitIncrement increment =
+                        entryWithBucket.getValue().prepareCommit(emptyWriter);
                 committable.addFileCommittable(
-                        entryWithPartition.getKey(), entryWithBucket.getKey(), increment);
+                        new FileCommittable(
+                                entryWithPartition.getKey(),
+                                entryWithBucket.getKey(),
+                                increment.newFilesIncrement(),
+                                increment.compactIncrement()));
             }
         }
 
@@ -276,13 +254,25 @@ public class TestFileStore extends KeyValueFileStore {
         return snapshots;
     }
 
-    public List<KeyValue> readKvsFromSnapshot(long snapshotId) throws IOException {
+    public List<KeyValue> readKvsFromSnapshot(long snapshotId) throws Exception {
         List<ManifestEntry> entries = newScan().withSnapshot(snapshotId).plan().files();
-        return readKvsFromManifestEntries(entries);
+        return readKvsFromManifestEntries(entries, false);
     }
 
-    public List<KeyValue> readKvsFromManifestEntries(List<ManifestEntry> entries)
-            throws IOException {
+    public List<KeyValue> readAllChangelogUntilSnapshot(long endInclusive) throws Exception {
+        List<KeyValue> result = new ArrayList<>();
+        for (long snapshotId = Snapshot.FIRST_SNAPSHOT_ID;
+                snapshotId <= endInclusive;
+                snapshotId++) {
+            List<ManifestEntry> entries =
+                    newScan().withIncremental(true).withSnapshot(snapshotId).plan().files();
+            result.addAll(readKvsFromManifestEntries(entries, true));
+        }
+        return result;
+    }
+
+    public List<KeyValue> readKvsFromManifestEntries(
+            List<ManifestEntry> entries, boolean isIncremental) throws Exception {
         if (LOG.isDebugEnabled()) {
             for (ManifestEntry entry : entries) {
                 LOG.debug("reading from " + entry.toString());
@@ -311,10 +301,11 @@ public class TestFileStore extends KeyValueFileStore {
                                                 entryWithPartition.getKey(),
                                                 entryWithBucket.getKey(),
                                                 entryWithBucket.getValue(),
-                                                false)));
+                                                isIncremental)));
                 while (iterator.hasNext()) {
                     kvs.add(iterator.next().copy(keySerializer, valueSerializer));
                 }
+                iterator.close();
             }
         }
         return kvs;
@@ -383,7 +374,15 @@ public class TestFileStore extends KeyValueFileStore {
         }
         actualFiles.remove(latest);
 
-        assertThat(actualFiles).isEqualTo(filesInUse);
+        // for easier debugging
+        String expectedString =
+                filesInUse.stream().map(Path::toString).sorted().collect(Collectors.joining(",\n"));
+        String actualString =
+                actualFiles.stream()
+                        .map(Path::toString)
+                        .sorted()
+                        .collect(Collectors.joining(",\n"));
+        assertThat(actualString).isEqualTo(expectedString);
     }
 
     private Set<Path> getFilesInUse() {
@@ -420,9 +419,15 @@ public class TestFileStore extends KeyValueFileStore {
             // manifest lists
             result.add(pathFactory.toManifestListPath(snapshot.baseManifestList()));
             result.add(pathFactory.toManifestListPath(snapshot.deltaManifestList()));
+            if (snapshot.changelogManifestList() != null) {
+                result.add(pathFactory.toManifestListPath(snapshot.changelogManifestList()));
+            }
 
             // manifests
-            List<ManifestFileMeta> manifests = snapshot.readAllManifests(manifestList);
+            List<ManifestFileMeta> manifests = snapshot.readAllDataManifests(manifestList);
+            if (snapshot.changelogManifestList() != null) {
+                manifests.addAll(manifestList.read(snapshot.changelogManifestList()));
+            }
             manifests.forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
 
             // data file
@@ -435,5 +440,65 @@ public class TestFileStore extends KeyValueFileStore {
             }
         }
         return result;
+    }
+
+    /** Builder of {@link TestFileStore}. */
+    public static class Builder {
+
+        private final String format;
+        private final String root;
+        private final int numBuckets;
+        private final RowType partitionType;
+        private final RowType keyType;
+        private final RowType valueType;
+        private final MergeFunction<KeyValue> mergeFunction;
+
+        private CoreOptions.ChangelogProducer changelogProducer;
+
+        public Builder(
+                String format,
+                String root,
+                int numBuckets,
+                RowType partitionType,
+                RowType keyType,
+                RowType valueType,
+                MergeFunction<KeyValue> mergeFunction) {
+            this.format = format;
+            this.root = root;
+            this.numBuckets = numBuckets;
+            this.partitionType = partitionType;
+            this.keyType = keyType;
+            this.valueType = valueType;
+            this.mergeFunction = mergeFunction;
+
+            this.changelogProducer = CoreOptions.ChangelogProducer.NONE;
+        }
+
+        public Builder changelogProducer(CoreOptions.ChangelogProducer changelogProducer) {
+            this.changelogProducer = changelogProducer;
+            return this;
+        }
+
+        public TestFileStore build() {
+            Configuration conf = new Configuration();
+
+            conf.set(CoreOptions.WRITE_BUFFER_SIZE, WRITE_BUFFER_SIZE);
+            conf.set(CoreOptions.PAGE_SIZE, PAGE_SIZE);
+            conf.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.parse("1 kb"));
+
+            conf.set(
+                    CoreOptions.MANIFEST_TARGET_FILE_SIZE,
+                    MemorySize.parse((ThreadLocalRandom.current().nextInt(16) + 1) + "kb"));
+
+            conf.set(CoreOptions.FILE_FORMAT, format);
+            conf.set(CoreOptions.MANIFEST_FORMAT, format);
+            conf.set(CoreOptions.PATH, root);
+            conf.set(CoreOptions.BUCKET, numBuckets);
+
+            conf.set(CoreOptions.CHANGELOG_PRODUCER, changelogProducer);
+
+            return new TestFileStore(
+                    root, new CoreOptions(conf), partitionType, keyType, valueType, mergeFunction);
+        }
     }
 }

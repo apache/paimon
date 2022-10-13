@@ -18,9 +18,7 @@
 
 package org.apache.flink.table.store.file.manifest;
 
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.mergetree.Increment;
+import org.apache.flink.table.store.table.sink.FileCommittable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -33,35 +31,25 @@ public class ManifestCommittable {
 
     private final String identifier;
     private final Map<Integer, Long> logOffsets;
-    private final Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> newFiles;
-    private final Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> compactBefore;
-    private final Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> compactAfter;
+    private final List<FileCommittable> fileCommittables;
 
     public ManifestCommittable(String identifier) {
         this.identifier = identifier;
         this.logOffsets = new HashMap<>();
-        this.newFiles = new HashMap<>();
-        this.compactBefore = new HashMap<>();
-        this.compactAfter = new HashMap<>();
+        this.fileCommittables = new ArrayList<>();
     }
 
     public ManifestCommittable(
             String identifier,
             Map<Integer, Long> logOffsets,
-            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> newFiles,
-            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> compactBefore,
-            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> compactAfter) {
+            List<FileCommittable> fileCommittables) {
         this.identifier = identifier;
         this.logOffsets = logOffsets;
-        this.newFiles = newFiles;
-        this.compactBefore = compactBefore;
-        this.compactAfter = compactAfter;
+        this.fileCommittables = fileCommittables;
     }
 
-    public void addFileCommittable(BinaryRowData partition, int bucket, Increment increment) {
-        addFiles(newFiles, partition, bucket, increment.newFiles());
-        addFiles(compactBefore, partition, bucket, increment.compactBefore());
-        addFiles(compactAfter, partition, bucket, increment.compactAfter());
+    public void addFileCommittable(FileCommittable fileCommittable) {
+        fileCommittables.add(fileCommittable);
     }
 
     public void addLogOffset(int bucket, long offset) {
@@ -73,16 +61,6 @@ public class ManifestCommittable {
         logOffsets.put(bucket, offset);
     }
 
-    private static void addFiles(
-            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> map,
-            BinaryRowData partition,
-            int bucket,
-            List<DataFileMeta> files) {
-        map.computeIfAbsent(partition, k -> new HashMap<>())
-                .computeIfAbsent(bucket, k -> new ArrayList<>())
-                .addAll(files);
-    }
-
     public String identifier() {
         return identifier;
     }
@@ -91,16 +69,8 @@ public class ManifestCommittable {
         return logOffsets;
     }
 
-    public Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> newFiles() {
-        return newFiles;
-    }
-
-    public Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> compactBefore() {
-        return compactBefore;
-    }
-
-    public Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> compactAfter() {
-        return compactAfter;
+    public List<FileCommittable> fileCommittables() {
+        return fileCommittables;
     }
 
     @Override
@@ -114,50 +84,21 @@ public class ManifestCommittable {
         ManifestCommittable that = (ManifestCommittable) o;
         return Objects.equals(identifier, that.identifier)
                 && Objects.equals(logOffsets, that.logOffsets)
-                && Objects.equals(newFiles, that.newFiles)
-                && Objects.equals(compactBefore, that.compactBefore)
-                && Objects.equals(compactAfter, that.compactAfter);
+                && Objects.equals(fileCommittables, that.fileCommittables);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(identifier, logOffsets, newFiles, compactBefore, compactAfter);
+        return Objects.hash(identifier, logOffsets, fileCommittables);
     }
 
     @Override
     public String toString() {
-        return "ManifestCommittable { "
-                + "identifier = "
-                + identifier
-                + ", logOffsets = "
-                + logOffsets
-                + ", newFiles =\n"
-                + filesToString(newFiles)
-                + ", compactBefore =\n"
-                + filesToString(compactBefore)
-                + ", compactAfter =\n"
-                + filesToString(compactAfter)
-                + '}';
-    }
-
-    private static String filesToString(
-            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> files) {
-        StringBuilder builder = new StringBuilder();
-        for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> entryWithPartition :
-                files.entrySet()) {
-            for (Map.Entry<Integer, List<DataFileMeta>> entryWithBucket :
-                    entryWithPartition.getValue().entrySet()) {
-                for (DataFileMeta dataFile : entryWithBucket.getValue()) {
-                    builder.append("  * partition: ")
-                            .append(entryWithPartition.getKey())
-                            .append(", bucket: ")
-                            .append(entryWithBucket.getKey())
-                            .append(", file: ")
-                            .append(dataFile.fileName())
-                            .append("\n");
-                }
-            }
-        }
-        return builder.toString();
+        return String.format(
+                "ManifestCommittable {"
+                        + "identifier = %s, "
+                        + "logOffsets = %s, "
+                        + "fileCommittables = %s",
+                identifier, logOffsets, fileCommittables);
     }
 }

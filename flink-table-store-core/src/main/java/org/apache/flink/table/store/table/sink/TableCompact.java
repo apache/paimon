@@ -20,8 +20,9 @@ package org.apache.flink.table.store.table.sink;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.compact.CompactResult;
+import org.apache.flink.table.store.file.io.CompactIncrement;
 import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.mergetree.Increment;
+import org.apache.flink.table.store.file.io.NewFilesIncrement;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.predicate.PredicateConverter;
@@ -32,6 +33,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -99,7 +101,9 @@ public class TableCompact {
                     new FileCommittable(
                             partition,
                             bucket,
-                            Increment.forCompact(result.before(), result.after()));
+                            NewFilesIncrement.emptyIncrement(),
+                            new CompactIncrement(
+                                    result.before(), result.after(), Collections.emptyList()));
             return Optional.of(committable);
         } catch (Exception e) {
             throw new RuntimeException(e);

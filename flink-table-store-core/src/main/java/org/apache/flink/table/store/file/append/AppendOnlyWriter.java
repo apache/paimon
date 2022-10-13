@@ -22,10 +22,11 @@ package org.apache.flink.table.store.file.append;
 import org.apache.flink.api.common.accumulators.LongCounter;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.compact.CompactManager;
+import org.apache.flink.table.store.file.io.CompactIncrement;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
+import org.apache.flink.table.store.file.io.NewFilesIncrement;
 import org.apache.flink.table.store.file.io.RowDataRollingFileWriter;
-import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.types.logical.RowType;
@@ -33,6 +34,7 @@ import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
@@ -89,7 +91,7 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     }
 
     @Override
-    public Increment prepareCommit(boolean endOnfInput) throws Exception {
+    public CommitIncrement prepareCommit(boolean endOnfInput) throws Exception {
         List<DataFileMeta> newFiles = new ArrayList<>();
         if (writer != null) {
             writer.close();
@@ -148,12 +150,28 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
                         });
     }
 
-    private Increment drainIncrement(List<DataFileMeta> newFiles) {
-        Increment increment =
-                new Increment(
-                        newFiles, new ArrayList<>(compactBefore), new ArrayList<>(compactAfter));
+    private CommitIncrement drainIncrement(List<DataFileMeta> newFiles) {
+        NewFilesIncrement newFilesIncrement =
+                new NewFilesIncrement(newFiles, Collections.emptyList());
+        CompactIncrement compactIncrement =
+                new CompactIncrement(
+                        new ArrayList<>(compactBefore),
+                        new ArrayList<>(compactAfter),
+                        Collections.emptyList());
+
         compactBefore.clear();
         compactAfter.clear();
-        return increment;
+
+        return new CommitIncrement() {
+            @Override
+            public NewFilesIncrement newFilesIncrement() {
+                return newFilesIncrement;
+            }
+
+            @Override
+            public CompactIncrement compactIncrement() {
+                return compactIncrement;
+            }
+        };
     }
 }

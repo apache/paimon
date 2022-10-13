@@ -168,7 +168,7 @@ public class MergeTreeTest {
     @Test
     public void testRestore() throws Exception {
         List<TestRecord> expected = new ArrayList<>(writeBatch());
-        List<DataFileMeta> newFiles = writer.prepareCommit(true).newFiles();
+        List<DataFileMeta> newFiles = writer.prepareCommit(true).newFilesIncrement().newFiles();
         writer = createMergeTreeWriter(newFiles);
         expected.addAll(writeBatch());
         writer.prepareCommit(true);
@@ -198,7 +198,7 @@ public class MergeTreeTest {
             }
             writeAll(records);
             expected.addAll(records);
-            Increment increment = writer.prepareCommit(true);
+            RecordWriter.CommitIncrement increment = writer.prepareCommit(true);
             mergeCompacted(newFileNames, compactedFiles, increment);
         }
         writer.close();
@@ -229,8 +229,8 @@ public class MergeTreeTest {
                 writer.sync();
             }
 
-            Increment increment = writer.prepareCommit(true);
-            newFiles.addAll(increment.newFiles());
+            RecordWriter.CommitIncrement increment = writer.prepareCommit(true);
+            newFiles.addAll(increment.newFilesIncrement().newFiles());
             mergeCompacted(newFileNames, compactedFiles, increment);
         }
 
@@ -287,7 +287,7 @@ public class MergeTreeTest {
         CompactRewriter rewriter =
                 (outputLevel, dropDelete, sections) -> {
                     RollingFileWriter<KeyValue, DataFileMeta> writer =
-                            writerFactory.createLeveledWriter(outputLevel);
+                            writerFactory.createRollingMergeTreeFileWriter(outputLevel);
                     writer.write(
                             new RecordReaderIterator<>(
                                     new MergeTreeReader(
@@ -310,14 +310,18 @@ public class MergeTreeTest {
     }
 
     private void mergeCompacted(
-            Set<String> newFileNames, List<DataFileMeta> compactedFiles, Increment increment) {
-        increment.newFiles().stream().map(DataFileMeta::fileName).forEach(newFileNames::add);
-        compactedFiles.addAll(increment.newFiles());
+            Set<String> newFileNames,
+            List<DataFileMeta> compactedFiles,
+            RecordWriter.CommitIncrement increment) {
+        increment.newFilesIncrement().newFiles().stream()
+                .map(DataFileMeta::fileName)
+                .forEach(newFileNames::add);
+        compactedFiles.addAll(increment.newFilesIncrement().newFiles());
         Set<String> afterFiles =
-                increment.compactAfter().stream()
+                increment.compactIncrement().compactAfter().stream()
                         .map(DataFileMeta::fileName)
                         .collect(Collectors.toSet());
-        for (DataFileMeta file : increment.compactBefore()) {
+        for (DataFileMeta file : increment.compactIncrement().compactBefore()) {
             boolean remove = compactedFiles.remove(file);
             assertThat(remove).isTrue();
             // See MergeTreeWriter.updateCompactResult
@@ -325,7 +329,7 @@ public class MergeTreeTest {
                 writerFactory.deleteFile(file.fileName());
             }
         }
-        compactedFiles.addAll(increment.compactAfter());
+        compactedFiles.addAll(increment.compactIncrement().compactAfter());
     }
 
     private List<TestRecord> writeBatch() throws Exception {

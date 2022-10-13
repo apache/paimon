@@ -28,6 +28,8 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,6 +44,7 @@ public class Snapshot {
     private static final String FIELD_SCHEMA_ID = "schemaId";
     private static final String FIELD_BASE_MANIFEST_LIST = "baseManifestList";
     private static final String FIELD_DELTA_MANIFEST_LIST = "deltaManifestList";
+    private static final String FIELD_CHANGELOG_MANIFEST_LIST = "changelogManifestList";
     private static final String FIELD_COMMIT_USER = "commitUser";
     private static final String FIELD_COMMIT_IDENTIFIER = "commitIdentifier";
     private static final String FIELD_COMMIT_KIND = "commitKind";
@@ -62,6 +65,12 @@ public class Snapshot {
     // for faster expire and streaming reads
     @JsonProperty(FIELD_DELTA_MANIFEST_LIST)
     private final String deltaManifestList;
+
+    // a manifest list recording all changelog produced in this snapshot
+    // null for snapshots strictly before table store version 0.3
+    @JsonProperty(FIELD_CHANGELOG_MANIFEST_LIST)
+    @Nullable
+    private final String changelogManifestList;
 
     @JsonProperty(FIELD_COMMIT_USER)
     private final String commitUser;
@@ -85,6 +94,7 @@ public class Snapshot {
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
             @JsonProperty(FIELD_BASE_MANIFEST_LIST) String baseManifestList,
             @JsonProperty(FIELD_DELTA_MANIFEST_LIST) String deltaManifestList,
+            @JsonProperty(FIELD_CHANGELOG_MANIFEST_LIST) @Nullable String changelogManifestList,
             @JsonProperty(FIELD_COMMIT_USER) String commitUser,
             @JsonProperty(FIELD_COMMIT_IDENTIFIER) String commitIdentifier,
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
@@ -94,6 +104,7 @@ public class Snapshot {
         this.schemaId = schemaId;
         this.baseManifestList = baseManifestList;
         this.deltaManifestList = deltaManifestList;
+        this.changelogManifestList = changelogManifestList;
         this.commitUser = commitUser;
         this.commitIdentifier = commitIdentifier;
         this.commitKind = commitKind;
@@ -119,6 +130,11 @@ public class Snapshot {
     @JsonGetter(FIELD_DELTA_MANIFEST_LIST)
     public String deltaManifestList() {
         return deltaManifestList;
+    }
+
+    @JsonGetter(FIELD_CHANGELOG_MANIFEST_LIST)
+    public String changelogManifestList() {
+        return changelogManifestList;
     }
 
     @JsonGetter(FIELD_COMMIT_USER)
@@ -150,7 +166,7 @@ public class Snapshot {
         return JsonSerdeUtil.toJson(this);
     }
 
-    public List<ManifestFileMeta> readAllManifests(ManifestList manifestList) {
+    public List<ManifestFileMeta> readAllDataManifests(ManifestList manifestList) {
         List<ManifestFileMeta> result = new ArrayList<>();
         result.addAll(manifestList.read(baseManifestList));
         result.addAll(manifestList.read(deltaManifestList));

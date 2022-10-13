@@ -229,7 +229,7 @@ public abstract class FileStoreTableTestBase {
         List<FileCommittable> commit4 = write.prepareCommit(false);
         // trigger compaction, but not wait it.
 
-        if (commit4.get(0).increment().compactBefore().isEmpty()) {
+        if (commit4.get(0).compactIncrement().compactBefore().isEmpty()) {
             // commit4 is not a compaction commit
             // do compaction commit5 and compaction commit6
             write.write(rowData(2, 20, 200L));

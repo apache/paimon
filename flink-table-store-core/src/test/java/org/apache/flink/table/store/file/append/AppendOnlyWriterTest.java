@@ -29,7 +29,6 @@ import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
-import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FieldStats;
@@ -85,11 +84,10 @@ public class AppendOnlyWriterTest {
 
         for (int i = 0; i < 3; i++) {
             writer.sync();
-            Increment inc = writer.prepareCommit(true);
+            RecordWriter.CommitIncrement inc = writer.prepareCommit(true);
 
-            assertThat(inc.newFiles()).isEqualTo(Collections.emptyList());
-            assertThat(inc.compactBefore()).isEqualTo(Collections.emptyList());
-            assertThat(inc.compactAfter()).isEqualTo(Collections.emptyList());
+            assertThat(inc.newFilesIncrement().isEmpty()).isTrue();
+            assertThat(inc.compactIncrement().isEmpty()).isTrue();
         }
     }
 
@@ -97,11 +95,11 @@ public class AppendOnlyWriterTest {
     public void testSingleWrite() throws Exception {
         RecordWriter<RowData> writer = createEmptyWriter(1024 * 1024L);
         writer.write(row(1, "AAA", PART));
-        Increment increment = writer.prepareCommit(true);
+        RecordWriter.CommitIncrement increment = writer.prepareCommit(true);
         writer.close();
 
-        assertThat(increment.newFiles().size()).isEqualTo(1);
-        DataFileMeta meta = increment.newFiles().get(0);
+        assertThat(increment.newFilesIncrement().newFiles().size()).isEqualTo(1);
+        DataFileMeta meta = increment.newFilesIncrement().newFiles().get(0);
         assertThat(meta).isNotNull();
 
         Path path = pathFactory.toPath(meta.fileName());
@@ -138,29 +136,31 @@ public class AppendOnlyWriterTest {
             }
 
             writer.sync();
-            Increment inc = writer.prepareCommit(true);
+            RecordWriter.CommitIncrement inc = writer.prepareCommit(true);
             if (txn > 0 && txn % 3 == 0) {
-                assertThat(inc.compactBefore()).hasSize(4);
-                assertThat(inc.compactAfter()).hasSize(1);
-                DataFileMeta compactAfter = inc.compactAfter().get(0);
+                assertThat(inc.compactIncrement().compactBefore()).hasSize(4);
+                assertThat(inc.compactIncrement().compactAfter()).hasSize(1);
+                DataFileMeta compactAfter = inc.compactIncrement().compactAfter().get(0);
                 assertThat(compactAfter.fileName()).startsWith("compact-");
                 assertThat(compactAfter.fileSize())
                         .isEqualTo(
-                                inc.compactBefore().stream()
+                                inc.compactIncrement().compactBefore().stream()
                                         .mapToLong(DataFileMeta::fileSize)
                                         .sum());
                 assertThat(compactAfter.rowCount())
                         .isEqualTo(
-                                inc.compactBefore().stream()
+                                inc.compactIncrement().compactBefore().stream()
                                         .mapToLong(DataFileMeta::rowCount)
                                         .sum());
             } else {
-                assertThat(inc.compactBefore()).isEqualTo(Collections.emptyList());
-                assertThat(inc.compactAfter()).isEqualTo(Collections.emptyList());
+                assertThat(inc.compactIncrement().compactBefore())
+                        .isEqualTo(Collections.emptyList());
+                assertThat(inc.compactIncrement().compactAfter())
+                        .isEqualTo(Collections.emptyList());
             }
 
-            assertThat(inc.newFiles().size()).isEqualTo(1);
-            DataFileMeta meta = inc.newFiles().get(0);
+            assertThat(inc.newFilesIncrement().newFiles().size()).isEqualTo(1);
+            DataFileMeta meta = inc.newFilesIncrement().newFiles().get(0);
 
             Path path = pathFactory.toPath(meta.fileName());
             assertThat(path.getFileSystem().exists(path)).isTrue();
@@ -195,14 +195,14 @@ public class AppendOnlyWriterTest {
         }
 
         writer.sync();
-        Increment firstInc = writer.prepareCommit(true);
-        assertThat(firstInc.compactBefore()).isEqualTo(Collections.emptyList());
-        assertThat(firstInc.compactAfter()).isEqualTo(Collections.emptyList());
+        RecordWriter.CommitIncrement firstInc = writer.prepareCommit(true);
+        assertThat(firstInc.compactIncrement().compactBefore()).isEqualTo(Collections.emptyList());
+        assertThat(firstInc.compactIncrement().compactAfter()).isEqualTo(Collections.emptyList());
 
-        assertThat(firstInc.newFiles().size()).isEqualTo(10);
+        assertThat(firstInc.newFilesIncrement().newFiles().size()).isEqualTo(10);
 
         int id = 0;
-        for (DataFileMeta meta : firstInc.newFiles()) {
+        for (DataFileMeta meta : firstInc.newFilesIncrement().newFiles()) {
             Path path = pathFactory.toPath(meta.fileName());
             assertThat(path.getFileSystem().exists(path)).isTrue();
 
@@ -231,19 +231,20 @@ public class AppendOnlyWriterTest {
         // increase target file size to test compaction
         long targetFileSize = 1024 * 1024L;
         Tuple2<AppendOnlyWriter, LinkedList<DataFileMeta>> writerAndToCompact =
-                createWriter(targetFileSize, true, firstInc.newFiles());
+                createWriter(targetFileSize, true, firstInc.newFilesIncrement().newFiles());
         writer = writerAndToCompact.f0;
         LinkedList<DataFileMeta> toCompact = writerAndToCompact.f1;
-        assertThat(toCompact).containsExactlyElementsOf(firstInc.newFiles());
+        assertThat(toCompact).containsExactlyElementsOf(firstInc.newFilesIncrement().newFiles());
         writer.write(row(id, String.format("%03d", id), PART));
         writer.sync();
-        Increment secInc = writer.prepareCommit(true);
+        RecordWriter.CommitIncrement secInc = writer.prepareCommit(true);
 
         // check compact before and after
-        List<DataFileMeta> compactBefore = secInc.compactBefore();
-        List<DataFileMeta> compactAfter = secInc.compactAfter();
+        List<DataFileMeta> compactBefore = secInc.compactIncrement().compactBefore();
+        List<DataFileMeta> compactAfter = secInc.compactIncrement().compactAfter();
         assertThat(compactBefore)
-                .containsExactlyInAnyOrderElementsOf(firstInc.newFiles().subList(0, 4));
+                .containsExactlyInAnyOrderElementsOf(
+                        firstInc.newFilesIncrement().newFiles().subList(0, 4));
         assertThat(compactAfter).hasSize(1);
         assertThat(compactBefore.stream().mapToLong(DataFileMeta::fileSize).sum())
                 .isEqualTo(compactAfter.stream().mapToLong(DataFileMeta::fileSize).sum());
@@ -254,7 +255,7 @@ public class AppendOnlyWriterTest {
                 .isEqualTo(compactAfter.get(0).minSequenceNumber());
         assertThat(compactBefore.get(compactBefore.size() - 1).maxSequenceNumber())
                 .isEqualTo(compactAfter.get(compactAfter.size() - 1).maxSequenceNumber());
-        assertThat(secInc.newFiles()).hasSize(1);
+        assertThat(secInc.newFilesIncrement().newFiles()).hasSize(1);
 
         /* check toCompact[round + 1] is composed of
          * <1> the compactAfter[round] (due to small size)
@@ -263,8 +264,11 @@ public class AppendOnlyWriterTest {
          * with strict order
          */
         List<DataFileMeta> toCompactResult = new ArrayList<>(compactAfter);
-        toCompactResult.addAll(firstInc.newFiles().subList(4, firstInc.newFiles().size()));
-        toCompactResult.addAll(secInc.newFiles());
+        toCompactResult.addAll(
+                firstInc.newFilesIncrement()
+                        .newFiles()
+                        .subList(4, firstInc.newFilesIncrement().newFiles().size()));
+        toCompactResult.addAll(secInc.newFilesIncrement().newFiles());
         assertThat(toCompact).containsExactlyElementsOf(toCompactResult);
     }
 

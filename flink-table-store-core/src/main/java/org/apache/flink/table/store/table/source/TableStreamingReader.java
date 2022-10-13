@@ -93,7 +93,10 @@ public class TableStreamingReader {
             long snapshotId = Objects.requireNonNull(plan.snapshotId);
             enumerator =
                     new SnapshotEnumerator(
-                            table.location(), scan.withIncremental(true), snapshotId);
+                            table.location(),
+                            scan.withIncremental(true),
+                            table.options().changelogProducer(),
+                            snapshotId);
             return read(plan);
         } else {
             SnapshotEnumerator.EnumeratorResult result = enumerator.call();
