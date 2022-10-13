@@ -25,9 +25,6 @@ import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
 
-import static org.apache.flink.util.Preconditions.checkArgument;
-import static org.apache.flink.util.Preconditions.checkNotNull;
-
 /**
  * A {@link MergeFunction} where key is primary key (unique) and value is the partial record, update
  * non-null fields on merge.
@@ -37,13 +34,15 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private static final long serialVersionUID = 1L;
 
     private final RowData.FieldGetter[] getters;
+    private final boolean ignoreDelete;
 
     private transient KeyValue latestKv;
     private transient GenericRowData row;
     private transient KeyValue reused;
 
-    public PartialUpdateMergeFunction(RowData.FieldGetter[] getters) {
+    public PartialUpdateMergeFunction(RowData.FieldGetter[] getters, boolean ignoreDelete) {
         this.getters = getters;
+        this.ignoreDelete = ignoreDelete;
     }
 
     @Override
@@ -54,9 +53,20 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
     @Override
     public void add(KeyValue kv) {
-        checkArgument(
-                kv.valueKind() == RowKind.INSERT || kv.valueKind() == RowKind.UPDATE_AFTER,
-                "Partial update can not accept delete records. Partial delete is not supported!");
+        if (kv.valueKind() == RowKind.UPDATE_BEFORE || kv.valueKind() == RowKind.DELETE) {
+            if (ignoreDelete) {
+                return;
+            }
+
+            if (kv.valueKind() == RowKind.UPDATE_BEFORE) {
+                throw new IllegalArgumentException(
+                        "Partial update can not accept update_before records, it is a bug.");
+            }
+
+            throw new IllegalArgumentException(
+                    "Partial update can not accept delete records. Partial delete is not supported!");
+        }
+
         latestKv = kv;
         for (int i = 0; i < getters.length; i++) {
             Object field = getters[i].getFieldOrNull(kv.value());
@@ -69,9 +79,14 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     @Override
     @Nullable
     public KeyValue getResult() {
-        checkNotNull(
-                latestKv,
-                "Trying to get result from merge function without any input. This is unexpected.");
+        if (latestKv == null) {
+            if (ignoreDelete) {
+                return null;
+            }
+
+            throw new IllegalArgumentException(
+                    "Trying to get result from merge function without any input. This is unexpected.");
+        }
 
         if (reused == null) {
             reused = new KeyValue();
@@ -82,6 +97,6 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     @Override
     public MergeFunction<KeyValue> copy() {
         // RowData.FieldGetter is thread safe
-        return new PartialUpdateMergeFunction(getters);
+        return new PartialUpdateMergeFunction(getters, ignoreDelete);
     }
 }
