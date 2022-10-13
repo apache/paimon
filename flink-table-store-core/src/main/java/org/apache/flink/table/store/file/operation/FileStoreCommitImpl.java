@@ -39,7 +39,6 @@ import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.util.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -279,9 +278,21 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 compactMergeTree,
                 compactChangelog);
 
-        Preconditions.checkState(
-                appendChangelog.isEmpty() && compactChangelog.isEmpty(),
-                "Overwrite mode does not support changelog.");
+        if (!appendChangelog.isEmpty() || !compactChangelog.isEmpty()) {
+            StringBuilder warnMessage =
+                    new StringBuilder(
+                            "Overwrite mode currently does not commit any changelog.\n"
+                                    + "Please make sure that the partition you're overwriting "
+                                    + "is not being consumed by a streaming reader.\n"
+                                    + "Ignored changelog files are:\n");
+            for (ManifestEntry entry : appendChangelog) {
+                warnMessage.append("  * ").append(entry.toString()).append("\n");
+            }
+            for (ManifestEntry entry : compactChangelog) {
+                warnMessage.append("  * ").append(entry.toString()).append("\n");
+            }
+            LOG.warn(warnMessage.toString());
+        }
 
         // sanity check, all changes must be done within the given partition
         Predicate partitionFilter = PredicateConverter.fromMap(partition, partitionType);
