@@ -96,10 +96,6 @@ public class KafkaLogSourceProvider implements LogSourceProvider {
                 properties.setProperty(ISOLATION_LEVEL_CONFIG, "read_committed");
                 break;
             case EVENTUAL:
-                if (primaryKeyDeserializer == null) {
-                    throw new IllegalArgumentException(
-                            "Can not use EVENTUAL consistency mode for non-pk table.");
-                }
                 properties.setProperty(ISOLATION_LEVEL_CONFIG, "read_uncommitted");
                 break;
         }
