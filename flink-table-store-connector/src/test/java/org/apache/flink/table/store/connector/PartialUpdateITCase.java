@@ -18,12 +18,17 @@
 
 package org.apache.flink.table.store.connector;
 
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.types.Row;
+import org.apache.flink.types.RowKind;
+import org.apache.flink.util.CloseableIterator;
 
 import org.junit.Test;
 
-import java.util.Collections;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -33,10 +38,15 @@ public class PartialUpdateITCase extends FileStoreTableITCase {
 
     @Override
     protected List<String> ddl() {
-        return Collections.singletonList(
+        return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS T ("
                         + "j INT, k INT, a INT, b INT, c STRING, PRIMARY KEY (j,k) NOT ENFORCED)"
-                        + " WITH ('merge-engine'='partial-update');");
+                        + " WITH ('merge-engine'='partial-update');",
+                "CREATE TABLE IF NOT EXISTS dwd_orders ("
+                        + "OrderID INT, OrderNumber INT, PersonID INT, LastName STRING, FirstName STRING, Age INT, PRIMARY KEY (OrderID) NOT ENFORCED)"
+                        + " WITH ('merge-engine'='partial-update', 'partial-update.ignore-delete'='true');",
+                "CREATE TABLE IF NOT EXISTS ods_orders (OrderID INT, OrderNumber INT, PersonID INT, PRIMARY KEY (OrderID) NOT ENFORCED) WITH ('changelog-producer'='input');",
+                "CREATE TABLE IF NOT EXISTS dim_persons (PersonID INT, LastName STRING, FirstName STRING, Age INT, PRIMARY KEY (PersonID) NOT ENFORCED) WITH ('changelog-producer'='input');");
     }
 
     @Test
@@ -76,6 +86,47 @@ public class PartialUpdateITCase extends FileStoreTableITCase {
 
         assertThat(batchSql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(Row.of(1, 2, 4, 5, "6"), Row.of(1, 3, 2, 4, "1"));
+    }
+
+    @Test
+    public void testForeignKeyJoin() throws Exception {
+        sEnv.getConfig()
+                .set(
+                        ExecutionConfigOptions.TABLE_EXEC_SINK_UPSERT_MATERIALIZE,
+                        ExecutionConfigOptions.UpsertMaterialize.NONE);
+        CloseableIterator<Row> iter =
+                streamSqlIter(
+                        "INSERT INTO dwd_orders "
+                                + "SELECT OrderID, OrderNumber, PersonID, CAST(NULL AS STRING), CAST(NULL AS STRING), CAST(NULL AS INT) FROM ods_orders "
+                                + "UNION ALL "
+                                + "SELECT OrderID, CAST(NULL AS INT), dim_persons.PersonID, LastName, FirstName, Age FROM dim_persons JOIN ods_orders ON dim_persons.PersonID = ods_orders.PersonID;");
+
+        batchSql("INSERT INTO ods_orders VALUES (1, 2, 3)");
+        batchSql("INSERT INTO dim_persons VALUES (3, 'snow', 'jon', 23)");
+        Thread.sleep(1000);
+        assertThat(rowsToList(batchSql("SELECT * FROM dwd_orders")))
+                .containsExactly(Arrays.asList(1, 2, 3, "snow", "jon", 23));
+
+        batchSql("INSERT INTO ods_orders VALUES (1, 4, 3)");
+        batchSql("INSERT INTO dim_persons VALUES (3, 'snow', 'targaryen', 23)");
+        Thread.sleep(1000);
+        assertThat(rowsToList(batchSql("SELECT * FROM dwd_orders")))
+                .containsExactly(Arrays.asList(1, 4, 3, "snow", "targaryen", 23));
+
+        iter.close();
+    }
+
+    private List<List<Object>> rowsToList(List<Row> rows) {
+        return rows.stream().map(this::toList).collect(Collectors.toList());
+    }
+
+    private List<Object> toList(Row row) {
+        assertThat(row.getKind()).isIn(RowKind.INSERT, RowKind.UPDATE_AFTER);
+        List<Object> result = new ArrayList<>();
+        for (int i = 0; i < row.getArity(); i++) {
+            result.add(row.getField(i));
+        }
+        return result;
     }
 
     @Test

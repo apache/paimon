@@ -283,6 +283,31 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 "1|60|500|binary|varbinary"));
     }
 
+    @Test
+    public void testPartialUpdateIgnoreDelete() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(
+                                    CoreOptions.MERGE_ENGINE,
+                                    CoreOptions.MergeEngine.PARTIAL_UPDATE);
+                            conf.set(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE, true);
+                        });
+        TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
+        write.write(rowData(1, 10, 200L));
+        write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 100L));
+        write.write(rowDataWithKind(RowKind.UPDATE_BEFORE, 1, 10, 100L));
+        write.write(rowDataWithKind(RowKind.DELETE, 1, 20, 400L));
+        commit.commit("0", write.prepareCommit(true));
+        write.close();
+
+        List<Split> splits = table.newScan().plan().splits;
+        TableRead read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
+                .isEqualTo(Collections.singletonList("1|10|200|binary|varbinary"));
+    }
+
     @Override
     protected FileStoreTable createFileStoreTable(Consumer<Configuration> configure)
             throws Exception {

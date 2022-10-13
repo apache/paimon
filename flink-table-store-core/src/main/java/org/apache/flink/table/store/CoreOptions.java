@@ -149,6 +149,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MergeEngine.DEDUPLICATE)
                     .withDescription("Specify the merge engine for table with primary key.");
 
+    public static final ConfigOption<Boolean> PARTIAL_UPDATE_IGNORE_DELETE =
+            ConfigOptions.key("partial-update.ignore-delete")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to ignore delete records in partial-update mode.");
+
     @Immutable
     public static final ConfigOption<WriteMode> WRITE_MODE =
             ConfigOptions.key("write-mode")

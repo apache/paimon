@@ -86,7 +86,8 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                 mergeFunction = new DeduplicateMergeFunction();
                 break;
             case PARTIAL_UPDATE:
-                mergeFunction = new PartialUpdateMergeFunction(fieldGetters);
+                boolean ignoreDelete = conf.get(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE);
+                mergeFunction = new PartialUpdateMergeFunction(fieldGetters, ignoreDelete);
                 break;
             case AGGREGATE:
                 List<String> fieldNames = tableSchema.fieldNames();
