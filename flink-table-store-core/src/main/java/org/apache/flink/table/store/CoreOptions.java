@@ -153,8 +153,7 @@ public class CoreOptions implements Serializable {
             ConfigOptions.key("partial-update.ignore-delete")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription(
-                            "Whether to ignore delete/update_before records in partial-update mode.");
+                    .withDescription("Whether to ignore delete records in partial-update mode.");
 
     @Immutable
     public static final ConfigOption<WriteMode> WRITE_MODE =
