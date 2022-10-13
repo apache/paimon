@@ -114,22 +114,12 @@ public class KafkaLogITCase extends KafkaTableTestBase {
                                         LogConsistency.EVENTUAL,
                                         false));
         assertThat(exception.getMessage())
-                .isEqualTo("Can not use EVENTUAL consistency mode for non-pk table.");
+                .isEqualTo("Can not use upsert changelog mode for non-pk table.");
     }
 
     @Test
-    public void testAllEventualNonKeyed() {
-        IllegalArgumentException exception =
-                Assertions.assertThrows(
-                        IllegalArgumentException.class,
-                        () ->
-                                innerTest(
-                                        "AllEventualNonKeyed",
-                                        LogChangelogMode.ALL,
-                                        LogConsistency.EVENTUAL,
-                                        false));
-        assertThat(exception.getMessage())
-                .isEqualTo("Can not use EVENTUAL consistency mode for non-pk table.");
+    public void testAllEventualNonKeyed() throws Exception {
+        innerTest("AllEventualNonKeyed", LogChangelogMode.ALL, LogConsistency.EVENTUAL, false);
     }
 
     private void innerTest(

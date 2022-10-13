@@ -74,10 +74,6 @@ public class KafkaLogSinkProvider implements LogSinkProvider {
                 semantic = Semantic.EXACTLY_ONCE;
                 break;
             case EVENTUAL:
-                if (primaryKeySerializer == null) {
-                    throw new IllegalArgumentException(
-                            "Can not use EVENTUAL consistency mode for non-pk table.");
-                }
                 semantic = Semantic.AT_LEAST_ONCE;
                 break;
             default:
