@@ -495,8 +495,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             newChangesListName = manifestList.write(newChangesManifests);
 
             // write changelog into manifest files
-            changelogMetas.addAll(manifestFile.write(changelogFiles));
-            changelogListName = manifestList.write(changelogMetas);
+            if (!changelogFiles.isEmpty()) {
+                changelogMetas.addAll(manifestFile.write(changelogFiles));
+                changelogListName = manifestList.write(changelogMetas);
+            }
 
             // prepare snapshot file
             newSnapshot =

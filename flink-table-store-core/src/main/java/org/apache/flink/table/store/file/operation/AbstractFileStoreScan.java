@@ -183,8 +183,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                     FileUtils.COMMON_IO_FORK_JOIN_POOL
                             .submit(
                                     () ->
-                                            readManifests
-                                                    .parallelStream()
+                                            readManifests.parallelStream()
                                                     .filter(this::filterManifestFileMeta)
                                                     .flatMap(m -> readManifestFileMeta(m).stream())
                                                     .filter(this::filterManifestEntry)
@@ -271,9 +270,14 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private List<ManifestFileMeta> readIncremental(Snapshot snapshot) {
         switch (changelogProducer) {
             case INPUT:
-                if (snapshot.changelogManifestList() != null) {
-                    return manifestList.read(snapshot.changelogManifestList());
+                if (snapshot.version() >= 2) {
+                    if (snapshot.changelogManifestList() == null) {
+                        return Collections.emptyList();
+                    } else {
+                        return manifestList.read(snapshot.changelogManifestList());
+                    }
                 }
+
                 // compatible with Table Store 0.2, we'll read extraFiles in DataFileMeta
                 // see comments on DataFileMeta#extraFiles
                 if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
