@@ -192,18 +192,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         Long safeLatestSnapshotId = null;
         List<ManifestEntry> baseEntries = new ArrayList<>();
 
-        List<ManifestEntry> appendMergeTree = new ArrayList<>();
+        List<ManifestEntry> appendTableFiles = new ArrayList<>();
         List<ManifestEntry> appendChangelog = new ArrayList<>();
-        List<ManifestEntry> compactMergeTree = new ArrayList<>();
+        List<ManifestEntry> compactTableFiles = new ArrayList<>();
         List<ManifestEntry> compactChangelog = new ArrayList<>();
         collectChanges(
                 committable.fileCommittables(),
-                appendMergeTree,
+                appendTableFiles,
                 appendChangelog,
-                compactMergeTree,
+                compactTableFiles,
                 compactChangelog);
 
-        if (createEmptyCommit || !appendMergeTree.isEmpty() || !appendChangelog.isEmpty()) {
+        if (createEmptyCommit || !appendTableFiles.isEmpty() || !appendChangelog.isEmpty()) {
             // Optimization for common path.
             // Step 1:
             // Read manifest entries from changed partitions here and check for conflicts.
@@ -216,13 +216,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 // so we need to contain all changes
                 baseEntries.addAll(
                         readAllEntriesFromChangedPartitions(
-                                latestSnapshotId, appendMergeTree, compactMergeTree));
-                noConflictsOrFail(baseEntries, appendMergeTree);
+                                latestSnapshotId, appendTableFiles, compactTableFiles));
+                noConflictsOrFail(baseEntries, appendTableFiles);
                 safeLatestSnapshotId = latestSnapshotId;
             }
 
             tryCommit(
-                    appendMergeTree,
+                    appendTableFiles,
                     appendChangelog,
                     committable.identifier(),
                     committable.logOffsets(),
@@ -230,7 +230,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     safeLatestSnapshotId);
         }
 
-        if (!compactMergeTree.isEmpty() || !compactChangelog.isEmpty()) {
+        if (!compactTableFiles.isEmpty() || !compactChangelog.isEmpty()) {
             // Optimization for common path.
             // Step 2:
             // Add appendChanges to the manifest entries read above and check for conflicts.
@@ -238,14 +238,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             // we can skip conflict checking in tryCommit method.
             // This optimization is mainly used to decrease the number of times we read from files.
             if (safeLatestSnapshotId != null) {
-                baseEntries.addAll(appendMergeTree);
-                noConflictsOrFail(baseEntries, compactMergeTree);
+                baseEntries.addAll(appendTableFiles);
+                noConflictsOrFail(baseEntries, compactTableFiles);
                 // assume this compact commit follows just after the append commit created above
                 safeLatestSnapshotId += 1;
             }
 
             tryCommit(
-                    compactMergeTree,
+                    compactTableFiles,
                     compactChangelog,
                     committable.identifier(),
                     committable.logOffsets(),
@@ -267,15 +267,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             + committable.toString());
         }
 
-        List<ManifestEntry> appendMergeTree = new ArrayList<>();
+        List<ManifestEntry> appendTableFiles = new ArrayList<>();
         List<ManifestEntry> appendChangelog = new ArrayList<>();
-        List<ManifestEntry> compactMergeTree = new ArrayList<>();
+        List<ManifestEntry> compactTableFiles = new ArrayList<>();
         List<ManifestEntry> compactChangelog = new ArrayList<>();
         collectChanges(
                 committable.fileCommittables(),
-                appendMergeTree,
+                appendTableFiles,
                 appendChangelog,
-                compactMergeTree,
+                compactTableFiles,
                 compactChangelog);
 
         if (!appendChangelog.isEmpty() || !compactChangelog.isEmpty()) {
@@ -297,7 +297,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         // sanity check, all changes must be done within the given partition
         Predicate partitionFilter = PredicateConverter.fromMap(partition, partitionType);
         if (partitionFilter != null) {
-            for (ManifestEntry entry : appendMergeTree) {
+            for (ManifestEntry entry : appendTableFiles) {
                 if (!partitionFilter.test(partitionObjectConverter.convert(entry.partition()))) {
                     throw new IllegalArgumentException(
                             "Trying to overwrite partition "
@@ -311,13 +311,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         // overwrite new files
         tryOverwrite(
                 partitionFilter,
-                appendMergeTree,
+                appendTableFiles,
                 committable.identifier(),
                 committable.logOffsets());
 
-        if (!compactMergeTree.isEmpty()) {
+        if (!compactTableFiles.isEmpty()) {
             tryCommit(
-                    compactMergeTree,
+                    compactTableFiles,
                     Collections.emptyList(),
                     committable.identifier(),
                     committable.logOffsets(),
@@ -328,15 +328,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private void collectChanges(
             List<FileCommittable> fileCommittables,
-            List<ManifestEntry> appendMergeTree,
+            List<ManifestEntry> appendTableFiles,
             List<ManifestEntry> appendChangelog,
-            List<ManifestEntry> compactMergeTree,
+            List<ManifestEntry> compactTableFiles,
             List<ManifestEntry> compactChangelog) {
         for (FileCommittable fileCommittable : fileCommittables) {
             fileCommittable
                     .newFilesIncrement()
                     .newFiles()
-                    .forEach(m -> appendMergeTree.add(makeEntry(FileKind.ADD, fileCommittable, m)));
+                    .forEach(
+                            m -> appendTableFiles.add(makeEntry(FileKind.ADD, fileCommittable, m)));
             fileCommittable
                     .newFilesIncrement()
                     .changelogFiles()
@@ -346,13 +347,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     .compactBefore()
                     .forEach(
                             m ->
-                                    compactMergeTree.add(
+                                    compactTableFiles.add(
                                             makeEntry(FileKind.DELETE, fileCommittable, m)));
             fileCommittable
                     .compactIncrement()
                     .compactAfter()
                     .forEach(
-                            m -> compactMergeTree.add(makeEntry(FileKind.ADD, fileCommittable, m)));
+                            m ->
+                                    compactTableFiles.add(
+                                            makeEntry(FileKind.ADD, fileCommittable, m)));
             fileCommittable
                     .compactIncrement()
                     .changelogFiles()
@@ -368,7 +371,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private void tryCommit(
-            List<ManifestEntry> mergeTreeChanges,
+            List<ManifestEntry> tableFiles,
             List<ManifestEntry> changelogFiles,
             String hash,
             Map<Integer, Long> logOffsets,
@@ -377,7 +380,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         while (true) {
             Long latestSnapshotId = snapshotManager.latestSnapshotId();
             if (tryCommitOnce(
-                    mergeTreeChanges,
+                    tableFiles,
                     changelogFiles,
                     hash,
                     logOffsets,
@@ -430,7 +433,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private boolean tryCommitOnce(
-            List<ManifestEntry> mergeTreeChanges,
+            List<ManifestEntry> tableFiles,
             List<ManifestEntry> changelogFiles,
             String identifier,
             Map<Integer, Long> logOffsets,
@@ -442,8 +445,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         Path newSnapshotPath = snapshotManager.snapshotPath(newSnapshotId);
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Ready to commit merge tree changes to snapshot #" + newSnapshotId);
-            for (ManifestEntry entry : mergeTreeChanges) {
+            LOG.debug("Ready to commit table files to snapshot #" + newSnapshotId);
+            for (ManifestEntry entry : tableFiles) {
                 LOG.debug("  * " + entry.toString());
             }
             LOG.debug("Ready to commit changelog to snapshot #" + newSnapshotId);
@@ -457,7 +460,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (!latestSnapshotId.equals(safeLatestSnapshotId)) {
                 // latestSnapshotId is different from the snapshot id we've checked for conflicts,
                 // so we have to check again
-                noConflictsOrFail(latestSnapshotId, mergeTreeChanges);
+                noConflictsOrFail(latestSnapshotId, tableFiles);
             }
             latestSnapshot = snapshotManager.snapshot(latestSnapshotId);
         }
@@ -487,7 +490,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             previousChangesListName = manifestList.write(newMetas);
 
             // write new changes into manifest files
-            List<ManifestFileMeta> newChangesManifests = manifestFile.write(mergeTreeChanges);
+            List<ManifestFileMeta> newChangesManifests = manifestFile.write(tableFiles);
             newMetas.addAll(newChangesManifests);
             newChangesListName = manifestList.write(newChangesManifests);
 

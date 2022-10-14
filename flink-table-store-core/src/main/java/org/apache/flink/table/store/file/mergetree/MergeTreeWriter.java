@@ -133,31 +133,27 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 trySyncLatestCompaction(true);
             }
 
+            // write changelog file
+            //
+            // NOTE: We must first call memTable.rawIterator(), then call memTable.mergeIterator().
+            // Otherwise memTable.rawIterator() will generate sorted, but not yet merged, data. See
+            // comments on MemTable for more details.
+            if (changelogProducer == ChangelogProducer.INPUT) {
+                KeyValueDataFileWriter changelogWriter = writerFactory.createChangelogFileWriter(0);
+                changelogWriter.write(memTable.rawIterator());
+                changelogWriter.close();
+                changelogFiles.add(changelogWriter.result());
+            }
+
             // write lsm level 0 file
             Iterator<KeyValue> iterator = memTable.mergeIterator(keyComparator, mergeFunction);
             KeyValueDataFileWriter writer = writerFactory.createMergeTreeFileWriter(0);
             writer.write(iterator);
             writer.close();
             DataFileMeta fileMeta = writer.result();
-
             if (fileMeta != null) {
                 newFiles.add(fileMeta);
                 compactManager.addNewFile(fileMeta);
-
-                // write changelog file
-                if (changelogProducer == ChangelogProducer.INPUT) {
-                    try {
-                        KeyValueDataFileWriter changelogWriter =
-                                writerFactory.createChangelogFileWriter(0);
-                        changelogWriter.write(memTable.rawIterator());
-                        changelogWriter.close();
-                        changelogFiles.add(changelogWriter.result());
-                    } catch (Exception e) {
-                        // exception occurs, clean up written file
-                        writerFactory.deleteFile(fileMeta.fileName());
-                        throw e;
-                    }
-                }
             }
 
             memTable.clear();

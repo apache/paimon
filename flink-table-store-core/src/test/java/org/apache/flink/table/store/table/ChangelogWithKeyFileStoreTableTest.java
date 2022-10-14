@@ -173,8 +173,11 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         TableWrite write = table.newWrite();
         TableCommit commit = table.newCommit("user");
         write.write(rowData(1, 10, 100L));
+        write.write(rowData(1, 20, 200L));
         write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 100L));
         write.write(rowData(1, 10, 101L));
+        write.write(rowDataWithKind(RowKind.UPDATE_BEFORE, 1, 20, 200L));
+        write.write(rowDataWithKind(RowKind.UPDATE_AFTER, 1, 20, 201L));
         write.write(rowDataWithKind(RowKind.UPDATE_BEFORE, 1, 10, 101L));
         write.write(rowDataWithKind(RowKind.UPDATE_AFTER, 1, 10, 102L));
         commit.commit("0", write.prepareCommit(true));
@@ -186,8 +189,11 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                 .isEqualTo(
                         Arrays.asList(
                                 "+I 1|10|100|binary|varbinary",
+                                "+I 1|20|200|binary|varbinary",
                                 "-D 1|10|100|binary|varbinary",
                                 "+I 1|10|101|binary|varbinary",
+                                "-U 1|20|200|binary|varbinary",
+                                "+U 1|20|201|binary|varbinary",
                                 "-U 1|10|101|binary|varbinary",
                                 "+U 1|10|102|binary|varbinary"));
     }
@@ -195,7 +201,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     @Test
     public void testStreamingChangelogCompatibility02() throws Exception {
         // already contains 2 commits
-        CompatibilityTestUtils.unzip("compatibility/0.2-changelog-table.zip", tablePath.getPath());
+        CompatibilityTestUtils.unzip("compatibility/table-changelog-0.2.zip", tablePath.getPath());
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
