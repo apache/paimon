@@ -64,14 +64,15 @@ public class KeyValueFileStoreScanTest {
     public void beforeEach() throws Exception {
         gen = new TestKeyValueGenerator();
         store =
-                TestFileStore.create(
-                        "avro",
-                        tempDir.toString(),
-                        NUM_BUCKETS,
-                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
-                        new DeduplicateMergeFunction());
+                new TestFileStore.Builder(
+                                "avro",
+                                tempDir.toString(),
+                                NUM_BUCKETS,
+                                TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                                TestKeyValueGenerator.KEY_TYPE,
+                                TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                                new DeduplicateMergeFunction())
+                        .build();
         snapshotManager = store.snapshotManager();
 
         SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
@@ -197,7 +198,7 @@ public class KeyValueFileStoreScanTest {
         ManifestList manifestList = store.manifestListFactory().create();
         long wantedSnapshotId = random.nextLong(snapshotManager.latestSnapshotId()) + 1;
         Snapshot wantedSnapshot = snapshotManager.snapshot(wantedSnapshotId);
-        List<ManifestFileMeta> wantedManifests = wantedSnapshot.readAllManifests(manifestList);
+        List<ManifestFileMeta> wantedManifests = wantedSnapshot.readAllDataManifests(manifestList);
 
         FileStoreScan scan = store.newScan();
         scan.withManifestList(wantedManifests);
@@ -230,7 +231,7 @@ public class KeyValueFileStoreScanTest {
         FileStoreScan.Plan plan = scan.plan();
         assertThat(plan.snapshotId()).isEqualTo(expectedSnapshotId);
 
-        List<KeyValue> actualKvs = store.readKvsFromManifestEntries(plan.files());
+        List<KeyValue> actualKvs = store.readKvsFromManifestEntries(plan.files(), false);
         gen.sort(actualKvs);
         return store.toKvMap(actualKvs);
     }

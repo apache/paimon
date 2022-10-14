@@ -47,13 +47,21 @@ public interface MemTable {
     /** Memory occupancy size of this table. */
     long memoryOccupancy();
 
-    /** Returns an iterator without sorting and merging. */
+    /**
+     * Returns an iterator without sorting and merging.
+     *
+     * <p>NOTE: If {@link MemTable#mergeIterator(Comparator, MergeFunction)} is called first,
+     * upcoming call to this method will return sorted, but not yet merged, data.
+     */
     Iterator<KeyValue> rawIterator();
 
     /**
      * Returns an iterator over the records in this table. The elements are returned in the order of
      * key and sequence number and elements with the same key will be merged by the given {@link
      * MergeFunction}.
+     *
+     * <p>NOTE: After calling this method, the upcoming call to {@link MemTable#rawIterator()} will
+     * return sorted, but not yet merged, data.
      */
     Iterator<KeyValue> mergeIterator(
             Comparator<RowData> keyComparator, MergeFunction<KeyValue> mergeFunction);

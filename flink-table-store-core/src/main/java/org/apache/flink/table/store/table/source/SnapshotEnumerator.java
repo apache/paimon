@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 
@@ -35,14 +36,20 @@ public class SnapshotEnumerator implements Callable<SnapshotEnumerator.Enumerato
     private static final Logger LOG = LoggerFactory.getLogger(SnapshotEnumerator.class);
 
     private final SnapshotManager snapshotManager;
-
     private final TableScan scan;
+    private final CoreOptions.ChangelogProducer changelogProducer;
 
     private long nextSnapshotId;
 
-    public SnapshotEnumerator(Path tablePath, TableScan scan, long currentSnapshot) {
+    public SnapshotEnumerator(
+            Path tablePath,
+            TableScan scan,
+            CoreOptions.ChangelogProducer changelogProducer,
+            long currentSnapshot) {
         this.snapshotManager = new SnapshotManager(tablePath);
         this.scan = scan;
+        this.changelogProducer = changelogProducer;
+
         this.nextSnapshotId = currentSnapshot + 1;
     }
 
@@ -60,16 +67,21 @@ public class SnapshotEnumerator implements Callable<SnapshotEnumerator.Enumerato
             }
 
             Snapshot snapshot = snapshotManager.snapshot(nextSnapshotId);
-            if (snapshot.commitKind() != Snapshot.CommitKind.APPEND) {
-                if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE) {
-                    LOG.warn("Ignore overwrite snapshot id {}.", nextSnapshotId);
-                }
 
+            if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE) {
+                LOG.warn("Ignore overwrite snapshot id {}.", nextSnapshotId);
                 nextSnapshotId++;
+                continue;
+            }
+
+            if (changelogProducer == CoreOptions.ChangelogProducer.NONE
+                    && snapshot.commitKind() != Snapshot.CommitKind.APPEND) {
                 LOG.debug(
-                        "Next snapshot id {} is not APPEND, but is {}, check next one.",
+                        "ChangelogProducer is NONE. "
+                                + "Next snapshot id {} is not APPEND, but is {}, check next one.",
                         nextSnapshotId,
                         snapshot.commitKind());
+                nextSnapshotId++;
                 continue;
             }
 

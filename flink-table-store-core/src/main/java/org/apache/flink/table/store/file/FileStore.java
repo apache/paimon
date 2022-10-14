@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file;
 
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.FileStoreExpire;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
@@ -38,6 +39,8 @@ public interface FileStore<T> extends Serializable {
     SnapshotManager snapshotManager();
 
     RowType partitionType();
+
+    CoreOptions options();
 
     FileStoreScan newScan();
 

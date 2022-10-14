@@ -18,8 +18,10 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestFileStore;
@@ -32,13 +34,15 @@ import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
+import org.apache.flink.table.store.file.utils.TraceableFileSystem;
 import org.apache.flink.types.RowKind;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,6 +54,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -73,27 +78,49 @@ public class FileStoreCommitTest {
         FailingAtomicRenameFileSystem.reset(failingName, 100, 100);
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testSingleCommitUser(boolean failing) throws Exception {
-        testRandomConcurrentNoConflict(1, failing);
+    @AfterEach
+    public void afterEach() throws Exception {
+        FileSystem fs =
+                new Path(TestAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString())
+                        .getFileSystem();
+        assertThat(fs).isInstanceOf(TraceableFileSystem.class);
+        TraceableFileSystem tfs = (TraceableFileSystem) fs;
+
+        Predicate<Path> pathPredicate = path -> path.toString().contains(tempDir.toString());
+        assertThat(tfs.openInputStreams(pathPredicate)).isEmpty();
+        assertThat(tfs.openOutputStreams(pathPredicate)).isEmpty();
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testManyCommitUsersNoConflict(boolean failing) throws Exception {
-        testRandomConcurrentNoConflict(ThreadLocalRandom.current().nextInt(3) + 2, failing);
+    @CsvSource({"false,NONE", "false,INPUT", "true,NONE", "true,INPUT"})
+    public void testSingleCommitUser(boolean failing, String changelogProducer) throws Exception {
+        testRandomConcurrentNoConflict(
+                1, failing, CoreOptions.ChangelogProducer.valueOf(changelogProducer));
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testManyCommitUsersWithConflict(boolean failing) throws Exception {
-        testRandomConcurrentWithConflict(ThreadLocalRandom.current().nextInt(3) + 2, failing);
+    @CsvSource({"false,NONE", "false,INPUT", "true,NONE", "true,INPUT"})
+    public void testManyCommitUsersNoConflict(boolean failing, String changelogProducer)
+            throws Exception {
+        testRandomConcurrentNoConflict(
+                ThreadLocalRandom.current().nextInt(3) + 2,
+                failing,
+                CoreOptions.ChangelogProducer.valueOf(changelogProducer));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,NONE", "false,INPUT", "true,NONE", "true,INPUT"})
+    public void testManyCommitUsersWithConflict(boolean failing, String changelogProducer)
+            throws Exception {
+        testRandomConcurrentWithConflict(
+                ThreadLocalRandom.current().nextInt(3) + 2,
+                failing,
+                CoreOptions.ChangelogProducer.valueOf(changelogProducer));
     }
 
     @Test
     public void testLatestHint() throws Exception {
-        testRandomConcurrentNoConflict(1, false);
+        testRandomConcurrentNoConflict(1, false, CoreOptions.ChangelogProducer.NONE);
         SnapshotManager snapshotManager = createStore(false, 1).snapshotManager();
         Path snapshotDir = snapshotManager.snapshotDirectory();
         Path latest = new Path(snapshotDir, SnapshotManager.LATEST);
@@ -110,7 +137,7 @@ public class FileStoreCommitTest {
 
     @Test
     public void testFilterCommittedAfterExpire() throws Exception {
-        testRandomConcurrentNoConflict(1, false);
+        testRandomConcurrentNoConflict(1, false, CoreOptions.ChangelogProducer.NONE);
         // remove first snapshot to mimic expiration
         TestFileStore store = createStore(false);
         SnapshotManager snapshotManager = store.snapshotManager();
@@ -121,7 +148,8 @@ public class FileStoreCommitTest {
                 .filterCommitted(Collections.singletonList(new ManifestCommittable("dummy")));
     }
 
-    protected void testRandomConcurrentNoConflict(int numThreads, boolean failing)
+    protected void testRandomConcurrentNoConflict(
+            int numThreads, boolean failing, CoreOptions.ChangelogProducer changelogProducer)
             throws Exception {
         // prepare test data
         Map<BinaryRowData, List<KeyValue>> data =
@@ -143,10 +171,15 @@ public class FileStoreCommitTest {
                     .put(entry.getKey(), entry.getValue());
         }
 
-        testRandomConcurrent(dataPerThread, true, failing);
+        testRandomConcurrent(
+                dataPerThread,
+                changelogProducer == CoreOptions.ChangelogProducer.NONE,
+                failing,
+                changelogProducer);
     }
 
-    protected void testRandomConcurrentWithConflict(int numThreads, boolean failing)
+    protected void testRandomConcurrentWithConflict(
+            int numThreads, boolean failing, CoreOptions.ChangelogProducer changelogProducer)
             throws Exception {
         // prepare test data
         Map<BinaryRowData, List<KeyValue>> data =
@@ -171,13 +204,14 @@ public class FileStoreCommitTest {
             }
         }
 
-        testRandomConcurrent(dataPerThread, false, failing);
+        testRandomConcurrent(dataPerThread, false, failing, changelogProducer);
     }
 
     private void testRandomConcurrent(
             List<Map<BinaryRowData, List<KeyValue>>> dataPerThread,
             boolean enableOverwrite,
-            boolean failing)
+            boolean failing,
+            CoreOptions.ChangelogProducer changelogProducer)
             throws Exception {
         // concurrent commits
         List<TestCommitThread> threads = new ArrayList<>();
@@ -188,13 +222,13 @@ public class FileStoreCommitTest {
                             TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                             enableOverwrite,
                             data,
-                            createStore(failing),
-                            createStore(false));
+                            createStore(failing, 1, changelogProducer),
+                            createStore(false, 1, changelogProducer));
             thread.start();
             threads.add(thread);
         }
 
-        TestFileStore store = createStore(false);
+        TestFileStore store = createStore(false, 1, changelogProducer);
 
         // calculate expected results
         List<KeyValue> threadResults = new ArrayList<>();
@@ -214,6 +248,15 @@ public class FileStoreCommitTest {
         logData(() -> kvMapToKvList(expected), "expected");
         logData(() -> kvMapToKvList(actual), "actual");
         assertThat(actual).isEqualTo(expected);
+
+        // read changelog and compare
+        if (changelogProducer != CoreOptions.ChangelogProducer.NONE) {
+            List<KeyValue> actualChangelog = store.readAllChangelogUntilSnapshot(snapshotId);
+            logData(() -> actualChangelog, "raw changelog results");
+            Map<BinaryRowData, BinaryRowData> actualChangelogMap = store.toKvMap(actualChangelog);
+            logData(() -> kvMapToKvList(actualChangelogMap), "actual changelog map");
+            assertThat(actualChangelogMap).isEqualTo(expected);
+        }
     }
 
     @Test
@@ -381,6 +424,12 @@ public class FileStoreCommitTest {
     }
 
     private TestFileStore createStore(boolean failing, int numBucket) throws Exception {
+        return createStore(failing, numBucket, CoreOptions.ChangelogProducer.NONE);
+    }
+
+    private TestFileStore createStore(
+            boolean failing, int numBucket, CoreOptions.ChangelogProducer changelogProducer)
+            throws Exception {
         String root =
                 failing
                         ? FailingAtomicRenameFileSystem.getFailingPath(
@@ -395,14 +444,16 @@ public class FileStoreCommitTest {
                                 TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),
                         Collections.emptyMap(),
                         null));
-        return TestFileStore.create(
-                "avro",
-                root,
-                numBucket,
-                TestKeyValueGenerator.DEFAULT_PART_TYPE,
-                TestKeyValueGenerator.KEY_TYPE,
-                TestKeyValueGenerator.DEFAULT_ROW_TYPE,
-                new DeduplicateMergeFunction());
+        return new TestFileStore.Builder(
+                        "avro",
+                        root,
+                        numBucket,
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                        TestKeyValueGenerator.KEY_TYPE,
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                        new DeduplicateMergeFunction())
+                .changelogProducer(changelogProducer)
+                .build();
     }
 
     private List<KeyValue> generateDataList(int numRecords) {

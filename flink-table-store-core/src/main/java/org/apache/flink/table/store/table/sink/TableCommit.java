@@ -71,10 +71,7 @@ public class TableCommit implements AutoCloseable {
     public void commit(String identifier, List<FileCommittable> fileCommittables) {
         ManifestCommittable committable = new ManifestCommittable(identifier);
         for (FileCommittable fileCommittable : fileCommittables) {
-            committable.addFileCommittable(
-                    fileCommittable.partition(),
-                    fileCommittable.bucket(),
-                    fileCommittable.increment());
+            committable.addFileCommittable(fileCommittable);
         }
         commit(Collections.singletonList(committable));
     }

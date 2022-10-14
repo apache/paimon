@@ -134,9 +134,12 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             List<ConcatRecordReader.ReaderSupplier<KeyValue>> suppliers = new ArrayList<>();
             for (DataFileMeta file : split.files()) {
                 suppliers.add(
-                        () ->
-                                readerFactory.createRecordReader(
-                                        changelogFile(file).orElse(file.fileName()), file.level()));
+                        () -> {
+                            // We need to check extraFiles to be compatible with Table Store 0.2.
+                            // See comments on DataFileMeta#extraFiles.
+                            String fileName = changelogFile(file).orElse(file.fileName());
+                            return readerFactory.createRecordReader(fileName, file.level());
+                        });
             }
             return ConcatRecordReader.create(suppliers);
         } else {

@@ -18,7 +18,8 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.store.file.mergetree.Increment;
+import org.apache.flink.table.store.file.io.CompactIncrement;
+import org.apache.flink.table.store.file.io.NewFilesIncrement;
 
 /**
  * The {@code RecordWriter} is responsible for writing data and handling in-progress files used to
@@ -38,7 +39,7 @@ public interface RecordWriter<T> {
      * @param endOfInput Signal that there is no committable anymore.
      * @return Incremental files in this snapshot cycle
      */
-    Increment prepareCommit(boolean endOfInput) throws Exception;
+    CommitIncrement prepareCommit(boolean endOfInput) throws Exception;
 
     /**
      * Sync the writer. The structure related to file reading and writing is thread unsafe, there
@@ -48,4 +49,12 @@ public interface RecordWriter<T> {
 
     /** Close this writer, the call will delete newly generated but not committed files. */
     void close() throws Exception;
+
+    /** Changes to commit. */
+    interface CommitIncrement {
+
+        NewFilesIncrement newFilesIncrement();
+
+        CompactIncrement compactIncrement();
+    }
 }
