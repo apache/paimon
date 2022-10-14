@@ -156,26 +156,32 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                     "Snapshot expire range is [" + beginInclusiveId + ", " + endExclusiveId + ")");
         }
 
-        // delete data files
-        // deleted data files in a snapshot are not used by that snapshot, so the range of id should
-        // be (beginInclusiveId, endExclusiveId]
+        // delete merge tree files
+        // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of
+        // id should be (beginInclusiveId, endExclusiveId]
         for (long id = beginInclusiveId + 1; id <= endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
-                LOG.debug("Ready to delete data files in snapshot #" + id);
+                LOG.debug("Ready to delete merge tree files not used by snapshot #" + id);
             }
+            Snapshot snapshot = snapshotManager.snapshot(id);
+            expireMergeTreeFiles(snapshot.deltaManifestList());
+        }
 
-            List<String> manifestFiles =
-                    manifestList.read(snapshotManager.snapshot(id).deltaManifestList()).stream()
-                            .map(ManifestFileMeta::fileName)
-                            .collect(Collectors.toList());
-            Iterable<ManifestEntry> dataFileLog = manifestFile.readManifestFiles(manifestFiles);
-            expireDataFiles(dataFileLog);
+        // delete changelog files
+        for (long id = beginInclusiveId; id < endExclusiveId; id++) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Ready to delete changelog files from snapshot #" + id);
+            }
+            Snapshot snapshot = snapshotManager.snapshot(id);
+            if (snapshot.changelogManifestList() != null) {
+                expireChangelogFiles(snapshot.changelogManifestList());
+            }
         }
 
         // delete manifests
         Snapshot exclusiveSnapshot = snapshotManager.snapshot(endExclusiveId);
         Set<ManifestFileMeta> manifestsInUse =
-                new HashSet<>(exclusiveSnapshot.readAllManifests(manifestList));
+                new HashSet<>(exclusiveSnapshot.readAllDataManifests(manifestList));
         // to avoid deleting twice
         Set<ManifestFileMeta> deletedManifests = new HashSet<>();
         for (long id = beginInclusiveId; id < endExclusiveId; id++) {
@@ -185,16 +191,26 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
             Snapshot toExpire = snapshotManager.snapshot(id);
 
-            for (ManifestFileMeta manifest : toExpire.readAllManifests(manifestList)) {
+            // delete manifest
+            for (ManifestFileMeta manifest : toExpire.readAllDataManifests(manifestList)) {
                 if (!manifestsInUse.contains(manifest) && !deletedManifests.contains(manifest)) {
                     manifestFile.delete(manifest.fileName());
                     deletedManifests.add(manifest);
+                }
+            }
+            if (toExpire.changelogManifestList() != null) {
+                for (ManifestFileMeta manifest :
+                        manifestList.read(toExpire.changelogManifestList())) {
+                    manifestFile.delete(manifest.fileName());
                 }
             }
 
             // delete manifest lists
             manifestList.delete(toExpire.baseManifestList());
             manifestList.delete(toExpire.deltaManifestList());
+            if (toExpire.changelogManifestList() != null) {
+                manifestList.delete(toExpire.changelogManifestList());
+            }
 
             // delete snapshot
             FileUtils.deleteOrWarn(snapshotManager.snapshotPath(id));
@@ -203,8 +219,12 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         writeEarliestHint(endExclusiveId);
     }
 
+    private void expireMergeTreeFiles(String manifestListName) {
+        expireMergeTreeFiles(getManifestEntriesFromManifestList(manifestListName));
+    }
+
     @VisibleForTesting
-    void expireDataFiles(Iterable<ManifestEntry> dataFileLog) {
+    void expireMergeTreeFiles(Iterable<ManifestEntry> dataFileLog) {
         // we cannot delete a data file directly when we meet a DELETE entry, because that
         // file might be upgraded
         Map<Path, List<Path>> dataFileToDelete = new HashMap<>();
@@ -232,6 +252,24 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                     FileUtils.deleteOrWarn(path);
                     extraFiles.forEach(FileUtils::deleteOrWarn);
                 });
+    }
+
+    private void expireChangelogFiles(String manifestListName) {
+        for (ManifestEntry changelogEntry : getManifestEntriesFromManifestList(manifestListName)) {
+            FileUtils.deleteOrWarn(
+                    new Path(
+                            pathFactory.bucketPath(
+                                    changelogEntry.partition(), changelogEntry.bucket()),
+                            changelogEntry.file().fileName()));
+        }
+    }
+
+    private Iterable<ManifestEntry> getManifestEntriesFromManifestList(String manifestListName) {
+        List<String> manifestFiles =
+                manifestList.read(manifestListName).stream()
+                        .map(ManifestFileMeta::fileName)
+                        .collect(Collectors.toList());
+        return manifestFile.readManifestFiles(manifestFiles);
     }
 
     private void writeEarliestHint(long earliest) {

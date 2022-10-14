@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.types.logical.ArrayType;
@@ -185,6 +186,17 @@ public class DataFileMeta {
         return level;
     }
 
+    /**
+     * Usage:
+     *
+     * <ul>
+     *   <li>Table Store 0.2
+     *       <ul>
+     *         <li>Stores changelog files for {@link CoreOptions.ChangelogProducer#INPUT}. Changelog
+     *             files are moved to {@link NewFilesIncrement} since Table Store 0.3.
+     *       </ul>
+     * </ul>
+     */
     public List<String> extraFiles() {
         return extraFiles;
     }

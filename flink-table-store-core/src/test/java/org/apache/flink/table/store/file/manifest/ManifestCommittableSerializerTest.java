@@ -19,14 +19,19 @@
 package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.io.CompactIncrement;
 import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.mergetree.Increment;
+import org.apache.flink.table.store.file.io.NewFilesIncrement;
+import org.apache.flink.table.store.table.sink.FileCommittable;
 
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManagerTest.row;
@@ -43,7 +48,7 @@ public class ManifestCommittableSerializerTest {
         ManifestCommittableSerializer serializer = serializer();
         ManifestCommittable committable = create();
         byte[] serialized = serializer.serialize(committable);
-        assertThat(serializer.deserialize(1, serialized)).isEqualTo(committable);
+        assertThat(serializer.deserialize(2, serialized)).isEqualTo(committable);
     }
 
     public static ManifestCommittableSerializer serializer() {
@@ -53,23 +58,25 @@ public class ManifestCommittableSerializerTest {
     public static ManifestCommittable create() {
         ManifestCommittable committable =
                 new ManifestCommittable(String.valueOf(new Random().nextLong()));
-        addAndAssert(committable, row(0), 0);
-        addAndAssert(committable, row(0), 1);
-        addAndAssert(committable, row(1), 0);
-        addAndAssert(committable, row(1), 1);
+        addFileCommittables(committable, row(0), 0);
+        addFileCommittables(committable, row(0), 1);
+        addFileCommittables(committable, row(1), 0);
+        addFileCommittables(committable, row(1), 1);
         return committable;
     }
 
-    private static void addAndAssert(
+    private static void addFileCommittables(
             ManifestCommittable committable, BinaryRowData partition, int bucket) {
-        Increment increment = randomIncrement();
-        committable.addFileCommittable(partition, bucket, increment);
-        assertThat(committable.newFiles().get(partition).get(bucket))
-                .isEqualTo(increment.newFiles());
-        assertThat(committable.compactBefore().get(partition).get(bucket))
-                .isEqualTo(increment.compactBefore());
-        assertThat(committable.compactAfter().get(partition).get(bucket))
-                .isEqualTo(increment.compactAfter());
+        List<FileCommittable> fileCommittables = new ArrayList<>();
+        int length = ThreadLocalRandom.current().nextInt(10) + 1;
+        for (int i = 0; i < length; i++) {
+            NewFilesIncrement newFilesIncrement = randomNewFilesIncrement();
+            CompactIncrement compactIncrement = randomCompactIncrement();
+            FileCommittable fileCommittable =
+                    new FileCommittable(partition, bucket, newFilesIncrement, compactIncrement);
+            fileCommittables.add(fileCommittable);
+            committable.addFileCommittable(fileCommittable);
+        }
 
         if (!committable.logOffsets().containsKey(bucket)) {
             int offset = ID.incrementAndGet();
@@ -78,8 +85,14 @@ public class ManifestCommittableSerializerTest {
         }
     }
 
-    public static Increment randomIncrement() {
-        return new Increment(
+    public static NewFilesIncrement randomNewFilesIncrement() {
+        return new NewFilesIncrement(
+                Arrays.asList(newFile(ID.incrementAndGet(), 0), newFile(ID.incrementAndGet(), 0)),
+                Arrays.asList(newFile(ID.incrementAndGet(), 0), newFile(ID.incrementAndGet(), 0)));
+    }
+
+    public static CompactIncrement randomCompactIncrement() {
+        return new CompactIncrement(
                 Arrays.asList(newFile(ID.incrementAndGet(), 0), newFile(ID.incrementAndGet(), 0)),
                 Arrays.asList(newFile(ID.incrementAndGet(), 0), newFile(ID.incrementAndGet(), 0)),
                 Arrays.asList(newFile(ID.incrementAndGet(), 0), newFile(ID.incrementAndGet(), 0)));

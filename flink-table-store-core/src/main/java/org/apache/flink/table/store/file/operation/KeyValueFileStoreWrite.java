@@ -184,7 +184,7 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
         KeyValueFileWriterFactory writerFactory = writerFactoryBuilder.build(partition, bucket);
         return (outputLevel, dropDelete, sections) -> {
             RollingFileWriter<KeyValue, DataFileMeta> writer =
-                    writerFactory.createLeveledWriter(outputLevel);
+                    writerFactory.createRollingMergeTreeFileWriter(outputLevel);
             writer.write(
                     new RecordReaderIterator<>(
                             new MergeTreeReader(

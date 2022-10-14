@@ -172,7 +172,7 @@ public class FileStoreSourceSplitReaderTest {
         writer.write(
                 new KeyValue()
                         .replace(GenericRowData.of(222L), RowKind.DELETE, GenericRowData.of(333L)));
-        List<DataFileMeta> files = writer.prepareCommit(true).newFiles();
+        List<DataFileMeta> files = writer.prepareCommit(true).newFilesIncrement().newFiles();
         writer.close();
 
         assignSplit(reader, newSourceSplit("id1", row(1), 0, files, true));

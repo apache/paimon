@@ -33,8 +33,6 @@ import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
-
 /** A factory to create {@link FileWriter}s for writing {@link KeyValue} files. */
 public class KeyValueFileWriterFactory {
 
@@ -76,16 +74,21 @@ public class KeyValueFileWriterFactory {
         return pathFactory;
     }
 
-    public KeyValueDataFileWriter createLevel0Writer() {
-        return createLeveledWriterImpl(0);
-    }
-
-    public RollingFileWriter<KeyValue, DataFileMeta> createLeveledWriter(int level) {
-        return new RollingFileWriter<>(() -> createLeveledWriterImpl(level), suggestedFileSize);
-    }
-
-    private KeyValueDataFileWriter createLeveledWriterImpl(int level) {
+    public KeyValueDataFileWriter createMergeTreeFileWriter(int level) {
         Path path = pathFactory.newPath();
+        return createDataFileWriter(path, level);
+    }
+
+    public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(int level) {
+        return new RollingFileWriter<>(() -> createMergeTreeFileWriter(level), suggestedFileSize);
+    }
+
+    public KeyValueDataFileWriter createChangelogFileWriter(int level) {
+        Path path = pathFactory.newChangelogPath();
+        return createDataFileWriter(path, level);
+    }
+
+    private KeyValueDataFileWriter createDataFileWriter(Path path, int level) {
         KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
         return new KeyValueDataFileWriter(
                 writerFactory,
@@ -96,18 +99,6 @@ public class KeyValueFileWriterFactory {
                 fileStatsExtractor,
                 schemaId,
                 level);
-    }
-
-    public SingleFileWriter<KeyValue, Void> createChangelogFileWriter() {
-        Path changelogPath = pathFactory.newChangelogPath();
-        KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
-        return new SingleFileWriter<KeyValue, Void>(
-                writerFactory, changelogPath, kvSerializer::toRow) {
-            @Override
-            public Void result() throws IOException {
-                return null;
-            }
-        };
     }
 
     public void deleteFile(String filename) {

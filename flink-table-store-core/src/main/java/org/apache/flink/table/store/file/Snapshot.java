@@ -28,25 +28,49 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-/** This file is the entrance to all data committed at some specific time point. */
+/**
+ * This file is the entrance to all data committed at some specific time point.
+ *
+ * <p>Change list:
+ *
+ * <ul>
+ *   <li>Version 1: Initial version for table store <= 0.2. There is no "version" field in json
+ *       file.
+ *   <li>Version 2: Introduced in table store 0.3. Add "version" field and "changelogManifestList"
+ *       field.
+ * </ul>
+ */
 public class Snapshot {
 
     public static final long FIRST_SNAPSHOT_ID = 1;
 
+    private static final int TABLE_STORE_02_VERSION = 1;
+    private static final int CURRENT_VERSION = 2;
+
+    private static final String FIELD_VERSION = "version";
     private static final String FIELD_ID = "id";
     private static final String FIELD_SCHEMA_ID = "schemaId";
     private static final String FIELD_BASE_MANIFEST_LIST = "baseManifestList";
     private static final String FIELD_DELTA_MANIFEST_LIST = "deltaManifestList";
+    private static final String FIELD_CHANGELOG_MANIFEST_LIST = "changelogManifestList";
     private static final String FIELD_COMMIT_USER = "commitUser";
     private static final String FIELD_COMMIT_IDENTIFIER = "commitIdentifier";
     private static final String FIELD_COMMIT_KIND = "commitKind";
     private static final String FIELD_TIME_MILLIS = "timeMillis";
     private static final String FIELD_LOG_OFFSETS = "logOffsets";
+
+    // version of snapshot
+    // null for table store <= 0.2
+    @JsonProperty(FIELD_VERSION)
+    @Nullable
+    private final Integer version;
 
     @JsonProperty(FIELD_ID)
     private final long id;
@@ -62,6 +86,12 @@ public class Snapshot {
     // for faster expire and streaming reads
     @JsonProperty(FIELD_DELTA_MANIFEST_LIST)
     private final String deltaManifestList;
+
+    // a manifest list recording all changelog produced in this snapshot
+    // null if no changelog is produced, or for table store <= 0.2
+    @JsonProperty(FIELD_CHANGELOG_MANIFEST_LIST)
+    @Nullable
+    private final String changelogManifestList;
 
     @JsonProperty(FIELD_COMMIT_USER)
     private final String commitUser;
@@ -79,26 +109,61 @@ public class Snapshot {
     @JsonProperty(FIELD_LOG_OFFSETS)
     private final Map<Integer, Long> logOffsets;
 
+    public Snapshot(
+            long id,
+            long schemaId,
+            String baseManifestList,
+            String deltaManifestList,
+            @Nullable String changelogManifestList,
+            String commitUser,
+            String commitIdentifier,
+            CommitKind commitKind,
+            long timeMillis,
+            Map<Integer, Long> logOffsets) {
+        this(
+                CURRENT_VERSION,
+                id,
+                schemaId,
+                baseManifestList,
+                deltaManifestList,
+                changelogManifestList,
+                commitUser,
+                commitIdentifier,
+                commitKind,
+                timeMillis,
+                logOffsets);
+    }
+
     @JsonCreator
     public Snapshot(
+            @JsonProperty(FIELD_VERSION) @Nullable Integer version,
             @JsonProperty(FIELD_ID) long id,
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
             @JsonProperty(FIELD_BASE_MANIFEST_LIST) String baseManifestList,
             @JsonProperty(FIELD_DELTA_MANIFEST_LIST) String deltaManifestList,
+            @JsonProperty(FIELD_CHANGELOG_MANIFEST_LIST) @Nullable String changelogManifestList,
             @JsonProperty(FIELD_COMMIT_USER) String commitUser,
             @JsonProperty(FIELD_COMMIT_IDENTIFIER) String commitIdentifier,
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
             @JsonProperty(FIELD_TIME_MILLIS) long timeMillis,
             @JsonProperty(FIELD_LOG_OFFSETS) Map<Integer, Long> logOffsets) {
+        this.version = version;
         this.id = id;
         this.schemaId = schemaId;
         this.baseManifestList = baseManifestList;
         this.deltaManifestList = deltaManifestList;
+        this.changelogManifestList = changelogManifestList;
         this.commitUser = commitUser;
         this.commitIdentifier = commitIdentifier;
         this.commitKind = commitKind;
         this.timeMillis = timeMillis;
         this.logOffsets = logOffsets;
+    }
+
+    @JsonGetter(FIELD_VERSION)
+    public int version() {
+        // there is no version field for table store <= 0.2
+        return version == null ? TABLE_STORE_02_VERSION : version;
     }
 
     @JsonGetter(FIELD_ID)
@@ -119,6 +184,12 @@ public class Snapshot {
     @JsonGetter(FIELD_DELTA_MANIFEST_LIST)
     public String deltaManifestList() {
         return deltaManifestList;
+    }
+
+    @JsonGetter(FIELD_CHANGELOG_MANIFEST_LIST)
+    @Nullable
+    public String changelogManifestList() {
+        return changelogManifestList;
     }
 
     @JsonGetter(FIELD_COMMIT_USER)
@@ -150,7 +221,7 @@ public class Snapshot {
         return JsonSerdeUtil.toJson(this);
     }
 
-    public List<ManifestFileMeta> readAllManifests(ManifestList manifestList) {
+    public List<ManifestFileMeta> readAllDataManifests(ManifestList manifestList) {
         List<ManifestFileMeta> result = new ArrayList<>();
         result.addAll(manifestList.read(baseManifestList));
         result.addAll(manifestList.read(deltaManifestList));

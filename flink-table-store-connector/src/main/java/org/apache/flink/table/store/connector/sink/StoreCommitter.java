@@ -42,22 +42,22 @@ public class StoreCommitter implements Committer {
 
     @Override
     public ManifestCommittable combine(long checkpointId, List<Committable> committables) {
-        ManifestCommittable fileCommittable = new ManifestCommittable(String.valueOf(checkpointId));
+        ManifestCommittable manifestCommittable =
+                new ManifestCommittable(String.valueOf(checkpointId));
         for (Committable committable : committables) {
             switch (committable.kind()) {
                 case FILE:
                     FileCommittable file = (FileCommittable) committable.wrappedCommittable();
-                    fileCommittable.addFileCommittable(
-                            file.partition(), file.bucket(), file.increment());
+                    manifestCommittable.addFileCommittable(file);
                     break;
                 case LOG_OFFSET:
                     LogOffsetCommittable offset =
                             (LogOffsetCommittable) committable.wrappedCommittable();
-                    fileCommittable.addLogOffset(offset.bucket(), offset.offset());
+                    manifestCommittable.addLogOffset(offset.bucket(), offset.offset());
                     break;
             }
         }
-        return fileCommittable;
+        return manifestCommittable;
     }
 
     @Override

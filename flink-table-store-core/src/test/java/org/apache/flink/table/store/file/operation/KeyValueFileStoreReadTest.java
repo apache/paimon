@@ -247,7 +247,14 @@ public class KeyValueFileStoreReadTest {
                                         .collect(Collectors.toList()),
                         Collections.emptyMap(),
                         null));
-        return TestFileStore.create(
-                "avro", tempDir.toString(), 1, partitionType, keyType, valueType, mergeFunction);
+        return new TestFileStore.Builder(
+                        "avro",
+                        tempDir.toString(),
+                        1,
+                        partitionType,
+                        keyType,
+                        valueType,
+                        mergeFunction)
+                .build();
     }
 }

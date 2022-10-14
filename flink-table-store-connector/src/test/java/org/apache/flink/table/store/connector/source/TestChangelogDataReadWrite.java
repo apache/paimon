@@ -140,7 +140,7 @@ public class TestChangelogDataReadWrite {
                                     RowKind.INSERT,
                                     GenericRowData.of(tuple2.f1)));
         }
-        List<DataFileMeta> files = writer.prepareCommit(true).newFiles();
+        List<DataFileMeta> files = writer.prepareCommit(true).newFilesIncrement().newFiles();
         writer.close();
         return new ArrayList<>(files);
     }

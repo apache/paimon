@@ -89,6 +89,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
         return partitionType;
     }
 
+    @Override
     public CoreOptions options() {
         return options;
     }

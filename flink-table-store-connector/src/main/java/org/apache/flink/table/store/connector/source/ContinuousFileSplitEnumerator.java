@@ -22,6 +22,7 @@ import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.table.source.SnapshotEnumerator;
 import org.apache.flink.table.store.table.source.SnapshotEnumerator.EnumeratorResult;
 import org.apache.flink.table.store.table.source.TableScan;
@@ -70,6 +71,7 @@ public class ContinuousFileSplitEnumerator
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Path location,
             TableScan scan,
+            CoreOptions.ChangelogProducer changelogProducer,
             Collection<FileStoreSourceSplit> remainSplits,
             long currentSnapshotId,
             long discoveryInterval) {
@@ -81,7 +83,8 @@ public class ContinuousFileSplitEnumerator
         this.discoveryInterval = discoveryInterval;
         this.readersAwaitingSplit = new HashSet<>();
         this.splitGenerator = new FileStoreSourceSplitGenerator();
-        this.snapshotEnumerator = new SnapshotEnumerator(location, scan, currentSnapshotId);
+        this.snapshotEnumerator =
+                new SnapshotEnumerator(location, scan, changelogProducer, currentSnapshotId);
     }
 
     private void addSplits(Collection<FileStoreSourceSplit> splits) {

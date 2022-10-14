@@ -141,6 +141,7 @@ public class FileStoreSource
                     context,
                     table.location(),
                     scan.withIncremental(true), // the subsequent planning is all incremental
+                    table.options().changelogProducer(),
                     splits,
                     currentSnapshot,
                     discoveryInterval);

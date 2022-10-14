@@ -25,16 +25,18 @@ import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
+import org.apache.flink.table.store.file.io.CompactIncrement;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.KeyValueDataFileWriter;
 import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
-import org.apache.flink.table.store.file.io.SingleFileWriter;
+import org.apache.flink.table.store.file.io.NewFilesIncrement;
 import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -44,33 +46,24 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** A {@link RecordWriter} to write records and generate {@link Increment}. */
+/** A {@link RecordWriter} to write records and generate {@link CompactIncrement}. */
 public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private final RowType keyType;
-
     private final RowType valueType;
-
     private final CompactManager compactManager;
-
     private final Comparator<RowData> keyComparator;
-
     private final MergeFunction<KeyValue> mergeFunction;
-
     private final KeyValueFileWriterFactory writerFactory;
-
     private final boolean commitForceCompact;
-
     private final ChangelogProducer changelogProducer;
 
     private final LinkedHashSet<DataFileMeta> newFiles;
-
     private final LinkedHashMap<String, DataFileMeta> compactBefore;
-
     private final LinkedHashSet<DataFileMeta> compactAfter;
+    private final LinkedHashSet<DataFileMeta> changelogFiles;
 
     private long newSequenceNumber;
-
     private MemTable memTable;
 
     public MergeTreeWriter(
@@ -90,9 +83,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.writerFactory = writerFactory;
         this.commitForceCompact = commitForceCompact;
         this.changelogProducer = changelogProducer;
+
         this.newFiles = new LinkedHashSet<>();
         this.compactBefore = new LinkedHashMap<>();
         this.compactAfter = new LinkedHashSet<>();
+        this.changelogFiles = new LinkedHashSet<>();
     }
 
     private long newSequenceNumber() {
@@ -139,45 +134,26 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             }
 
             // write changelog file
-            List<String> extraFiles = new ArrayList<>();
+            //
+            // NOTE: We must first call memTable.rawIterator(), then call memTable.mergeIterator().
+            // Otherwise memTable.rawIterator() will generate sorted, but not yet merged, data. See
+            // comments on MemTable for more details.
             if (changelogProducer == ChangelogProducer.INPUT) {
-                SingleFileWriter<KeyValue, Void> writer = writerFactory.createChangelogFileWriter();
-                writer.write(memTable.rawIterator());
-                writer.close();
-                extraFiles.add(writer.path().getName());
+                KeyValueDataFileWriter changelogWriter = writerFactory.createChangelogFileWriter(0);
+                changelogWriter.write(memTable.rawIterator());
+                changelogWriter.close();
+                changelogFiles.add(changelogWriter.result());
             }
 
             // write lsm level 0 file
-            try {
-                Iterator<KeyValue> iterator = memTable.mergeIterator(keyComparator, mergeFunction);
-                KeyValueDataFileWriter writer = writerFactory.createLevel0Writer();
-                writer.write(iterator);
-                writer.close();
-
-                // In theory, this fileMeta should contain statistics from both lsm file extra file.
-                // However for level 0 files, as we do not drop DELETE records, keys appear in one
-                // file will also appear in the other. So we just need to use statistics from one of
-                // them.
-                //
-                // For value count merge function, it is possible that we have changelog first
-                // adding one record then remove one record, but after merging this record will not
-                // appear in lsm file. This is OK because we can also skip this changelog.
-                DataFileMeta fileMeta = writer.result();
-                if (fileMeta == null) {
-                    for (String extraFile : extraFiles) {
-                        writerFactory.deleteFile(extraFile);
-                    }
-                } else {
-                    fileMeta = fileMeta.copy(extraFiles);
-                    newFiles.add(fileMeta);
-                    compactManager.addNewFile(fileMeta);
-                }
-            } catch (Throwable e) {
-                // exception occurs, clean up changelog file if needed
-                for (String extraFile : extraFiles) {
-                    writerFactory.deleteFile(extraFile);
-                }
-                throw e;
+            Iterator<KeyValue> iterator = memTable.mergeIterator(keyComparator, mergeFunction);
+            KeyValueDataFileWriter writer = writerFactory.createMergeTreeFileWriter(0);
+            writer.write(iterator);
+            writer.close();
+            DataFileMeta fileMeta = writer.result();
+            if (fileMeta != null) {
+                newFiles.add(fileMeta);
+                compactManager.addNewFile(fileMeta);
             }
 
             memTable.clear();
@@ -186,7 +162,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @Override
-    public Increment prepareCommit(boolean endOfInput) throws Exception {
+    public CommitIncrement prepareCommit(boolean endOfInput) throws Exception {
         flushMemory();
         boolean blocking = endOfInput || commitForceCompact;
         trySyncLatestCompaction(blocking);
@@ -198,16 +174,31 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         trySyncLatestCompaction(true);
     }
 
-    private Increment drainIncrement() {
-        Increment increment =
-                new Increment(
-                        new ArrayList<>(newFiles),
+    private CommitIncrement drainIncrement() {
+        NewFilesIncrement newFilesIncrement =
+                new NewFilesIncrement(new ArrayList<>(newFiles), new ArrayList<>(changelogFiles));
+        CompactIncrement compactIncrement =
+                new CompactIncrement(
                         new ArrayList<>(compactBefore.values()),
-                        new ArrayList<>(compactAfter));
+                        new ArrayList<>(compactAfter),
+                        Collections.emptyList());
+
         newFiles.clear();
         compactBefore.clear();
         compactAfter.clear();
-        return increment;
+        changelogFiles.clear();
+
+        return new CommitIncrement() {
+            @Override
+            public NewFilesIncrement newFilesIncrement() {
+                return newFilesIncrement;
+            }
+
+            @Override
+            public CompactIncrement compactIncrement() {
+                return compactIncrement;
+            }
+        };
     }
 
     private void updateCompactResult(CompactResult result) {
@@ -261,5 +252,9 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         }
         newFiles.clear();
         compactAfter.clear();
+        for (DataFileMeta file : changelogFiles) {
+            writerFactory.deleteFile(file.fileName());
+        }
+        changelogFiles.clear();
     }
 }

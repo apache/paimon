@@ -28,7 +28,7 @@ import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.file.io.KeyValueFileReadWriteTest;
 import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
-import org.apache.flink.table.store.file.mergetree.Increment;
+import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -72,10 +72,10 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         dataFilePathFactory);
         appendOnlyWriter.write(
                 GenericRowData.of(1, StringData.fromString("aaa"), StringData.fromString("1")));
-        Increment increment = appendOnlyWriter.prepareCommit(true);
+        RecordWriter.CommitIncrement increment = appendOnlyWriter.prepareCommit(true);
         appendOnlyWriter.close();
 
-        DataFileMeta meta = increment.newFiles().get(0);
+        DataFileMeta meta = increment.newFilesIncrement().newFiles().get(0);
         Assertions.assertTrue(meta.fileName().endsWith(format));
     }
 }
