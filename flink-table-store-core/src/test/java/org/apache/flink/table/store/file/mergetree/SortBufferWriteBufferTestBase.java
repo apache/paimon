@@ -37,9 +37,9 @@ import org.junit.jupiter.api.Test;
 import java.io.EOFException;
 import java.io.IOException;
 import java.util.Collections;
-import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
-import java.util.Random;
+import java.util.Queue;
 
 import static org.apache.flink.util.Preconditions.checkState;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -101,26 +101,14 @@ public abstract class SortBufferWriteBufferTestBase {
     }
 
     protected void runTest(List<ReusingTestData> input) throws IOException {
-        List<ReusingTestData> expected = getExpected(input);
+        Queue<ReusingTestData> expected = new LinkedList<>(getExpected(input));
         prepareTable(input);
-        Iterator<KeyValue> actual = table.mergeIterator(KEY_COMPARATOR, createMergeFunction());
-
-        Random rnd = new Random();
-        for (ReusingTestData data : expected) {
-            int r = rnd.nextInt(3) + 1;
-            for (int i = 0; i < r; i++) {
-                // test idempotence of this method
-                assertThat(actual.hasNext()).isTrue();
-            }
-            KeyValue kv = actual.next();
-            data.assertEquals(kv);
-        }
-        // test idempotence of this method
-        int r = rnd.nextInt(3) + 1;
-        for (int i = 0; i < r; i++) {
-            assertThat(actual.hasNext()).isFalse();
-            assertThat(actual.next()).isNull();
-        }
+        table.forEach(
+                KEY_COMPARATOR,
+                createMergeFunction(),
+                null,
+                kv -> expected.poll().assertEquals(kv));
+        assertThat(expected).isEmpty();
     }
 
     private void prepareTable(List<ReusingTestData> input) throws IOException {
