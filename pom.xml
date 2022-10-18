@@ -52,7 +52,6 @@ under the License.
     </scm>
 
     <modules>
-        <module>flink-table-store-benchmark</module>
         <module>flink-table-store-codegen</module>
         <module>flink-table-store-codegen-loader</module>
         <module>flink-table-store-common</module>
@@ -67,6 +66,7 @@ under the License.
         <module>flink-table-store-kafka</module>
         <module>flink-table-store-spark</module>
         <module>flink-table-store-spark2</module>
+        <module>flink-table-store-benchmark</module>
     </modules>
 
     <properties>

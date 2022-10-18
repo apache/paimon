@@ -31,11 +31,6 @@ under the License.
     <artifactId>flink-table-store-micro-benchmarks</artifactId>
     <name>Flink Table Store : Micro Benchmark</name>
 
-    <properties>
-        <maven.exec.version>1.6.0</maven.exec.version>
-        <executableJava>java</executableJava>
-    </properties>
-
     <dependencies>
 
         <dependency>
@@ -279,45 +274,6 @@ under the License.
             <properties>
                 <benchmarkExcludes>""</benchmarkExcludes>
             </properties>
-        </profile>
-
-        <profile>
-            <id>generate-thrift</id>
-            <activation>
-                <property>
-                    <name>generate-thrift</name>
-                </property>
-            </activation>
-            <build>
-                <plugins>
-                    <!-- Generate MyPojo class from thrift schema -->
-                    <plugin>
-                        <groupId>org.apache.thrift</groupId>
-                        <artifactId>thrift-maven-plugin</artifactId>
-                        <version>0.10.0</version>
-                        <configuration>
-                            <thriftSourceRoot>${project.basedir}/src/main/resources/thrift</thriftSourceRoot>
-                            <outputDirectory>${project.basedir}/src/main/java/</outputDirectory>
-                        </configuration>
-                        <executions>
-                            <execution>
-                                <id>thrift-sources</id>
-                                <phase>generate-sources</phase>
-                                <goals>
-                                    <goal>compile</goal>
-                                </goals>
-                            </execution>
-                            <execution>
-                                <id>thrift-test-sources</id>
-                                <phase>generate-test-sources</phase>
-                                <goals>
-                                    <goal>testCompile</goal>
-                                </goals>
-                            </execution>
-                        </executions>
-                    </plugin>
-                </plugins>
-            </build>
         </profile>
     </profiles>
 </project>

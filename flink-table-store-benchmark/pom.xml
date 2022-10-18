@@ -39,6 +39,8 @@ under the License.
         <httpclient.version>4.5.13</httpclient.version>
         <avro.version>1.10.0</avro.version>
         <jmh.version>1.35</jmh.version>
+        <maven.exec.version>1.6.0</maven.exec.version>
+        <executableJava>java</executableJava>
     </properties>
 
     <modules>
