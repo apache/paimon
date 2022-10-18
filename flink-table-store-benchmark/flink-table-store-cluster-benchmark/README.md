@@ -1,6 +1,6 @@
-# Flink Table Store Benchmark
+# Flink Table Store Cluster Benchmark
 
-This is the benchmark module for Flink Table Store. Inspired by [Nexmark](https://github.com/nexmark/nexmark).
+This is the cluster benchmark module for Flink Table Store. Inspired by [Nexmark](https://github.com/nexmark/nexmark).
 
 ## How To Run
 ### Environment Preparation
