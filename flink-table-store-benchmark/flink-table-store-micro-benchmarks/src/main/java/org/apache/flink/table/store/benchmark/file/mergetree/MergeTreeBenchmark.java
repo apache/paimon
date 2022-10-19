@@ -32,7 +32,6 @@ import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
 import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
 import org.apache.flink.table.store.file.io.RollingFileWriter;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
-import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.mergetree.Levels;
 import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
@@ -69,16 +68,13 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonList;
 import static org.apache.flink.table.store.file.utils.FileStorePathFactory.PARTITION_DEFAULT_NAME;
-import static org.apache.flink.util.Preconditions.checkState;
 
 /** Base class for merge tree benchmark. */
 @SuppressWarnings("MethodMayBeStatic")
@@ -208,23 +204,25 @@ public class MergeTreeBenchmark {
                 rewriter);
     }
 
-    protected void mergeCompacted(
-            Set<String> newFileNames, List<DataFileMeta> compactedFiles, Increment increment) {
-        increment.newFiles().stream().map(DataFileMeta::fileName).forEach(newFileNames::add);
-        compactedFiles.addAll(increment.newFiles());
-        Set<String> afterFiles =
-                increment.compactAfter().stream()
-                        .map(DataFileMeta::fileName)
-                        .collect(Collectors.toSet());
-        for (DataFileMeta file : increment.compactBefore()) {
-            checkState(compactedFiles.remove(file));
-            // See MergeTreeWriter.updateCompactResult
-            if (!newFileNames.contains(file.fileName()) && !afterFiles.contains(file.fileName())) {
-                writerFactory.deleteFile(file.fileName());
-            }
-        }
-        compactedFiles.addAll(increment.compactAfter());
-    }
+    //    protected void mergeCompacted(
+    //            Set<String> newFileNames, List<DataFileMeta> compactedFiles, Increment increment)
+    // {
+    //        increment.newFiles().stream().map(DataFileMeta::fileName).forEach(newFileNames::add);
+    //        compactedFiles.addAll(increment.newFiles());
+    //        Set<String> afterFiles =
+    //                increment.compactAfter().stream()
+    //                        .map(DataFileMeta::fileName)
+    //                        .collect(Collectors.toSet());
+    //        for (DataFileMeta file : increment.compactBefore()) {
+    //            checkState(compactedFiles.remove(file));
+    //            // See MergeTreeWriter.updateCompactResult
+    //            if (!newFileNames.contains(file.fileName()) &&
+    // !afterFiles.contains(file.fileName())) {
+    //                writerFactory.deleteFile(file.fileName());
+    //            }
+    //        }
+    //        compactedFiles.addAll(increment.compactAfter());
+    //    }
 
     protected void cleanUp() throws Exception {
         if (file != null) {

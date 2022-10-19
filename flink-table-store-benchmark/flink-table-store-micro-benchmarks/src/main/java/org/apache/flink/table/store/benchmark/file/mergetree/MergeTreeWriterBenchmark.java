@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.benchmark.file.mergetree;
 
-import org.apache.flink.table.store.file.mergetree.Increment;
-
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.TearDown;
@@ -27,8 +25,6 @@ import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 import org.openjdk.jmh.runner.options.VerboseMode;
-
-import java.util.HashSet;
 
 /** Benchmark for merge tree writer with compaction. */
 public class MergeTreeWriterBenchmark extends MergeTreeBenchmark {
@@ -53,8 +49,8 @@ public class MergeTreeWriterBenchmark extends MergeTreeBenchmark {
         kv.replace(data.key, sequenceNumber++, data.kind, data.value);
         writer.write(kv);
         if (sequenceNumber % countPerBatch == 0) {
-            Increment increment = writer.prepareCommit(false);
-            mergeCompacted(new HashSet<>(), compactedFiles, increment);
+            //            mergeCompacted(new HashSet<>(), compactedFiles,
+            // writer.prepareCommit(false));
         }
     }
 

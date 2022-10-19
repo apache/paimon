@@ -74,7 +74,8 @@ public class MergeTreeReaderBenchmark extends MergeTreeBenchmark {
                     writer.write(kv);
                 }
 
-                mergeCompacted(newFileNames, compactedFiles, writer.prepareCommit(true));
+                //                mergeCompacted(newFileNames, compactedFiles,
+                // writer.prepareCommit(true));
             }
 
             writer.close();
