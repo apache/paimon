@@ -15,7 +15,7 @@ jobs:
           java-version: 1.8
       - name: Build Flink 1.15
         run: |
-          mvn clean install -Dmaven.test.skip=true
+          mvn --version && mvn clean install -Dmaven.test.skip=true -X
       - name: Build Hive 2.2
         run: |
           mvn clean install -Dmaven.test.skip=true -Phive-2.2 -f flink-table-store-hive
