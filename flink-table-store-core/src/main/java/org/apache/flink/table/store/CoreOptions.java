@@ -192,17 +192,8 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Boolean> WRITE_BUFFER_SPILLABLE =
             ConfigOptions.key("write-buffer-spillable")
                     .booleanType()
-                    .noDefaultValue()
-                    .withDescription(
-                            Description.builder()
-                                    .text("Whether the write buffer can be spillable.")
-                                    .list(
-                                            text(
-                                                    "When `input` changelog-producer is not enabled, it is enabled by default."),
-                                            text(
-                                                    "When `input` changelog-producer is started, it is closed by default,"
-                                                            + " because it currently does not support changelog producer input as input."))
-                                    .build());
+                    .defaultValue(true)
+                    .withDescription("Whether the write buffer can be spillable.");
 
     public static final ConfigOption<Integer> LOCAL_SORT_MAX_NUM_FILE_HANDLES =
             ConfigOptions.key("local-sort.max-num-file-handles")
@@ -451,8 +442,7 @@ public class CoreOptions implements Serializable {
     }
 
     public boolean writeBufferSpillable() {
-        Optional<Boolean> optional = options.getOptional(WRITE_BUFFER_SPILLABLE);
-        return optional.orElseGet(() -> changelogProducer() != ChangelogProducer.INPUT);
+        return options.get(WRITE_BUFFER_SPILLABLE);
     }
 
     public int localSortMaxNumFileHandles() {
