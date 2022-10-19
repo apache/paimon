@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.benchmark.file.mergetree;
 
-import org.apache.flink.table.store.file.mergetree.Increment;
+import org.apache.flink.table.store.file.utils.RecordWriter;
 
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.Setup;
@@ -53,7 +53,7 @@ public class MergeTreeWriterBenchmark extends MergeTreeBenchmark {
         kv.replace(data.key, sequenceNumber++, data.kind, data.value);
         writer.write(kv);
         if (sequenceNumber % countPerBatch == 0) {
-            Increment increment = writer.prepareCommit(false);
+            RecordWriter.CommitIncrement increment = writer.prepareCommit(false);
             mergeCompacted(new HashSet<>(), compactedFiles, increment);
         }
     }

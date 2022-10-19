@@ -32,7 +32,6 @@ import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
 import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
 import org.apache.flink.table.store.file.io.RollingFileWriter;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
-import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.mergetree.Levels;
 import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
@@ -186,7 +185,7 @@ public class MergeTreeBenchmark {
         CompactRewriter rewriter =
                 (outputLevel, dropDelete, sections) -> {
                     RollingFileWriter<KeyValue, DataFileMeta> writer =
-                            writerFactory.createLeveledWriter(outputLevel);
+                            writerFactory.createRollingMergeTreeFileWriter(outputLevel);
                     writer.write(
                             new RecordReaderIterator<>(
                                     new MergeTreeReader(
@@ -209,21 +208,25 @@ public class MergeTreeBenchmark {
     }
 
     protected void mergeCompacted(
-            Set<String> newFileNames, List<DataFileMeta> compactedFiles, Increment increment) {
-        increment.newFiles().stream().map(DataFileMeta::fileName).forEach(newFileNames::add);
-        compactedFiles.addAll(increment.newFiles());
+            Set<String> newFileNames,
+            List<DataFileMeta> compactedFiles,
+            RecordWriter.CommitIncrement increment) {
+        increment.newFilesIncrement().newFiles().stream()
+                .map(DataFileMeta::fileName)
+                .forEach(newFileNames::add);
+        compactedFiles.addAll(increment.newFilesIncrement().newFiles());
         Set<String> afterFiles =
-                increment.compactAfter().stream()
+                increment.compactIncrement().compactAfter().stream()
                         .map(DataFileMeta::fileName)
                         .collect(Collectors.toSet());
-        for (DataFileMeta file : increment.compactBefore()) {
+        for (DataFileMeta file : increment.compactIncrement().compactBefore()) {
             checkState(compactedFiles.remove(file));
             // See MergeTreeWriter.updateCompactResult
             if (!newFileNames.contains(file.fileName()) && !afterFiles.contains(file.fileName())) {
                 writerFactory.deleteFile(file.fileName());
             }
         }
-        compactedFiles.addAll(increment.compactAfter());
+        compactedFiles.addAll(increment.compactIncrement().compactAfter());
     }
 
     protected void cleanUp() throws Exception {
