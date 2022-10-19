@@ -20,7 +20,6 @@ package org.apache.flink.table.store.benchmark.file.mergetree;
 
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.mergetree.Increment;
 import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
@@ -75,8 +74,7 @@ public class MergeTreeReaderBenchmark extends MergeTreeBenchmark {
                     writer.write(kv);
                 }
 
-                Increment increment = writer.prepareCommit(true);
-                mergeCompacted(newFileNames, compactedFiles, increment);
+                mergeCompacted(newFileNames, compactedFiles, writer.prepareCommit(true));
             }
 
             writer.close();
