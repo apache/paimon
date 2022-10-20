@@ -44,6 +44,7 @@ import org.junit.runner.RunWith;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -167,9 +168,7 @@ public class HiveCatalogITCase {
                 .await();
         tEnv.executeSql("CREATE TABLE S ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
                 .await();
-        Assert.assertEquals(
-                Arrays.asList(Row.of("hive_table"), Row.of("s"), Row.of("t")),
-                collect("SHOW TABLES"));
+        Assert.assertEquals(Arrays.asList(Row.of("s"), Row.of("t")), collect("SHOW TABLES"));
         tEnv.executeSql(
                         "CREATE TABLE IF NOT EXISTS S ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
                 .await();
@@ -187,8 +186,7 @@ public class HiveCatalogITCase {
         Path tablePath = new Path(path, "test_db.db/S");
         Assert.assertTrue(tablePath.getFileSystem().exists(tablePath));
         tEnv.executeSql("DROP TABLE S").await();
-        Assert.assertEquals(
-                Arrays.asList(Row.of("hive_table"), Row.of("t")), collect("SHOW TABLES"));
+        Assert.assertEquals(Collections.singletonList(Row.of("t")), collect("SHOW TABLES"));
         Assert.assertFalse(tablePath.getFileSystem().exists(tablePath));
         tEnv.executeSql("DROP TABLE IF EXISTS S").await();
         try {
