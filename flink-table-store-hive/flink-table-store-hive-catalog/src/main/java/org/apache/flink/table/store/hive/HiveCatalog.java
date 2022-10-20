@@ -148,7 +148,13 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         try {
-            return client.getAllTables(databaseName);
+            return client.getAllTables(databaseName).stream()
+                    .parallel()
+                    .filter(
+                            tableName ->
+                                    tableStoreTableExists(
+                                            new ObjectPath(databaseName, tableName), false))
+                    .collect(Collectors.toList());
         } catch (UnknownDBException e) {
             throw new DatabaseNotExistException(databaseName, e);
         } catch (TException e) {
@@ -158,7 +164,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public TableSchema getTableSchema(ObjectPath tablePath) throws TableNotExistException {
-        if (isTableStoreTableNotExisted(tablePath)) {
+        if (!tableStoreTableExists(tablePath)) {
             throw new TableNotExistException(tablePath);
         }
         Path tableLocation = getTableLocation(tablePath);
@@ -170,21 +176,13 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public boolean tableExists(ObjectPath tablePath) {
-        try {
-            client.getTable(tablePath.getDatabaseName(), tablePath.getObjectName());
-            return true;
-        } catch (NoSuchObjectException e) {
-            return false;
-        } catch (TException e) {
-            throw new RuntimeException(
-                    "Failed to determine if table " + tablePath.getFullName() + " exists", e);
-        }
+        return tableStoreTableExists(tablePath);
     }
 
     @Override
     public void dropTable(ObjectPath tablePath, boolean ignoreIfNotExists)
             throws TableNotExistException {
-        if (isTableStoreTableNotExisted(tablePath)) {
+        if (!tableStoreTableExists(tablePath)) {
             if (ignoreIfNotExists) {
                 return;
             } else {
@@ -240,7 +238,7 @@ public class HiveCatalog extends AbstractCatalog {
     public void alterTable(
             ObjectPath tablePath, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException {
-        if (isTableStoreTableNotExisted(tablePath)) {
+        if (!tableStoreTableExists(tablePath)) {
             if (ignoreIfNotExists) {
                 return;
             } else {
@@ -332,12 +330,16 @@ public class HiveCatalog extends AbstractCatalog {
                 dataField.description());
     }
 
-    private boolean isTableStoreTableNotExisted(ObjectPath tablePath) {
+    private boolean tableStoreTableExists(ObjectPath tablePath) {
+        return tableStoreTableExists(tablePath, true);
+    }
+
+    private boolean tableStoreTableExists(ObjectPath tablePath, boolean throwException) {
         Table table;
         try {
             table = client.getTable(tablePath.getDatabaseName(), tablePath.getObjectName());
         } catch (NoSuchObjectException e) {
-            return true;
+            return false;
         } catch (TException e) {
             throw new RuntimeException(
                     "Cannot determine if table "
@@ -348,15 +350,19 @@ public class HiveCatalog extends AbstractCatalog {
 
         if (!INPUT_FORMAT_CLASS_NAME.equals(table.getSd().getInputFormat())
                 || !OUTPUT_FORMAT_CLASS_NAME.equals(table.getSd().getOutputFormat())) {
-            throw new IllegalArgumentException(
-                    "Table "
-                            + tablePath.getFullName()
-                            + " is not a table store table. It's input format is "
-                            + table.getSd().getInputFormat()
-                            + " and its output format is "
-                            + table.getSd().getOutputFormat());
+            if (throwException) {
+                throw new IllegalArgumentException(
+                        "Table "
+                                + tablePath.getFullName()
+                                + " is not a table store table. It's input format is "
+                                + table.getSd().getInputFormat()
+                                + " and its output format is "
+                                + table.getSd().getOutputFormat());
+            } else {
+                return false;
+            }
         }
-        return false;
+        return true;
     }
 
     private SchemaManager schemaManager(ObjectPath tablePath) {
