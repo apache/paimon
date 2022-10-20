@@ -189,6 +189,21 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Amount of data to build up in memory before converting to a sorted on-disk file.");
 
+    public static final ConfigOption<Boolean> WRITE_BUFFER_SPILLABLE =
+            ConfigOptions.key("write-buffer-spillable")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription("Whether the write buffer can be spillable.");
+
+    public static final ConfigOption<Integer> LOCAL_SORT_MAX_NUM_FILE_HANDLES =
+            ConfigOptions.key("local-sort.max-num-file-handles")
+                    .intType()
+                    .defaultValue(128)
+                    .withDescription(
+                            "The maximal fan-in for external merge sort. It limits the number of file handles. "
+                                    + "If it is too small, may cause intermediate merging. But if it is too large, "
+                                    + "it will cause too many files opened at the same time, consume memory and lead to random reading.");
+
     public static final ConfigOption<MemorySize> PAGE_SIZE =
             ConfigOptions.key("page-size")
                     .memoryType()
@@ -424,6 +439,14 @@ public class CoreOptions implements Serializable {
 
     public long writeBufferSize() {
         return options.get(WRITE_BUFFER_SIZE).getBytes();
+    }
+
+    public boolean writeBufferSpillable() {
+        return options.get(WRITE_BUFFER_SPILLABLE);
+    }
+
+    public int localSortMaxNumFileHandles() {
+        return options.get(LOCAL_SORT_MAX_NUM_FILE_HANDLES);
     }
 
     public int pageSize() {

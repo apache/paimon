@@ -160,6 +160,18 @@ public class UniversalCompaction implements CompactStrategy {
             outputLevel = Math.max(0, runs.get(runCount).level() - 1);
         }
 
+        if (outputLevel == 0) {
+            // do not output level 0
+            for (int i = runCount; i < runs.size(); i++) {
+                LevelSortedRun next = runs.get(i);
+                runCount++;
+                if (next.level() != 0) {
+                    outputLevel = next.level();
+                    break;
+                }
+            }
+        }
+
         return CompactUnit.fromLevelRuns(outputLevel, runs.subList(0, runCount));
     }
 }

@@ -96,7 +96,10 @@ public class StoreWriteOperator extends PrepareCommitOperator {
     @Override
     public void open() throws Exception {
         super.open();
-        this.write = table.newWrite().withOverwrite(overwritePartition != null);
+        this.write =
+                table.newWrite()
+                        .withIOManager(getContainingTask().getEnvironment().getIOManager())
+                        .withOverwrite(overwritePartition != null);
         this.sinkContext = new SimpleContext(getProcessingTimeService());
         if (logSinkFunction != null) {
             FunctionUtils.openFunction(logSinkFunction, new Configuration());

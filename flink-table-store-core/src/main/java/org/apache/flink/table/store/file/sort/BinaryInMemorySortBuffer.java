@@ -16,10 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.memory.sort;
+package org.apache.flink.table.store.file.sort;
 
 import org.apache.flink.core.memory.MemorySegment;
 import org.apache.flink.runtime.io.disk.SimpleCollectingOutputView;
+import org.apache.flink.runtime.operators.sort.QuickSort;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.generated.NormalizedKeyComputer;
@@ -49,7 +50,7 @@ import static org.apache.flink.util.Preconditions.checkArgument;
  *   <li>3. Remove reset() and etc. methods which are not used in flink table store.
  * </ul>
  */
-public class BinaryInMemorySortBuffer extends BinaryIndexedSortable {
+public class BinaryInMemorySortBuffer extends BinaryIndexedSortable implements SortBuffer {
 
     private static final int MIN_REQUIRED_BUFFERS = 3;
 
@@ -64,16 +65,15 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable {
     /** Create a memory sorter in `insert` way. */
     public static BinaryInMemorySortBuffer createBuffer(
             NormalizedKeyComputer normalizedKeyComputer,
-            AbstractRowDataSerializer<RowData> inputSerializer,
-            BinaryRowDataSerializer serializer,
+            AbstractRowDataSerializer<RowData> serializer,
             RecordComparator comparator,
             MemorySegmentPool memoryPool) {
         checkArgument(memoryPool.freePages() >= MIN_REQUIRED_BUFFERS);
         ArrayList<MemorySegment> recordBufferSegments = new ArrayList<>(16);
         return new BinaryInMemorySortBuffer(
                 normalizedKeyComputer,
-                inputSerializer,
                 serializer,
+                new BinaryRowDataSerializer(serializer.getArity()),
                 comparator,
                 recordBufferSegments,
                 new SimpleCollectingOutputView(
@@ -102,7 +102,7 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable {
     // Memory Segment
     // -------------------------------------------------------------------------
 
-    public void returnToSegmentPool() {
+    private void returnToSegmentPool() {
         // return all memory
         this.memorySegmentPool.returnAll(this.sortIndex);
         this.memorySegmentPool.returnAll(this.recordBufferSegments);
@@ -115,7 +115,7 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable {
     }
 
     /** Try to initialize the sort buffer if all contained data is discarded. */
-    public void tryInitialize() {
+    private void tryInitialize() {
         if (!isInitialized) {
             // grab first buffer
             this.currentSortIndexSegment = nextMemorySegment();
@@ -131,6 +131,7 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable {
      * method in flink sort buffer will clear memory and grab two buffers for
      * currentSortIndexSegment and recordCollector.
      */
+    @Override
     public void clear() {
         if (this.isInitialized) {
             // reset all offsets
@@ -146,8 +147,18 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable {
         }
     }
 
+    @Override
     public long getOccupancy() {
         return this.currentDataBufferOffset + this.sortIndexBytes;
+    }
+
+    @Override
+    public boolean flushMemory() {
+        return false;
+    }
+
+    boolean isEmpty() {
+        return this.numRecords == 0;
     }
 
     /**
@@ -159,6 +170,7 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable {
      * @throws IOException Thrown, if an error occurred while serializing the record into the
      *     buffers.
      */
+    @Override
     public boolean write(RowData record) throws IOException {
         tryInitialize();
 
@@ -198,7 +210,7 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable {
      *
      * @return An iterator returning the records in their logical order.
      */
-    public final MutableObjectIterator<BinaryRowData> getIterator() {
+    private MutableObjectIterator<BinaryRowData> iterator() {
         tryInitialize();
 
         return new MutableObjectIterator<BinaryRowData>() {
@@ -237,5 +249,11 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable {
                 throw new RuntimeException("Not support!");
             }
         };
+    }
+
+    @Override
+    public final MutableObjectIterator<BinaryRowData> sortedIterator() {
+        new QuickSort().sort(this);
+        return iterator();
     }
 }
