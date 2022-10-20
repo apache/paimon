@@ -34,7 +34,7 @@ import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
-import org.apache.flink.table.store.table.sink.WriteFunction;
+import org.apache.flink.table.store.table.sink.WriteRecordConverter;
 import org.apache.flink.table.store.table.source.AppendOnlySplitGenerator;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.SplitGenerator;
@@ -109,7 +109,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         SinkRecordConverter recordConverter =
                 new SinkRecordConverter(store.options().bucket(), tableSchema);
         return new TableWriteImpl<>(
-                store.newWrite(), recordConverter, new AppendOnlyWriteFunction());
+                store.newWrite(), recordConverter, new AppendOnlyWriteRecordConverter());
     }
 
     @Override
@@ -117,8 +117,8 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         return store;
     }
 
-    /** {@link WriteFunction} implementation in {@link AppendOnlyFileStore}. */
-    private static class AppendOnlyWriteFunction implements WriteFunction<RowData> {
+    /** {@link WriteRecordConverter} implementation in {@link AppendOnlyFileStore}. */
+    private static class AppendOnlyWriteRecordConverter implements WriteRecordConverter<RowData> {
         private static final long serialVersionUID = 1L;
 
         @Override

@@ -40,7 +40,7 @@ import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
-import org.apache.flink.table.store.table.sink.WriteFunction;
+import org.apache.flink.table.store.table.sink.WriteRecordConverter;
 import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.MergeTreeSplitGenerator;
 import org.apache.flink.table.store.table.source.SplitGenerator;
@@ -194,7 +194,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         return new TableWriteImpl<>(
                 store.newWrite(),
                 recordConverter,
-                new ChangelogWithKeyWriteFunction(store.options(), schema()));
+                new ChangelogWithKeyWriteRecordConverter(store.options(), schema()));
     }
 
     @Override
@@ -202,14 +202,14 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         return store;
     }
 
-    /** {@link WriteFunction} implementation for {@link ChangelogWithKeyFileStoreTable}. */
-    private static class ChangelogWithKeyWriteFunction implements WriteFunction<KeyValue> {
+    /** {@link WriteRecordConverter} implementation for {@link ChangelogWithKeyFileStoreTable}. */
+    private static class ChangelogWithKeyWriteRecordConverter implements WriteRecordConverter<KeyValue> {
         private final CoreOptions options;
         private final TableSchema schema;
         private transient SequenceGenerator sequenceGenerator;
         private transient KeyValue kv;
 
-        private ChangelogWithKeyWriteFunction(CoreOptions options, TableSchema schema) {
+        private ChangelogWithKeyWriteRecordConverter(CoreOptions options, TableSchema schema) {
             this.options = options;
             this.schema = schema;
         }

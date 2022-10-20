@@ -29,7 +29,7 @@ import java.io.Serializable;
  *
  * @param <T> type of record in store table.
  */
-public interface WriteFunction<T> extends Serializable {
+public interface WriteRecordConverter<T> extends Serializable {
     /**
      * Validate and convert the {@link SinkRecord} to the record, operations in {@link
      * AppendOnlyFileStoreTable}, {@link ChangelogValueCountFileStoreTable} and {@link

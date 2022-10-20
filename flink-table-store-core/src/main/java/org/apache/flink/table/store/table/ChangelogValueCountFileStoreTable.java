@@ -37,7 +37,7 @@ import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
-import org.apache.flink.table.store.table.sink.WriteFunction;
+import org.apache.flink.table.store.table.sink.WriteRecordConverter;
 import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.MergeTreeSplitGenerator;
 import org.apache.flink.table.store.table.source.SplitGenerator;
@@ -123,7 +123,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
         SinkRecordConverter recordConverter =
                 new SinkRecordConverter(store.options().bucket(), tableSchema);
         return new TableWriteImpl<>(
-                store.newWrite(), recordConverter, new ChangelogValueCountWriteFunction());
+                store.newWrite(), recordConverter, new ChangelogValueCountWriteRecordConverter());
     }
 
     @Override
@@ -131,8 +131,8 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
         return store;
     }
 
-    /** {@link WriteFunction} implementation for {@link ChangelogValueCountFileStoreTable}. */
-    private static class ChangelogValueCountWriteFunction implements WriteFunction<KeyValue> {
+    /** {@link WriteRecordConverter} implementation for {@link ChangelogValueCountFileStoreTable}. */
+    private static class ChangelogValueCountWriteRecordConverter implements WriteRecordConverter<KeyValue> {
         private static final long serialVersionUID = 1L;
 
         private transient KeyValue kv;

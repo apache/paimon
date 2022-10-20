@@ -32,15 +32,15 @@ public class TableWriteImpl<T> implements TableWrite {
 
     private final FileStoreWrite<T> write;
     private final SinkRecordConverter recordConverter;
-    private final WriteFunction<T> writeFunction;
+    private final WriteRecordConverter<T> writeRecordConverter;
 
     public TableWriteImpl(
             FileStoreWrite<T> write,
             SinkRecordConverter recordConverter,
-            WriteFunction<T> writeFunction) {
+            WriteRecordConverter<T> writeRecordConverter) {
         this.write = write;
         this.recordConverter = recordConverter;
-        this.writeFunction = writeFunction;
+        this.writeRecordConverter = writeRecordConverter;
     }
 
     @Override
@@ -57,7 +57,7 @@ public class TableWriteImpl<T> implements TableWrite {
     @Override
     public SinkRecord write(RowData rowData) throws Exception {
         SinkRecord record = recordConverter.convert(rowData);
-        write.write(record.partition(), record.bucket(), writeFunction.write(record));
+        write.write(record.partition(), record.bucket(), writeRecordConverter.write(record));
         return record;
     }
 
