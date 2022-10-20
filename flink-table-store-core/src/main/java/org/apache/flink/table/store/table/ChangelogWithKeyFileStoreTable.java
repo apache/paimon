@@ -203,7 +203,8 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     /** {@link WriteRecordConverter} implementation for {@link ChangelogWithKeyFileStoreTable}. */
-    private static class ChangelogWithKeyWriteRecordConverter implements WriteRecordConverter<KeyValue> {
+    private static class ChangelogWithKeyWriteRecordConverter
+            implements WriteRecordConverter<KeyValue> {
         private final CoreOptions options;
         private final TableSchema schema;
         private transient SequenceGenerator sequenceGenerator;

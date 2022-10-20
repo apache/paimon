@@ -131,8 +131,11 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
         return store;
     }
 
-    /** {@link WriteRecordConverter} implementation for {@link ChangelogValueCountFileStoreTable}. */
-    private static class ChangelogValueCountWriteRecordConverter implements WriteRecordConverter<KeyValue> {
+    /**
+     * {@link WriteRecordConverter} implementation for {@link ChangelogValueCountFileStoreTable}.
+     */
+    private static class ChangelogValueCountWriteRecordConverter
+            implements WriteRecordConverter<KeyValue> {
         private static final long serialVersionUID = 1L;
 
         private transient KeyValue kv;

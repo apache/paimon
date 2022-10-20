@@ -26,8 +26,6 @@ import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreWrite;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.KeyComparatorSupplier;
-import org.apache.flink.table.store.table.sink.WriteFunction;
-import org.apache.flink.table.store.table.sink.WriteRecordConverter;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.Comparator;
@@ -43,7 +41,6 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final RowType valueType;
     private final Supplier<Comparator<RowData>> keyComparatorSupplier;
     private final MergeFunction<KeyValue> mergeFunction;
-    private final WriteRecordConverter<KeyValue> writeRecordConverter;
 
     public KeyValueFileStore(
             SchemaManager schemaManager,
@@ -53,15 +50,13 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             RowType bucketKeyType,
             RowType keyType,
             RowType valueType,
-            MergeFunction<KeyValue> mergeFunction,
-            WriteRecordConverter<KeyValue> writeRecordConverter) {
+            MergeFunction<KeyValue> mergeFunction) {
         super(schemaManager, schemaId, options, partitionType);
         this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
         this.valueType = valueType;
         this.mergeFunction = mergeFunction;
         this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
-        this.writeRecordConverter = writeRecordConverter;
     }
 
     @Override
@@ -94,8 +89,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 pathFactory(),
                 snapshotManager(),
                 newScan(true),
-                options,
-                writeRecordConverter);
+                options);
     }
 
     private KeyValueFileStoreScan newScan(boolean checkNumOfBuckets) {

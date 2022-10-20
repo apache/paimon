@@ -111,14 +111,19 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 Map.Entry<Integer, RecordWriter<T>> entry = bucketIter.next();
                 int bucket = entry.getKey();
                 RecordWriter<T> writer = entry.getValue();
+                RecordWriter.CommitIncrement increment = writer.prepareCommit(endOfInput);
                 FileCommittable committable =
-                        new FileCommittable(partition, bucket, writer.prepareCommit(endOfInput));
+                        new FileCommittable(
+                                partition,
+                                bucket,
+                                increment.newFilesIncrement(),
+                                increment.compactIncrement());
                 result.add(committable);
 
                 // clear if no update
                 // we need a mechanism to clear writers, otherwise there will be more and more
                 // such as yesterday's partition that no longer needs to be written.
-                if (committable.increment().isEmpty()) {
+                if (committable.isEmpty()) {
                     writer.close();
                     bucketIter.remove();
                 }
