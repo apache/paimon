@@ -125,12 +125,7 @@ public class KeyValueFileReadWriteTest {
                         "avro");
 
         try {
-            FileWriter<KeyValue, ?> writer;
-            if (ThreadLocalRandom.current().nextBoolean()) {
-                writer = writerFactory.createRollingMergeTreeFileWriter(0);
-            } else {
-                writer = writerFactory.createMergeTreeFileWriter(0);
-            }
+            FileWriter<KeyValue, ?> writer = writerFactory.createRollingMergeTreeFileWriter(0);
             writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         } catch (Throwable e) {
             if (e.getCause() != null) {

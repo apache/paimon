@@ -262,6 +262,9 @@ public class MergeTreeTest {
                 files.stream().map(DataFileMeta::maxSequenceNumber).max(Long::compare).orElse(-1L);
         MergeTreeWriter writer =
                 new MergeTreeWriter(
+                        false,
+                        128,
+                        null,
                         createCompactManager(writerFactory, service, files),
                         maxSequenceNumber,
                         comparator,

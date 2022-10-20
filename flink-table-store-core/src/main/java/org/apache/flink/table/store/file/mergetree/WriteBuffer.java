@@ -23,15 +23,16 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.types.RowKind;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.Comparator;
-import java.util.Iterator;
 
 /**
- * Append only memory table for storing key-values. When it is full, it will be flushed to disk and
+ * Append only writer buffer for storing key-values. When it is full, it will be flushed to disk and
  * form a data file.
  */
-public interface MemTable {
+public interface WriteBuffer {
 
     /**
      * Put a record with sequence number and value kind.
@@ -47,25 +48,29 @@ public interface MemTable {
     /** Memory occupancy size of this table. */
     long memoryOccupancy();
 
-    /**
-     * Returns an iterator without sorting and merging.
-     *
-     * <p>NOTE: If {@link MemTable#mergeIterator(Comparator, MergeFunction)} is called first,
-     * upcoming call to this method will return sorted, but not yet merged, data.
-     */
-    Iterator<KeyValue> rawIterator();
+    /** Flush memory, return false if not supported. */
+    boolean flushMemory() throws IOException;
 
     /**
-     * Returns an iterator over the records in this table. The elements are returned in the order of
-     * key and sequence number and elements with the same key will be merged by the given {@link
-     * MergeFunction}.
+     * Performs the given action for each remaining element in this buffer until all elements have
+     * been processed or the action throws an exception.
      *
-     * <p>NOTE: After calling this method, the upcoming call to {@link MemTable#rawIterator()} will
-     * return sorted, but not yet merged, data.
+     * @param rawConsumer consumer to consume records without merging.
+     * @param mergedConsumer consumer to consume records after merging.
      */
-    Iterator<KeyValue> mergeIterator(
-            Comparator<RowData> keyComparator, MergeFunction<KeyValue> mergeFunction);
+    void forEach(
+            Comparator<RowData> keyComparator,
+            MergeFunction<KeyValue> mergeFunction,
+            @Nullable KvConsumer rawConsumer,
+            KvConsumer mergedConsumer)
+            throws IOException;
 
     /** Removes all records from this table. The table will be empty after this call returns. */
     void clear();
+
+    /** A Consumer that accepts KeyValue and throw exceptions. */
+    @FunctionalInterface
+    interface KvConsumer {
+        void accept(KeyValue kv) throws IOException;
+    }
 }

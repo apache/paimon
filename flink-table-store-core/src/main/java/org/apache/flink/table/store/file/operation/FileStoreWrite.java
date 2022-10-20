@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.io.DataFileMeta;
@@ -35,6 +36,8 @@ import java.util.concurrent.ExecutorService;
  * @param <T> type of record to write.
  */
 public interface FileStoreWrite<T> {
+
+    FileStoreWrite<T> withIOManager(IOManager ioManager);
 
     /** Create a {@link RecordWriter} from partition and bucket. */
     RecordWriter<T> createWriter(

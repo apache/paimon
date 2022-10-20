@@ -152,6 +152,9 @@ public class KeyValueFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
                             levels);
         }
         return new MergeTreeWriter(
+                options.writeBufferSpillable(),
+                options.localSortMaxNumFileHandles(),
+                ioManager,
                 compactManager,
                 getMaxSequenceNumber(restoreFiles),
                 keyComparator,

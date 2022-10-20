@@ -43,6 +43,9 @@ import java.util.function.Function;
 /**
  * A {@link StatsCollectingSingleFileWriter} to write data files containing {@link KeyValue}s. Also
  * produces {@link DataFileMeta} after writing a file.
+ *
+ * <p>NOTE: records given to the writer must be sorted because it does not compare the min max keys
+ * to produce {@link DataFileMeta}.
  */
 public class KeyValueDataFileWriter
         extends StatsCollectingSingleFileWriter<KeyValue, DataFileMeta> {

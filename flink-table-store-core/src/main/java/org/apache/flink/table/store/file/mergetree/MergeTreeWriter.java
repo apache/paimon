@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.util.MemorySegmentPool;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
@@ -27,9 +28,9 @@ import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.io.CompactIncrement;
 import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.io.KeyValueDataFileWriter;
 import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
 import org.apache.flink.table.store.file.io.NewFilesIncrement;
+import org.apache.flink.table.store.file.io.RollingFileWriter;
 import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.utils.RecordWriter;
@@ -38,7 +39,6 @@ import org.apache.flink.table.types.logical.RowType;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -48,6 +48,10 @@ import java.util.stream.Collectors;
 
 /** A {@link RecordWriter} to write records and generate {@link CompactIncrement}. */
 public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
+
+    private final boolean writeBufferSpillable;
+    private final int sortMaxFan;
+    private final IOManager ioManager;
 
     private final RowType keyType;
     private final RowType valueType;
@@ -64,9 +68,12 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     private final LinkedHashSet<DataFileMeta> changelogFiles;
 
     private long newSequenceNumber;
-    private MemTable memTable;
+    private WriteBuffer writeBuffer;
 
     public MergeTreeWriter(
+            boolean writeBufferSpillable,
+            int sortMaxFan,
+            IOManager ioManager,
             CompactManager compactManager,
             long maxSequenceNumber,
             Comparator<RowData> keyComparator,
@@ -74,6 +81,9 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             KeyValueFileWriterFactory writerFactory,
             boolean commitForceCompact,
             ChangelogProducer changelogProducer) {
+        this.writeBufferSpillable = writeBufferSpillable;
+        this.sortMaxFan = sortMaxFan;
+        this.ioManager = ioManager;
         this.keyType = writerFactory.keyType();
         this.valueType = writerFactory.valueType();
         this.compactManager = compactManager;
@@ -101,7 +111,14 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public void setMemoryPool(MemorySegmentPool memoryPool) {
-        this.memTable = new SortBufferMemTable(keyType, valueType, memoryPool);
+        this.writeBuffer =
+                new SortBufferWriteBuffer(
+                        keyType,
+                        valueType,
+                        memoryPool,
+                        writeBufferSpillable,
+                        sortMaxFan,
+                        ioManager);
     }
 
     @Override
@@ -110,10 +127,10 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 kv.sequenceNumber() == KeyValue.UNKNOWN_SEQUENCE
                         ? newSequenceNumber()
                         : kv.sequenceNumber();
-        boolean success = memTable.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
+        boolean success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
         if (!success) {
-            flushMemory();
-            success = memTable.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
+            flushWriteBuffer();
+            success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
             if (!success) {
                 throw new RuntimeException("Mem table is too small to hold a single element.");
             }
@@ -122,48 +139,61 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public long memoryOccupancy() {
-        return memTable.memoryOccupancy();
+        return writeBuffer.memoryOccupancy();
     }
 
     @Override
     public void flushMemory() throws Exception {
-        if (memTable.size() > 0) {
+        boolean success = writeBuffer.flushMemory();
+        if (!success) {
+            flushWriteBuffer();
+        }
+    }
+
+    private void flushWriteBuffer() throws Exception {
+        if (writeBuffer.size() > 0) {
             if (compactManager.shouldWaitCompaction()) {
                 // stop writing, wait for compaction finished
                 trySyncLatestCompaction(true);
             }
 
-            // write changelog file
-            //
-            // NOTE: We must first call memTable.rawIterator(), then call memTable.mergeIterator().
-            // Otherwise memTable.rawIterator() will generate sorted, but not yet merged, data. See
-            // comments on MemTable for more details.
-            if (changelogProducer == ChangelogProducer.INPUT) {
-                KeyValueDataFileWriter changelogWriter = writerFactory.createChangelogFileWriter(0);
-                changelogWriter.write(memTable.rawIterator());
-                changelogWriter.close();
-                changelogFiles.add(changelogWriter.result());
+            final RollingFileWriter<KeyValue, DataFileMeta> changelogWriter =
+                    changelogProducer == ChangelogProducer.INPUT
+                            ? writerFactory.createRollingChangelogFileWriter(0)
+                            : null;
+            final RollingFileWriter<KeyValue, DataFileMeta> dataWriter =
+                    writerFactory.createRollingMergeTreeFileWriter(0);
+
+            try {
+                writeBuffer.forEach(
+                        keyComparator,
+                        mergeFunction,
+                        changelogWriter == null ? null : changelogWriter::write,
+                        dataWriter::write);
+            } finally {
+                if (changelogWriter != null) {
+                    changelogWriter.close();
+                }
+                dataWriter.close();
             }
 
-            // write lsm level 0 file
-            Iterator<KeyValue> iterator = memTable.mergeIterator(keyComparator, mergeFunction);
-            KeyValueDataFileWriter writer = writerFactory.createMergeTreeFileWriter(0);
-            writer.write(iterator);
-            writer.close();
-            DataFileMeta fileMeta = writer.result();
-            if (fileMeta != null) {
+            if (changelogWriter != null) {
+                changelogFiles.addAll(changelogWriter.result());
+            }
+
+            for (DataFileMeta fileMeta : dataWriter.result()) {
                 newFiles.add(fileMeta);
                 compactManager.addNewFile(fileMeta);
             }
 
-            memTable.clear();
+            writeBuffer.clear();
             submitCompaction();
         }
     }
 
     @Override
     public CommitIncrement prepareCommit(boolean endOfInput) throws Exception {
-        flushMemory();
+        flushWriteBuffer();
         boolean blocking = endOfInput || commitForceCompact;
         trySyncLatestCompaction(blocking);
         return drainIncrement();

@@ -186,16 +186,15 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         List<Split> splits = table.newScan().withIncremental(true).plan().splits;
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
-                .isEqualTo(
-                        Arrays.asList(
-                                "+I 1|10|100|binary|varbinary",
-                                "+I 1|20|200|binary|varbinary",
-                                "-D 1|10|100|binary|varbinary",
-                                "+I 1|10|101|binary|varbinary",
-                                "-U 1|20|200|binary|varbinary",
-                                "+U 1|20|201|binary|varbinary",
-                                "-U 1|10|101|binary|varbinary",
-                                "+U 1|10|102|binary|varbinary"));
+                .containsExactlyInAnyOrder(
+                        "+I 1|10|100|binary|varbinary",
+                        "+I 1|20|200|binary|varbinary",
+                        "-D 1|10|100|binary|varbinary",
+                        "+I 1|10|101|binary|varbinary",
+                        "-U 1|20|200|binary|varbinary",
+                        "+U 1|20|201|binary|varbinary",
+                        "-U 1|10|101|binary|varbinary",
+                        "+U 1|10|102|binary|varbinary");
     }
 
     @Test

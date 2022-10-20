@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.table.sink;
 
 import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
@@ -61,6 +62,12 @@ public abstract class AbstractTableWrite<T> implements TableWrite {
     @Override
     public TableWrite withOverwrite(boolean overwrite) {
         this.overwrite = overwrite;
+        return this;
+    }
+
+    @Override
+    public TableWrite withIOManager(IOManager ioManager) {
+        this.write.withIOManager(ioManager);
         return this;
     }
 
