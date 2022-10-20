@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.table.sink;
 
+import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
 
@@ -46,6 +47,12 @@ public class TableWriteImpl<T> implements TableWrite {
     @Override
     public TableWrite withOverwrite(boolean overwrite) {
         write.withOverwrite(overwrite);
+        return this;
+    }
+
+    @Override
+    public TableWrite withIOManager(IOManager ioManager) {
+        write.withIOManager(ioManager);
         return this;
     }
 
