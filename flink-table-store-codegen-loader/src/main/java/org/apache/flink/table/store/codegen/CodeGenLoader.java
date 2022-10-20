@@ -87,7 +87,7 @@ public class CodeGenLoader {
                             COMPONENT_CLASSPATH);
         } catch (IOException e) {
             throw new RuntimeException(
-                    "Could not initialize the table planner components loader.", e);
+                    "Could not initialize the flink-table-store-codegen loader.", e);
         }
     }
 
