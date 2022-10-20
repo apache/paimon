@@ -60,6 +60,33 @@ public class LookupJoinITCase extends AbstractTestBase {
     }
 
     @Test
+    public void testLookupEmptyTable() throws Exception {
+        String query =
+                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+
+        executeSql("INSERT INTO T VALUES (1), (2), (3)");
+
+        List<Row> result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, null, null, null),
+                        Row.of(2, null, null, null),
+                        Row.of(3, null, null, null));
+
+        executeSql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+        Thread.sleep(2000); // wait refresh
+        executeSql("INSERT INTO T VALUES (1), (2), (4)");
+        result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(2, 22, 222, 2222),
+                        Row.of(4, null, null, null));
+        iterator.close();
+    }
+
+    @Test
     public void testLookup() throws Exception {
         executeSql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
