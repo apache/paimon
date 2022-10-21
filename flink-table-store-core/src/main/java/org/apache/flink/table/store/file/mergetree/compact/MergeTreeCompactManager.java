@@ -20,11 +20,12 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.compact.CompactManager;
+import org.apache.flink.table.store.file.compact.CompactFutureManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactUnit;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.Levels;
+import org.apache.flink.util.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,20 +37,16 @@ import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
 /** Compact manager for {@link org.apache.flink.table.store.file.KeyValueFileStore}. */
-public class MergeTreeCompactManager extends CompactManager {
+public class MergeTreeCompactManager extends CompactFutureManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(MergeTreeCompactManager.class);
 
+    private final ExecutorService executor;
     private final Levels levels;
-
     private final CompactStrategy strategy;
-
     private final Comparator<RowData> keyComparator;
-
     private final long minFileSize;
-
     private final int numSortedRunStopTrigger;
-
     private final CompactRewriter rewriter;
 
     public MergeTreeCompactManager(
@@ -60,7 +57,7 @@ public class MergeTreeCompactManager extends CompactManager {
             long minFileSize,
             int numSortedRunStopTrigger,
             CompactRewriter rewriter) {
-        super(executor);
+        this.executor = executor;
         this.levels = levels;
         this.strategy = strategy;
         this.minFileSize = minFileSize;
@@ -80,43 +77,52 @@ public class MergeTreeCompactManager extends CompactManager {
     }
 
     @Override
-    public void triggerCompaction() {
-        if (taskFuture != null) {
-            return;
+    public void triggerCompaction(boolean forcedCompaction) {
+        Optional<CompactUnit> optionalUnit;
+        if (forcedCompaction) {
+            Preconditions.checkState(
+                    taskFuture == null,
+                    "A compaction task is still running while the user "
+                            + "forces a new compaction. This is unexpected.");
+            optionalUnit = strategy.forcedPick(levels.numberOfLevels(), levels.levelSortedRuns());
+        } else {
+            if (taskFuture != null) {
+                return;
+            }
+            optionalUnit =
+                    strategy.pick(levels.numberOfLevels(), levels.levelSortedRuns())
+                            .map(unit -> unit.files().size() < 2 ? null : unit);
         }
-        strategy.pick(levels.numberOfLevels(), levels.levelSortedRuns())
-                .ifPresent(
-                        unit -> {
-                            if (unit.files().size() < 2) {
-                                return;
-                            }
-                            /*
-                             * As long as there is no older data, We can drop the deletion.
-                             * If the output level is 0, there may be older data not involved in compaction.
-                             * If the output level is bigger than 0, as long as there is no older data in
-                             * the current levels, the output is the oldest, so we can drop the deletion.
-                             * See CompactStrategy.pick.
-                             */
-                            boolean dropDelete =
-                                    unit.outputLevel() != 0
-                                            && unit.outputLevel() >= levels.nonEmptyHighestLevel();
 
-                            if (LOG.isDebugEnabled()) {
-                                LOG.debug(
-                                        "Submit compaction with files (name, level, size): "
-                                                + levels.levelSortedRuns().stream()
-                                                        .flatMap(lsr -> lsr.run().files().stream())
-                                                        .map(
-                                                                file ->
-                                                                        String.format(
-                                                                                "(%s, %d, %d)",
-                                                                                file.fileName(),
-                                                                                file.level(),
-                                                                                file.fileSize()))
-                                                        .collect(Collectors.joining(", ")));
-                            }
-                            submitCompaction(unit, dropDelete);
-                        });
+        optionalUnit.ifPresent(
+                unit -> {
+                    /*
+                     * As long as there is no older data, We can drop the deletion.
+                     * If the output level is 0, there may be older data not involved in compaction.
+                     * If the output level is bigger than 0, as long as there is no older data in
+                     * the current levels, the output is the oldest, so we can drop the deletion.
+                     * See CompactStrategy.pick.
+                     */
+                    boolean dropDelete =
+                            unit.outputLevel() != 0
+                                    && unit.outputLevel() >= levels.nonEmptyHighestLevel();
+
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug(
+                                "Submit compaction with files (name, level, size): "
+                                        + levels.levelSortedRuns().stream()
+                                                .flatMap(lsr -> lsr.run().files().stream())
+                                                .map(
+                                                        file ->
+                                                                String.format(
+                                                                        "(%s, %d, %d)",
+                                                                        file.fileName(),
+                                                                        file.level(),
+                                                                        file.fileSize()))
+                                                .collect(Collectors.joining(", ")));
+                    }
+                    submitCompaction(unit, dropDelete);
+                });
     }
 
     @VisibleForTesting

@@ -33,6 +33,9 @@ public interface RecordWriter<T> {
     /** Add a key-value element to the writer. */
     void write(T record) throws Exception;
 
+    /** Compact files related to the writer. */
+    void compact() throws Exception;
+
     /**
      * Prepare for a commit.
      *

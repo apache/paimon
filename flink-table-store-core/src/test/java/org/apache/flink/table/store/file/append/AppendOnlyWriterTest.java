@@ -318,7 +318,8 @@ public class AppendOnlyWriterTest {
                                         compactBefore.isEmpty()
                                                 ? Collections.emptyList()
                                                 : Collections.singletonList(
-                                                        generateCompactAfter(compactBefore))),
+                                                        generateCompactAfter(compactBefore)),
+                                pathFactory),
                         forceCompact,
                         pathFactory),
                 toCompact);

@@ -19,12 +19,13 @@
 package org.apache.flink.table.store.file.append;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.table.store.file.compact.CompactManager;
+import org.apache.flink.table.store.file.compact.CompactFutureManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactTask;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
+import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -37,13 +38,15 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 
 /** Compact manager for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
-public class AppendOnlyCompactManager extends CompactManager {
+public class AppendOnlyCompactManager extends CompactFutureManager {
 
+    private final ExecutorService executor;
+    private final LinkedList<DataFileMeta> toCompact;
     private final int minFileNum;
     private final int maxFileNum;
     private final long targetFileSize;
     private final CompactRewriter rewriter;
-    private final LinkedList<DataFileMeta> toCompact;
+    private final DataFilePathFactory pathFactory;
 
     public AppendOnlyCompactManager(
             ExecutorService executor,
@@ -51,17 +54,43 @@ public class AppendOnlyCompactManager extends CompactManager {
             int minFileNum,
             int maxFileNum,
             long targetFileSize,
-            CompactRewriter rewriter) {
-        super(executor);
+            CompactRewriter rewriter,
+            DataFilePathFactory pathFactory) {
+        this.executor = executor;
         this.toCompact = toCompact;
-        this.maxFileNum = maxFileNum;
         this.minFileNum = minFileNum;
+        this.maxFileNum = maxFileNum;
         this.targetFileSize = targetFileSize;
         this.rewriter = rewriter;
+        this.pathFactory = pathFactory;
     }
 
     @Override
-    public void triggerCompaction() {
+    public void triggerCompaction(boolean forcedCompaction) {
+        if (forcedCompaction) {
+            triggerForcedCompaction();
+        } else {
+            triggerCompactionWithBestEffort();
+        }
+    }
+
+    private void triggerForcedCompaction() {
+        Preconditions.checkState(
+                taskFuture == null,
+                "A compaction task is still running while the user "
+                        + "forces a new compaction. This is unexpected.");
+        taskFuture =
+                executor.submit(
+                        new AppendOnlyCompactManager.IterativeCompactTask(
+                                toCompact,
+                                targetFileSize,
+                                minFileNum,
+                                maxFileNum,
+                                rewriter,
+                                pathFactory));
+    }
+
+    private void triggerCompactionWithBestEffort() {
         if (taskFuture != null) {
             return;
         }

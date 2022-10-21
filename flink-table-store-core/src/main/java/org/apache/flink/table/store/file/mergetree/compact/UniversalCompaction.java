@@ -88,6 +88,12 @@ public class UniversalCompaction implements CompactStrategy {
         return Optional.empty();
     }
 
+    @Override
+    public Optional<CompactUnit> forcedPick(int numLevels, List<LevelSortedRun> runs) {
+        int maxLevel = numLevels - 1;
+        return Optional.of(CompactUnit.fromLevelRuns(maxLevel, runs));
+    }
+
     @VisibleForTesting
     CompactUnit pickForSizeAmp(int maxLevel, List<LevelSortedRun> runs) {
         if (runs.size() < numRunCompactionTrigger) {

@@ -91,6 +91,11 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     }
 
     @Override
+    public void compact() throws Exception {
+        submitCompaction(true);
+    }
+
+    @Override
     public CommitIncrement prepareCommit(boolean endOnfInput) throws Exception {
         List<DataFileMeta> newFiles = new ArrayList<>();
         if (writer != null) {
@@ -104,7 +109,7 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
         }
         // add new generated files
         newFiles.forEach(compactManager::addNewFile);
-        submitCompaction();
+        submitCompaction(false);
 
         boolean blocking = endOnfInput || forceCompact;
         trySyncLatestCompaction(blocking);
@@ -134,9 +139,10 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
                 schemaId, fileFormat, targetFileSize, writeSchema, pathFactory, seqNumCounter);
     }
 
-    private void submitCompaction() throws ExecutionException, InterruptedException {
-        trySyncLatestCompaction(false);
-        compactManager.triggerCompaction();
+    private void submitCompaction(boolean forcedCompaction)
+            throws ExecutionException, InterruptedException {
+        trySyncLatestCompaction(forcedCompaction);
+        compactManager.triggerCompaction(forcedCompaction);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

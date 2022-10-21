@@ -37,4 +37,7 @@ public interface CompactStrategy {
      * </ul>
      */
     Optional<CompactUnit> pick(int numLevels, List<LevelSortedRun> runs);
+
+    /** Pick compaction unit from runs. However this compaction is forced by the user. */
+    Optional<CompactUnit> forcedPick(int numLevels, List<LevelSortedRun> runs);
 }

@@ -21,17 +21,11 @@ package org.apache.flink.table.store.file.operation;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileStore;
-import org.apache.flink.table.store.file.compact.CompactResult;
-import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 
-import javax.annotation.Nullable;
-
 import java.util.List;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
 
 /**
  * Write operation which provides {@link RecordWriter} creation and writes {@link SinkRecord} to
@@ -42,23 +36,6 @@ import java.util.concurrent.ExecutorService;
 public interface FileStoreWrite<T> {
 
     FileStoreWrite<T> withIOManager(IOManager ioManager);
-
-    /** Create a {@link RecordWriter} from partition and bucket. */
-    RecordWriter<T> createWriter(
-            BinaryRowData partition, int bucket, ExecutorService compactExecutor);
-
-    /** Create an empty {@link RecordWriter} from partition and bucket. */
-    RecordWriter<T> createEmptyWriter(
-            BinaryRowData partition, int bucket, ExecutorService compactExecutor);
-
-    /**
-     * Create a {@link Callable} compactor from partition, bucket.
-     *
-     * @param compactFiles input files of compaction. When it is null, will automatically read all
-     *     files of the current bucket.
-     */
-    Callable<CompactResult> createCompactWriter(
-            BinaryRowData partition, int bucket, @Nullable List<DataFileMeta> compactFiles);
 
     /**
      * If overwrite is true, the writer will overwrite the store, otherwise it won't.
@@ -76,6 +53,15 @@ public interface FileStoreWrite<T> {
      * @throws Exception the thrown exception when writing the record
      */
     void write(BinaryRowData partition, int bucket, T data) throws Exception;
+
+    /**
+     * Compact data stored in given partition and bucket.
+     *
+     * @param partition the partition to compact
+     * @param bucket the bucket to compact
+     * @throws Exception the thrown exception when compacting the records
+     */
+    void compact(BinaryRowData partition, int bucket) throws Exception;
 
     /**
      * Prepare commit in the write.

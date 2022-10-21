@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.io.DataFileMeta;
@@ -97,6 +98,12 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         writer.write(data);
     }
 
+    @Override
+    public void compact(BinaryRowData partition, int bucket) throws Exception {
+        getWriter(partition, bucket).compact();
+    }
+
+    @Override
     public List<FileCommittable> prepareCommit(boolean endOfInput) throws Exception {
         List<FileCommittable> result = new ArrayList<>();
 
@@ -167,4 +174,14 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     protected void notifyNewWriter(RecordWriter<T> writer) {}
+
+    /** Create a {@link RecordWriter} from partition and bucket. */
+    @VisibleForTesting
+    public abstract RecordWriter<T> createWriter(
+            BinaryRowData partition, int bucket, ExecutorService compactExecutor);
+
+    /** Create an empty {@link RecordWriter} from partition and bucket. */
+    @VisibleForTesting
+    public abstract RecordWriter<T> createEmptyWriter(
+            BinaryRowData partition, int bucket, ExecutorService compactExecutor);
 }

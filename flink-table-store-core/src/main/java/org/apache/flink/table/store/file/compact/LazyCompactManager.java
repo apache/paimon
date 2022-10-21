@@ -21,13 +21,15 @@ package org.apache.flink.table.store.file.compact;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 
 import java.util.Optional;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ExecutionException;
 
-/** A {@link CompactManager} which doesn't do things. */
-public class NoopCompactManager extends CompactManager {
+/** A {@link CompactManager} which only performs compaction when forced by user. */
+public class LazyCompactManager implements CompactManager {
 
-    public NoopCompactManager(ExecutorService executor) {
-        super(executor);
+    private final CompactManager wrapped;
+
+    public LazyCompactManager(CompactManager wrapped) {
+        this.wrapped = wrapped;
     }
 
     @Override
@@ -36,13 +38,25 @@ public class NoopCompactManager extends CompactManager {
     }
 
     @Override
-    public void addNewFile(DataFileMeta file) {}
+    public void addNewFile(DataFileMeta file) {
+        wrapped.addNewFile(file);
+    }
 
     @Override
-    public void triggerCompaction() {}
+    public void triggerCompaction(boolean forcedCompaction) {
+        if (forcedCompaction) {
+            wrapped.triggerCompaction(true);
+        }
+    }
 
     @Override
-    public Optional<CompactResult> getCompactionResult(boolean blocking) {
-        return Optional.empty();
+    public Optional<CompactResult> getCompactionResult(boolean blocking)
+            throws ExecutionException, InterruptedException {
+        return wrapped.getCompactionResult(blocking);
+    }
+
+    @Override
+    public void cancelCompaction() {
+        wrapped.cancelCompaction();
     }
 }

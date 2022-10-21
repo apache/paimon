@@ -23,9 +23,7 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.compact.CompactManager;
-import org.apache.flink.table.store.file.compact.CompactResult;
-import org.apache.flink.table.store.file.compact.CompactUnit;
-import org.apache.flink.table.store.file.compact.NoopCompactManager;
+import org.apache.flink.table.store.file.compact.LazyCompactManager;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
 import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
@@ -37,7 +35,6 @@ import org.apache.flink.table.store.file.mergetree.compact.CompactRewriter;
 import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManager;
-import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactTask;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -46,12 +43,9 @@ import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.RowType;
 
-import javax.annotation.Nullable;
-
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
@@ -112,21 +106,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         return createMergeTreeWriter(partition, bucket, Collections.emptyList(), compactExecutor);
     }
 
-    @Override
-    public Callable<CompactResult> createCompactWriter(
-            BinaryRowData partition, int bucket, @Nullable List<DataFileMeta> compactFiles) {
-        if (compactFiles == null) {
-            compactFiles = scanExistingFileMetas(partition, bucket);
-        }
-        Comparator<RowData> keyComparator = keyComparatorSupplier.get();
-        CompactRewriter rewriter = compactRewriter(partition, bucket, keyComparator);
-        Levels levels = new Levels(keyComparator, compactFiles, options.numLevels());
-        CompactUnit unit =
-                CompactUnit.fromLevelRuns(levels.numberOfLevels() - 1, levels.levelSortedRuns());
-        return new MergeTreeCompactTask(
-                keyComparator, options.targetFileSize(), rewriter, unit, true);
-    }
-
     private MergeTreeWriter createMergeTreeWriter(
             BinaryRowData partition,
             int bucket,
@@ -134,23 +113,18 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             ExecutorService compactExecutor) {
         KeyValueFileWriterFactory writerFactory = writerFactoryBuilder.build(partition, bucket);
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
-        CompactManager compactManager;
-        if (options.writeCompactionSkip()) {
-            compactManager = new NoopCompactManager(compactExecutor);
-        } else {
-            Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
-            compactManager =
-                    createCompactManager(
-                            partition,
-                            bucket,
-                            new UniversalCompaction(
-                                    options.maxSizeAmplificationPercent(),
-                                    options.sortedRunSizeRatio(),
-                                    options.numSortedRunCompactionTrigger(),
-                                    options.maxSortedRunNum()),
-                            compactExecutor,
-                            levels);
-        }
+        Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
+        CompactManager compactManager =
+                createCompactManager(
+                        partition,
+                        bucket,
+                        new UniversalCompaction(
+                                options.maxSizeAmplificationPercent(),
+                                options.sortedRunSizeRatio(),
+                                options.numSortedRunCompactionTrigger(),
+                                options.maxSortedRunNum()),
+                        compactExecutor,
+                        levels);
         return new MergeTreeWriter(
                 options.writeBufferSpillable(),
                 options.localSortMaxNumFileHandles(),
@@ -172,14 +146,19 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             Levels levels) {
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
         CompactRewriter rewriter = compactRewriter(partition, bucket, keyComparator);
-        return new MergeTreeCompactManager(
-                compactExecutor,
-                levels,
-                compactStrategy,
-                keyComparator,
-                options.targetFileSize(),
-                options.numSortedRunStopTrigger(),
-                rewriter);
+        CompactManager compactManager =
+                new MergeTreeCompactManager(
+                        compactExecutor,
+                        levels,
+                        compactStrategy,
+                        keyComparator,
+                        options.targetFileSize(),
+                        options.numSortedRunStopTrigger(),
+                        rewriter);
+        if (options.writeCompactionSkip()) {
+            compactManager = new LazyCompactManager(compactManager);
+        }
+        return compactManager;
     }
 
     private CompactRewriter compactRewriter(

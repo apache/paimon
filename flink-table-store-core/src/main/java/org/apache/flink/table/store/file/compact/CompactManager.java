@@ -20,65 +20,29 @@ package org.apache.flink.table.store.file.compact;
 
 import org.apache.flink.table.store.file.io.DataFileMeta;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.Optional;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
 
 /** Manager to submit compaction task. */
-public abstract class CompactManager {
-
-    private static final Logger LOG = LoggerFactory.getLogger(CompactManager.class);
-
-    protected final ExecutorService executor;
-
-    protected Future<CompactResult> taskFuture;
-
-    public CompactManager(ExecutorService executor) {
-        this.executor = executor;
-    }
+public interface CompactManager {
 
     /** Should wait compaction finish. */
-    public abstract boolean shouldWaitCompaction();
+    boolean shouldWaitCompaction();
 
     /** Add a new file. */
-    public abstract void addNewFile(DataFileMeta file);
+    void addNewFile(DataFileMeta file);
 
-    /** Trigger a new compaction task. */
-    public abstract void triggerCompaction();
+    /**
+     * Trigger a new compaction task.
+     *
+     * @param forcedCompaction if this compaction is forced by user
+     */
+    void triggerCompaction(boolean forcedCompaction);
 
     /** Get compaction result. Wait finish if {@code blocking} is true. */
-    public abstract Optional<CompactResult> getCompactionResult(boolean blocking)
+    Optional<CompactResult> getCompactionResult(boolean blocking)
             throws ExecutionException, InterruptedException;
 
-    public void cancelCompaction() {
-        // TODO this method may leave behind orphan files if compaction is actually finished
-        //  but some CPU work still needs to be done
-        if (taskFuture != null && !taskFuture.isCancelled()) {
-            taskFuture.cancel(true);
-        }
-    }
-
-    protected final Optional<CompactResult> innerGetCompactionResult(boolean blocking)
-            throws ExecutionException, InterruptedException {
-        if (taskFuture != null) {
-            if (blocking || taskFuture.isDone()) {
-                CompactResult result;
-                try {
-                    result = taskFuture.get();
-                } catch (CancellationException e) {
-                    LOG.info("Compaction future is cancelled", e);
-                    taskFuture = null;
-                    return Optional.empty();
-                }
-                taskFuture = null;
-                return Optional.of(result);
-            }
-        }
-        return Optional.empty();
-    }
+    /** Cancel currently running compaction task. */
+    void cancelCompaction();
 }
