@@ -24,7 +24,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.generated.NormalizedKeyComputer;
 import org.apache.flink.table.runtime.generated.RecordComparator;
-import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.runtime.typeutils.InternalSerializers;
 import org.apache.flink.table.runtime.util.MemorySegmentPool;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
@@ -78,7 +77,6 @@ public class SortBufferMemTable implements MemTable {
                 BinaryInMemorySortBuffer.createBuffer(
                         normalizedKeyComputer,
                         InternalSerializers.create(KeyValue.schema(keyType, valueType)),
-                        new BinaryRowDataSerializer(sortKeyTypes.size()),
                         keyComparator,
                         memoryPool);
     }
