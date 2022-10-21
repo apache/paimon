@@ -77,6 +77,8 @@ public class TableStoreHiveStorageHandler
         TableStoreJobConf.configureInputJobProperties(properties, map);
     }
 
+    public void configureInputJobCredentials(TableDesc tableDesc, Map<String, String> map) {}
+
     @Override
     public void configureOutputJobProperties(TableDesc tableDesc, Map<String, String> map) {}
 

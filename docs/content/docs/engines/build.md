@@ -50,6 +50,12 @@ You can find Flink 1.15 bundled jar in `./flink-table-store-dist/target/flink-ta
 
 To build with Hive 2.3, no special argument is needed.
 
+To build with Hive 3.1, run the following command.
+
+```bash
+mvn clean install -Dmaven.test.skip=true -Phive-3.1
+```
+
 To build with Hive 2.2, run the following command.
 
 ```bash
