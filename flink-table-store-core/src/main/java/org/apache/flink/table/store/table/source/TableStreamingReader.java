@@ -35,7 +35,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Objects;
 import java.util.function.IntUnaryOperator;
 import java.util.stream.IntStream;
 
@@ -90,7 +89,10 @@ public class TableStreamingReader {
                 scan.withFilter(predicate);
             }
             TableScan.Plan plan = scan.plan();
-            long snapshotId = Objects.requireNonNull(plan.snapshotId);
+            if (plan.snapshotId == null) {
+                return null;
+            }
+            long snapshotId = plan.snapshotId;
             enumerator =
                     new SnapshotEnumerator(
                             table.location(),
