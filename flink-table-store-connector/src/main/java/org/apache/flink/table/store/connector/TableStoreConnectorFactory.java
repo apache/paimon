@@ -18,12 +18,17 @@
 
 package org.apache.flink.table.store.connector;
 
+import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.UpdateSchema;
 
 import javax.annotation.Nullable;
 
@@ -59,6 +64,7 @@ public class TableStoreConnectorFactory extends AbstractTableStoreFactory {
                     context.getClassLoader(),
                     context.isTemporary());
         }
+        createTableIfNeeded(context);
         return super.createDynamicTableSource(context);
     }
 
@@ -74,9 +80,23 @@ public class TableStoreConnectorFactory extends AbstractTableStoreFactory {
                     context.getClassLoader(),
                     context.isTemporary());
         }
+        createTableIfNeeded(context);
         TableStoreSink sink = (TableStoreSink) super.createDynamicTableSink(context);
         sink.setLockFactory(lockFactory);
         return sink;
+    }
+
+    private void createTableIfNeeded(Context context) {
+        ResolvedCatalogTable table = context.getCatalogTable();
+        Path tablePath = CoreOptions.path(table.getOptions());
+        SchemaManager schemaManager = new SchemaManager(tablePath);
+        if (!schemaManager.latest().isPresent()) {
+            try {
+                schemaManager.commitNewVersion(UpdateSchema.fromCatalogTable(table));
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 
     private boolean isFlinkTable(Context context) {
