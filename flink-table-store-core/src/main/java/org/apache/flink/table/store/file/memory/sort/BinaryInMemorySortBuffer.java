@@ -65,7 +65,6 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable {
     public static BinaryInMemorySortBuffer createBuffer(
             NormalizedKeyComputer normalizedKeyComputer,
             AbstractRowDataSerializer<RowData> inputSerializer,
-            BinaryRowDataSerializer serializer,
             RecordComparator comparator,
             MemorySegmentPool memoryPool) {
         checkArgument(memoryPool.freePages() >= MIN_REQUIRED_BUFFERS);
@@ -73,7 +72,6 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable {
         return new BinaryInMemorySortBuffer(
                 normalizedKeyComputer,
                 inputSerializer,
-                serializer,
                 comparator,
                 recordBufferSegments,
                 new SimpleCollectingOutputView(
@@ -84,12 +82,16 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable {
     private BinaryInMemorySortBuffer(
             NormalizedKeyComputer normalizedKeyComputer,
             AbstractRowDataSerializer<RowData> inputSerializer,
-            BinaryRowDataSerializer serializer,
             RecordComparator comparator,
             ArrayList<MemorySegment> recordBufferSegments,
             SimpleCollectingOutputView recordCollector,
             MemorySegmentPool pool) {
-        super(normalizedKeyComputer, serializer, comparator, recordBufferSegments, pool);
+        super(
+                normalizedKeyComputer,
+                new BinaryRowDataSerializer(inputSerializer.getArity()),
+                comparator,
+                recordBufferSegments,
+                pool);
         this.inputSerializer = inputSerializer;
         this.recordBufferSegments = recordBufferSegments;
         this.recordCollector = recordCollector;
