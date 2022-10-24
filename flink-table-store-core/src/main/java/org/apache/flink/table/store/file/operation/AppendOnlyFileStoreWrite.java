@@ -139,8 +139,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
                             new LongCounter(toCompact.get(0).minSequenceNumber()));
             rewriter.write(
                     new RecordReaderIterator<>(
-                            read.createReader(
-                                    new DataSplit(partition, bucket, toCompact, false))));
+                            read.createReader(new DataSplit(partition, bucket, toCompact, false))));
             rewriter.close();
             return rewriter.result();
         };

@@ -49,8 +49,7 @@ public class SplitTest {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         split.serialize(new DataOutputViewStreamWrapper(out));
 
-        DataSplit newSplit =
-                DataSplit.deserialize(new DataInputDeserializer(out.toByteArray()));
+        DataSplit newSplit = DataSplit.deserialize(new DataInputDeserializer(out.toByteArray()));
         assertThat(newSplit).isEqualTo(split);
     }
 }

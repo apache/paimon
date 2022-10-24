@@ -38,6 +38,7 @@ public interface TableScan {
 
     Plan plan();
 
+    /** Plan of scan. */
     interface Plan {
         List<Split> splits();
     }
