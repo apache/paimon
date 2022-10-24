@@ -30,11 +30,9 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
-import org.apache.flink.table.store.table.sink.WriteRecordConverter;
 import org.apache.flink.table.store.table.source.AppendOnlySplitGenerator;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.SplitGenerator;
@@ -109,25 +107,19 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         SinkRecordConverter recordConverter =
                 new SinkRecordConverter(store.options().bucket(), tableSchema);
         return new TableWriteImpl<>(
-                store.newWrite(), recordConverter, new AppendOnlyWriteRecordConverter());
+                store.newWrite(),
+                recordConverter,
+                record -> {
+                    Preconditions.checkState(
+                            record.row().getRowKind() == RowKind.INSERT,
+                            "Append only writer can not accept row with RowKind %s",
+                            record.row().getRowKind());
+                    return record.row();
+                });
     }
 
     @Override
     public AppendOnlyFileStore store() {
         return store;
-    }
-
-    /** {@link WriteRecordConverter} implementation in {@link AppendOnlyFileStore}. */
-    private static class AppendOnlyWriteRecordConverter implements WriteRecordConverter<RowData> {
-        private static final long serialVersionUID = 1L;
-
-        @Override
-        public RowData write(SinkRecord record) throws Exception {
-            Preconditions.checkState(
-                    record.row().getRowKind() == RowKind.INSERT,
-                    "Append only writer can not accept row with RowKind %s",
-                    record.row().getRowKind());
-            return record.row();
-        }
     }
 }
