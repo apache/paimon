@@ -31,7 +31,7 @@ import org.apache.flink.table.store.RowDataContainer;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
-import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
@@ -186,7 +186,7 @@ public class TableStoreRecordReaderTest {
     private TableStoreRecordReader read(
             FileStoreTable table, BinaryRowData partition, int bucket, List<String> selectedColumns)
             throws Exception {
-        for (Split split : table.newScan().plan().splits) {
+        for (DataSplit split : table.newScan().plan().splits) {
             if (split.partition().equals(partition) && split.bucket() == bucket) {
                 return new TableStoreRecordReader(
                         table.newRead(),

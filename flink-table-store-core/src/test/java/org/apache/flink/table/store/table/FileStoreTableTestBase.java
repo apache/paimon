@@ -39,6 +39,7 @@ import org.apache.flink.table.store.file.utils.TraceableFileSystem;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -147,7 +148,7 @@ public abstract class FileStoreTableTestBase {
         commit.withOverwritePartition(overwritePartition).commit("1", write.prepareCommit(true));
         write.close();
 
-        List<Split> splits = table.newScan().plan().splits;
+        List<Split> splits = table.newScan().plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(Collections.singletonList("1|10|100|binary|varbinary"));
@@ -177,9 +178,9 @@ public abstract class FileStoreTableTestBase {
                 table.newScan()
                         .withFilter(new PredicateBuilder(ROW_TYPE).equal(1, 5))
                         .plan()
-                        .splits;
+                        .splits();
         assertThat(splits.size()).isEqualTo(1);
-        assertThat(splits.get(0).bucket()).isEqualTo(1);
+        assertThat(((DataSplit) splits.get(0)).bucket()).isEqualTo(1);
     }
 
     @Test
@@ -204,7 +205,7 @@ public abstract class FileStoreTableTestBase {
         write.close();
 
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
-        List<Split> splits = table.newScan().plan().splits;
+        List<Split> splits = table.newScan().plan().splits();
         TableRead read = table.newRead().withFilter(builder.equal(2, 300L));
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
@@ -278,7 +279,8 @@ public abstract class FileStoreTableTestBase {
         write.close();
 
         List<DataFileMeta> files =
-                table.newScan().plan().splits.stream()
+                table.newScan().plan().splits().stream()
+                        .map(split -> (DataSplit) split)
                         .flatMap(split -> split.files().stream())
                         .collect(Collectors.toList());
         for (DataFileMeta file : files) {
@@ -319,7 +321,8 @@ public abstract class FileStoreTableTestBase {
     private List<Split> getSplitsFor(List<Split> splits, BinaryRowData partition, int bucket) {
         List<Split> result = new ArrayList<>();
         for (Split split : splits) {
-            if (split.partition().equals(partition) && split.bucket() == bucket) {
+            DataSplit dataSplit = (DataSplit) split;
+            if (dataSplit.partition().equals(partition) && dataSplit.bucket() == bucket) {
                 result.add(split);
             }
         }

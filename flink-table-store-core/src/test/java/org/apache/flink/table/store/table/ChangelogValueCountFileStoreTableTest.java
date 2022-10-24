@@ -51,7 +51,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().plan().splits;
+        List<Split> splits = table.newScan().plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .isEqualTo(
@@ -72,7 +72,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().plan().splits;
+        List<Split> splits = table.newScan().plan().splits();
         TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("101|11", "101|11", "102|12"));
@@ -87,7 +87,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
 
         Predicate predicate = builder.equal(2, 201L);
-        List<Split> splits = table.newScan().withFilter(predicate).plan().splits;
+        List<Split> splits = table.newScan().withFilter(predicate).plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
@@ -103,7 +103,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().withIncremental(true).plan().splits;
+        List<Split> splits = table.newScan().withIncremental(true).plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
@@ -121,7 +121,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().withIncremental(true).plan().splits;
+        List<Split> splits = table.newScan().withIncremental(true).plan().splits();
         TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("-100|10", "+101|11"));
@@ -137,7 +137,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
 
         Predicate predicate = builder.equal(2, 201L);
         List<Split> splits =
-                table.newScan().withIncremental(true).withFilter(predicate).plan().splits;
+                table.newScan().withIncremental(true).withFilter(predicate).plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
@@ -188,7 +188,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         write.close();
 
         // check that no data file is produced
-        List<Split> splits = table.newScan().withIncremental(true).plan().splits;
+        List<Split> splits = table.newScan().withIncremental(true).plan().splits();
         assertThat(splits).isEmpty();
         // check that no changelog file is produced
         Path bucketPath = DataFilePathFactory.bucketPath(table.location(), "1", 0);

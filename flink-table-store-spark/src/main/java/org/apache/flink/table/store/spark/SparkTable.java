@@ -18,9 +18,8 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.Table;
 
-import org.apache.spark.sql.catalog.Table;
 import org.apache.spark.sql.connector.catalog.SupportsRead;
 import org.apache.spark.sql.connector.catalog.TableCapability;
 import org.apache.spark.sql.connector.expressions.FieldReference;
@@ -33,12 +32,12 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 import java.util.HashSet;
 import java.util.Set;
 
-/** A spark {@link Table} for table store. */
+/** A spark {@code Table} for table store. */
 public class SparkTable implements org.apache.spark.sql.connector.catalog.Table, SupportsRead {
 
-    private final FileStoreTable table;
+    private final Table table;
 
-    public SparkTable(FileStoreTable table) {
+    public SparkTable(Table table) {
         this.table = table;
     }
 
@@ -50,12 +49,12 @@ public class SparkTable implements org.apache.spark.sql.connector.catalog.Table,
 
     @Override
     public String name() {
-        return table.location().getName();
+        return table.name();
     }
 
     @Override
     public StructType schema() {
-        return SparkTypeUtils.fromFlinkRowType(table.schema().logicalRowType());
+        return SparkTypeUtils.fromFlinkRowType(table.rowType());
     }
 
     @Override
@@ -67,7 +66,7 @@ public class SparkTable implements org.apache.spark.sql.connector.catalog.Table,
 
     @Override
     public Transform[] partitioning() {
-        return table.schema().partitionKeys().stream()
+        return table.partitionKeys().stream()
                 .map(FieldReference::apply)
                 .map(IdentityTransform::apply)
                 .toArray(Transform[]::new);

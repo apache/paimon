@@ -30,7 +30,7 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FileFormat;
-import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.utils.Projection;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -82,7 +82,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
     }
 
     @Override
-    public RecordReader<RowData> createReader(Split split) throws IOException {
+    public RecordReader<RowData> createReader(DataSplit split) throws IOException {
         BulkFormat<RowData, FileSourceSplit> readerFactory =
                 fileFormat.createReaderFactory(rowType, projection, filters);
         DataFilePathFactory dataFilePathFactory =

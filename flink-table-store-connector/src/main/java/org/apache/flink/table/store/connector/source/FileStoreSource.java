@@ -29,8 +29,8 @@ import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.table.source.TableScan;
 
 import javax.annotation.Nullable;
 
@@ -105,7 +105,7 @@ public class FileStoreSource
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
         SnapshotManager snapshotManager = table.snapshotManager();
-        TableScan scan = table.newScan();
+        DataTableScan scan = (DataTableScan) table.newScan();
         if (predicate != null) {
             scan.withFilter(predicate);
         }
@@ -121,7 +121,7 @@ public class FileStoreSource
                 snapshotId = snapshotManager.latestSnapshotId();
                 splits = new ArrayList<>();
             } else {
-                TableScan.Plan plan = scan.plan();
+                DataTableScan.DataFilePlan plan = scan.plan();
                 snapshotId = plan.snapshotId;
                 splits = new FileStoreSourceSplitGenerator().createSplits(plan);
             }

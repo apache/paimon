@@ -33,7 +33,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link Split}. */
+/** Test for {@link DataSplit}. */
 public class SplitTest {
 
     @Test
@@ -44,12 +44,13 @@ public class SplitTest {
         for (int i = 0; i < ThreadLocalRandom.current().nextInt(10); i++) {
             files.add(gen.next().meta);
         }
-        Split split = new Split(data.partition, data.bucket, files, false);
+        DataSplit split = new DataSplit(data.partition, data.bucket, files, false);
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         split.serialize(new DataOutputViewStreamWrapper(out));
 
-        Split newSplit = Split.deserialize(new DataInputDeserializer(out.toByteArray()));
+        DataSplit newSplit =
+                DataSplit.deserialize(new DataInputDeserializer(out.toByteArray()));
         assertThat(newSplit).isEqualTo(split);
     }
 }

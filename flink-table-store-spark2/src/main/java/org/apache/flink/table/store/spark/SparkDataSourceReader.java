@@ -18,9 +18,8 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.logical.RowType;
@@ -46,20 +45,20 @@ public class SparkDataSourceReader
                 SupportsPushDownRequiredColumns,
                 SupportsReportStatistics {
 
-    private final FileStoreTable table;
+    private final Table table;
 
     private List<Predicate> predicates = new ArrayList<>();
     private Filter[] pushedFilters;
     private int[] projectedFields;
     private List<Split> splits;
 
-    public SparkDataSourceReader(FileStoreTable table) {
+    public SparkDataSourceReader(Table table) {
         this.table = table;
     }
 
     @Override
     public Filter[] pushFilters(Filter[] filters) {
-        SparkFilterConverter converter = new SparkFilterConverter(table.schema().logicalRowType());
+        SparkFilterConverter converter = new SparkFilterConverter(table.rowType());
         List<Predicate> predicates = new ArrayList<>();
         List<Filter> pushed = new ArrayList<>();
         for (Filter filter : filters) {
@@ -82,7 +81,7 @@ public class SparkDataSourceReader
     @Override
     public void pruneColumns(StructType requiredSchema) {
         String[] pruneFields = requiredSchema.fieldNames();
-        List<String> fieldNames = table.schema().fieldNames();
+        List<String> fieldNames = table.rowType().getFieldNames();
         int[] projected = new int[pruneFields.length];
         for (int i = 0; i < projected.length; i++) {
             projected[i] = fieldNames.indexOf(pruneFields[i]);
@@ -95,9 +94,7 @@ public class SparkDataSourceReader
         long rowCount = 0L;
 
         for (Split split : splits()) {
-            for (DataFileMeta file : split.files()) {
-                rowCount += file.rowCount();
-            }
+            rowCount += split.rowCount();
         }
 
         final long numRows = rowCount;
@@ -118,7 +115,7 @@ public class SparkDataSourceReader
 
     @Override
     public StructType readSchema() {
-        RowType rowType = table.schema().logicalRowType();
+        RowType rowType = table.rowType();
         return SparkTypeUtils.fromFlinkRowType(
                 projectedFields == null ? rowType : TypeUtils.project(rowType, projectedFields));
     }
@@ -132,7 +129,7 @@ public class SparkDataSourceReader
 
     protected List<Split> splits() {
         if (splits == null) {
-            this.splits = table.newScan().withFilter(predicates).plan().splits;
+            this.splits = table.newScan().withFilter(predicates).plan().splits();
         }
         return splits;
     }

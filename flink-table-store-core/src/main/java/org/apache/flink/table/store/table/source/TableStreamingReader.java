@@ -84,11 +84,11 @@ public class TableStreamingReader {
     @Nullable
     public Iterator<RowData> nextBatch() throws IOException {
         if (enumerator == null) {
-            TableScan scan = table.newScan();
+            DataTableScan scan = (DataTableScan) table.newScan();
             if (predicate != null) {
                 scan.withFilter(predicate);
             }
-            TableScan.Plan plan = scan.plan();
+            DataTableScan.DataFilePlan plan = scan.plan();
             if (plan.snapshotId == null) {
                 return null;
             }
@@ -109,14 +109,14 @@ public class TableStreamingReader {
         }
     }
 
-    private Iterator<RowData> read(TableScan.Plan plan) throws IOException {
+    private Iterator<RowData> read(DataTableScan.DataFilePlan plan) throws IOException {
         TableRead read = table.newRead().withProjection(projection);
         if (predicate != null) {
             read.withFilter(predicate);
         }
 
         List<ConcatRecordReader.ReaderSupplier<RowData>> readers = new ArrayList<>();
-        for (Split split : plan.splits) {
+        for (DataSplit split : plan.splits) {
             readers.add(() -> read.createReader(split));
         }
         Iterator<RowData> iterator = new RecordReaderIterator<>(ConcatRecordReader.create(readers));

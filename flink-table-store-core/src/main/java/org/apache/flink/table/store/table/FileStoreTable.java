@@ -24,28 +24,42 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
-import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.table.source.TableScan;
+import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.types.logical.RowType;
 
-import java.io.Serializable;
+import java.util.List;
 
 /**
  * An abstraction layer above {@link org.apache.flink.table.store.file.FileStore} to provide reading
  * and writing of {@link org.apache.flink.table.data.RowData}.
  */
-public interface FileStoreTable extends Serializable {
+public interface FileStoreTable extends Table {
 
     CoreOptions options();
 
     Path location();
 
+    @Override
+    default String name() {
+        return location().getName();
+    }
+
+    @Override
+    default RowType rowType() {
+        return schema().logicalRowType();
+    }
+
+    @Override
+    default List<String> partitionKeys() {
+        return schema().partitionKeys();
+    }
+
     TableSchema schema();
 
     SnapshotManager snapshotManager();
 
-    TableScan newScan();
-
-    TableRead newRead();
+    @Override
+    DataTableScan newScan();
 
     TableWrite newWrite();
 
