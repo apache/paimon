@@ -23,7 +23,7 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.compact.CompactManager;
-import org.apache.flink.table.store.file.compact.LazyCompactManager;
+import org.apache.flink.table.store.file.compact.NoopCompactManager;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
 import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
@@ -144,21 +144,20 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             CompactStrategy compactStrategy,
             ExecutorService compactExecutor,
             Levels levels) {
-        Comparator<RowData> keyComparator = keyComparatorSupplier.get();
-        CompactRewriter rewriter = compactRewriter(partition, bucket, keyComparator);
-        CompactManager compactManager =
-                new MergeTreeCompactManager(
-                        compactExecutor,
-                        levels,
-                        compactStrategy,
-                        keyComparator,
-                        options.targetFileSize(),
-                        options.numSortedRunStopTrigger(),
-                        rewriter);
         if (options.writeCompactionSkip()) {
-            compactManager = new LazyCompactManager(compactManager);
+            return new NoopCompactManager();
+        } else {
+            Comparator<RowData> keyComparator = keyComparatorSupplier.get();
+            CompactRewriter rewriter = compactRewriter(partition, bucket, keyComparator);
+            return new MergeTreeCompactManager(
+                    compactExecutor,
+                    levels,
+                    compactStrategy,
+                    keyComparator,
+                    options.targetFileSize(),
+                    options.numSortedRunStopTrigger(),
+                    rewriter);
         }
-        return compactManager;
     }
 
     private CompactRewriter compactRewriter(

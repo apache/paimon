@@ -25,7 +25,7 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.append.AppendOnlyCompactManager;
 import org.apache.flink.table.store.file.append.AppendOnlyWriter;
 import org.apache.flink.table.store.file.compact.CompactManager;
-import org.apache.flink.table.store.file.compact.LazyCompactManager;
+import org.apache.flink.table.store.file.compact.NoopCompactManager;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.file.io.RowDataRollingFileWriter;
@@ -102,17 +102,16 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
         LinkedList<DataFileMeta> restored = new LinkedList<>(restoredFiles);
         DataFilePathFactory factory = pathFactory.createDataFilePathFactory(partition, bucket);
         CompactManager compactManager =
-                new AppendOnlyCompactManager(
-                        compactExecutor,
-                        restored,
-                        compactionMinFileNum,
-                        compactionMaxFileNum,
-                        targetFileSize,
-                        compactRewriter(partition, bucket),
-                        factory);
-        if (skipCompaction) {
-            compactManager = new LazyCompactManager(compactManager);
-        }
+                skipCompaction
+                        ? new NoopCompactManager()
+                        : new AppendOnlyCompactManager(
+                                compactExecutor,
+                                restored,
+                                compactionMinFileNum,
+                                compactionMaxFileNum,
+                                targetFileSize,
+                                compactRewriter(partition, bucket),
+                                factory);
         return new AppendOnlyWriter(
                 schemaId,
                 fileFormat,

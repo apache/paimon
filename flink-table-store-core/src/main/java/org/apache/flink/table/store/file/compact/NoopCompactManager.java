@@ -18,19 +18,17 @@
 
 package org.apache.flink.table.store.file.compact;
 
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.util.Preconditions;
 
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 
-/** A {@link CompactManager} which only performs compaction when forced by user. */
-public class LazyCompactManager implements CompactManager {
+/** A {@link CompactManager} which never compacts. */
+public class NoopCompactManager implements CompactManager {
 
-    private final CompactManager wrapped;
-
-    public LazyCompactManager(CompactManager wrapped) {
-        this.wrapped = wrapped;
-    }
+    public NoopCompactManager() {}
 
     @Override
     public boolean shouldWaitCompaction() {
@@ -38,25 +36,24 @@ public class LazyCompactManager implements CompactManager {
     }
 
     @Override
-    public void addNewFile(DataFileMeta file) {
-        wrapped.addNewFile(file);
-    }
+    public void addNewFile(DataFileMeta file) {}
 
     @Override
     public void triggerCompaction(boolean fullCompaction) {
-        if (fullCompaction) {
-            wrapped.triggerCompaction(true);
-        }
+        Preconditions.checkArgument(
+                !fullCompaction,
+                "NoopCompactManager does not support user triggered compaction.\n"
+                        + "If you really need a guaranteed compaction, please set "
+                        + CoreOptions.WRITE_COMPACTION_SKIP.key()
+                        + " property of this table to false.");
     }
 
     @Override
     public Optional<CompactResult> getCompactionResult(boolean blocking)
             throws ExecutionException, InterruptedException {
-        return wrapped.getCompactionResult(blocking);
+        return Optional.empty();
     }
 
     @Override
-    public void cancelCompaction() {
-        wrapped.cancelCompaction();
-    }
+    public void cancelCompaction() {}
 }
