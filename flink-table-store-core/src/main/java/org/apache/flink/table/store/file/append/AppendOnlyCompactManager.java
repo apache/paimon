@@ -66,15 +66,15 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     }
 
     @Override
-    public void triggerCompaction(boolean forcedCompaction) {
-        if (forcedCompaction) {
-            triggerForcedCompaction();
+    public void triggerCompaction(boolean fullCompaction) {
+        if (fullCompaction) {
+            triggerFullCompaction();
         } else {
             triggerCompactionWithBestEffort();
         }
     }
 
-    private void triggerForcedCompaction() {
+    private void triggerFullCompaction() {
         Preconditions.checkState(
                 taskFuture == null,
                 "A compaction task is still running while the user "

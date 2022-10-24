@@ -23,7 +23,6 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.compact.CompactUnit;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFileTestUtils;
-import org.apache.flink.table.store.file.mergetree.LevelSortedRun;
 import org.apache.flink.table.store.file.mergetree.Levels;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 
@@ -72,18 +71,7 @@ public class MergeTreeCompactManagerTest {
                         new LevelMinMax(0, 1, 5),
                         new LevelMinMax(0, 1, 8)),
                 Arrays.asList(new LevelMinMax(0, 1, 8), new LevelMinMax(0, 1, 3)),
-                new CompactStrategy() {
-                    @Override
-                    public Optional<CompactUnit> pick(int numLevels, List<LevelSortedRun> runs) {
-                        return Optional.of(CompactUnit.fromLevelRuns(0, runs.subList(0, 2)));
-                    }
-
-                    @Override
-                    public Optional<CompactUnit> forcedPick(
-                            int numLevels, List<LevelSortedRun> runs) {
-                        throw new UnsupportedOperationException();
-                    }
-                },
+                (numLevels, runs) -> Optional.of(CompactUnit.fromLevelRuns(0, runs.subList(0, 2))),
                 false);
     }
 
@@ -95,18 +83,7 @@ public class MergeTreeCompactManagerTest {
                         new LevelMinMax(0, 1, 5),
                         new LevelMinMax(2, 1, 7)),
                 Arrays.asList(new LevelMinMax(1, 1, 5), new LevelMinMax(2, 1, 7)),
-                new CompactStrategy() {
-                    @Override
-                    public Optional<CompactUnit> pick(int numLevels, List<LevelSortedRun> runs) {
-                        return Optional.of(CompactUnit.fromLevelRuns(1, runs.subList(0, 2)));
-                    }
-
-                    @Override
-                    public Optional<CompactUnit> forcedPick(
-                            int numLevels, List<LevelSortedRun> runs) {
-                        throw new UnsupportedOperationException();
-                    }
-                },
+                (numLevels, runs) -> Optional.of(CompactUnit.fromLevelRuns(1, runs.subList(0, 2))),
                 false);
     }
 
@@ -239,17 +216,7 @@ public class MergeTreeCompactManagerTest {
     }
 
     private CompactStrategy testStrategy() {
-        return new CompactStrategy() {
-            @Override
-            public Optional<CompactUnit> pick(int numLevels, List<LevelSortedRun> runs) {
-                return Optional.of(CompactUnit.fromLevelRuns(numLevels - 1, runs));
-            }
-
-            @Override
-            public Optional<CompactUnit> forcedPick(int numLevels, List<LevelSortedRun> runs) {
-                throw new UnsupportedOperationException();
-            }
-        };
+        return (numLevels, runs) -> Optional.of(CompactUnit.fromLevelRuns(numLevels - 1, runs));
     }
 
     private CompactRewriter testRewriter(boolean expectedDropDelete) {

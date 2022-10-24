@@ -38,6 +38,9 @@ public interface CompactStrategy {
      */
     Optional<CompactUnit> pick(int numLevels, List<LevelSortedRun> runs);
 
-    /** Pick compaction unit from runs. However this compaction is forced by the user. */
-    Optional<CompactUnit> forcedPick(int numLevels, List<LevelSortedRun> runs);
+    /** Pick a compaction unit consisting of all existing files. */
+    static Optional<CompactUnit> pickFullCompaction(int numLevels, List<LevelSortedRun> runs) {
+        int maxLevel = numLevels - 1;
+        return Optional.of(CompactUnit.fromLevelRuns(maxLevel, runs));
+    }
 }

@@ -77,14 +77,16 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     }
 
     @Override
-    public void triggerCompaction(boolean forcedCompaction) {
+    public void triggerCompaction(boolean fullCompaction) {
         Optional<CompactUnit> optionalUnit;
-        if (forcedCompaction) {
+        if (fullCompaction) {
             Preconditions.checkState(
                     taskFuture == null,
                     "A compaction task is still running while the user "
                             + "forces a new compaction. This is unexpected.");
-            optionalUnit = strategy.forcedPick(levels.numberOfLevels(), levels.levelSortedRuns());
+            optionalUnit =
+                    CompactStrategy.pickFullCompaction(
+                            levels.numberOfLevels(), levels.levelSortedRuns());
         } else {
             if (taskFuture != null) {
                 return;

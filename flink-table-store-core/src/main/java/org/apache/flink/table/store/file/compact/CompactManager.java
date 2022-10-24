@@ -35,9 +35,9 @@ public interface CompactManager {
     /**
      * Trigger a new compaction task.
      *
-     * @param forcedCompaction if this compaction is forced by user
+     * @param fullCompaction if caller needs a guaranteed full compaction
      */
-    void triggerCompaction(boolean forcedCompaction);
+    void triggerCompaction(boolean fullCompaction);
 
     /** Get compaction result. Wait finish if {@code blocking} is true. */
     Optional<CompactResult> getCompactionResult(boolean blocking)

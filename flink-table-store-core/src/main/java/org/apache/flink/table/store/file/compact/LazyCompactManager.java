@@ -43,8 +43,8 @@ public class LazyCompactManager implements CompactManager {
     }
 
     @Override
-    public void triggerCompaction(boolean forcedCompaction) {
-        if (forcedCompaction) {
+    public void triggerCompaction(boolean fullCompaction) {
+        if (fullCompaction) {
             wrapped.triggerCompaction(true);
         }
     }
