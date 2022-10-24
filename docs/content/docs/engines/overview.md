@@ -40,6 +40,7 @@ Apache Hive and Apache Spark.
 | Hive      | 2.1 CDH 6.3 | read                                                 | Projection, Filter |
 | Hive      | 2.2      | read                                                 | Projection, Filter |
 | Hive      | 2.3      | read                                                 | Projection, Filter |
+| Hive      | 3.1      | read                                                 | Projection, Filter |
 | Spark     | 2.4      | read                                                 | Projection, Filter |
 | Spark     | 3.0      | read                                                 | Projection, Filter |
 | Spark     | 3.1      | read                                                 | Projection, Filter |
