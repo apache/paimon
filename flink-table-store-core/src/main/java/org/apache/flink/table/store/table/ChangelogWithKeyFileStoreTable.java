@@ -40,7 +40,6 @@ import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
-import org.apache.flink.table.store.table.sink.WriteRecordConverter;
 import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.MergeTreeSplitGenerator;
 import org.apache.flink.table.store.table.source.SplitGenerator;
@@ -194,45 +193,43 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         return new TableWriteImpl<>(
                 store.newWrite(),
                 recordConverter,
-                new ChangelogWithKeyWriteRecordConverter(store.options(), schema()));
+                new TableWriteImpl.RecordExtractor<KeyValue>() {
+
+                    private SequenceGenerator sequenceGenerator;
+                    private KeyValue kv;
+
+                    @Override
+                    public KeyValue extract(SinkRecord record) {
+                        if (sequenceGenerator == null) {
+                            sequenceGenerator =
+                                    store.options()
+                                            .sequenceField()
+                                            .map(
+                                                    field ->
+                                                            new SequenceGenerator(
+                                                                    field,
+                                                                    tableSchema.logicalRowType()))
+                                            .orElse(null);
+                        }
+                        if (kv == null) {
+                            kv = new KeyValue();
+                        }
+
+                        long sequenceNumber =
+                                sequenceGenerator == null
+                                        ? KeyValue.UNKNOWN_SEQUENCE
+                                        : sequenceGenerator.generate(record.row());
+                        return kv.replace(
+                                record.primaryKey(),
+                                sequenceNumber,
+                                record.row().getRowKind(),
+                                record.row());
+                    }
+                });
     }
 
     @Override
     public KeyValueFileStore store() {
         return store;
-    }
-
-    /** {@link WriteRecordConverter} implementation for {@link ChangelogWithKeyFileStoreTable}. */
-    private static class ChangelogWithKeyWriteRecordConverter
-            implements WriteRecordConverter<KeyValue> {
-        private final CoreOptions options;
-        private final TableSchema schema;
-        private transient SequenceGenerator sequenceGenerator;
-        private transient KeyValue kv;
-
-        private ChangelogWithKeyWriteRecordConverter(CoreOptions options, TableSchema schema) {
-            this.options = options;
-            this.schema = schema;
-        }
-
-        @Override
-        public KeyValue write(SinkRecord record) throws Exception {
-            if (sequenceGenerator == null) {
-                sequenceGenerator =
-                        options.sequenceField()
-                                .map(field -> new SequenceGenerator(field, schema.logicalRowType()))
-                                .orElse(null);
-            }
-            if (kv == null) {
-                kv = new KeyValue();
-            }
-
-            long sequenceNumber =
-                    sequenceGenerator == null
-                            ? KeyValue.UNKNOWN_SEQUENCE
-                            : sequenceGenerator.generate(record.row());
-            return kv.replace(
-                    record.primaryKey(), sequenceNumber, record.row().getRowKind(), record.row());
-        }
     }
 }

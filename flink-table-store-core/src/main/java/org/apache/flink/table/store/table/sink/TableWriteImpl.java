@@ -33,15 +33,15 @@ public class TableWriteImpl<T> implements TableWrite {
 
     private final FileStoreWrite<T> write;
     private final SinkRecordConverter recordConverter;
-    private final WriteRecordConverter<T> writeRecordConverter;
+    private final RecordExtractor<T> recordExtractor;
 
     public TableWriteImpl(
             FileStoreWrite<T> write,
             SinkRecordConverter recordConverter,
-            WriteRecordConverter<T> writeRecordConverter) {
+            RecordExtractor<T> recordExtractor) {
         this.write = write;
         this.recordConverter = recordConverter;
-        this.writeRecordConverter = writeRecordConverter;
+        this.recordExtractor = recordExtractor;
     }
 
     @Override
@@ -64,7 +64,7 @@ public class TableWriteImpl<T> implements TableWrite {
     @Override
     public SinkRecord write(RowData rowData) throws Exception {
         SinkRecord record = recordConverter.convert(rowData);
-        write.write(record.partition(), record.bucket(), writeRecordConverter.write(record));
+        write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
         return record;
     }
 
@@ -76,5 +76,11 @@ public class TableWriteImpl<T> implements TableWrite {
     @Override
     public void close() throws Exception {
         write.close();
+    }
+
+    /** Extractor to extract {@link T} from the {@link SinkRecord}. */
+    public interface RecordExtractor<T> {
+
+        T extract(SinkRecord record);
     }
 }
