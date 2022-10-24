@@ -33,7 +33,6 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
@@ -121,34 +120,25 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     public TableWrite newWrite() {
         SinkRecordConverter recordConverter =
                 new SinkRecordConverter(store.options().bucket(), tableSchema);
+        final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 store.newWrite(),
                 recordConverter,
-                new TableWriteImpl.RecordExtractor<KeyValue>() {
-
-                    private KeyValue kv;
-
-                    @Override
-                    public KeyValue extract(SinkRecord record) {
-                        if (kv == null) {
-                            kv = new KeyValue();
-                        }
-
-                        switch (record.row().getRowKind()) {
-                            case INSERT:
-                            case UPDATE_AFTER:
-                                kv.replace(record.row(), RowKind.INSERT, GenericRowData.of(1L));
-                                break;
-                            case UPDATE_BEFORE:
-                            case DELETE:
-                                kv.replace(record.row(), RowKind.INSERT, GenericRowData.of(-1L));
-                                break;
-                            default:
-                                throw new UnsupportedOperationException(
-                                        "Unknown row kind " + record.row().getRowKind());
-                        }
-                        return kv;
+                record -> {
+                    switch (record.row().getRowKind()) {
+                        case INSERT:
+                        case UPDATE_AFTER:
+                            kv.replace(record.row(), RowKind.INSERT, GenericRowData.of(1L));
+                            break;
+                        case UPDATE_BEFORE:
+                        case DELETE:
+                            kv.replace(record.row(), RowKind.INSERT, GenericRowData.of(-1L));
+                            break;
+                        default:
+                            throw new UnsupportedOperationException(
+                                    "Unknown row kind " + record.row().getRowKind());
                     }
+                    return kv;
                 });
     }
 

@@ -36,7 +36,6 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.table.sink.SequenceGenerator;
-import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
@@ -190,41 +189,25 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     public TableWrite newWrite() {
         SinkRecordConverter recordConverter =
                 new SinkRecordConverter(store.options().bucket(), tableSchema);
+        final SequenceGenerator sequenceGenerator =
+                store.options()
+                        .sequenceField()
+                        .map(field -> new SequenceGenerator(field, schema().logicalRowType()))
+                        .orElse(null);
+        final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 store.newWrite(),
                 recordConverter,
-                new TableWriteImpl.RecordExtractor<KeyValue>() {
-
-                    private SequenceGenerator sequenceGenerator;
-                    private KeyValue kv;
-
-                    @Override
-                    public KeyValue extract(SinkRecord record) {
-                        if (sequenceGenerator == null) {
-                            sequenceGenerator =
-                                    store.options()
-                                            .sequenceField()
-                                            .map(
-                                                    field ->
-                                                            new SequenceGenerator(
-                                                                    field,
-                                                                    tableSchema.logicalRowType()))
-                                            .orElse(null);
-                        }
-                        if (kv == null) {
-                            kv = new KeyValue();
-                        }
-
-                        long sequenceNumber =
-                                sequenceGenerator == null
-                                        ? KeyValue.UNKNOWN_SEQUENCE
-                                        : sequenceGenerator.generate(record.row());
-                        return kv.replace(
-                                record.primaryKey(),
-                                sequenceNumber,
-                                record.row().getRowKind(),
-                                record.row());
-                    }
+                record -> {
+                    long sequenceNumber =
+                            sequenceGenerator == null
+                                    ? KeyValue.UNKNOWN_SEQUENCE
+                                    : sequenceGenerator.generate(record.row());
+                    return kv.replace(
+                            record.primaryKey(),
+                            sequenceNumber,
+                            record.row().getRowKind(),
+                            record.row());
                 });
     }
 
