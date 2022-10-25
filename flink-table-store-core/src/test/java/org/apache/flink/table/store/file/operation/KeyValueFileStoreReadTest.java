@@ -33,7 +33,7 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
-import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -208,7 +208,7 @@ public class KeyValueFileStoreReadTest {
                 filesGroupedByPartition.entrySet()) {
             RecordReader<KeyValue> reader =
                     read.createReader(
-                            new Split(
+                            new DataSplit(
                                     entry.getKey(),
                                     0,
                                     entry.getValue().stream()

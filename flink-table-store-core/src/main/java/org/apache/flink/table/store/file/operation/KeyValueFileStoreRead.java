@@ -34,7 +34,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.ProjectKeyRecordReader;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FileFormat;
-import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
@@ -125,7 +125,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     }
 
     @Override
-    public RecordReader<KeyValue> createReader(Split split) throws IOException {
+    public RecordReader<KeyValue> createReader(DataSplit split) throws IOException {
         if (split.isIncremental()) {
             KeyValueFileReaderFactory readerFactory =
                     readerFactoryBuilder.build(
@@ -154,7 +154,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         }
     }
 
-    private List<ConcatRecordReader.ReaderSupplier<KeyValue>> createSectionReaders(Split split) {
+    private List<ConcatRecordReader.ReaderSupplier<KeyValue>> createSectionReaders(
+            DataSplit split) {
         List<ConcatRecordReader.ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
         MergeFunction<KeyValue> mergeFunc = mergeFunction.copy();
         for (List<SortedRun> section :
@@ -169,7 +170,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         return sectionReaders;
     }
 
-    private KeyValueFileReaderFactory createReaderFactory(Split split, boolean overlapped) {
+    private KeyValueFileReaderFactory createReaderFactory(DataSplit split, boolean overlapped) {
         return readerFactoryBuilder.build(
                 split.partition(),
                 split.bucket(),

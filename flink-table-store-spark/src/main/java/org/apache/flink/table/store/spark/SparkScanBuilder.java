@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.Table;
 
 import org.apache.spark.sql.connector.read.Scan;
 import org.apache.spark.sql.connector.read.ScanBuilder;
@@ -35,19 +35,19 @@ import java.util.List;
 public class SparkScanBuilder
         implements ScanBuilder, SupportsPushDownFilters, SupportsPushDownRequiredColumns {
 
-    private final FileStoreTable table;
+    private final Table table;
 
     private List<Predicate> predicates = new ArrayList<>();
     private Filter[] pushedFilters;
     private int[] projectedFields;
 
-    public SparkScanBuilder(FileStoreTable table) {
+    public SparkScanBuilder(Table table) {
         this.table = table;
     }
 
     @Override
     public Filter[] pushFilters(Filter[] filters) {
-        SparkFilterConverter converter = new SparkFilterConverter(table.schema().logicalRowType());
+        SparkFilterConverter converter = new SparkFilterConverter(table.rowType());
         List<Predicate> predicates = new ArrayList<>();
         List<Filter> pushed = new ArrayList<>();
         for (Filter filter : filters) {
@@ -70,7 +70,7 @@ public class SparkScanBuilder
     @Override
     public void pruneColumns(StructType requiredSchema) {
         String[] pruneFields = requiredSchema.fieldNames();
-        List<String> fieldNames = table.schema().fieldNames();
+        List<String> fieldNames = table.rowType().getFieldNames();
         int[] projected = new int[pruneFields.length];
         for (int i = 0; i < projected.length; i++) {
             projected[i] = fieldNames.indexOf(pruneFields[i]);

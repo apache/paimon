@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 
 import org.apache.spark.sql.sources.DataSourceRegister;
@@ -44,7 +43,7 @@ public class SparkSource implements DataSourceRegister, ReadSupport {
 
     @Override
     public DataSourceReader createReader(DataSourceOptions options) {
-        FileStoreTable table = FileStoreTableFactory.create(Configuration.fromMap(options.asMap()));
-        return new SparkDataSourceReader(table);
+        return new SparkDataSourceReader(
+                FileStoreTableFactory.create(Configuration.fromMap(options.asMap())));
     }
 }

@@ -21,7 +21,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
-import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.logical.RowType;
@@ -42,19 +42,18 @@ public class SparkReaderFactory implements PartitionReaderFactory {
 
     private static final long serialVersionUID = 1L;
 
-    private final FileStoreTable table;
+    private final Table table;
     private final int[] projectedFields;
     private final List<Predicate> predicates;
 
-    public SparkReaderFactory(
-            FileStoreTable table, int[] projectedFields, List<Predicate> predicates) {
+    public SparkReaderFactory(Table table, int[] projectedFields, List<Predicate> predicates) {
         this.table = table;
         this.projectedFields = projectedFields;
         this.predicates = predicates;
     }
 
     private RowType readRowType() {
-        return TypeUtils.project(table.schema().logicalRowType(), projectedFields);
+        return TypeUtils.project(table.rowType(), projectedFields);
     }
 
     @Override

@@ -161,7 +161,7 @@ public class SchemaEvolutionTest {
         if (filter != null) {
             scan.withFilter(filter);
         }
-        for (Split split : scan.plan().splits) {
+        for (Split split : scan.plan().splits()) {
             TableRead read = table.newRead();
             if (filter != null) {
                 read.withFilter(filter);

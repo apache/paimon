@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 
 import org.apache.spark.sql.connector.catalog.Table;
@@ -62,7 +61,6 @@ public class SparkSource implements DataSourceRegister, TableProvider {
     @Override
     public Table getTable(
             StructType schema, Transform[] partitioning, Map<String, String> options) {
-        FileStoreTable table = FileStoreTableFactory.create(Configuration.fromMap(options));
-        return new SparkTable(table);
+        return new SparkTable(FileStoreTableFactory.create(Configuration.fromMap(options)));
     }
 }

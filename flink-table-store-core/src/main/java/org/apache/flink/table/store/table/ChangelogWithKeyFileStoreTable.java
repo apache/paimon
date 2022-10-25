@@ -39,11 +39,11 @@ import org.apache.flink.table.store.table.sink.SequenceGenerator;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
+import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.MergeTreeSplitGenerator;
 import org.apache.flink.table.store.table.source.SplitGenerator;
 import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
 import org.apache.flink.table.store.utils.RowDataUtils;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -127,9 +127,9 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableScan newScan() {
+    public DataTableScan newScan() {
         KeyValueFileStoreScan scan = store.newScan();
-        return new TableScan(scan, tableSchema, store.pathFactory()) {
+        return new DataTableScan(scan, tableSchema, store.pathFactory()) {
             @Override
             protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
                 return new MergeTreeSplitGenerator(

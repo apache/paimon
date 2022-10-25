@@ -16,24 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.spark;
+package org.apache.flink.table.store.table;
 
-import org.apache.flink.table.store.table.source.Split;
+import java.util.List;
 
-import org.apache.spark.sql.connector.read.InputPartition;
+/** An interface for {@link Table} partition support. */
+public interface SupportsPartition {
 
-/** A Spark {@link InputPartition} for table store. */
-public class SparkInputPartition implements InputPartition {
-
-    private static final long serialVersionUID = 1L;
-
-    private final Split split;
-
-    public SparkInputPartition(Split split) {
-        this.split = split;
-    }
-
-    public Split split() {
-        return split;
-    }
+    List<String> partitionKeys();
 }

@@ -31,6 +31,7 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 
@@ -58,7 +59,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().plan().splits;
+        List<Split> splits = table.newScan().plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
@@ -82,7 +83,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().plan().splits;
+        List<Split> splits = table.newScan().plan().splits();
         TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_PROJECTED_ROW_TO_STRING))
                 .hasSameElementsAs(Arrays.asList("100|10", "101|11", "102|12", "101|11", "102|12"));
@@ -97,7 +98,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
 
         Predicate predicate = builder.equal(2, 201L);
-        List<Split> splits = table.newScan().withFilter(predicate).plan().splits;
+        List<Split> splits = table.newScan().withFilter(predicate).plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
@@ -114,7 +115,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().withIncremental(true).plan().splits;
+        List<Split> splits = table.newScan().withIncremental(true).plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
@@ -128,7 +129,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().withIncremental(true).plan().splits;
+        List<Split> splits = table.newScan().withIncremental(true).plan().splits();
         TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("+101|11", "+102|12"));
@@ -144,7 +145,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
 
         Predicate predicate = builder.equal(2, 101L);
         List<Split> splits =
-                table.newScan().withIncremental(true).withFilter(predicate).plan().splits;
+                table.newScan().withIncremental(true).withFilter(predicate).plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
@@ -197,7 +198,11 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         Predicate partitionFilter =
                 new PredicateBuilder(table.schema().logicalRowType()).equal(0, partition);
         List<Split> splits =
-                table.newScan().withFilter(partitionFilter).withBucket(bucket).plan().splits;
+                ((DataTableScan) table.newScan())
+                        .withFilter(partitionFilter)
+                        .withBucket(bucket)
+                        .plan()
+                        .splits();
         TableRead read = table.newRead();
 
         assertThat(getResult(read, splits, binaryRow(partition), bucket, STREAMING_ROW_TO_STRING))

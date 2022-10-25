@@ -36,14 +36,14 @@ public class SnapshotEnumerator implements Callable<SnapshotEnumerator.Enumerato
     private static final Logger LOG = LoggerFactory.getLogger(SnapshotEnumerator.class);
 
     private final SnapshotManager snapshotManager;
-    private final TableScan scan;
+    private final DataTableScan scan;
     private final CoreOptions.ChangelogProducer changelogProducer;
 
     private long nextSnapshotId;
 
     public SnapshotEnumerator(
             Path tablePath,
-            TableScan scan,
+            DataTableScan scan,
             CoreOptions.ChangelogProducer changelogProducer,
             long currentSnapshot) {
         this.snapshotManager = new SnapshotManager(tablePath);
@@ -85,7 +85,7 @@ public class SnapshotEnumerator implements Callable<SnapshotEnumerator.Enumerato
                 continue;
             }
 
-            TableScan.Plan plan = scan.withSnapshot(nextSnapshotId).plan();
+            DataTableScan.DataFilePlan plan = scan.withSnapshot(nextSnapshotId).plan();
             EnumeratorResult result = new EnumeratorResult(nextSnapshotId, plan);
             LOG.debug("Find snapshot id {}.", nextSnapshotId);
 
@@ -99,9 +99,9 @@ public class SnapshotEnumerator implements Callable<SnapshotEnumerator.Enumerato
 
         public final long snapshotId;
 
-        public final TableScan.Plan plan;
+        public final DataTableScan.DataFilePlan plan;
 
-        private EnumeratorResult(long snapshotId, TableScan.Plan plan) {
+        private EnumeratorResult(long snapshotId, DataTableScan.DataFilePlan plan) {
             this.snapshotId = snapshotId;
             this.plan = plan;
         }
