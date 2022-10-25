@@ -138,7 +138,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @Override
-    public void compact() throws Exception {
+    public void fullCompaction() throws Exception {
         submitCompaction(true);
     }
 
@@ -257,9 +257,9 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         compactAfter.addAll(result.after());
     }
 
-    private void submitCompaction(boolean forcedCompaction) throws Exception {
-        trySyncLatestCompaction(forcedCompaction);
-        compactManager.triggerCompaction(forcedCompaction);
+    private void submitCompaction(boolean forcedFullCompaction) throws Exception {
+        trySyncLatestCompaction(forcedFullCompaction);
+        compactManager.triggerCompaction(forcedFullCompaction);
     }
 
     private void trySyncLatestCompaction(boolean blocking) throws Exception {

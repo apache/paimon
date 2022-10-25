@@ -91,7 +91,7 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     }
 
     @Override
-    public void compact() throws Exception {
+    public void fullCompaction() throws Exception {
         submitCompaction(true);
     }
 
@@ -139,10 +139,10 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
                 schemaId, fileFormat, targetFileSize, writeSchema, pathFactory, seqNumCounter);
     }
 
-    private void submitCompaction(boolean forcedCompaction)
+    private void submitCompaction(boolean forcedFullCompaction)
             throws ExecutionException, InterruptedException {
-        trySyncLatestCompaction(forcedCompaction);
-        compactManager.triggerCompaction(forcedCompaction);
+        trySyncLatestCompaction(forcedFullCompaction);
+        compactManager.triggerCompaction(forcedFullCompaction);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

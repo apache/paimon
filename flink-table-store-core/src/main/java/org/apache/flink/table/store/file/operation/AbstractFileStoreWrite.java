@@ -100,7 +100,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Override
     public void compact(BinaryRowData partition, int bucket) throws Exception {
-        getWriter(partition, bucket).compact();
+        getWriter(partition, bucket).fullCompaction();
     }
 
     @Override
