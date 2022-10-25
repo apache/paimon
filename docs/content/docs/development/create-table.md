@@ -28,9 +28,15 @@ under the License.
 
 ## Managed Table in Table Store Catalog
 
+If you need to manage tables uniformly according to the catalog and database.
+You can consider using the Table Store Catalog to create managed tables. In
+this case, creating tables will actually create file structures, and deleting
+tables will actually delete table data.
+
 ### Catalog
 
-Table Store uses its own catalog to manage all the databases and tables. Users need to configure the type `table-store` and a root directory `warehouse` to use it.
+Table Store uses its own catalog to manage all the databases and tables. Users
+need to configure the type `table-store` and a root directory `warehouse` to use it.
 
 ```sql
 CREATE CATALOG my_catalog WITH (
@@ -63,6 +69,10 @@ CREATE TABLE MyTable (
 This will create a directory under `${warehouse}/${database_name}.db/${table_name}`.
 
 ## Mapping Table in Generic Catalog
+
+If you do not want to create a Table Store Catalog, you only want to read and write
+a table separately. You can use the mapping table, which is a standard Flink connector
+table.
 
 The SQL `CREATE TABLE T (..) WITH ('connector'='table-store', 'path'='...')` will
 create a Table Store table in current catalog, the catalog should support generic
