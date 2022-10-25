@@ -28,17 +28,19 @@ import org.apache.flink.table.data.binary.BinaryRowDataUtil;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.format.FlushingFileFormat;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
 import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
 import org.apache.flink.table.store.file.io.RollingFileWriter;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
-import org.apache.flink.table.store.file.mergetree.compact.CompactRewriter;
+import org.apache.flink.table.store.file.mergetree.compact.AbstractCompactRewriter;
 import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
 import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManager;
+import org.apache.flink.table.store.file.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -75,7 +77,7 @@ import java.util.stream.Collectors;
 import static java.util.Collections.singletonList;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link MergeTreeReader} and {@link MergeTreeWriter}. */
+/** Tests for {@link MergeTreeReaders} and {@link MergeTreeWriter}. */
 public class MergeTreeTest {
 
     @TempDir java.nio.file.Path tempDir;
@@ -259,7 +261,7 @@ public class MergeTreeTest {
                         false,
                         128,
                         null,
-                        createCompactManager(writerFactory, service, files),
+                        createCompactManager(service, files),
                         maxSequenceNumber,
                         comparator,
                         new DeduplicateMergeFunction(),
@@ -272,30 +274,13 @@ public class MergeTreeTest {
     }
 
     private MergeTreeCompactManager createCompactManager(
-            KeyValueFileWriterFactory writerFactory,
-            ExecutorService compactExecutor,
-            List<DataFileMeta> files) {
+            ExecutorService compactExecutor, List<DataFileMeta> files) {
         CompactStrategy strategy =
                 new UniversalCompaction(
                         options.maxSizeAmplificationPercent(),
                         options.sortedRunSizeRatio(),
                         options.numSortedRunCompactionTrigger(),
                         options.maxSortedRunNum());
-        CompactRewriter rewriter =
-                (outputLevel, dropDelete, sections) -> {
-                    RollingFileWriter<KeyValue, DataFileMeta> writer =
-                            compactWriterFactory.createRollingMergeTreeFileWriter(outputLevel);
-                    writer.write(
-                            new RecordReaderIterator<>(
-                                    new MergeTreeReader(
-                                            sections,
-                                            dropDelete,
-                                            compactReaderFactory,
-                                            comparator,
-                                            new DeduplicateMergeFunction())));
-                    writer.close();
-                    return writer.result();
-                };
         return new MergeTreeCompactManager(
                 compactExecutor,
                 new Levels(comparator, files, options.numLevels()),
@@ -303,7 +288,7 @@ public class MergeTreeTest {
                 comparator,
                 options.targetFileSize(),
                 options.numSortedRunStopTrigger(),
-                rewriter);
+                new TestRewriter());
     }
 
     private void mergeCompacted(
@@ -377,12 +362,14 @@ public class MergeTreeTest {
     private List<TestRecord> readAll(List<DataFileMeta> files, boolean dropDelete)
             throws Exception {
         RecordReader<KeyValue> reader =
-                new MergeTreeReader(
+                MergeTreeReaders.readerForSections(
                         new IntervalPartition(files, comparator).partition(),
-                        dropDelete,
                         readerFactory,
                         comparator,
-                        new DeduplicateMergeFunction());
+                        new ReducerMergeFunctionWrapper(new DeduplicateMergeFunction()));
+        if (dropDelete) {
+            reader = new DropDeleteReader(reader);
+        }
         List<TestRecord> records = new ArrayList<>();
         try (RecordReaderIterator<KeyValue> iterator = new RecordReaderIterator<>(reader)) {
             while (iterator.hasNext()) {
@@ -409,6 +396,40 @@ public class MergeTreeTest {
                             random.nextInt()));
         }
         return records;
+    }
+
+    private class TestRewriter extends AbstractCompactRewriter {
+
+        @Override
+        public void rewrite(
+                int outputLevel,
+                boolean dropDelete,
+                List<List<SortedRun>> sections,
+                CompactResult toUpdate)
+                throws Exception {
+            addBefore(sections, toUpdate);
+
+            RollingFileWriter<KeyValue, DataFileMeta> writer =
+                    writerFactory.createRollingMergeTreeFileWriter(outputLevel);
+            RecordReader<KeyValue> sectionsReader =
+                    MergeTreeReaders.readerForSections(
+                            sections,
+                            compactReaderFactory,
+                            comparator,
+                            new ReducerMergeFunctionWrapper(new DeduplicateMergeFunction()));
+            if (dropDelete) {
+                sectionsReader = new DropDeleteReader(sectionsReader);
+            }
+            writer.write(new RecordReaderIterator<>(sectionsReader));
+            writer.close();
+            toUpdate.addAfter(writer.result());
+        }
+
+        @Override
+        public void upgrade(int outputLevel, DataFileMeta file, CompactResult toUpdate) {
+            toUpdate.addBefore(file);
+            toUpdate.addAfter(file.upgrade(outputLevel));
+        }
     }
 
     private static class TestRecord {

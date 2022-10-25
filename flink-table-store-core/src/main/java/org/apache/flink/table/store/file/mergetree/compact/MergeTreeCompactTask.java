@@ -64,8 +64,7 @@ public class MergeTreeCompactTask extends CompactTask {
     @Override
     protected CompactResult doCompact(List<DataFileMeta> inputs) throws Exception {
         List<List<SortedRun>> candidate = new ArrayList<>();
-        List<DataFileMeta> compactBefore = new ArrayList<>();
-        List<DataFileMeta> compactAfter = new ArrayList<>();
+        CompactResult result = new CompactResult();
 
         // Checking the order and compacting adjacent and contiguous files
         // Note: can't skip an intermediate file to compact, this will destroy the overall
@@ -85,24 +84,14 @@ public class MergeTreeCompactTask extends CompactTask {
                         candidate.add(singletonList(SortedRun.fromSingle(file)));
                     } else {
                         // Large file appear, rewrite previous and upgrade it
-                        rewrite(candidate, compactBefore, compactAfter);
-                        upgrade(file, compactBefore, compactAfter);
+                        rewrite(candidate, result);
+                        upgrade(file, result);
                     }
                 }
             }
         }
-        rewrite(candidate, compactBefore, compactAfter);
-        return new CompactResult() {
-            @Override
-            public List<DataFileMeta> before() {
-                return compactBefore;
-            }
-
-            @Override
-            public List<DataFileMeta> after() {
-                return compactAfter;
-            }
-        };
+        rewrite(candidate, result);
+        return result;
     }
 
     @Override
@@ -113,20 +102,14 @@ public class MergeTreeCompactTask extends CompactTask {
                 super.logMetric(startMillis, compactBefore, compactAfter), upgradeFilesNum);
     }
 
-    private void upgrade(
-            DataFileMeta file, List<DataFileMeta> compactBefore, List<DataFileMeta> compactAfter) {
+    private void upgrade(DataFileMeta file, CompactResult toUpdate) throws Exception {
         if (file.level() != outputLevel) {
-            compactBefore.add(file);
-            compactAfter.add(file.upgrade(outputLevel));
+            rewriter.upgrade(outputLevel, file, toUpdate);
             upgradeFilesNum++;
         }
     }
 
-    private void rewrite(
-            List<List<SortedRun>> candidate,
-            List<DataFileMeta> compactBefore,
-            List<DataFileMeta> compactAfter)
-            throws Exception {
+    private void rewrite(List<List<SortedRun>> candidate, CompactResult toUpdate) throws Exception {
         if (candidate.isEmpty()) {
             return;
         }
@@ -136,15 +119,13 @@ public class MergeTreeCompactTask extends CompactTask {
                 return;
             } else if (section.size() == 1) {
                 for (DataFileMeta file : section.get(0).files()) {
-                    upgrade(file, compactBefore, compactAfter);
+                    upgrade(file, toUpdate);
                 }
                 candidate.clear();
                 return;
             }
         }
-        candidate.forEach(runs -> runs.forEach(run -> compactBefore.addAll(run.files())));
-        List<DataFileMeta> result = rewriter.rewrite(outputLevel, dropDelete, candidate);
-        compactAfter.addAll(result);
+        rewriter.rewrite(outputLevel, dropDelete, candidate, toUpdate);
         candidate.clear();
     }
 }

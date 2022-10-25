@@ -19,20 +19,14 @@
 package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.store.file.compact.CompactResult;
-import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 
 import java.util.List;
 
-/** Rewrite sections to the files. */
-public interface CompactRewriter {
+/** Common implementation of {@link CompactRewriter}. */
+public abstract class AbstractCompactRewriter implements CompactRewriter {
 
-    void rewrite(
-            int outputLevel,
-            boolean dropDelete,
-            List<List<SortedRun>> sections,
-            CompactResult toUpdate)
-            throws Exception;
-
-    void upgrade(int outputLevel, DataFileMeta file, CompactResult toUpdate) throws Exception;
+    protected void addBefore(List<List<SortedRun>> sections, CompactResult toUpdate) {
+        sections.forEach(runs -> runs.forEach(run -> toUpdate.addBefore(run.files())));
+    }
 }

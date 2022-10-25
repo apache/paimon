@@ -36,9 +36,11 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -60,6 +62,7 @@ public class TestCommitThread extends Thread {
     private final Map<BinaryRowData, List<KeyValue>> data;
     private final Map<BinaryRowData, List<KeyValue>> result;
     private final Map<BinaryRowData, MergeTreeWriter> writers;
+    private final Set<BinaryRowData> writtenPartitions;
 
     private final AbstractFileStoreWrite<KeyValue> write;
     private final FileStoreCommit commit;
@@ -77,6 +80,7 @@ public class TestCommitThread extends Thread {
         this.data = data;
         this.result = new HashMap<>();
         this.writers = new HashMap<>();
+        this.writtenPartitions = new HashSet<>();
 
         if (LOG.isDebugEnabled()) {
             LOG.debug(
@@ -109,6 +113,7 @@ public class TestCommitThread extends Thread {
                 throw new RuntimeException(e);
             }
         }
+        doFinalCompact();
 
         for (MergeTreeWriter writer : writers.values()) {
             try {
@@ -153,6 +158,31 @@ public class TestCommitThread extends Thread {
                                 Collections.emptyMap()));
     }
 
+    private void doFinalCompact() {
+        while (true) {
+            try {
+                ManifestCommittable committable =
+                        new ManifestCommittable(String.valueOf(new Random().nextLong()));
+                for (BinaryRowData partition : writtenPartitions) {
+                    MergeTreeWriter writer =
+                            writers.computeIfAbsent(partition, p -> createWriter(p, false));
+                    writer.fullCompaction();
+                    RecordWriter.CommitIncrement inc = writer.prepareCommit(true);
+                    committable.addFileCommittable(
+                            new FileCommittable(
+                                    partition, 0, inc.newFilesIncrement(), inc.compactIncrement()));
+                }
+                commit.commit(committable, Collections.emptyMap());
+                break;
+            } catch (Exception e) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Failed to do final compact because of exception, try again", e);
+                }
+                writers.clear();
+            }
+        }
+    }
+
     private void runWithRetry(ManifestCommittable committable, Runnable runnable) {
         boolean shouldCheckFilter = false;
         while (true) {
@@ -178,6 +208,7 @@ public class TestCommitThread extends Thread {
         List<KeyValue> changes = new ArrayList<>();
         BinaryRowData partition = pickData(changes);
         result.computeIfAbsent(partition, p -> new ArrayList<>()).addAll(changes);
+        writtenPartitions.add(partition);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug(

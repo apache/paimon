@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactUnit;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFileTestUtils;
@@ -203,7 +204,7 @@ public class MergeTreeCompactManagerTest {
                         comparator,
                         2,
                         Integer.MAX_VALUE,
-                        testRewriter(expectedDropDelete));
+                        new TestRewriter(expectedDropDelete));
         manager.triggerCompaction(false);
         manager.getCompactionResult(true);
         List<LevelMinMax> outputs =
@@ -219,9 +220,24 @@ public class MergeTreeCompactManagerTest {
         return (numLevels, runs) -> Optional.of(CompactUnit.fromLevelRuns(numLevels - 1, runs));
     }
 
-    private CompactRewriter testRewriter(boolean expectedDropDelete) {
-        return (outputLevel, dropDelete, sections) -> {
+    private static class TestRewriter extends AbstractCompactRewriter {
+
+        private final boolean expectedDropDelete;
+
+        private TestRewriter(boolean expectedDropDelete) {
+            this.expectedDropDelete = expectedDropDelete;
+        }
+
+        @Override
+        public void rewrite(
+                int outputLevel,
+                boolean dropDelete,
+                List<List<SortedRun>> sections,
+                CompactResult toUpdate)
+                throws Exception {
             assertThat(dropDelete).isEqualTo(expectedDropDelete);
+            addBefore(sections, toUpdate);
+
             int minKey = Integer.MAX_VALUE;
             int maxKey = Integer.MIN_VALUE;
             long maxSequence = 0;
@@ -242,8 +258,15 @@ public class MergeTreeCompactManagerTest {
                     }
                 }
             }
-            return Collections.singletonList(newFile(outputLevel, minKey, maxKey, maxSequence));
-        };
+            toUpdate.addAfter(
+                    Collections.singletonList(newFile(outputLevel, minKey, maxKey, maxSequence)));
+        }
+
+        @Override
+        public void upgrade(int outputLevel, DataFileMeta file, CompactResult toUpdate) {
+            toUpdate.addBefore(file);
+            toUpdate.addAfter(file.upgrade(outputLevel));
+        }
     }
 
     private static class LevelMinMax {

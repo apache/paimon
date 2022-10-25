@@ -20,12 +20,51 @@ package org.apache.flink.table.store.file.compact;
 
 import org.apache.flink.table.store.file.io.DataFileMeta;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /** Result of compaction. */
-public interface CompactResult {
+public class CompactResult {
 
-    List<DataFileMeta> before();
+    private final List<DataFileMeta> before;
+    private final List<DataFileMeta> after;
+    private final List<DataFileMeta> changelog;
 
-    List<DataFileMeta> after();
+    public CompactResult() {
+        this.before = new ArrayList<>();
+        this.after = new ArrayList<>();
+        this.changelog = new ArrayList<>();
+    }
+
+    public List<DataFileMeta> before() {
+        return before;
+    }
+
+    public List<DataFileMeta> after() {
+        return after;
+    }
+
+    public List<DataFileMeta> changelog() {
+        return changelog;
+    }
+
+    public void addBefore(DataFileMeta file) {
+        this.before.add(file);
+    }
+
+    public void addBefore(List<DataFileMeta> before) {
+        this.before.addAll(before);
+    }
+
+    public void addAfter(DataFileMeta file) {
+        this.after.add(file);
+    }
+
+    public void addAfter(List<DataFileMeta> after) {
+        this.after.addAll(after);
+    }
+
+    public void addChangelog(List<DataFileMeta> changelog) {
+        this.changelog.addAll(changelog);
+    }
 }

@@ -156,7 +156,11 @@ public class FullChangelogMergeFunctionWrapper
         }
 
         private Result setResult(@Nullable KeyValue result) {
-            this.result = result;
+            if (result != null && result.valueKind() != RowKind.DELETE) {
+                this.result = result;
+            } else {
+                this.result = null;
+            }
             return this;
         }
 
@@ -178,7 +182,10 @@ public class FullChangelogMergeFunctionWrapper
             return after;
         }
 
-        /** Latest full compaction result (result of merge function) for this key. */
+        /**
+         * Latest full compaction result (result of merge function) for this key. Null if the merged
+         * result is null or is of DELETE kind.
+         */
         @Nullable
         public KeyValue result() {
             return result;

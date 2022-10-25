@@ -648,7 +648,9 @@ public class CoreOptions implements Serializable {
 
         INPUT(
                 "input",
-                "Double write to a changelog file when flushing memory table, the changelog is from input.");
+                "Double write to a changelog file when flushing memory table, the changelog is from input."),
+
+        FULL_COMPACTION("full-compaction", "Generate changelog files with each full compaction.");
 
         private final String value;
         private final String description;

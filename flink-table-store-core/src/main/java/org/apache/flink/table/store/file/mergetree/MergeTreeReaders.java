@@ -23,108 +23,59 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
-import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader.ReaderSupplier;
-import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionWrapper;
 import org.apache.flink.table.store.file.mergetree.compact.SortMergeReader;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.types.RowKind;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-/** A {@link RecordReader} to read merge tree sections. */
-public class MergeTreeReader implements RecordReader<KeyValue> {
+/** Utility class to create commonly used {@link RecordReader}s for merge trees. */
+public class MergeTreeReaders {
 
-    private final RecordReader<KeyValue> reader;
+    private MergeTreeReaders() {}
 
-    private final boolean dropDelete;
-
-    public MergeTreeReader(
+    public static RecordReader<KeyValue> readerForSections(
             List<List<SortedRun>> sections,
-            boolean dropDelete,
             KeyValueFileReaderFactory readerFactory,
             Comparator<RowData> userKeyComparator,
-            MergeFunction<KeyValue> mergeFunction)
+            MergeFunctionWrapper<KeyValue> mergeFunctionWrapper)
             throws IOException {
-        this.dropDelete = dropDelete;
-
-        List<ReaderSupplier<KeyValue>> readers = new ArrayList<>();
+        List<ConcatRecordReader.ReaderSupplier<KeyValue>> readers = new ArrayList<>();
         for (List<SortedRun> section : sections) {
             readers.add(
                     () ->
                             readerForSection(
-                                    section, readerFactory, userKeyComparator, mergeFunction));
+                                    section,
+                                    readerFactory,
+                                    userKeyComparator,
+                                    mergeFunctionWrapper));
         }
-        this.reader = ConcatRecordReader.create(readers);
-    }
-
-    public MergeTreeReader(boolean dropDelete, List<ReaderSupplier<KeyValue>> sectionReaders)
-            throws IOException {
-        this.dropDelete = dropDelete;
-        this.reader = ConcatRecordReader.create(sectionReaders);
-    }
-
-    @Nullable
-    @Override
-    public RecordIterator<KeyValue> readBatch() throws IOException {
-        RecordIterator<KeyValue> batch = reader.readBatch();
-
-        if (!dropDelete) {
-            return batch;
-        }
-
-        if (batch == null) {
-            return null;
-        }
-
-        return new RecordIterator<KeyValue>() {
-            @Override
-            public KeyValue next() throws IOException {
-                while (true) {
-                    KeyValue kv = batch.next();
-                    if (kv == null) {
-                        return null;
-                    }
-
-                    if (kv.valueKind() == RowKind.INSERT
-                            || kv.valueKind() == RowKind.UPDATE_AFTER) {
-                        return kv;
-                    }
-                }
-            }
-
-            @Override
-            public void releaseBatch() {
-                batch.releaseBatch();
-            }
-        };
-    }
-
-    @Override
-    public void close() throws IOException {
-        reader.close();
+        return ConcatRecordReader.create(readers);
     }
 
     public static RecordReader<KeyValue> readerForSection(
             List<SortedRun> section,
             KeyValueFileReaderFactory readerFactory,
             Comparator<RowData> userKeyComparator,
-            MergeFunction<KeyValue> mergeFunction)
+            MergeFunctionWrapper<KeyValue> mergeFunctionWrapper)
             throws IOException {
         List<RecordReader<KeyValue>> readers = new ArrayList<>();
         for (SortedRun run : section) {
             readers.add(readerForRun(run, readerFactory));
         }
-        return SortMergeReader.create(readers, userKeyComparator, mergeFunction);
+        if (readers.size() == 1) {
+            return readers.get(0);
+        } else {
+            return new SortMergeReader<>(readers, userKeyComparator, mergeFunctionWrapper);
+        }
     }
 
     public static RecordReader<KeyValue> readerForRun(
             SortedRun run, KeyValueFileReaderFactory readerFactory) throws IOException {
-        List<ReaderSupplier<KeyValue>> readers = new ArrayList<>();
+        List<ConcatRecordReader.ReaderSupplier<KeyValue>> readers = new ArrayList<>();
         for (DataFileMeta file : run.files()) {
             readers.add(() -> readerFactory.createRecordReader(file.fileName(), file.level()));
         }
