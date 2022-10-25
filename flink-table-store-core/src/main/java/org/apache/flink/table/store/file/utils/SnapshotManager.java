@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Iterator;
 import java.util.UUID;
 import java.util.function.BinaryOperator;
 
@@ -77,6 +78,16 @@ public class SnapshotManager {
         } catch (IOException e) {
             throw new RuntimeException("Failed to find latest snapshot id", e);
         }
+    }
+
+    public long snapshotCount() throws IOException {
+        return listVersionedFiles(snapshotDirectory(), SNAPSHOT_PREFIX).count();
+    }
+
+    public Iterator<Snapshot> snapshots() throws IOException {
+        return listVersionedFiles(snapshotDirectory(), SNAPSHOT_PREFIX)
+                .map(this::snapshot)
+                .iterator();
     }
 
     public Long findLatest() throws IOException {

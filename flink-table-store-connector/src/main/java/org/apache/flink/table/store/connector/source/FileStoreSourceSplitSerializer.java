@@ -19,10 +19,12 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.core.io.SimpleVersionedSerializer;
-import org.apache.flink.core.memory.DataInputDeserializer;
+import org.apache.flink.core.memory.DataInputViewStreamWrapper;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
-import org.apache.flink.table.store.table.source.DataSplit;
+import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.util.InstantiationUtil;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
@@ -40,15 +42,23 @@ public class FileStoreSourceSplitSerializer
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
         view.writeUTF(split.splitId());
-        split.split().serialize(view);
+        InstantiationUtil.serializeObject(view, split.split());
         view.writeLong(split.recordsToSkip());
         return out.toByteArray();
     }
 
     @Override
     public FileStoreSourceSplit deserialize(int version, byte[] serialized) throws IOException {
-        DataInputDeserializer view = new DataInputDeserializer(serialized);
-        return new FileStoreSourceSplit(
-                view.readUTF(), DataSplit.deserialize(view), view.readLong());
+        ByteArrayInputStream in = new ByteArrayInputStream(serialized);
+        DataInputViewStreamWrapper view = new DataInputViewStreamWrapper(in);
+        String splitId = view.readUTF();
+        Split split;
+        try {
+            split = InstantiationUtil.deserializeObject(in, getClass().getClassLoader());
+        } catch (ClassNotFoundException e) {
+            throw new IOException(e);
+        }
+        long recordsToSkip = view.readLong();
+        return new FileStoreSourceSplit(splitId, split, recordsToSkip);
     }
 }

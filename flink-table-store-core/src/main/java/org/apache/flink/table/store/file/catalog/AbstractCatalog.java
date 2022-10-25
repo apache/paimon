@@ -20,6 +20,12 @@ package org.apache.flink.table.store.file.catalog;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.table.FileStoreTableFactory;
+import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.table.metadata.MetadataTableLoader;
+
+import org.apache.commons.lang3.StringUtils;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -29,6 +35,26 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public Path getTableLocation(ObjectPath tablePath) {
         return new Path(databasePath(tablePath.getDatabaseName()), tablePath.getObjectName());
+    }
+
+    @Override
+    public Table getTable(ObjectPath tablePath) throws TableNotExistException {
+        String inputTableName = tablePath.getObjectName();
+        if (inputTableName.contains(METADATA_TABLE_SPLITTER)) {
+            String[] splits = StringUtils.split(inputTableName, METADATA_TABLE_SPLITTER);
+            if (splits.length != 2) {
+                throw new IllegalArgumentException(
+                        "Metadata table can only contain one '$' separator, but this is: "
+                                + inputTableName);
+            }
+            String table = splits[0];
+            String metadata = splits[1];
+            Path location = getTableLocation(new ObjectPath(tablePath.getDatabaseName(), table));
+            return MetadataTableLoader.load(metadata, location);
+        } else {
+            TableSchema tableSchema = getTableSchema(tablePath);
+            return FileStoreTableFactory.create(getTableLocation(tablePath), tableSchema);
+        }
     }
 
     protected Path databasePath(String database) {
