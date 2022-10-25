@@ -18,9 +18,8 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.utils.TypeUtils;
 
@@ -43,13 +42,13 @@ import java.util.OptionalLong;
  */
 public class SparkScan implements Scan, SupportsReportStatistics {
 
-    protected final FileStoreTable table;
+    protected final Table table;
     private final List<Predicate> predicates;
     private final int[] projectedFields;
 
     private List<Split> splits;
 
-    public SparkScan(FileStoreTable table, List<Predicate> predicates, int[] projectedFields) {
+    public SparkScan(Table table, List<Predicate> predicates, int[] projectedFields) {
         this.table = table;
         this.predicates = predicates;
         this.projectedFields = projectedFields;
@@ -58,13 +57,12 @@ public class SparkScan implements Scan, SupportsReportStatistics {
     @Override
     public String description() {
         // TODO add filters
-        return String.format("tablestore(%s)", table.location().getName());
+        return String.format("tablestore(%s)", table.name());
     }
 
     @Override
     public StructType readSchema() {
-        return SparkTypeUtils.fromFlinkRowType(
-                TypeUtils.project(table.schema().logicalRowType(), projectedFields));
+        return SparkTypeUtils.fromFlinkRowType(TypeUtils.project(table.rowType(), projectedFields));
     }
 
     @Override
@@ -86,7 +84,7 @@ public class SparkScan implements Scan, SupportsReportStatistics {
 
     protected List<Split> splits() {
         if (splits == null) {
-            this.splits = table.newScan().withFilter(predicates).plan().splits;
+            this.splits = table.newScan().withFilter(predicates).plan().splits();
         }
         return splits;
     }
@@ -96,9 +94,7 @@ public class SparkScan implements Scan, SupportsReportStatistics {
         long rowCount = 0L;
 
         for (Split split : splits()) {
-            for (DataFileMeta file : split.files()) {
-                rowCount += file.rowCount();
-            }
+            rowCount += split.rowCount();
         }
 
         final long numRows = rowCount;
@@ -128,13 +124,13 @@ public class SparkScan implements Scan, SupportsReportStatistics {
         }
 
         SparkScan that = (SparkScan) o;
-        return table.location().equals(that.table.location())
+        return table.name().equals(that.table.name())
                 && readSchema().equals(that.readSchema())
                 && predicates.equals(that.predicates);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(table.location(), readSchema(), predicates);
+        return Objects.hash(table.name(), readSchema(), predicates);
     }
 }

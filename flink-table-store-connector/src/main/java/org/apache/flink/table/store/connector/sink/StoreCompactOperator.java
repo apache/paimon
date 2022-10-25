@@ -23,6 +23,7 @@ import org.apache.flink.table.store.file.predicate.PredicateConverter;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.types.logical.RowType;
@@ -75,9 +76,10 @@ public class StoreCompactOperator extends PrepareCommitOperator {
         int task = getRuntimeContext().getIndexOfThisSubtask();
         int numTask = getRuntimeContext().getNumberOfParallelSubtasks();
 
-        for (Split split : scan.plan().splits) {
-            BinaryRowData partition = split.partition();
-            int bucket = split.bucket();
+        for (Split split : scan.plan().splits()) {
+            DataSplit dataSplit = (DataSplit) split;
+            BinaryRowData partition = dataSplit.partition();
+            int bucket = dataSplit.bucket();
             if (Math.abs(Objects.hash(partition, bucket)) % numTask != task) {
                 continue;
             }

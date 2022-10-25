@@ -21,7 +21,7 @@ package org.apache.flink.table.store.connector.source;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
-import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.table.source.DataSplit;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -48,6 +48,7 @@ public class FileStoreSourceSplitSerializer
     @Override
     public FileStoreSourceSplit deserialize(int version, byte[] serialized) throws IOException {
         DataInputDeserializer view = new DataInputDeserializer(serialized);
-        return new FileStoreSourceSplit(view.readUTF(), Split.deserialize(view), view.readLong());
+        return new FileStoreSourceSplit(
+                view.readUTF(), DataSplit.deserialize(view), view.readLong());
     }
 }

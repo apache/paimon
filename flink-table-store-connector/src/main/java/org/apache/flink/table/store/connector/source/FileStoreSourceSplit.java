@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.api.connector.source.SourceSplit;
-import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.table.source.DataSplit;
 
 import java.util.Objects;
 
@@ -29,21 +29,21 @@ public class FileStoreSourceSplit implements SourceSplit {
     /** The unique ID of the split. Unique within the scope of this source. */
     private final String id;
 
-    private final Split split;
+    private final DataSplit split;
 
     private final long recordsToSkip;
 
-    public FileStoreSourceSplit(String id, Split split) {
+    public FileStoreSourceSplit(String id, DataSplit split) {
         this(id, split, 0);
     }
 
-    public FileStoreSourceSplit(String id, Split split, long recordsToSkip) {
+    public FileStoreSourceSplit(String id, DataSplit split, long recordsToSkip) {
         this.id = id;
         this.split = split;
         this.recordsToSkip = recordsToSkip;
     }
 
-    public Split split() {
+    public DataSplit split() {
         return split;
     }
 

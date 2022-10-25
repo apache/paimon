@@ -16,24 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.spark;
+package org.apache.flink.table.store.table;
 
-import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.table.sink.TableCommit;
+import org.apache.flink.table.store.table.sink.TableWrite;
 
-import org.apache.spark.sql.connector.read.InputPartition;
+/** An interface for {@link Table} write support. */
+public interface SupportsWrite {
 
-/** A Spark {@link InputPartition} for table store. */
-public class SparkInputPartition implements InputPartition {
+    TableWrite newWrite();
 
-    private static final long serialVersionUID = 1L;
-
-    private final Split split;
-
-    public SparkInputPartition(Split split) {
-        this.split = split;
-    }
-
-    public Split split() {
-        return split;
-    }
+    TableCommit newCommit(String user);
 }

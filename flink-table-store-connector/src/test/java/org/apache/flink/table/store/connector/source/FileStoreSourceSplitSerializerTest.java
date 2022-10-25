@@ -22,7 +22,7 @@ import org.apache.flink.core.io.SimpleVersionedSerialization;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
-import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.table.source.DataSplit;
 
 import org.junit.jupiter.api.Test;
 
@@ -118,7 +118,7 @@ public class FileStoreSourceSplitSerializerTest {
             boolean isIncremental,
             long recordsToSkip) {
         return new FileStoreSourceSplit(
-                id, new Split(partition, bucket, files, isIncremental), recordsToSkip);
+                id, new DataSplit(partition, bucket, files, isIncremental), recordsToSkip);
     }
 
     private static FileStoreSourceSplit serializeAndDeserialize(FileStoreSourceSplit split)

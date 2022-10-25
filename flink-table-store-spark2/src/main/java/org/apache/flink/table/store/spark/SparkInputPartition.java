@@ -18,13 +18,11 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.core.memory.DataInputViewStreamWrapper;
-import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
-import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.utils.TypeUtils;
@@ -35,8 +33,6 @@ import org.apache.spark.sql.sources.v2.reader.InputPartition;
 import org.apache.spark.sql.sources.v2.reader.InputPartitionReader;
 
 import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
 import java.io.UncheckedIOException;
 import java.util.List;
 
@@ -47,14 +43,13 @@ public class SparkInputPartition implements InputPartition<InternalRow> {
 
     private static final long serialVersionUID = 1L;
 
-    private final FileStoreTable table;
+    private final Table table;
     private final int[] projectedFields;
     private final List<Predicate> predicates;
-
-    private transient Split split;
+    private final Split split;
 
     public SparkInputPartition(
-            FileStoreTable table, int[] projectedFields, List<Predicate> predicates, Split split) {
+            Table table, int[] projectedFields, List<Predicate> predicates, Split split) {
         this.table = table;
         this.projectedFields = projectedFields;
         this.predicates = predicates;
@@ -111,17 +106,7 @@ public class SparkInputPartition implements InputPartition<InternalRow> {
     }
 
     private RowType readRowType() {
-        RowType rowType = table.schema().logicalRowType();
+        RowType rowType = table.rowType();
         return projectedFields == null ? rowType : TypeUtils.project(rowType, projectedFields);
-    }
-
-    private void writeObject(ObjectOutputStream out) throws IOException {
-        out.defaultWriteObject();
-        split.serialize(new DataOutputViewStreamWrapper(out));
-    }
-
-    private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
-        in.defaultReadObject();
-        split = Split.deserialize(new DataInputViewStreamWrapper(in));
     }
 }

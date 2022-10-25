@@ -40,7 +40,7 @@ public abstract class KeyValueTableRead implements TableRead {
 
     @Override
     public RecordReader<RowData> createReader(Split split) throws IOException {
-        return new RowDataRecordReader(read.createReader(split));
+        return new RowDataRecordReader(read.createReader((DataSplit) split));
     }
 
     protected abstract RecordReader.RecordIterator<RowData> rowDataRecordIteratorFromKv(

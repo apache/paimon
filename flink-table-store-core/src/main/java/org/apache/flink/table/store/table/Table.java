@@ -16,24 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.spark;
+package org.apache.flink.table.store.table;
 
-import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.table.source.TableRead;
+import org.apache.flink.table.store.table.source.TableScan;
+import org.apache.flink.table.types.logical.RowType;
 
-import org.apache.spark.sql.connector.read.InputPartition;
+import java.io.Serializable;
 
-/** A Spark {@link InputPartition} for table store. */
-public class SparkInputPartition implements InputPartition {
+/** A table provides basic abstraction for table type and table scan and table read. */
+public interface Table extends Serializable {
 
-    private static final long serialVersionUID = 1L;
+    String name();
 
-    private final Split split;
+    RowType rowType();
 
-    public SparkInputPartition(Split split) {
-        this.split = split;
-    }
+    TableScan newScan();
 
-    public Split split() {
-        return split;
-    }
+    TableRead newRead();
 }

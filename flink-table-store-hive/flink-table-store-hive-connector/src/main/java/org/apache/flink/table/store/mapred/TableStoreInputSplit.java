@@ -21,7 +21,7 @@ package org.apache.flink.table.store.mapred;
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputSerializer;
 import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.table.source.DataSplit;
 
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.mapred.FileSplit;
@@ -40,17 +40,17 @@ public class TableStoreInputSplit extends FileSplit {
     private static final String[] ANYWHERE = new String[] {"*"};
 
     private String path;
-    private Split split;
+    private DataSplit split;
 
     // public no-argument constructor for deserialization
     public TableStoreInputSplit() {}
 
-    public TableStoreInputSplit(String path, Split split) {
+    public TableStoreInputSplit(String path, DataSplit split) {
         this.path = path;
         this.split = split;
     }
 
-    public Split split() {
+    public DataSplit split() {
         return split;
     }
 
@@ -89,7 +89,7 @@ public class TableStoreInputSplit extends FileSplit {
         int length = dataInput.readInt();
         byte[] bytes = new byte[length];
         dataInput.readFully(bytes);
-        split = Split.deserialize(new DataInputDeserializer(bytes));
+        split = DataSplit.deserialize(new DataInputDeserializer(bytes));
     }
 
     @Override
