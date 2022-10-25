@@ -84,7 +84,7 @@ public class TableStreamingReader {
     @Nullable
     public Iterator<RowData> nextBatch() throws IOException {
         if (enumerator == null) {
-            DataTableScan scan = (DataTableScan) table.newScan();
+            DataTableScan scan = table.newScan();
             if (predicate != null) {
                 scan.withFilter(predicate);
             }

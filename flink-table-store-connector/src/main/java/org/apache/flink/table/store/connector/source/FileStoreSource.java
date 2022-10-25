@@ -105,7 +105,7 @@ public class FileStoreSource
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
         SnapshotManager snapshotManager = table.snapshotManager();
-        DataTableScan scan = (DataTableScan) table.newScan();
+        DataTableScan scan = table.newScan();
         if (predicate != null) {
             scan.withFilter(predicate);
         }
