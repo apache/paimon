@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
@@ -32,6 +33,7 @@ import org.apache.flink.table.store.file.schema.UpdateSchema;
 
 import javax.annotation.Nullable;
 
+import static org.apache.flink.table.store.CoreOptions.AUTO_CREATE;
 import static org.apache.flink.table.store.connector.FlinkCatalogFactory.IDENTIFIER;
 
 /** A table store {@link DynamicTableFactory} to create source and sink. */
@@ -88,13 +90,16 @@ public class TableStoreConnectorFactory extends AbstractTableStoreFactory {
 
     private void createTableIfNeeded(Context context) {
         ResolvedCatalogTable table = context.getCatalogTable();
-        Path tablePath = CoreOptions.path(table.getOptions());
-        SchemaManager schemaManager = new SchemaManager(tablePath);
-        if (!schemaManager.latest().isPresent()) {
-            try {
-                schemaManager.commitNewVersion(UpdateSchema.fromCatalogTable(table));
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+        Configuration options = Configuration.fromMap(table.getOptions());
+        if (options.get(AUTO_CREATE)) {
+            Path tablePath = CoreOptions.path(table.getOptions());
+            SchemaManager schemaManager = new SchemaManager(tablePath);
+            if (!schemaManager.latest().isPresent()) {
+                try {
+                    schemaManager.commitNewVersion(UpdateSchema.fromCatalogTable(table));
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
             }
         }
     }

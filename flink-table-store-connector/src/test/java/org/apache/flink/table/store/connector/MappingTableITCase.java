@@ -36,8 +36,8 @@ import java.util.concurrent.ExecutionException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/** ITCase for temporary table api. */
-public class TemporaryTableITCase extends AbstractTestBase {
+/** ITCase for mapping table api. */
+public class MappingTableITCase extends AbstractTestBase {
 
     private TableEnvironment tEnv;
     private String path;
@@ -49,13 +49,34 @@ public class TemporaryTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testCreateTemporaryTable() throws ExecutionException, InterruptedException {
+    public void testCreateEmptyMappingTable() {
         tEnv.executeSql(
                 String.format(
-                        "CREATE TEMPORARY TABLE T (i INT, j INT) WITH ("
+                        "CREATE TABLE T (i INT, j INT) WITH ("
                                 + "'connector'='table-store', 'path'='%s')",
                         path));
+        assertThrows(
+                ValidationException.class,
+                () -> tEnv.executeSql("INSERT INTO T VALUES (1, 2), (3, 4)").await(),
+                "Schema file not found in location");
+    }
+
+    @Test
+    public void testCreateMappingTable() throws ExecutionException, InterruptedException {
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE T (i INT, j INT) WITH ("
+                                + "'connector'='table-store', 'path'='%s', 'auto-create'='true')",
+                        path));
         tEnv.executeSql("INSERT INTO T VALUES (1, 2), (3, 4)").await();
+
+        tEnv.executeSql("DROP TABLE T");
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE T (i INT, j INT) WITH ("
+                                + "'connector'='table-store', 'path'='%s')",
+                        path));
+
         List<Row> result = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM T").collect());
         assertThat(result).containsExactlyInAnyOrder(Row.of(1, 2), Row.of(3, 4));
     }
@@ -65,11 +86,11 @@ public class TemporaryTableITCase extends AbstractTestBase {
         for (int i = 0; i < 5; i++) {
             tEnv.executeSql(
                     String.format(
-                            "CREATE TEMPORARY TABLE T (i INT, j INT) WITH ("
-                                    + "'connector'='table-store', 'path'='%s')",
+                            "CREATE TABLE T (i INT, j INT) WITH ("
+                                    + "'connector'='table-store', 'path'='%s', 'auto-create'='true')",
                             path));
             tEnv.executeSql("SELECT * FROM T").collect().close();
-            tEnv.executeSql("DROP TEMPORARY TABLE T");
+            tEnv.executeSql("DROP TABLE T");
         }
     }
 
@@ -77,16 +98,16 @@ public class TemporaryTableITCase extends AbstractTestBase {
     public void testCreateTemporaryTableConflict() throws Exception {
         tEnv.executeSql(
                 String.format(
-                        "CREATE TEMPORARY TABLE T (i INT, j INT) WITH ("
-                                + "'connector'='table-store', 'path'='%s')",
+                        "CREATE TABLE T (i INT, j INT) WITH ("
+                                + "'connector'='table-store', 'path'='%s', 'auto-create'='true')",
                         path));
         tEnv.executeSql("SELECT * FROM T").collect().close();
-        tEnv.executeSql("DROP TEMPORARY TABLE T");
+        tEnv.executeSql("DROP TABLE T");
 
         tEnv.executeSql(
                 String.format(
-                        "CREATE TEMPORARY TABLE T (i INT, j INT, k INT) WITH ("
-                                + "'connector'='table-store', 'path'='%s')",
+                        "CREATE TABLE T (i INT, j INT, k INT) WITH ("
+                                + "'connector'='table-store', 'path'='%s', 'auto-create'='true')",
                         path));
 
         assertThrows(

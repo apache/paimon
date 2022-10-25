@@ -26,7 +26,7 @@ under the License.
 
 # Create Table
 
-## Catalog
+## Managed Table in Table Store Catalog
 
 Table Store uses its own catalog to manage all the databases and tables. Users need to configure the type `table-store` and a root directory `warehouse` to use it.
 
@@ -45,6 +45,20 @@ Table Store catalog supports SQL DDL commands:
 - `ALTER TABLE ...`
 - `SHOW DATABASES`
 - `SHOW TABLES`
+
+## Mapping Table in Generic Catalog
+
+The SQL `CREATE TABLE T (..) WITH ('connector'='table-store', 'path'='...')` will
+create a Table Store table in current catalog, the catalog should support generic
+Flink connector tables, the available catalogs are `GenericInMemoryCatalog` (by default)
+and `HiveCatalog`. The generic catalog only manages the mapping relationship between
+tables and underlying file structure in `path`, but does not really create and delete
+tables.
+
+- By default, the mapping table needs to be mapped to an actual underlying file structure
+  in FileSystem `path`. If the file structure in `path` does not exist, an exception will be thrown.
+- If you want to create the file structure automatically when reading or writing a table,
+  you can configure `auto-create` to `true`: `CREATE TABLE T (..) WITH ('connector'='table-store', 'path'='...', 'auto-create'='true')`.
 
 ## Syntax
 
