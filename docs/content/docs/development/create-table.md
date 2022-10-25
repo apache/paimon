@@ -28,6 +28,8 @@ under the License.
 
 ## Managed Table in Table Store Catalog
 
+### Catalog
+
 Table Store uses its own catalog to manage all the databases and tables. Users need to configure the type `table-store` and a root directory `warehouse` to use it.
 
 ```sql
@@ -46,6 +48,20 @@ Table Store catalog supports SQL DDL commands:
 - `SHOW DATABASES`
 - `SHOW TABLES`
 
+### Create Managed Table
+
+```sql
+CREATE TABLE MyTable (
+   user_id BIGINT,
+   item_id BIGINT,
+   behavior STRING,
+   dt STRING,
+   PRIMARY KEY (dt, user_id) NOT ENFORCED
+) PARTITIONED BY (dt);
+```
+
+This will create a directory under `${warehouse}/${database_name}.db/${table_name}`.
+
 ## Mapping Table in Generic Catalog
 
 The SQL `CREATE TABLE T (..) WITH ('connector'='table-store', 'path'='...')` will
@@ -60,7 +76,26 @@ tables.
 - If you want to create the file structure automatically when reading or writing a table,
   you can configure `auto-create` to `true`: `CREATE TABLE T (..) WITH ('connector'='table-store', 'path'='...', 'auto-create'='true')`.
 
-## Syntax
+For example:
+
+```sql
+CREATE TABLE MyTable (
+   user_id BIGINT,
+   item_id BIGINT,
+   behavior STRING,
+   dt STRING,
+   PRIMARY KEY (dt, user_id) NOT ENFORCED
+) PARTITIONED BY (dt) WITH (
+  'connector'='table-store',
+  'path'='hdfs://nn:8020/my_table_path',
+  'auto-create'='true'
+);
+
+-- This will create a directory structure under path.
+INSERT INTO MyTable SELECT ...;
+```
+
+## Table Syntax
 
 ```sql
 CREATE TABLE [IF NOT EXISTS] [catalog_name.][db_name.]table_name
@@ -95,8 +130,6 @@ __Note:__
   including `UPDATE_BEFORE` records, even if you declare the primary key containing partition
   field, you can achieve the unique effect.
   {{< /hint >}}
-
-This will create a directory under `${warehouse}/${database_name}.db/${table_name}`.
 
 ## Table Options
 
