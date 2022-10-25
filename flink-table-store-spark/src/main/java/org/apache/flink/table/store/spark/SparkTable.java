@@ -32,7 +32,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 import java.util.HashSet;
 import java.util.Set;
 
-/** A spark {@code Table} for table store. */
+/** A spark {@link org.apache.spark.sql.connector.catalog.Table} for table store. */
 public class SparkTable implements org.apache.spark.sql.connector.catalog.Table, SupportsRead {
 
     private final Table table;

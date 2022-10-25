@@ -57,13 +57,7 @@ public abstract class DataTableScan implements TableScan {
         return this;
     }
 
-    public DataTableScan withFilter(List<Predicate> predicates) {
-        if (predicates == null || predicates.isEmpty()) {
-            return this;
-        }
-        return withFilter(PredicateBuilder.and(predicates));
-    }
-
+    @Override
     public DataTableScan withFilter(Predicate predicate) {
         List<String> partitionKeys = tableSchema.partitionKeys();
         int[] fieldIdxToPartitionIdx =
