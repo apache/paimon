@@ -37,4 +37,10 @@ public interface CompactStrategy {
      * </ul>
      */
     Optional<CompactUnit> pick(int numLevels, List<LevelSortedRun> runs);
+
+    /** Pick a compaction unit consisting of all existing files. */
+    static Optional<CompactUnit> pickFullCompaction(int numLevels, List<LevelSortedRun> runs) {
+        int maxLevel = numLevels - 1;
+        return Optional.of(CompactUnit.fromLevelRuns(maxLevel, runs));
+    }
 }

@@ -20,6 +20,7 @@ package org.apache.flink.table.store.table.sink;
 
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.binary.BinaryRowData;
 
 import java.util.List;
 
@@ -36,6 +37,8 @@ public interface TableWrite {
     SinkRecordConverter recordConverter();
 
     SinkRecord write(RowData rowData) throws Exception;
+
+    void compact(BinaryRowData partition, int bucket) throws Exception;
 
     List<FileCommittable> prepareCommit(boolean endOfInput) throws Exception;
 

@@ -61,7 +61,7 @@ public class TestCommitThread extends Thread {
     private final Map<BinaryRowData, List<KeyValue>> result;
     private final Map<BinaryRowData, MergeTreeWriter> writers;
 
-    private final FileStoreWrite<KeyValue> write;
+    private final AbstractFileStoreWrite<KeyValue> write;
     private final FileStoreCommit commit;
 
     public TestCommitThread(
