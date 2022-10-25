@@ -86,7 +86,9 @@ public class MergeTreeTest {
 
     private CoreOptions options;
     private KeyValueFileReaderFactory readerFactory;
+    private KeyValueFileReaderFactory compactReaderFactory;
     private KeyValueFileWriterFactory writerFactory;
+    private KeyValueFileWriterFactory compactWriterFactory;
     private RecordWriter<KeyValue> writer;
 
     @BeforeEach
@@ -108,24 +110,16 @@ public class MergeTreeTest {
         RowType keyType = new RowType(singletonList(new RowType.RowField("k", new IntType())));
         RowType valueType = new RowType(singletonList(new RowType.RowField("v", new IntType())));
         FileFormat flushingAvro = new FlushingFileFormat("avro");
-        readerFactory =
+        KeyValueFileReaderFactory.Builder readerFactoryBuilder =
                 KeyValueFileReaderFactory.builder(
-                                new SchemaManager(path),
-                                0,
-                                keyType,
-                                valueType,
-                                flushingAvro,
-                                pathFactory)
-                        .build(BinaryRowDataUtil.EMPTY_ROW, 0);
-        writerFactory =
+                        new SchemaManager(path), 0, keyType, valueType, flushingAvro, pathFactory);
+        readerFactory = readerFactoryBuilder.build(BinaryRowDataUtil.EMPTY_ROW, 0);
+        compactReaderFactory = readerFactoryBuilder.build(BinaryRowDataUtil.EMPTY_ROW, 0);
+        KeyValueFileWriterFactory.Builder writerFactoryBuilder =
                 KeyValueFileWriterFactory.builder(
-                                0,
-                                keyType,
-                                valueType,
-                                flushingAvro,
-                                pathFactory,
-                                options.targetFileSize())
-                        .build(BinaryRowDataUtil.EMPTY_ROW, 0);
+                        0, keyType, valueType, flushingAvro, pathFactory, options.targetFileSize());
+        writerFactory = writerFactoryBuilder.build(BinaryRowDataUtil.EMPTY_ROW, 0);
+        compactWriterFactory = writerFactoryBuilder.build(BinaryRowDataUtil.EMPTY_ROW, 0);
         writer = createMergeTreeWriter(Collections.emptyList());
     }
 
@@ -290,13 +284,13 @@ public class MergeTreeTest {
         CompactRewriter rewriter =
                 (outputLevel, dropDelete, sections) -> {
                     RollingFileWriter<KeyValue, DataFileMeta> writer =
-                            writerFactory.createRollingMergeTreeFileWriter(outputLevel);
+                            compactWriterFactory.createRollingMergeTreeFileWriter(outputLevel);
                     writer.write(
                             new RecordReaderIterator<>(
                                     new MergeTreeReader(
                                             sections,
                                             dropDelete,
-                                            readerFactory,
+                                            compactReaderFactory,
                                             comparator,
                                             new DeduplicateMergeFunction())));
                     writer.close();
@@ -329,7 +323,7 @@ public class MergeTreeTest {
             assertThat(remove).isTrue();
             // See MergeTreeWriter.updateCompactResult
             if (!newFileNames.contains(file.fileName()) && !afterFiles.contains(file.fileName())) {
-                writerFactory.deleteFile(file.fileName());
+                compactWriterFactory.deleteFile(file.fileName());
             }
         }
         compactedFiles.addAll(increment.compactIncrement().compactAfter());
