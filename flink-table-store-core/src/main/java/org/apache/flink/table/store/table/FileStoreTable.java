@@ -33,7 +33,7 @@ import java.util.List;
  * An abstraction layer above {@link org.apache.flink.table.store.file.FileStore} to provide reading
  * and writing of {@link org.apache.flink.table.data.RowData}.
  */
-public interface FileStoreTable extends Table {
+public interface FileStoreTable extends Table, SupportsPartition, SupportsRead, SupportsWrite {
 
     CoreOptions options();
 

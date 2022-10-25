@@ -18,20 +18,13 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.table.source.TableScan;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.table.sink.TableCommit;
+import org.apache.flink.table.store.table.sink.TableWrite;
 
-import java.io.Serializable;
+/** An interface for {@link Table} write support. */
+public interface SupportsWrite {
 
-/** A table provides basic abstraction for table type and table scan and table read. */
-public interface Table extends Serializable {
+    TableWrite newWrite();
 
-    String name();
-
-    RowType rowType();
-
-    TableScan newScan();
-
-    TableRead newRead();
+    TableCommit newCommit(String user);
 }

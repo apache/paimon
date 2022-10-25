@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.spark;
 
+import org.apache.flink.table.store.table.SupportsPartition;
 import org.apache.flink.table.store.table.Table;
 
 import org.apache.spark.sql.connector.catalog.SupportsRead;
@@ -66,9 +67,13 @@ public class SparkTable implements org.apache.spark.sql.connector.catalog.Table,
 
     @Override
     public Transform[] partitioning() {
-        return table.partitionKeys().stream()
-                .map(FieldReference::apply)
-                .map(IdentityTransform::apply)
-                .toArray(Transform[]::new);
+        if (table instanceof SupportsPartition) {
+            return ((SupportsPartition) table)
+                    .partitionKeys().stream()
+                            .map(FieldReference::apply)
+                            .map(IdentityTransform::apply)
+                            .toArray(Transform[]::new);
+        }
+        return new Transform[0];
     }
 }
