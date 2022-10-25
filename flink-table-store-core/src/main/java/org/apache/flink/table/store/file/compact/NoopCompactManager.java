@@ -18,17 +18,17 @@
 
 package org.apache.flink.table.store.file.compact;
 
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.util.Preconditions;
 
 import java.util.Optional;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ExecutionException;
 
-/** A {@link CompactManager} which doesn't do things. */
-public class NoopCompactManager extends CompactManager {
+/** A {@link CompactManager} which never compacts. */
+public class NoopCompactManager implements CompactManager {
 
-    public NoopCompactManager(ExecutorService executor) {
-        super(executor);
-    }
+    public NoopCompactManager() {}
 
     @Override
     public boolean shouldWaitCompaction() {
@@ -39,10 +39,21 @@ public class NoopCompactManager extends CompactManager {
     public void addNewFile(DataFileMeta file) {}
 
     @Override
-    public void triggerCompaction() {}
+    public void triggerCompaction(boolean fullCompaction) {
+        Preconditions.checkArgument(
+                !fullCompaction,
+                "NoopCompactManager does not support user triggered compaction.\n"
+                        + "If you really need a guaranteed compaction, please set "
+                        + CoreOptions.WRITE_COMPACTION_SKIP.key()
+                        + " property of this table to false.");
+    }
 
     @Override
-    public Optional<CompactResult> getCompactionResult(boolean blocking) {
+    public Optional<CompactResult> getCompactionResult(boolean blocking)
+            throws ExecutionException, InterruptedException {
         return Optional.empty();
     }
+
+    @Override
+    public void cancelCompaction() {}
 }

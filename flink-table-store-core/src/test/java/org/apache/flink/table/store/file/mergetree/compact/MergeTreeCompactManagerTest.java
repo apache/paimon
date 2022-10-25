@@ -204,7 +204,7 @@ public class MergeTreeCompactManagerTest {
                         2,
                         Integer.MAX_VALUE,
                         testRewriter(expectedDropDelete));
-        manager.triggerCompaction();
+        manager.triggerCompaction(false);
         manager.getCompactionResult(true);
         List<LevelMinMax> outputs =
                 levels.allFiles().stream().map(LevelMinMax::new).collect(Collectors.toList());

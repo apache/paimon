@@ -25,7 +25,6 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.append.AppendOnlyCompactManager;
 import org.apache.flink.table.store.file.append.AppendOnlyWriter;
 import org.apache.flink.table.store.file.compact.CompactManager;
-import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.NoopCompactManager;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
@@ -38,12 +37,9 @@ import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.types.logical.RowType;
 
-import javax.annotation.Nullable;
-
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 
 import static org.apache.flink.table.store.file.io.DataFileMeta.getMaxSequenceNumber;
@@ -96,21 +92,6 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
         return createWriter(partition, bucket, Collections.emptyList(), compactExecutor);
     }
 
-    @Override
-    public Callable<CompactResult> createCompactWriter(
-            BinaryRowData partition, int bucket, @Nullable List<DataFileMeta> compactFiles) {
-        if (compactFiles == null) {
-            compactFiles = scanExistingFileMetas(partition, bucket);
-        }
-        return new AppendOnlyCompactManager.IterativeCompactTask(
-                compactFiles,
-                targetFileSize,
-                compactionMinFileNum,
-                compactionMaxFileNum,
-                compactRewriter(partition, bucket),
-                pathFactory.createDataFilePathFactory(partition, bucket));
-    }
-
     private RecordWriter<RowData> createWriter(
             BinaryRowData partition,
             int bucket,
@@ -120,19 +101,17 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
         // and make restore files mutable to update
         LinkedList<DataFileMeta> restored = new LinkedList<>(restoredFiles);
         DataFilePathFactory factory = pathFactory.createDataFilePathFactory(partition, bucket);
-        CompactManager compactManager;
-        if (skipCompaction) {
-            compactManager = new NoopCompactManager(compactExecutor);
-        } else {
-            compactManager =
-                    new AppendOnlyCompactManager(
-                            compactExecutor,
-                            restored,
-                            compactionMinFileNum,
-                            compactionMaxFileNum,
-                            targetFileSize,
-                            compactRewriter(partition, bucket));
-        }
+        CompactManager compactManager =
+                skipCompaction
+                        ? new NoopCompactManager()
+                        : new AppendOnlyCompactManager(
+                                compactExecutor,
+                                restored,
+                                compactionMinFileNum,
+                                compactionMaxFileNum,
+                                targetFileSize,
+                                compactRewriter(partition, bucket),
+                                factory);
         return new AppendOnlyWriter(
                 schemaId,
                 fileFormat,
