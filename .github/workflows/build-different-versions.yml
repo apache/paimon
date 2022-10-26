@@ -16,6 +16,9 @@ jobs:
       - name: Build Flink 1.15
         run: |
           ./mvnw clean install -Dmaven.test.skip=true
+      - name: Build Hive 3.1
+        run: |
+          ./mvnw clean install -Dmaven.test.skip=true -Phive-3.1 -f flink-table-store-hive
       - name: Build Hive 2.2
         run: |
           ./mvnw clean install -Dmaven.test.skip=true -Phive-2.2 -f flink-table-store-hive
