@@ -431,6 +431,7 @@ under the License.
                         <!--suppress MavenModelInspection -->
                         <test.randomization.seed>${test.randomization.seed}</test.randomization.seed>
                         <flink.version>${flink.version}</flink.version>
+                        <hive.main.version>${hive.main.version}</hive.main.version>
                     </systemPropertyVariables>
                     <argLine>-Xms256m -Xmx2048m -Dmvn.forkNumber=${surefire.forkNumber} -XX:+UseG1GC</argLine>
                 </configuration>
@@ -519,7 +520,7 @@ under the License.
                             <rules>
                                 <bannedDependencies>
                                     <excludes>
-                                        <exclude>com.fasterxml.jackson*:*:(,2.9.0]</exclude>
+                                        <exclude>com.fasterxml.jackson*:*:(,2.7.0]</exclude>
                                     </excludes>
                                 </bannedDependencies>
                             </rules>

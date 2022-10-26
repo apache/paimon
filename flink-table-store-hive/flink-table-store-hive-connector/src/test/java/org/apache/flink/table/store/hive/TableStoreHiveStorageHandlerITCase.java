@@ -874,7 +874,7 @@ public class TableStoreHiveStorageHandlerITCase {
                 GenericRowData.of(
                         375, /* 1971-01-11 */
                         TimestampData.fromLocalDateTime(
-                                LocalDateTime.of(2022, 5, 17, 17, 29, 20))));
+                                LocalDateTime.of(2022, 5, 17, 17, 29, 20, 100_000_000))));
         commit.commit("0", write.prepareCommit(true));
         write.write(GenericRowData.of(null, null));
         commit.commit("1", write.prepareCommit(true));
@@ -882,7 +882,8 @@ public class TableStoreHiveStorageHandlerITCase {
         write.write(
                 GenericRowData.of(
                         null,
-                        TimestampData.fromLocalDateTime(LocalDateTime.of(2022, 6, 18, 8, 30, 0))));
+                        TimestampData.fromLocalDateTime(
+                                LocalDateTime.of(2022, 6, 18, 8, 30, 0, 100_000_000))));
         commit.commit("2", write.prepareCommit(true));
         write.close();
 
@@ -894,18 +895,18 @@ public class TableStoreHiveStorageHandlerITCase {
                                 "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
                                 "LOCATION '" + path + "'")));
         Assert.assertEquals(
-                Collections.singletonList("1971-01-11\t2022-05-17 17:29:20.0"),
+                Collections.singletonList("1971-01-11\t2022-05-17 17:29:20.1"),
                 hiveShell.executeQuery("SELECT * FROM test_table WHERE dt = '1971-01-11'"));
         Assert.assertEquals(
-                Collections.singletonList("1971-01-11\t2022-05-17 17:29:20.0"),
+                Collections.singletonList("1971-01-11\t2022-05-17 17:29:20.1"),
                 hiveShell.executeQuery(
-                        "SELECT * FROM test_table WHERE ts = '2022-05-17 17:29:20'"));
+                        "SELECT * FROM test_table WHERE ts = '2022-05-17 17:29:20.1'"));
         Assert.assertEquals(
                 Collections.singletonList("1971-01-12\tNULL"),
                 hiveShell.executeQuery("SELECT * FROM test_table WHERE dt = '1971-01-12'"));
         Assert.assertEquals(
-                Collections.singletonList("NULL\t2022-06-18 08:30:00.0"),
+                Collections.singletonList("NULL\t2022-06-18 08:30:00.1"),
                 hiveShell.executeQuery(
-                        "SELECT * FROM test_table WHERE ts = '2022-06-18 08:30:00'"));
+                        "SELECT * FROM test_table WHERE ts = '2022-06-18 08:30:00.1'"));
     }
 }

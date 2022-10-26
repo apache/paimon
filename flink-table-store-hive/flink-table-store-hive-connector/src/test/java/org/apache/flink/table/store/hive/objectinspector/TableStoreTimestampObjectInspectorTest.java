@@ -24,6 +24,7 @@ import org.apache.hadoop.hive.serde2.io.TimestampWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
@@ -33,6 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests for {@link TableStoreTimestampObjectInspector}. */
 public class TableStoreTimestampObjectInspectorTest {
 
+    @DisabledIfSystemProperty(named = "hive.main.version", matches = "3")
     @Test
     public void testCategoryAndClass() {
         TableStoreTimestampObjectInspector oi = new TableStoreTimestampObjectInspector();
@@ -49,9 +51,9 @@ public class TableStoreTimestampObjectInspectorTest {
     public void testGetPrimitiveJavaObject() {
         TableStoreTimestampObjectInspector oi = new TableStoreTimestampObjectInspector();
 
-        LocalDateTime local = LocalDateTime.of(2022, 4, 27, 15, 0, 0);
+        LocalDateTime local = LocalDateTime.of(2022, 4, 27, 15, 0, 0, 100_000_000);
         TimestampData input = TimestampData.fromLocalDateTime(local);
-        assertThat(oi.getPrimitiveJavaObject(input).toString()).isEqualTo("2022-04-27 15:00:00.0");
+        assertThat(oi.getPrimitiveJavaObject(input).toString()).isEqualTo("2022-04-27 15:00:00.1");
         assertThat(oi.getPrimitiveJavaObject(null)).isNull();
     }
 
@@ -59,13 +61,14 @@ public class TableStoreTimestampObjectInspectorTest {
     public void testGetPrimitiveWritableObject() {
         TableStoreTimestampObjectInspector oi = new TableStoreTimestampObjectInspector();
 
-        LocalDateTime local = LocalDateTime.of(2022, 4, 27, 15, 0, 0);
+        LocalDateTime local = LocalDateTime.of(2022, 4, 27, 15, 0, 0, 100_000_000);
         TimestampData input = TimestampData.fromLocalDateTime(local);
         assertThat(oi.getPrimitiveWritableObject(input).getTimestamp().toString())
-                .isEqualTo("2022-04-27 15:00:00.0");
+                .isEqualTo("2022-04-27 15:00:00.1");
         assertThat(oi.getPrimitiveWritableObject(null)).isNull();
     }
 
+    @DisabledIfSystemProperty(named = "hive.main.version", matches = "3")
     @Test
     public void testCopyObject() {
         TableStoreTimestampObjectInspector oi = new TableStoreTimestampObjectInspector();
