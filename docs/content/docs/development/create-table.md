@@ -26,9 +26,17 @@ under the License.
 
 # Create Table
 
-## Catalog
+## Managed Table in Table Store Catalog
 
-Table Store uses its own catalog to manage all the databases and tables. Users need to configure the type `table-store` and a root directory `warehouse` to use it.
+If you need to manage tables uniformly according to the catalog and database.
+You can consider using the Table Store Catalog to create managed tables. In
+this case, creating tables will actually create file structures, and deleting
+tables will actually delete table data.
+
+### Catalog
+
+Table Store uses its own catalog to manage all the databases and tables. Users
+need to configure the type `table-store` and a root directory `warehouse` to use it.
 
 ```sql
 CREATE CATALOG my_catalog WITH (
@@ -46,7 +54,58 @@ Table Store catalog supports SQL DDL commands:
 - `SHOW DATABASES`
 - `SHOW TABLES`
 
-## Syntax
+### Create Managed Table
+
+```sql
+CREATE TABLE MyTable (
+   user_id BIGINT,
+   item_id BIGINT,
+   behavior STRING,
+   dt STRING,
+   PRIMARY KEY (dt, user_id) NOT ENFORCED
+) PARTITIONED BY (dt);
+```
+
+This will create a directory under `${warehouse}/${database_name}.db/${table_name}`.
+
+## Mapping Table in Generic Catalog
+
+If you do not want to create a Table Store Catalog, you only want to read and write
+a table separately. You can use the mapping table, which is a standard Flink connector
+table.
+
+The SQL `CREATE TABLE T (..) WITH ('connector'='table-store', 'path'='...')` will
+create a Table Store table in current catalog, the catalog should support generic
+Flink connector tables, the available catalogs are `GenericInMemoryCatalog` (by default)
+and `HiveCatalog`. The generic catalog only manages the mapping relationship between
+tables and underlying file structure in `path`, but does not really create and delete
+tables.
+
+- By default, the mapping table needs to be mapped to an actual underlying file structure
+  in FileSystem `path`. If the file structure in `path` does not exist, an exception will be thrown.
+- If you want to create the file structure automatically when reading or writing a table,
+  you can configure `auto-create` to `true`: `CREATE TABLE T (..) WITH ('connector'='table-store', 'path'='...', 'auto-create'='true')`.
+
+For example:
+
+```sql
+CREATE TABLE MyTable (
+   user_id BIGINT,
+   item_id BIGINT,
+   behavior STRING,
+   dt STRING,
+   PRIMARY KEY (dt, user_id) NOT ENFORCED
+) PARTITIONED BY (dt) WITH (
+  'connector'='table-store',
+  'path'='hdfs://nn:8020/my_table_path',
+  'auto-create'='true'
+);
+
+-- This will create a directory structure under path.
+INSERT INTO MyTable SELECT ...;
+```
+
+## Table Syntax
 
 ```sql
 CREATE TABLE [IF NOT EXISTS] [catalog_name.][db_name.]table_name
@@ -81,8 +140,6 @@ __Note:__
   including `UPDATE_BEFORE` records, even if you declare the primary key containing partition
   field, you can achieve the unique effect.
   {{< /hint >}}
-
-This will create a directory under `${warehouse}/${database_name}.db/${table_name}`.
 
 ## Table Options
 

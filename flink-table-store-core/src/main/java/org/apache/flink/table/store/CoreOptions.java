@@ -362,6 +362,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue("debezium-json")
                     .withDescription("Specify the message format of log system.");
 
+    public static final ConfigOption<Boolean> AUTO_CREATE =
+            ConfigOptions.key("auto-create")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to create underlying storage when reading and writing the table.");
+
     private final Configuration options;
 
     public CoreOptions(Map<String, String> options) {
