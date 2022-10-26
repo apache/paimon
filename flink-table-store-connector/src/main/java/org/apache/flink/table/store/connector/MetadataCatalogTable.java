@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.types.utils.TypeConversions;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -44,7 +44,9 @@ public class MetadataCatalogTable implements CatalogTable {
 
     @Override
     public Schema getUnresolvedSchema() {
-        return Schema.newBuilder().fromRowDataType(DataTypes.of(table.rowType())).build();
+        return Schema.newBuilder()
+                .fromRowDataType(TypeConversions.fromLogicalToDataType(table.rowType()))
+                .build();
     }
 
     @Override
