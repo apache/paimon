@@ -15,13 +15,13 @@ jobs:
           java-version: 1.8
       - name: Build Flink 1.15
         run: |
-          mvn clean install -Dmaven.test.skip=true
+          ./mvnw clean install -Dmaven.test.skip=true
       - name: Build Hive 2.2
         run: |
-          mvn clean install -Dmaven.test.skip=true -Phive-2.2 -f flink-table-store-hive
+          ./mvnw clean install -Dmaven.test.skip=true -Phive-2.2 -f flink-table-store-hive
       - name: Build Hive 2.1
         run: |
-          mvn clean install -Dmaven.test.skip=true -Phive-2.1 -f flink-table-store-hive
+          ./mvnw clean install -Dmaven.test.skip=true -Phive-2.1 -f flink-table-store-hive
       - name: Build Flink 1.14
         run: |
-          mvn clean install -Dmaven.test.skip=true -Pflink-1.14
+          ./mvnw clean install -Dmaven.test.skip=true -Pflink-1.14
