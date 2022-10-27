@@ -85,8 +85,12 @@ public class FileStoreSourceSplitGeneratorTest {
         assertThat(splits.size()).isEqualTo(12);
         splits.sort(
                 Comparator.comparingInt(
-                                o -> ((FileStoreSourceSplit) o).split().partition().getInt(0))
-                        .thenComparing(o -> ((FileStoreSourceSplit) o).split().bucket()));
+                                o ->
+                                        ((DataSplit) ((FileStoreSourceSplit) o).split())
+                                                .partition()
+                                                .getInt(0))
+                        .thenComparing(
+                                o -> ((DataSplit) ((FileStoreSourceSplit) o).split()).bucket()));
         assertSplit(splits.get(0), "0000000007", 1, 0, Arrays.asList("f0", "f1"));
         assertSplit(splits.get(1), "0000000008", 1, 1, Collections.singletonList("f2"));
         assertSplit(splits.get(2), "0000000003", 2, 0, Arrays.asList("f3", "f4", "f5"));
@@ -104,12 +108,13 @@ public class FileStoreSourceSplitGeneratorTest {
     private void assertSplit(
             FileStoreSourceSplit split, String splitId, int part, int bucket, List<String> files) {
         assertThat(split.splitId()).isEqualTo(splitId);
-        assertThat(split.split().partition().getInt(0)).isEqualTo(part);
-        assertThat(split.split().bucket()).isEqualTo(bucket);
+        assertThat(((DataSplit) split.split()).partition().getInt(0)).isEqualTo(part);
+        assertThat(((DataSplit) split.split()).bucket()).isEqualTo(bucket);
         assertThat(
-                        split.split().files().stream()
-                                .map(DataFileMeta::fileName)
-                                .collect(Collectors.toList()))
+                        ((DataSplit) split.split())
+                                .files().stream()
+                                        .map(DataFileMeta::fileName)
+                                        .collect(Collectors.toList()))
                 .isEqualTo(files);
     }
 

@@ -221,8 +221,16 @@ public class SparkReadITCase {
     @Test
     public void testCatalogNormal() {
         innerTestSimpleType(spark.table("tablestore.default.t1"));
-
         innerTestNestedType(spark.table("tablestore.default.t2"));
+    }
+
+    @Test
+    public void testMetadataTable() {
+        List<Row> rows =
+                spark.table("tablestore.default.`t1$snapshots`")
+                        .select("snapshot_id", "schema_id", "commit_user", "commit_kind")
+                        .collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[1,0,user,APPEND]]");
     }
 
     @Test

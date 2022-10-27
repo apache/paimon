@@ -24,14 +24,9 @@ import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.LookupTableSource;
-import org.apache.flink.table.connector.source.ScanTableSource;
 import org.apache.flink.table.connector.source.TableFunctionProvider;
-import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
-import org.apache.flink.table.connector.source.abilities.SupportsLimitPushDown;
-import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsWatermarkPushDown;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
@@ -40,8 +35,6 @@ import org.apache.flink.table.store.connector.FlinkConnectorOptions;
 import org.apache.flink.table.store.connector.TableStoreDataStreamScanProvider;
 import org.apache.flink.table.store.connector.lookup.FileStoreLookupFunction;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.file.predicate.PredicateConverter;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.store.table.AppendOnlyFileStoreTable;
@@ -49,12 +42,9 @@ import org.apache.flink.table.store.table.ChangelogValueCountFileStoreTable;
 import org.apache.flink.table.store.table.ChangelogWithKeyFileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.utils.Projection;
-import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.stream.IntStream;
 
 import static org.apache.flink.table.store.CoreOptions.CHANGELOG_PRODUCER;
@@ -68,23 +58,14 @@ import static org.apache.flink.table.store.CoreOptions.LOG_SCAN_REMOVE_NORMALIZE
  * org.apache.flink.connector.base.source.hybrid.HybridSource} of {@link FileStoreSource} and kafka
  * log source created by {@link LogSourceProvider}.
  */
-public class TableStoreSource
-        implements ScanTableSource,
-                LookupTableSource,
-                SupportsFilterPushDown,
-                SupportsProjectionPushDown,
-                SupportsLimitPushDown,
-                SupportsWatermarkPushDown {
+public class TableStoreSource extends FlinkTableSource
+        implements LookupTableSource, SupportsWatermarkPushDown {
 
     private final ObjectIdentifier tableIdentifier;
     private final FileStoreTable table;
     private final boolean streaming;
     private final DynamicTableFactory.Context context;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
-
-    @Nullable private Predicate predicate;
-    @Nullable private int[][] projectFields;
-    @Nullable private Long limit;
 
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
 
@@ -116,6 +97,7 @@ public class TableStoreSource
             @Nullable int[][] projectFields,
             @Nullable Long limit,
             @Nullable WatermarkStrategy<RowData> watermarkStrategy) {
+        super(table, predicate, projectFields, limit);
         this.tableIdentifier = tableIdentifier;
         this.table = table;
         this.streaming = streaming;
@@ -158,7 +140,9 @@ public class TableStoreSource
                     : ChangelogMode.upsert();
         } else {
             throw new UnsupportedOperationException(
-                    "Unknown FileStoreTable subclass " + table.getClass().getName());
+                    "Unsupported Table subclass "
+                            + table.getClass().getName()
+                            + " for streaming mode.");
         }
     }
 
@@ -202,38 +186,12 @@ public class TableStoreSource
 
     @Override
     public String asSummaryString() {
-        return "TableStoreSource";
-    }
-
-    @Override
-    public Result applyFilters(List<ResolvedExpression> filters) {
-        List<Predicate> converted = new ArrayList<>();
-        RowType rowType = table.schema().logicalRowType();
-        for (ResolvedExpression filter : filters) {
-            PredicateConverter.convert(rowType, filter).ifPresent(converted::add);
-        }
-        predicate = converted.isEmpty() ? null : PredicateBuilder.and(converted);
-        return Result.of(filters, filters);
-    }
-
-    @Override
-    public boolean supportsNestedProjection() {
-        return false;
-    }
-
-    @Override
-    public void applyProjection(int[][] projectedFields) {
-        this.projectFields = projectedFields;
+        return "TableStore-DataSource";
     }
 
     @Override
     public void applyWatermark(WatermarkStrategy<RowData> watermarkStrategy) {
         this.watermarkStrategy = watermarkStrategy;
-    }
-
-    @Override
-    public void applyLimit(long limit) {
-        this.limit = limit;
     }
 
     @Override

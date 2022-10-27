@@ -204,7 +204,8 @@ public class TableStoreManagedFactoryTest {
         context = createEnrichedContext(TABLE_IDENTIFIER, catalogTable);
         if (expectedResult.success) {
             tableStoreManagedFactory.onCreateTable(context, false);
-            FileStoreTable table = AbstractTableStoreFactory.buildFileStoreTable(context);
+            FileStoreTable table =
+                    (FileStoreTable) AbstractTableStoreFactory.buildFileStoreTable(context);
             assertThat(table.schema().partitionKeys().size() > 0)
                     .isEqualTo(catalogTable.isPartitioned());
             assertThat(table.schema().primaryKeys().size())
