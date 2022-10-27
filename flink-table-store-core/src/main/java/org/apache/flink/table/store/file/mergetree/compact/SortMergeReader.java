@@ -38,22 +38,22 @@ import java.util.PriorityQueue;
  *
  * <p>NOTE: {@link KeyValue}s from the same {@link RecordReader} must not contain the same key.
  */
-public class SortMergeReader implements RecordReader<KeyValue> {
+public class SortMergeReader<T> implements RecordReader<T> {
 
     private final List<RecordReader<KeyValue>> nextBatchReaders;
     private final Comparator<RowData> userKeyComparator;
-    private final MergeFunctionWrapper<KeyValue> mergeFunctionWrapper;
+    private final MergeFunctionWrapper<T> mergeFunctionWrapper;
 
     private final PriorityQueue<Element> minHeap;
     private final List<Element> polled;
 
-    protected SortMergeReader(
+    public SortMergeReader(
             List<RecordReader<KeyValue>> readers,
             Comparator<RowData> userKeyComparator,
-            MergeFunction<KeyValue> mergeFunction) {
+            MergeFunctionWrapper<T> mergeFunctionWrapper) {
         this.nextBatchReaders = new ArrayList<>(readers);
         this.userKeyComparator = userKeyComparator;
-        this.mergeFunctionWrapper = new ReducerMergeFunctionWrapper(mergeFunction);
+        this.mergeFunctionWrapper = mergeFunctionWrapper;
 
         this.minHeap =
                 new PriorityQueue<>(
@@ -67,18 +67,9 @@ public class SortMergeReader implements RecordReader<KeyValue> {
         this.polled = new ArrayList<>();
     }
 
-    public static RecordReader<KeyValue> create(
-            List<RecordReader<KeyValue>> readers,
-            Comparator<RowData> userKeyComparator,
-            MergeFunction<KeyValue> mergeFunction) {
-        return readers.size() == 1
-                ? readers.get(0)
-                : new SortMergeReader(readers, userKeyComparator, mergeFunction);
-    }
-
     @Nullable
     @Override
-    public RecordIterator<KeyValue> readBatch() throws IOException {
+    public RecordIterator<T> readBatch() throws IOException {
         for (RecordReader<KeyValue> reader : nextBatchReaders) {
             while (true) {
                 RecordIterator<KeyValue> iterator = reader.readBatch();
@@ -119,18 +110,18 @@ public class SortMergeReader implements RecordReader<KeyValue> {
     }
 
     /** The iterator iterates on {@link SortMergeReader}. */
-    private class SortMergeIterator implements RecordIterator<KeyValue> {
+    private class SortMergeIterator implements RecordIterator<T> {
 
         private boolean released = false;
 
         @Override
-        public KeyValue next() throws IOException {
+        public T next() throws IOException {
             while (true) {
                 boolean hasMore = nextImpl();
                 if (!hasMore) {
                     return null;
                 }
-                KeyValue result = mergeFunctionWrapper.getResult();
+                T result = mergeFunctionWrapper.getResult();
                 if (result != null) {
                     return result;
                 }

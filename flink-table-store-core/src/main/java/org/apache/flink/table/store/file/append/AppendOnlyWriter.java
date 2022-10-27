@@ -53,6 +53,7 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     private final DataFilePathFactory pathFactory;
     private final CompactManager compactManager;
     private final boolean forceCompact;
+    private final List<DataFileMeta> newFiles;
     private final List<DataFileMeta> compactBefore;
     private final List<DataFileMeta> compactAfter;
     private final LongCounter seqNumCounter;
@@ -75,9 +76,11 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
         this.pathFactory = pathFactory;
         this.compactManager = compactManager;
         this.forceCompact = forceCompact;
+        this.newFiles = new ArrayList<>();
         this.compactBefore = new ArrayList<>();
         this.compactAfter = new ArrayList<>();
         this.seqNumCounter = new LongCounter(maxSequenceNumber + 1);
+
         this.writer = createRollingRowWriter();
     }
 
@@ -92,29 +95,33 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
 
     @Override
     public void fullCompaction() throws Exception {
-        submitCompaction(true);
+        flushWriter(true);
     }
 
     @Override
     public CommitIncrement prepareCommit(boolean endOnfInput) throws Exception {
-        List<DataFileMeta> newFiles = new ArrayList<>();
+        flushWriter(false);
+        boolean blocking = endOnfInput || forceCompact;
+        trySyncLatestCompaction(blocking);
+        return drainIncrement();
+    }
+
+    private void flushWriter(boolean forcedFullCompaction) throws Exception {
+        List<DataFileMeta> flushedFiles = new ArrayList<>();
         if (writer != null) {
             writer.close();
-            newFiles.addAll(writer.result());
+            flushedFiles.addAll(writer.result());
 
             // Reopen the writer to accept further records.
             seqNumCounter.resetLocal();
-            seqNumCounter.add(getMaxSequenceNumber(newFiles) + 1);
+            seqNumCounter.add(getMaxSequenceNumber(flushedFiles) + 1);
             writer = createRollingRowWriter();
         }
+
         // add new generated files
-        newFiles.forEach(compactManager::addNewFile);
-        submitCompaction(false);
-
-        boolean blocking = endOnfInput || forceCompact;
-        trySyncLatestCompaction(blocking);
-
-        return drainIncrement(newFiles);
+        flushedFiles.forEach(compactManager::addNewFile);
+        submitCompaction(forcedFullCompaction);
+        newFiles.addAll(flushedFiles);
     }
 
     @Override
@@ -156,15 +163,16 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
                         });
     }
 
-    private CommitIncrement drainIncrement(List<DataFileMeta> newFiles) {
+    private CommitIncrement drainIncrement() {
         NewFilesIncrement newFilesIncrement =
-                new NewFilesIncrement(newFiles, Collections.emptyList());
+                new NewFilesIncrement(new ArrayList<>(newFiles), Collections.emptyList());
         CompactIncrement compactIncrement =
                 new CompactIncrement(
                         new ArrayList<>(compactBefore),
                         new ArrayList<>(compactAfter),
                         Collections.emptyList());
 
+        newFiles.clear();
         compactBefore.clear();
         compactAfter.clear();
 

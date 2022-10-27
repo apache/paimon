@@ -37,7 +37,6 @@ import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -63,9 +62,10 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     private final ChangelogProducer changelogProducer;
 
     private final LinkedHashSet<DataFileMeta> newFiles;
+    private final LinkedHashSet<DataFileMeta> newFilesChangelog;
     private final LinkedHashMap<String, DataFileMeta> compactBefore;
     private final LinkedHashSet<DataFileMeta> compactAfter;
-    private final LinkedHashSet<DataFileMeta> changelogFiles;
+    private final LinkedHashSet<DataFileMeta> compactChangelog;
 
     private long newSequenceNumber;
     private WriteBuffer writeBuffer;
@@ -95,9 +95,10 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.changelogProducer = changelogProducer;
 
         this.newFiles = new LinkedHashSet<>();
+        this.newFilesChangelog = new LinkedHashSet<>();
         this.compactBefore = new LinkedHashMap<>();
         this.compactAfter = new LinkedHashSet<>();
-        this.changelogFiles = new LinkedHashSet<>();
+        this.compactChangelog = new LinkedHashSet<>();
     }
 
     private long newSequenceNumber() {
@@ -129,7 +130,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                         : kv.sequenceNumber();
         boolean success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
         if (!success) {
-            flushWriteBuffer();
+            flushWriteBuffer(false);
             success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
             if (!success) {
                 throw new RuntimeException("Mem table is too small to hold a single element.");
@@ -139,7 +140,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public void fullCompaction() throws Exception {
-        submitCompaction(true);
+        flushWriteBuffer(true);
     }
 
     @Override
@@ -151,11 +152,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     public void flushMemory() throws Exception {
         boolean success = writeBuffer.flushMemory();
         if (!success) {
-            flushWriteBuffer();
+            flushWriteBuffer(false);
         }
     }
 
-    private void flushWriteBuffer() throws Exception {
+    private void flushWriteBuffer(boolean forcedFullCompaction) throws Exception {
         if (writeBuffer.size() > 0) {
             if (compactManager.shouldWaitCompaction()) {
                 // stop writing, wait for compaction finished
@@ -183,7 +184,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             }
 
             if (changelogWriter != null) {
-                changelogFiles.addAll(changelogWriter.result());
+                newFilesChangelog.addAll(changelogWriter.result());
             }
 
             for (DataFileMeta fileMeta : dataWriter.result()) {
@@ -192,13 +193,13 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             }
 
             writeBuffer.clear();
-            submitCompaction(false);
         }
+        submitCompaction(forcedFullCompaction);
     }
 
     @Override
     public CommitIncrement prepareCommit(boolean endOfInput) throws Exception {
-        flushWriteBuffer();
+        flushWriteBuffer(false);
         boolean blocking = endOfInput || commitForceCompact;
         trySyncLatestCompaction(blocking);
         return drainIncrement();
@@ -211,17 +212,19 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private CommitIncrement drainIncrement() {
         NewFilesIncrement newFilesIncrement =
-                new NewFilesIncrement(new ArrayList<>(newFiles), new ArrayList<>(changelogFiles));
+                new NewFilesIncrement(
+                        new ArrayList<>(newFiles), new ArrayList<>(newFilesChangelog));
         CompactIncrement compactIncrement =
                 new CompactIncrement(
                         new ArrayList<>(compactBefore.values()),
                         new ArrayList<>(compactAfter),
-                        Collections.emptyList());
+                        new ArrayList<>(compactChangelog));
 
         newFiles.clear();
+        newFilesChangelog.clear();
         compactBefore.clear();
         compactAfter.clear();
-        changelogFiles.clear();
+        compactChangelog.clear();
 
         return new CommitIncrement() {
             @Override
@@ -255,6 +258,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             }
         }
         compactAfter.addAll(result.after());
+        compactChangelog.addAll(result.changelog());
     }
 
     private void submitCompaction(boolean forcedFullCompaction) throws Exception {
@@ -275,6 +279,13 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
         // delete temporary files
         List<DataFileMeta> delete = new ArrayList<>(newFiles);
+        newFiles.clear();
+
+        for (DataFileMeta file : newFilesChangelog) {
+            writerFactory.deleteFile(file.fileName());
+        }
+        newFilesChangelog.clear();
+
         for (DataFileMeta file : compactAfter) {
             // upgrade file is required by previous snapshot, so we should ensure that this file is
             // not the output of upgraded.
@@ -282,14 +293,16 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 delete.add(file);
             }
         }
+
+        compactAfter.clear();
+
+        for (DataFileMeta file : compactChangelog) {
+            writerFactory.deleteFile(file.fileName());
+        }
+        compactChangelog.clear();
+
         for (DataFileMeta file : delete) {
             writerFactory.deleteFile(file.fileName());
         }
-        newFiles.clear();
-        compactAfter.clear();
-        for (DataFileMeta file : changelogFiles) {
-            writerFactory.deleteFile(file.fileName());
-        }
-        changelogFiles.clear();
     }
 }

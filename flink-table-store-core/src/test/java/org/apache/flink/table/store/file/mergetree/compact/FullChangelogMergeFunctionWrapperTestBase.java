@@ -126,12 +126,12 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
         private static final List<KeyValue> EXPECTED_RESULT =
                 Arrays.asList(
                         new KeyValue().replace(row(1), 1, RowKind.INSERT, row(1)),
-                        new KeyValue().replace(row(2), 2, RowKind.DELETE, row(0)),
+                        null,
                         new KeyValue().replace(row(3), 3, RowKind.INSERT, row(3)),
                         new KeyValue().replace(row(4), 5, RowKind.INSERT, row(-3)),
-                        new KeyValue().replace(row(5), 7, RowKind.DELETE, row(3)),
+                        null,
                         new KeyValue().replace(row(6), 9, RowKind.INSERT, row(-3)),
-                        new KeyValue().replace(row(7), 11, RowKind.DELETE, row(3)));
+                        null);
 
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {

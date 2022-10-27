@@ -22,11 +22,14 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
-import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
+import org.apache.flink.table.store.file.mergetree.DropDeleteReader;
+import org.apache.flink.table.store.file.mergetree.MergeTreeReaders;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionWrapper;
+import org.apache.flink.table.store.file.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -118,7 +121,16 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                 pkFilters.add(sub);
             }
         }
-        // for section which does not have key range overlap, push down value filters too
+        // Consider this case:
+        // Denote (seqNumber, key, value) as a record. We have two overlapping runs in a section:
+        //   * First run: (1, k1, 100), (2, k2, 200)
+        //   * Second run: (3, k1, 10), (4, k2, 20)
+        // If we push down filter "value >= 100" for this section, only the first run will be read,
+        // and the second run is lost. This will produce incorrect results.
+        //
+        // So for sections with overlapping runs, we only push down key filters.
+        // For sections with only one run, as each key only appears once, it is OK to push down
+        // value filters.
         filtersForNonOverlappedSection = allFilters;
         filtersForOverlappedSection = valueCountMode ? allFilters : pkFilters;
         return this;
@@ -143,39 +155,41 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             }
             return ConcatRecordReader.create(suppliers);
         } else {
-            // in this case merge tree should merge records with same key
-            // Do not project key in MergeTreeReader.
-            MergeTreeReader reader = new MergeTreeReader(true, createSectionReaders(split));
+            // Sections are read by SortMergeReader, which sorts and merges records by keys.
+            // So we cannot project keys or else the sorting will be incorrect.
+            KeyValueFileReaderFactory overlappedSectionFactory =
+                    readerFactoryBuilder.build(
+                            split.partition(), split.bucket(), false, filtersForOverlappedSection);
+            KeyValueFileReaderFactory nonOverlappedSectionFactory =
+                    readerFactoryBuilder.build(
+                            split.partition(),
+                            split.bucket(),
+                            false,
+                            filtersForNonOverlappedSection);
 
-            // project key using ProjectKeyRecordReader
+            List<ConcatRecordReader.ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
+            MergeFunctionWrapper<KeyValue> mergeFuncWrapper =
+                    new ReducerMergeFunctionWrapper(mergeFunction.copy());
+            for (List<SortedRun> section :
+                    new IntervalPartition(split.files(), keyComparator).partition()) {
+                sectionReaders.add(
+                        () ->
+                                MergeTreeReaders.readerForSection(
+                                        section,
+                                        section.size() > 1
+                                                ? overlappedSectionFactory
+                                                : nonOverlappedSectionFactory,
+                                        keyComparator,
+                                        mergeFuncWrapper));
+            }
+            DropDeleteReader reader =
+                    new DropDeleteReader(ConcatRecordReader.create(sectionReaders));
+
+            // Project results from SortMergeReader using ProjectKeyRecordReader.
             return keyProjectedFields == null
                     ? reader
                     : new ProjectKeyRecordReader(reader, keyProjectedFields);
         }
-    }
-
-    private List<ConcatRecordReader.ReaderSupplier<KeyValue>> createSectionReaders(
-            DataSplit split) {
-        List<ConcatRecordReader.ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
-        MergeFunction<KeyValue> mergeFunc = mergeFunction.copy();
-        for (List<SortedRun> section :
-                new IntervalPartition(split.files(), keyComparator).partition()) {
-            KeyValueFileReaderFactory readerFactory =
-                    createReaderFactory(split, section.size() > 1);
-            sectionReaders.add(
-                    () ->
-                            MergeTreeReader.readerForSection(
-                                    section, readerFactory, keyComparator, mergeFunc));
-        }
-        return sectionReaders;
-    }
-
-    private KeyValueFileReaderFactory createReaderFactory(DataSplit split, boolean overlapped) {
-        return readerFactoryBuilder.build(
-                split.partition(),
-                split.bucket(),
-                false,
-                overlapped ? filtersForOverlappedSection : filtersForNonOverlappedSection);
     }
 
     private Optional<String> changelogFile(DataFileMeta fileMeta) {

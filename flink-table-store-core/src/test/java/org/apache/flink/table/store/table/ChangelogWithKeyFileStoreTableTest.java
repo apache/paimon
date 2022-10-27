@@ -167,7 +167,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
-    public void testStreamingChangelog() throws Exception {
+    public void testStreamingInputChangelog() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
@@ -196,6 +196,85 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                         "+U 1|20|201|binary|varbinary",
                         "-U 1|10|101|binary|varbinary",
                         "+U 1|10|102|binary|varbinary");
+    }
+
+    @Test
+    public void testStreamingFullChangelog() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf ->
+                                conf.set(
+                                        CoreOptions.CHANGELOG_PRODUCER,
+                                        ChangelogProducer.FULL_COMPACTION));
+        TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
+
+        write.write(rowData(1, 10, 110L));
+        write.write(rowData(1, 20, 120L));
+        write.write(rowData(2, 10, 210L));
+        write.write(rowData(2, 20, 220L));
+        write.write(rowDataWithKind(RowKind.DELETE, 2, 10, 210L));
+        write.compact(binaryRow(1), 0);
+        write.compact(binaryRow(2), 0);
+        commit.commit("0", write.prepareCommit(true));
+
+        List<Split> splits = table.newScan().withIncremental(true).plan().splits();
+        TableRead read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
+                .containsExactlyInAnyOrder(
+                        "+I 1|10|110|binary|varbinary", "+I 1|20|120|binary|varbinary");
+        assertThat(getResult(read, splits, binaryRow(2), 0, CHANGELOG_ROW_TO_STRING))
+                .containsExactlyInAnyOrder("+I 2|20|220|binary|varbinary");
+
+        write.write(rowData(1, 30, 130L));
+        write.write(rowData(1, 40, 140L));
+        write.write(rowData(2, 30, 230L));
+        write.write(rowData(2, 40, 240L));
+        commit.commit("1", write.prepareCommit(true));
+
+        write.write(rowDataWithKind(RowKind.DELETE, 1, 40, 140L));
+        write.write(rowData(2, 40, 241L));
+        write.compact(binaryRow(1), 0);
+        write.compact(binaryRow(2), 0);
+        commit.commit("2", write.prepareCommit(true));
+
+        splits = table.newScan().withIncremental(true).plan().splits();
+        assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
+                .containsExactlyInAnyOrder("+I 1|30|130|binary|varbinary");
+        assertThat(getResult(read, splits, binaryRow(2), 0, CHANGELOG_ROW_TO_STRING))
+                .containsExactlyInAnyOrder(
+                        "+I 2|30|230|binary|varbinary", "+I 2|40|241|binary|varbinary");
+
+        write.write(rowData(1, 20, 121L));
+        write.write(rowData(1, 30, 131L));
+        write.write(rowData(2, 30, 231L));
+        commit.commit("3", write.prepareCommit(true));
+
+        write.write(rowDataWithKind(RowKind.DELETE, 1, 20, 121L));
+        write.write(rowData(1, 30, 132L));
+        write.write(rowData(1, 40, 141L));
+        write.write(rowDataWithKind(RowKind.DELETE, 2, 20, 220L));
+        write.write(rowData(2, 20, 221L));
+        write.write(rowDataWithKind(RowKind.DELETE, 2, 20, 221L));
+        write.write(rowData(2, 40, 242L));
+        write.compact(binaryRow(1), 0);
+        write.compact(binaryRow(2), 0);
+        commit.commit("4", write.prepareCommit(true));
+
+        splits = table.newScan().withIncremental(true).plan().splits();
+        assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
+                .containsExactlyInAnyOrder(
+                        "-D 1|20|120|binary|varbinary",
+                        "-U 1|30|130|binary|varbinary",
+                        "+U 1|30|132|binary|varbinary",
+                        "+I 1|40|141|binary|varbinary");
+        assertThat(getResult(read, splits, binaryRow(2), 0, CHANGELOG_ROW_TO_STRING))
+                .containsExactlyInAnyOrder(
+                        "-D 2|20|220|binary|varbinary",
+                        "-U 2|30|230|binary|varbinary",
+                        "+U 2|30|231|binary|varbinary",
+                        "-U 2|40|241|binary|varbinary",
+                        "+U 2|40|242|binary|varbinary");
     }
 
     @Test

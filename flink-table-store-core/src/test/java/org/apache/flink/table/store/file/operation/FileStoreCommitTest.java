@@ -92,14 +92,28 @@ public class FileStoreCommitTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"false,NONE", "false,INPUT", "true,NONE", "true,INPUT"})
+    @CsvSource({
+        "false,NONE",
+        "false,INPUT",
+        "true,NONE",
+        "true,INPUT",
+        "false,FULL_COMPACTION",
+        "true,FULL_COMPACTION"
+    })
     public void testSingleCommitUser(boolean failing, String changelogProducer) throws Exception {
         testRandomConcurrentNoConflict(
                 1, failing, CoreOptions.ChangelogProducer.valueOf(changelogProducer));
     }
 
     @ParameterizedTest
-    @CsvSource({"false,NONE", "false,INPUT", "true,NONE", "true,INPUT"})
+    @CsvSource({
+        "false,NONE",
+        "false,INPUT",
+        "true,NONE",
+        "true,INPUT",
+        "false,FULL_COMPACTION",
+        "true,FULL_COMPACTION"
+    })
     public void testManyCommitUsersNoConflict(boolean failing, String changelogProducer)
             throws Exception {
         testRandomConcurrentNoConflict(
@@ -109,7 +123,14 @@ public class FileStoreCommitTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"false,NONE", "false,INPUT", "true,NONE", "true,INPUT"})
+    @CsvSource({
+        "false,NONE",
+        "false,INPUT",
+        "true,NONE",
+        "true,INPUT",
+        "false,FULL_COMPACTION",
+        "true,FULL_COMPACTION"
+    })
     public void testManyCommitUsersWithConflict(boolean failing, String changelogProducer)
             throws Exception {
         testRandomConcurrentWithConflict(
@@ -256,6 +277,45 @@ public class FileStoreCommitTest {
             Map<BinaryRowData, BinaryRowData> actualChangelogMap = store.toKvMap(actualChangelog);
             logData(() -> kvMapToKvList(actualChangelogMap), "actual changelog map");
             assertThat(actualChangelogMap).isEqualTo(expected);
+
+            if (changelogProducer == CoreOptions.ChangelogProducer.FULL_COMPACTION) {
+                validateFullChangelog(actualChangelog);
+            }
+        }
+    }
+
+    private void validateFullChangelog(List<KeyValue> changelog) {
+        Map<BinaryRowData, KeyValue> kvMap = new HashMap<>();
+        Map<BinaryRowData, RowKind> kindMap = new HashMap<>();
+        for (KeyValue kv : changelog) {
+            BinaryRowData key = TestKeyValueGenerator.KEY_SERIALIZER.toBinaryRow(kv.key()).copy();
+            switch (kv.valueKind()) {
+                case INSERT:
+                    assertThat(kvMap).doesNotContainKey(key);
+                    if (kindMap.containsKey(key)) {
+                        assertThat(kindMap.get(key)).isEqualTo(RowKind.DELETE);
+                    }
+                    kvMap.put(key, kv);
+                    kindMap.put(key, RowKind.INSERT);
+                    break;
+                case UPDATE_AFTER:
+                    assertThat(kvMap).doesNotContainKey(key);
+                    assertThat(kindMap.get(key)).isEqualTo(RowKind.UPDATE_BEFORE);
+                    kvMap.put(key, kv);
+                    kindMap.put(key, RowKind.UPDATE_AFTER);
+                    break;
+                case UPDATE_BEFORE:
+                case DELETE:
+                    assertThat(kvMap).containsKey(key);
+                    assertThat(kv.value()).isEqualTo(kvMap.get(key).value());
+                    assertThat(kindMap.get(key)).isIn(RowKind.INSERT, RowKind.UPDATE_AFTER);
+                    kvMap.remove(key);
+                    kindMap.put(key, kv.valueKind());
+                    break;
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unknown value kind " + kv.valueKind().name());
+            }
         }
     }
 

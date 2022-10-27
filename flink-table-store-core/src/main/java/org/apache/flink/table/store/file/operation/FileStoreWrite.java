@@ -55,7 +55,8 @@ public interface FileStoreWrite<T> {
     void write(BinaryRowData partition, int bucket, T data) throws Exception;
 
     /**
-     * Compact data stored in given partition and bucket.
+     * Compact data stored in given partition and bucket. Note that compaction process is only
+     * submitted and may not be completed when the method returns.
      *
      * @param partition the partition to compact
      * @param bucket the bucket to compact

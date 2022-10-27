@@ -27,18 +27,17 @@ import org.apache.flink.table.store.file.compact.NoopCompactManager;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
 import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
-import org.apache.flink.table.store.file.io.RollingFileWriter;
 import org.apache.flink.table.store.file.mergetree.Levels;
-import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
 import org.apache.flink.table.store.file.mergetree.compact.CompactRewriter;
 import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
+import org.apache.flink.table.store.file.mergetree.compact.FullChangelogMergeTreeCompactRewriter;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManager;
+import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactRewriter;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.RowType;
@@ -148,7 +147,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             return new NoopCompactManager();
         } else {
             Comparator<RowData> keyComparator = keyComparatorSupplier.get();
-            CompactRewriter rewriter = compactRewriter(partition, bucket, keyComparator);
+            CompactRewriter rewriter = createRewriter(partition, bucket, keyComparator);
             return new MergeTreeCompactManager(
                     compactExecutor,
                     levels,
@@ -160,22 +159,21 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         }
     }
 
-    private CompactRewriter compactRewriter(
+    private MergeTreeCompactRewriter createRewriter(
             BinaryRowData partition, int bucket, Comparator<RowData> keyComparator) {
+        KeyValueFileReaderFactory readerFactory = readerFactoryBuilder.build(partition, bucket);
         KeyValueFileWriterFactory writerFactory = writerFactoryBuilder.build(partition, bucket);
-        return (outputLevel, dropDelete, sections) -> {
-            RollingFileWriter<KeyValue, DataFileMeta> writer =
-                    writerFactory.createRollingMergeTreeFileWriter(outputLevel);
-            writer.write(
-                    new RecordReaderIterator<>(
-                            new MergeTreeReader(
-                                    sections,
-                                    dropDelete,
-                                    readerFactoryBuilder.build(partition, bucket),
-                                    keyComparator,
-                                    mergeFunction.copy())));
-            writer.close();
-            return writer.result();
-        };
+
+        if (options.changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION) {
+            return new FullChangelogMergeTreeCompactRewriter(
+                    options.numLevels() - 1,
+                    readerFactory,
+                    writerFactory,
+                    keyComparator,
+                    mergeFunction);
+        } else {
+            return new MergeTreeCompactRewriter(
+                    readerFactory, writerFactory, keyComparator, mergeFunction);
+        }
     }
 }
