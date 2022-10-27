@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.api.common.JobID;
-import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.runtime.jobgraph.SavepointConfigOptions;
@@ -154,7 +153,7 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
     private void stopJobSafely(ClusterClient<?> client, JobID jobId)
             throws ExecutionException, InterruptedException {
         client.stopWithSavepoint(jobId, true, path, SavepointFormatType.DEFAULT);
-        while (client.getJobStatus(jobId).get() == JobStatus.RUNNING) {
+        while (!client.getJobStatus(jobId).get().isGloballyTerminalState()) {
             Thread.sleep(2000L);
         }
     }
