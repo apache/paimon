@@ -99,5 +99,8 @@ public class SparkInternalRowTest {
                         + "\"decimal3\":62123123.5"
                         + "}";
         assertThat(sparkRow.json()).isEqualTo(expected);
+
+        SparkRowData sparkRowData = new SparkRowData(ALL_TYPES, sparkRow);
+        assertThat(flinkConverter.toExternal(sparkRowData)).isEqualTo(row);
     }
 }
