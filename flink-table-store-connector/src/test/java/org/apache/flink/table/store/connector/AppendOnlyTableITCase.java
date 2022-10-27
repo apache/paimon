@@ -196,10 +196,17 @@ public class AppendOnlyTableITCase extends FileStoreTableITCase {
         testRejectChanges(RowKind.UPDATE_BEFORE);
     }
 
+    @Test
+    public void testComplexType() {
+        batchSql("INSERT INTO complex_table VALUES (1, CAST(NULL AS MAP<INT, INT>))");
+        assertThat(batchSql("SELECT * FROM complex_table")).containsExactly(Row.of(1, null));
+    }
+
     @Override
     protected List<String> ddl() {
-        return Collections.singletonList(
-                "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('write-mode'='append-only')");
+        return Arrays.asList(
+                "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('write-mode'='append-only')",
+                "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>) WITH ('write-mode'='append-only')");
     }
 
     private void testRejectChanges(RowKind kind) {

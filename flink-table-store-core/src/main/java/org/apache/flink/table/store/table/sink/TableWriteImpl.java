@@ -33,12 +33,12 @@ import java.util.List;
 public class TableWriteImpl<T> implements TableWrite {
 
     private final FileStoreWrite<T> write;
-    private final SinkRecordConverter recordConverter;
+    private final RecordConverter recordConverter;
     private final RecordExtractor<T> recordExtractor;
 
     public TableWriteImpl(
             FileStoreWrite<T> write,
-            SinkRecordConverter recordConverter,
+            RecordConverter recordConverter,
             RecordExtractor<T> recordExtractor) {
         this.write = write;
         this.recordConverter = recordConverter;
@@ -58,7 +58,7 @@ public class TableWriteImpl<T> implements TableWrite {
     }
 
     @Override
-    public SinkRecordConverter recordConverter() {
+    public RecordConverter recordConverter() {
         return recordConverter;
     }
 

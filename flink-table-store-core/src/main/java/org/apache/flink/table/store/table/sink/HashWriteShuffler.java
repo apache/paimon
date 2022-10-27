@@ -18,29 +18,29 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.schema.TableSchema;
 
-import java.util.List;
+/** A {@link WriteShuffler} to generate downstream channel from hash bucket mode. */
+public class HashWriteShuffler implements WriteShuffler {
 
-/**
- * An abstraction layer above {@link org.apache.flink.table.store.file.operation.FileStoreWrite} to
- * provide {@link RowData} writing.
- */
-public interface TableWrite {
+    private final TableSchema tableSchema;
 
-    TableWrite withOverwrite(boolean overwrite);
+    private transient int numberOfChannels;
+    private transient HashBucketComputer bucketComputer;
 
-    TableWrite withIOManager(IOManager ioManager);
+    public HashWriteShuffler(TableSchema tableSchema) {
+        this.tableSchema = tableSchema;
+    }
 
-    RecordConverter recordConverter();
+    @Override
+    public void setup(int numberOfChannels) {
+        this.numberOfChannels = numberOfChannels;
+        this.bucketComputer = new HashBucketComputer(tableSchema);
+    }
 
-    SinkRecord write(RowData rowData) throws Exception;
-
-    void compact(BinaryRowData partition, int bucket) throws Exception;
-
-    List<FileCommittable> prepareCommit(boolean endOfInput) throws Exception;
-
-    void close() throws Exception;
+    @Override
+    public int shuffle(RowData row) {
+        return bucketComputer.bucket(row) % numberOfChannels;
+    }
 }

@@ -18,22 +18,25 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.WriteShuffler;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * An abstraction layer above {@link org.apache.flink.table.store.file.FileStore} to provide reading
  * and writing of {@link org.apache.flink.table.data.RowData}.
  */
-public interface FileStoreTable extends Table, SupportsPartition, SupportsWrite {
+public interface FileStoreTable extends Table, SupportsPartition {
 
     CoreOptions options();
 
@@ -61,7 +64,14 @@ public interface FileStoreTable extends Table, SupportsPartition, SupportsWrite 
     @Override
     DataTableScan newScan();
 
-    TableWrite newWrite();
+    Optional<WriteShuffler> newWriteShuffler();
+
+    @VisibleForTesting
+    default TableWrite newWrite() {
+        return newWrite(0, 1);
+    }
+
+    TableWrite newWrite(int taskId, int numTasks);
 
     TableCommit newCommit(String user);
 }

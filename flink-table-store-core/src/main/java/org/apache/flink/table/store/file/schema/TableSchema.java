@@ -185,9 +185,6 @@ public class TableSchema implements Serializable {
         if (bucketKeys.isEmpty()) {
             bucketKeys = trimmedPrimaryKeys();
         }
-        if (bucketKeys.isEmpty()) {
-            bucketKeys = fieldNames();
-        }
         return projectedLogicalRowType(bucketKeys);
     }
 
@@ -200,7 +197,7 @@ public class TableSchema implements Serializable {
         return projectedFieldNames.stream().mapToInt(fieldNames::indexOf).toArray();
     }
 
-    private RowType projectedLogicalRowType(List<String> projectedFieldNames) {
+    public RowType projectedLogicalRowType(List<String> projectedFieldNames) {
         List<String> fieldNames = fieldNames();
         return (RowType)
                 new RowDataType(

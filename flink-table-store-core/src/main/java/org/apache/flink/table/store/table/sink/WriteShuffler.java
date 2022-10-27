@@ -16,15 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.table;
+package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.store.table.sink.TableCommit;
-import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.data.RowData;
 
-/** An interface for {@link Table} write support. */
-public interface SupportsWrite {
+import java.io.Serializable;
 
-    TableWrite newWrite();
+/** Shuffler before writing to table. */
+public interface WriteShuffler extends Serializable {
 
-    TableCommit newCommit(String user);
+    void setup(int numberOfChannels);
+
+    int shuffle(RowData row);
 }

@@ -96,11 +96,11 @@ public class StoreSink implements Serializable {
                         .withLock(lock));
     }
 
-    public DataStreamSink<?> sinkTo(DataStream<RowData> input) {
+    public DataStreamSink<?> sinkTo(DataStream<RowData> input, int parallelism) {
         CommittableTypeInfo typeInfo = new CommittableTypeInfo();
         SingleOutputStreamOperator<Committable> written =
                 input.transform(WRITER_NAME, typeInfo, createWriteOperator())
-                        .setParallelism(input.getParallelism());
+                        .setParallelism(parallelism);
 
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         boolean streamingCheckpointEnabled =

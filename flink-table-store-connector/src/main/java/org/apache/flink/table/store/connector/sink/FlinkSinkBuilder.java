@@ -25,16 +25,17 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.FlinkConnectorOptions;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.LogSinkFunction;
+import org.apache.flink.table.store.table.sink.WriteShuffler;
 
 import javax.annotation.Nullable;
 
 import java.util.Map;
+import java.util.Optional;
 
 /** Sink builder to build a flink sink from input. */
 public class FlinkSinkBuilder {
@@ -91,17 +92,18 @@ public class FlinkSinkBuilder {
     }
 
     public DataStreamSink<?> build() {
-        int numBucket = conf.get(CoreOptions.BUCKET);
+        StreamExecutionEnvironment env = input.getExecutionEnvironment();
+        int parallelism = this.parallelism == null ? input.getParallelism() : this.parallelism;
 
-        BucketStreamPartitioner partitioner =
-                new BucketStreamPartitioner(numBucket, table.schema());
-        PartitionTransformation<RowData> partitioned =
-                new PartitionTransformation<>(input.getTransformation(), partitioner);
-        if (parallelism != null) {
+        Optional<WriteShuffler> shuffler = table.newWriteShuffler();
+        if (shuffler.isPresent()) {
+            BucketStreamPartitioner partitioner = new BucketStreamPartitioner(shuffler.get());
+            PartitionTransformation<RowData> partitioned =
+                    new PartitionTransformation<>(input.getTransformation(), partitioner);
             partitioned.setParallelism(parallelism);
+            input = new DataStream<>(env, partitioned);
         }
 
-        StreamExecutionEnvironment env = input.getExecutionEnvironment();
         StoreSink sink =
                 new StoreSink(
                         tableIdentifier,
@@ -111,6 +113,6 @@ public class FlinkSinkBuilder {
                         lockFactory,
                         overwritePartition,
                         logSinkFunction);
-        return sink.sinkTo(new DataStream<>(env, partitioned));
+        return sink.sinkTo(input, parallelism);
     }
 }

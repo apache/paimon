@@ -18,29 +18,13 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 
-import java.util.List;
+/** Computer to compute bucket for record. */
+public interface BucketComputer {
 
-/**
- * An abstraction layer above {@link org.apache.flink.table.store.file.operation.FileStoreWrite} to
- * provide {@link RowData} writing.
- */
-public interface TableWrite {
+    int bucket(RowData row);
 
-    TableWrite withOverwrite(boolean overwrite);
-
-    TableWrite withIOManager(IOManager ioManager);
-
-    RecordConverter recordConverter();
-
-    SinkRecord write(RowData rowData) throws Exception;
-
-    void compact(BinaryRowData partition, int bucket) throws Exception;
-
-    List<FileCommittable> prepareCommit(boolean endOfInput) throws Exception;
-
-    void close() throws Exception;
+    int bucket(RowData row, BinaryRowData pk);
 }

@@ -30,6 +30,7 @@ import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.TimestampType;
 
 import java.time.DateTimeException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -54,6 +55,15 @@ public class TypeUtils {
         List<RowType.RowField> fields = inputType.getFields();
         return new RowType(
                 Arrays.stream(mapping).mapToObj(fields::get).collect(Collectors.toList()));
+    }
+
+    public static RowType project(RowType inputType, List<String> projected) {
+        List<String> fieldNames = inputType.getFieldNames();
+        List<RowType.RowField> fields = new ArrayList<>();
+        for (String name : projected) {
+            fields.add(inputType.getFields().get(fieldNames.indexOf(name)));
+        }
+        return new RowType(fields);
     }
 
     public static Object castFromString(String s, LogicalType type) {

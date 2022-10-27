@@ -26,6 +26,7 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.Preconditions;
 
 import java.util.List;
 
@@ -38,6 +39,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     private final FieldStatsArraySerializer keyStatsConverter;
     private final RowType keyType;
+    private final RowType bucketKeyType;
 
     private Predicate keyFilter;
 
@@ -53,7 +55,6 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             CoreOptions.ChangelogProducer changelogProducer) {
         super(
                 partitionType,
-                bucketKeyType,
                 snapshotManager,
                 manifestFileFactory,
                 manifestListFactory,
@@ -62,6 +63,9 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 changelogProducer);
         this.keyStatsConverter = new FieldStatsArraySerializer(keyType);
         this.keyType = keyType;
+        Preconditions.checkArgument(
+                bucketKeyType.getFieldCount() > 0, "The bucket keys should not be empty.");
+        this.bucketKeyType = bucketKeyType;
     }
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {
@@ -73,7 +77,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                         keyType.getFieldNames(),
                         bucketKeyType.getFieldNames());
         if (bucketFilters.size() > 0) {
-            withBucketKeyFilter(and(bucketFilters));
+            initBucketKeyFilter(and(bucketFilters), bucketKeyType);
         }
         return this;
     }

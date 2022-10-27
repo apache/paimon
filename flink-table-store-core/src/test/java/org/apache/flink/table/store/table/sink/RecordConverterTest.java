@@ -33,12 +33,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.flink.table.store.CoreOptions.BUCKET;
 import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
-/** Test for {@link SinkRecordConverter}. */
-public class SinkRecordConverterTest {
+/** Test for {@link RecordConverter}. */
+public class RecordConverterTest {
 
     @Test
     public void testInvalidBucket() {
@@ -64,18 +65,18 @@ public class SinkRecordConverterTest {
         assertThat(bucket(converter("", "a,b,c"), row)).isEqualTo(40);
     }
 
-    private int bucket(SinkRecordConverter converter, RowData row) {
+    private int bucket(RecordConverter converter, RowData row) {
         int bucket1 = converter.bucket(row);
         int bucket2 = converter.convert(row).bucket();
         assertThat(bucket1).isEqualTo(bucket2);
         return bucket1;
     }
 
-    private SinkRecordConverter converter(String bk, String pk) {
+    private RecordConverter converter(String bk, String pk) {
         return converter("", bk, pk);
     }
 
-    private SinkRecordConverter converter(String partK, String bk, String pk) {
+    private RecordConverter converter(String partK, String bk, String pk) {
         RowType rowType =
                 new RowType(
                         Arrays.asList(
@@ -85,6 +86,7 @@ public class SinkRecordConverterTest {
         List<DataField> fields = TableSchema.newFields(rowType);
         Map<String, String> options = new HashMap<>();
         options.put(BUCKET_KEY.key(), bk);
+        options.put(BUCKET.key(), "100");
         TableSchema schema =
                 new TableSchema(
                         0,
@@ -96,6 +98,6 @@ public class SinkRecordConverterTest {
                         "".equals(pk) ? Collections.emptyList() : Arrays.asList(pk.split(",")),
                         options,
                         "");
-        return new SinkRecordConverter(100, schema);
+        return new RecordConverter(schema, new HashBucketComputer(schema));
     }
 }

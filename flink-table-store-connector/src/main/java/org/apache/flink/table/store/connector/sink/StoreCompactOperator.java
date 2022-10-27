@@ -67,7 +67,10 @@ public class StoreCompactOperator extends PrepareCommitOperator {
                             compactPartitionSpec, table.schema().logicalPartitionType()));
         }
 
-        write = table.newWrite();
+        write =
+                table.newWrite(
+                        getRuntimeContext().getIndexOfThisSubtask(),
+                        getRuntimeContext().getNumberOfParallelSubtasks());
     }
 
     @Override

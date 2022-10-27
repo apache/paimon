@@ -97,7 +97,9 @@ public class StoreWriteOperator extends PrepareCommitOperator {
     public void open() throws Exception {
         super.open();
         this.write =
-                table.newWrite()
+                table.newWrite(
+                                getRuntimeContext().getIndexOfThisSubtask(),
+                                getRuntimeContext().getNumberOfParallelSubtasks())
                         .withIOManager(getContainingTask().getEnvironment().getIOManager())
                         .withOverwrite(overwritePartition != null);
         this.sinkContext = new SimpleContext(getProcessingTimeService());
@@ -131,7 +133,7 @@ public class StoreWriteOperator extends PrepareCommitOperator {
 
         if (logSinkFunction != null) {
             // write to log store, need to preserve original pk (which includes partition fields)
-            SinkRecord logRecord = write.recordConverter().convertToLogSinkRecord(record);
+            SinkRecord logRecord = write.recordConverter().convertToLogRecord(record);
             logSinkFunction.invoke(logRecord, sinkContext);
         }
     }

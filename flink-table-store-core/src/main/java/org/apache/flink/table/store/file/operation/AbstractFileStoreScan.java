@@ -35,7 +35,6 @@ import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -51,7 +50,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private final FieldStatsArraySerializer partitionStatsConverter;
     private final RowDataToObjectArrayConverter partitionConverter;
-    protected final RowType bucketKeyType;
     private final SnapshotManager snapshotManager;
     private final ManifestFile.Factory manifestFileFactory;
     private final ManifestList manifestList;
@@ -69,7 +67,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     public AbstractFileStoreScan(
             RowType partitionType,
-            RowType bucketKeyType,
             SnapshotManager snapshotManager,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
@@ -78,9 +75,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             CoreOptions.ChangelogProducer changelogProducer) {
         this.partitionStatsConverter = new FieldStatsArraySerializer(partitionType);
         this.partitionConverter = new RowDataToObjectArrayConverter(partitionType);
-        Preconditions.checkArgument(
-                bucketKeyType.getFieldCount() > 0, "The bucket keys should not be empty.");
-        this.bucketKeyType = bucketKeyType;
         this.snapshotManager = snapshotManager;
         this.manifestFileFactory = manifestFileFactory;
         this.manifestList = manifestListFactory.create();
@@ -95,9 +89,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return this;
     }
 
-    protected FileStoreScan withBucketKeyFilter(Predicate predicate) {
+    protected void initBucketKeyFilter(Predicate predicate, RowType bucketKeyType) {
         this.bucketSelector = BucketSelector.create(predicate, bucketKeyType).orElse(null);
-        return this;
     }
 
     @Override

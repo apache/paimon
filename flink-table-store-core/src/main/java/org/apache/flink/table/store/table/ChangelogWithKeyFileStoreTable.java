@@ -35,10 +35,13 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.table.sink.HashBucketComputer;
+import org.apache.flink.table.store.table.sink.HashWriteShuffler;
+import org.apache.flink.table.store.table.sink.RecordConverter;
 import org.apache.flink.table.store.table.sink.SequenceGenerator;
-import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
+import org.apache.flink.table.store.table.sink.WriteShuffler;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.MergeTreeSplitGenerator;
@@ -50,6 +53,7 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
@@ -186,9 +190,12 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableWrite newWrite() {
-        SinkRecordConverter recordConverter =
-                new SinkRecordConverter(store.options().bucket(), tableSchema);
+    public Optional<WriteShuffler> newWriteShuffler() {
+        return Optional.of(new HashWriteShuffler(tableSchema));
+    }
+
+    @Override
+    public TableWrite newWrite(int taskId, int numTasks) {
         final SequenceGenerator sequenceGenerator =
                 store.options()
                         .sequenceField()
@@ -197,7 +204,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 store.newWrite(),
-                recordConverter,
+                new RecordConverter(tableSchema, new HashBucketComputer(tableSchema)),
                 record -> {
                     long sequenceNumber =
                             sequenceGenerator == null

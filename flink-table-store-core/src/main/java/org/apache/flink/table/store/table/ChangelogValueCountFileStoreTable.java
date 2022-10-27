@@ -33,9 +33,12 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.table.sink.SinkRecordConverter;
+import org.apache.flink.table.store.table.sink.HashBucketComputer;
+import org.apache.flink.table.store.table.sink.HashWriteShuffler;
+import org.apache.flink.table.store.table.sink.RecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
+import org.apache.flink.table.store.table.sink.WriteShuffler;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.MergeTreeSplitGenerator;
@@ -46,6 +49,8 @@ import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
+
+import java.util.Optional;
 
 /** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode without primary keys. */
 public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
@@ -61,13 +66,17 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                 RowType.of(
                         new LogicalType[] {new BigIntType(false)}, new String[] {"_VALUE_COUNT"});
         MergeFunction<KeyValue> mergeFunction = new ValueCountMergeFunction();
+        RowType bucketKeyType = tableSchema.logicalBucketKeyType();
+        if (bucketKeyType.getFieldCount() == 0) {
+            bucketKeyType = tableSchema.logicalRowType();
+        }
         this.store =
                 new KeyValueFileStore(
                         schemaManager,
                         tableSchema.id(),
                         new CoreOptions(tableSchema.options()),
                         tableSchema.logicalPartitionType(),
-                        tableSchema.logicalBucketKeyType(),
+                        bucketKeyType,
                         tableSchema.logicalRowType(),
                         countType,
                         mergeFunction);
@@ -117,13 +126,16 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableWrite newWrite() {
-        SinkRecordConverter recordConverter =
-                new SinkRecordConverter(store.options().bucket(), tableSchema);
+    public Optional<WriteShuffler> newWriteShuffler() {
+        return Optional.of(new HashWriteShuffler(tableSchema));
+    }
+
+    @Override
+    public TableWrite newWrite(int taskId, int numTasks) {
         final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 store.newWrite(),
-                recordConverter,
+                new RecordConverter(tableSchema, new HashBucketComputer(tableSchema)),
                 record -> {
                     switch (record.row().getRowKind()) {
                         case INSERT:

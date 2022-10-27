@@ -30,9 +30,14 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.table.sink.SinkRecordConverter;
+import org.apache.flink.table.store.table.sink.BucketComputer;
+import org.apache.flink.table.store.table.sink.HashBucketComputer;
+import org.apache.flink.table.store.table.sink.HashWriteShuffler;
+import org.apache.flink.table.store.table.sink.RecordConverter;
+import org.apache.flink.table.store.table.sink.RoundRobinBucketComputer;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
+import org.apache.flink.table.store.table.sink.WriteShuffler;
 import org.apache.flink.table.store.table.source.AppendOnlySplitGenerator;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -43,6 +48,7 @@ import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
+import java.util.Optional;
 
 /** {@link FileStoreTable} for {@link WriteMode#APPEND_ONLY} write mode. */
 public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
@@ -59,7 +65,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                         tableSchema.id(),
                         new CoreOptions(tableSchema.options()),
                         tableSchema.logicalPartitionType(),
-                        tableSchema.logicalBucketKeyType(),
+                        tableSchema.originalBucketKeys(),
                         tableSchema.logicalRowType());
     }
 
@@ -104,12 +110,27 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableWrite newWrite() {
-        SinkRecordConverter recordConverter =
-                new SinkRecordConverter(store.options().bucket(), tableSchema);
+    public Optional<WriteShuffler> newWriteShuffler() {
+        if (tableSchema.originalBucketKeys().isEmpty()) {
+            return Optional.empty();
+        } else {
+            return Optional.of(new HashWriteShuffler(tableSchema));
+        }
+    }
+
+    public BucketComputer newBucketComputer(int taskId, int numTasks) {
+        if (tableSchema.originalBucketKeys().isEmpty()) {
+            return new RoundRobinBucketComputer(taskId, numTasks, options().bucket());
+        } else {
+            return new HashBucketComputer(tableSchema);
+        }
+    }
+
+    @Override
+    public TableWrite newWrite(int taskId, int numTasks) {
         return new TableWriteImpl<>(
                 store.newWrite(),
-                recordConverter,
+                new RecordConverter(tableSchema, newBucketComputer(taskId, numTasks)),
                 record -> {
                     Preconditions.checkState(
                             record.row().getRowKind() == RowKind.INSERT,
