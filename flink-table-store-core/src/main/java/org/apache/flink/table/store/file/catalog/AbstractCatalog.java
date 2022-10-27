@@ -49,7 +49,11 @@ public abstract class AbstractCatalog implements Catalog {
             }
             String table = splits[0];
             String metadata = splits[1];
-            Path location = getTableLocation(new ObjectPath(tablePath.getDatabaseName(), table));
+            ObjectPath originTablePath = new ObjectPath(tablePath.getDatabaseName(), table);
+            if (!tableExists(originTablePath)) {
+                throw new TableNotExistException(tablePath);
+            }
+            Path location = getTableLocation(originTablePath);
             return MetadataTableLoader.load(metadata, location);
         } else {
             TableSchema tableSchema = getTableSchema(tablePath);
