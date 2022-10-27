@@ -154,7 +154,7 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
     private void stopJobSafely(ClusterClient<?> client, JobID jobId)
             throws ExecutionException, InterruptedException {
         client.stopWithSavepoint(jobId, true, path, SavepointFormatType.DEFAULT);
-        while (client.getJobStatus(jobId).get() == JobStatus.RUNNING) {
+        while (!client.getJobStatus(jobId).get().isGloballyTerminalState()) {
             Thread.sleep(2000L);
         }
     }
