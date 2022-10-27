@@ -104,7 +104,8 @@ public class MergeTreeCompactTask extends CompactTask {
 
     private void upgrade(DataFileMeta file, CompactResult toUpdate) throws Exception {
         if (file.level() != outputLevel) {
-            rewriter.upgrade(outputLevel, file, toUpdate);
+            CompactResult upgradeResult = rewriter.upgrade(outputLevel, file);
+            toUpdate.merge(upgradeResult);
             upgradeFilesNum++;
         }
     }
@@ -125,7 +126,8 @@ public class MergeTreeCompactTask extends CompactTask {
                 return;
             }
         }
-        rewriter.rewrite(outputLevel, dropDelete, candidate, toUpdate);
+        CompactResult rewriteResult = rewriter.rewrite(outputLevel, dropDelete, candidate);
+        toUpdate.merge(rewriteResult);
         candidate.clear();
     }
 }

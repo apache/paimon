@@ -27,12 +27,8 @@ import java.util.List;
 /** Rewrite sections to the files. */
 public interface CompactRewriter {
 
-    void rewrite(
-            int outputLevel,
-            boolean dropDelete,
-            List<List<SortedRun>> sections,
-            CompactResult toUpdate)
+    CompactResult rewrite(int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
             throws Exception;
 
-    void upgrade(int outputLevel, DataFileMeta file, CompactResult toUpdate) throws Exception;
+    CompactResult upgrade(int outputLevel, DataFileMeta file) throws Exception;
 }

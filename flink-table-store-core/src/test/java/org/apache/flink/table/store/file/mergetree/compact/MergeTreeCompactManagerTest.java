@@ -25,6 +25,7 @@ import org.apache.flink.table.store.file.compact.CompactUnit;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFileTestUtils;
 import org.apache.flink.table.store.file.mergetree.Levels;
+import org.apache.flink.table.store.file.mergetree.MergeTreeReaders;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 
 import org.junit.jupiter.api.AfterAll;
@@ -220,7 +221,7 @@ public class MergeTreeCompactManagerTest {
         return (numLevels, runs) -> Optional.of(CompactUnit.fromLevelRuns(numLevels - 1, runs));
     }
 
-    private static class TestRewriter extends AbstractCompactRewriter {
+    private static class TestRewriter implements CompactRewriter {
 
         private final boolean expectedDropDelete;
 
@@ -229,15 +230,10 @@ public class MergeTreeCompactManagerTest {
         }
 
         @Override
-        public void rewrite(
-                int outputLevel,
-                boolean dropDelete,
-                List<List<SortedRun>> sections,
-                CompactResult toUpdate)
+        public CompactResult rewrite(
+                int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
                 throws Exception {
             assertThat(dropDelete).isEqualTo(expectedDropDelete);
-            addBefore(sections, toUpdate);
-
             int minKey = Integer.MAX_VALUE;
             int maxKey = Integer.MIN_VALUE;
             long maxSequence = 0;
@@ -258,14 +254,14 @@ public class MergeTreeCompactManagerTest {
                     }
                 }
             }
-            toUpdate.addAfter(
+            return new CompactResult(
+                    MergeTreeReaders.extractFilesFromSections(sections),
                     Collections.singletonList(newFile(outputLevel, minKey, maxKey, maxSequence)));
         }
 
         @Override
-        public void upgrade(int outputLevel, DataFileMeta file, CompactResult toUpdate) {
-            toUpdate.addBefore(file);
-            toUpdate.addAfter(file.upgrade(outputLevel));
+        public CompactResult upgrade(int outputLevel, DataFileMeta file) {
+            return new CompactResult(file, file.upgrade(outputLevel));
         }
     }
 

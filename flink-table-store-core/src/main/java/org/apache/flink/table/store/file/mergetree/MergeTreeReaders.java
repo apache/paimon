@@ -29,8 +29,10 @@ import org.apache.flink.table.store.file.utils.RecordReader;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /** Utility class to create commonly used {@link RecordReader}s for merge trees. */
 public class MergeTreeReaders {
@@ -80,5 +82,13 @@ public class MergeTreeReaders {
             readers.add(() -> readerFactory.createRecordReader(file.fileName(), file.level()));
         }
         return ConcatRecordReader.create(readers);
+    }
+
+    public static List<DataFileMeta> extractFilesFromSections(List<List<SortedRun>> sections) {
+        return sections.stream()
+                .flatMap(Collection::stream)
+                .map(SortedRun::files)
+                .flatMap(Collection::stream)
+                .collect(Collectors.toList());
     }
 }

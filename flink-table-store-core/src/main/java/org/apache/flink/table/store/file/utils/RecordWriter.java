@@ -33,7 +33,10 @@ public interface RecordWriter<T> {
     /** Add a key-value element to the writer. */
     void write(T record) throws Exception;
 
-    /** Compact all files related to the writer. */
+    /**
+     * Compact all files related to the writer. Note that compaction process is only submitted and
+     * may not be completed when the method returns.
+     */
     void fullCompaction() throws Exception;
 
     /**

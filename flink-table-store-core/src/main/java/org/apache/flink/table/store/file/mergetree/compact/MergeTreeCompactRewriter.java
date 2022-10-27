@@ -35,7 +35,7 @@ import java.util.Comparator;
 import java.util.List;
 
 /** Default {@link CompactRewriter} for merge trees. */
-public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
+public class MergeTreeCompactRewriter implements CompactRewriter {
 
     protected final KeyValueFileReaderFactory readerFactory;
     protected final KeyValueFileWriterFactory writerFactory;
@@ -54,22 +54,13 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
     }
 
     @Override
-    public void rewrite(
-            int outputLevel,
-            boolean dropDelete,
-            List<List<SortedRun>> sections,
-            CompactResult toUpdate)
-            throws Exception {
-        addBefore(sections, toUpdate);
-        rewriteCompaction(outputLevel, dropDelete, sections, toUpdate);
+    public CompactResult rewrite(
+            int outputLevel, boolean dropDelete, List<List<SortedRun>> sections) throws Exception {
+        return rewriteCompaction(outputLevel, dropDelete, sections);
     }
 
-    protected void rewriteCompaction(
-            int outputLevel,
-            boolean dropDelete,
-            List<List<SortedRun>> sections,
-            CompactResult toUpdate)
-            throws Exception {
+    protected CompactResult rewriteCompaction(
+            int outputLevel, boolean dropDelete, List<List<SortedRun>> sections) throws Exception {
         RollingFileWriter<KeyValue, DataFileMeta> writer =
                 writerFactory.createRollingMergeTreeFileWriter(outputLevel);
         RecordReader<KeyValue> sectionsReader =
@@ -83,13 +74,12 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
         }
         writer.write(new RecordReaderIterator<>(sectionsReader));
         writer.close();
-        toUpdate.addAfter(writer.result());
+        return new CompactResult(
+                MergeTreeReaders.extractFilesFromSections(sections), writer.result());
     }
 
     @Override
-    public void upgrade(int outputLevel, DataFileMeta file, CompactResult toUpdate)
-            throws Exception {
-        toUpdate.addBefore(file);
-        toUpdate.addAfter(file.upgrade(outputLevel));
+    public CompactResult upgrade(int outputLevel, DataFileMeta file) throws Exception {
+        return new CompactResult(file, file.upgrade(outputLevel));
     }
 }

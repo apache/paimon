@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.compact;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /** Result of compaction. */
@@ -31,9 +32,22 @@ public class CompactResult {
     private final List<DataFileMeta> changelog;
 
     public CompactResult() {
-        this.before = new ArrayList<>();
-        this.after = new ArrayList<>();
-        this.changelog = new ArrayList<>();
+        this(Collections.emptyList(), Collections.emptyList());
+    }
+
+    public CompactResult(DataFileMeta before, DataFileMeta after) {
+        this(Collections.singletonList(before), Collections.singletonList(after));
+    }
+
+    public CompactResult(List<DataFileMeta> before, List<DataFileMeta> after) {
+        this(before, after, Collections.emptyList());
+    }
+
+    public CompactResult(
+            List<DataFileMeta> before, List<DataFileMeta> after, List<DataFileMeta> changelog) {
+        this.before = new ArrayList<>(before);
+        this.after = new ArrayList<>(after);
+        this.changelog = new ArrayList<>(changelog);
     }
 
     public List<DataFileMeta> before() {
@@ -48,23 +62,9 @@ public class CompactResult {
         return changelog;
     }
 
-    public void addBefore(DataFileMeta file) {
-        this.before.add(file);
-    }
-
-    public void addBefore(List<DataFileMeta> before) {
-        this.before.addAll(before);
-    }
-
-    public void addAfter(DataFileMeta file) {
-        this.after.add(file);
-    }
-
-    public void addAfter(List<DataFileMeta> after) {
-        this.after.addAll(after);
-    }
-
-    public void addChangelog(List<DataFileMeta> changelog) {
-        this.changelog.addAll(changelog);
+    public void merge(CompactResult that) {
+        before.addAll(that.before);
+        after.addAll(that.after);
+        changelog.addAll(that.changelog);
     }
 }

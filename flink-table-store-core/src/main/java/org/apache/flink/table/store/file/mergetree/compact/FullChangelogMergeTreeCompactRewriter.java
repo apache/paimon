@@ -52,26 +52,19 @@ public class FullChangelogMergeTreeCompactRewriter extends MergeTreeCompactRewri
     }
 
     @Override
-    public void rewrite(
-            int outputLevel,
-            boolean dropDelete,
-            List<List<SortedRun>> sections,
-            CompactResult toUpdate)
-            throws Exception {
-        addBefore(sections, toUpdate);
-
+    public CompactResult rewrite(
+            int outputLevel, boolean dropDelete, List<List<SortedRun>> sections) throws Exception {
         if (outputLevel == maxLevel) {
             Preconditions.checkArgument(
                     dropDelete,
                     "Delete records should be dropped from result of full compaction. This is unexpected.");
-            rewriteFullCompaction(sections, toUpdate);
+            return rewriteFullCompaction(sections);
         } else {
-            rewriteCompaction(outputLevel, dropDelete, sections, toUpdate);
+            return rewriteCompaction(outputLevel, dropDelete, sections);
         }
     }
 
-    private void rewriteFullCompaction(List<List<SortedRun>> sections, CompactResult toUpdate)
-            throws Exception {
+    private CompactResult rewriteFullCompaction(List<List<SortedRun>> sections) throws Exception {
         List<ConcatRecordReader.ReaderSupplier<FullChangelogMergeFunctionWrapper.Result>>
                 sectionReaders = new ArrayList<>();
         for (List<SortedRun> section : sections) {
@@ -88,48 +81,54 @@ public class FullChangelogMergeTreeCompactRewriter extends MergeTreeCompactRewri
                                         mergeFunction.copy(), maxLevel));
                     });
         }
-        RecordReader<FullChangelogMergeFunctionWrapper.Result> sectionsReader =
-                ConcatRecordReader.create(sectionReaders);
 
-        RollingFileWriter<KeyValue, DataFileMeta> compactFileWriter =
-                writerFactory.createRollingMergeTreeFileWriter(maxLevel);
-        RollingFileWriter<KeyValue, DataFileMeta> changelogFileWriter =
-                writerFactory.createRollingChangelogFileWriter(maxLevel);
+        RecordReaderIterator<FullChangelogMergeFunctionWrapper.Result> iterator = null;
+        RollingFileWriter<KeyValue, DataFileMeta> compactFileWriter = null;
+        RollingFileWriter<KeyValue, DataFileMeta> changelogFileWriter = null;
 
-        RecordReaderIterator<FullChangelogMergeFunctionWrapper.Result> iterator =
-                new RecordReaderIterator<>(sectionsReader);
-        while (iterator.hasNext()) {
-            FullChangelogMergeFunctionWrapper.Result result = iterator.next();
-            if (result.result() != null) {
-                compactFileWriter.write(result.result());
+        try {
+            iterator = new RecordReaderIterator<>(ConcatRecordReader.create(sectionReaders));
+            compactFileWriter = writerFactory.createRollingMergeTreeFileWriter(maxLevel);
+            changelogFileWriter = writerFactory.createRollingChangelogFileWriter(maxLevel);
+
+            while (iterator.hasNext()) {
+                FullChangelogMergeFunctionWrapper.Result result = iterator.next();
+                if (result.result() != null) {
+                    compactFileWriter.write(result.result());
+                }
+                if (result.before() != null) {
+                    changelogFileWriter.write(result.before());
+                }
+                if (result.after() != null) {
+                    changelogFileWriter.write(result.after());
+                }
             }
-            if (result.before() != null) {
-                changelogFileWriter.write(result.before());
+        } finally {
+            if (iterator != null) {
+                iterator.close();
             }
-            if (result.after() != null) {
-                changelogFileWriter.write(result.after());
+            if (compactFileWriter != null) {
+                compactFileWriter.close();
+            }
+            if (changelogFileWriter != null) {
+                changelogFileWriter.close();
             }
         }
-        iterator.close();
 
-        compactFileWriter.close();
-        toUpdate.addAfter(compactFileWriter.result());
-        changelogFileWriter.close();
-        toUpdate.addChangelog(changelogFileWriter.result());
+        return new CompactResult(
+                MergeTreeReaders.extractFilesFromSections(sections),
+                compactFileWriter.result(),
+                changelogFileWriter.result());
     }
 
     @Override
-    public void upgrade(int outputLevel, DataFileMeta file, CompactResult toUpdate)
-            throws Exception {
-        toUpdate.addBefore(file);
-
+    public CompactResult upgrade(int outputLevel, DataFileMeta file) throws Exception {
         if (outputLevel == maxLevel) {
-            rewriteFullCompaction(
+            return rewriteFullCompaction(
                     Collections.singletonList(
-                            Collections.singletonList(SortedRun.fromSingle(file))),
-                    toUpdate);
+                            Collections.singletonList(SortedRun.fromSingle(file))));
         } else {
-            toUpdate.addAfter(file.upgrade(outputLevel));
+            return new CompactResult(file, file.upgrade(outputLevel));
         }
     }
 }

@@ -130,7 +130,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                         : kv.sequenceNumber();
         boolean success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
         if (!success) {
-            flushWriteBuffer();
+            flushWriteBuffer(false);
             success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
             if (!success) {
                 throw new RuntimeException("Mem table is too small to hold a single element.");
@@ -140,7 +140,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public void fullCompaction() throws Exception {
-        submitCompaction(true);
+        flushWriteBuffer(true);
     }
 
     @Override
@@ -152,11 +152,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     public void flushMemory() throws Exception {
         boolean success = writeBuffer.flushMemory();
         if (!success) {
-            flushWriteBuffer();
+            flushWriteBuffer(false);
         }
     }
 
-    private void flushWriteBuffer() throws Exception {
+    private void flushWriteBuffer(boolean forcedFullCompaction) throws Exception {
         if (writeBuffer.size() > 0) {
             if (compactManager.shouldWaitCompaction()) {
                 // stop writing, wait for compaction finished
@@ -193,13 +193,13 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             }
 
             writeBuffer.clear();
-            submitCompaction(false);
         }
+        submitCompaction(forcedFullCompaction);
     }
 
     @Override
     public CommitIncrement prepareCommit(boolean endOfInput) throws Exception {
-        flushWriteBuffer();
+        flushWriteBuffer(false);
         boolean blocking = endOfInput || commitForceCompact;
         trySyncLatestCompaction(blocking);
         return drainIncrement();

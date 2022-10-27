@@ -35,7 +35,7 @@ import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
 import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
 import org.apache.flink.table.store.file.io.RollingFileWriter;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
-import org.apache.flink.table.store.file.mergetree.compact.AbstractCompactRewriter;
+import org.apache.flink.table.store.file.mergetree.compact.CompactRewriter;
 import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
@@ -398,17 +398,12 @@ public class MergeTreeTest {
         return records;
     }
 
-    private class TestRewriter extends AbstractCompactRewriter {
+    private class TestRewriter implements CompactRewriter {
 
         @Override
-        public void rewrite(
-                int outputLevel,
-                boolean dropDelete,
-                List<List<SortedRun>> sections,
-                CompactResult toUpdate)
+        public CompactResult rewrite(
+                int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
                 throws Exception {
-            addBefore(sections, toUpdate);
-
             RollingFileWriter<KeyValue, DataFileMeta> writer =
                     writerFactory.createRollingMergeTreeFileWriter(outputLevel);
             RecordReader<KeyValue> sectionsReader =
@@ -422,13 +417,13 @@ public class MergeTreeTest {
             }
             writer.write(new RecordReaderIterator<>(sectionsReader));
             writer.close();
-            toUpdate.addAfter(writer.result());
+            return new CompactResult(
+                    MergeTreeReaders.extractFilesFromSections(sections), writer.result());
         }
 
         @Override
-        public void upgrade(int outputLevel, DataFileMeta file, CompactResult toUpdate) {
-            toUpdate.addBefore(file);
-            toUpdate.addAfter(file.upgrade(outputLevel));
+        public CompactResult upgrade(int outputLevel, DataFileMeta file) {
+            return new CompactResult(file, file.upgrade(outputLevel));
         }
     }
 
