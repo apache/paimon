@@ -107,6 +107,12 @@ public class PreAggregationITCase {
     /** ITCase for listagg aggregate function. */
     public static class ListAggAggregation extends FileStoreTableITCase {
         @Override
+        protected int defaultParallelism() {
+            // set parallelism to 1 so that the order of input data is determined
+            return 1;
+        }
+
+        @Override
         protected List<String> ddl() {
             return Collections.singletonList(
                     "CREATE TABLE IF NOT EXISTS T6 ("
@@ -169,6 +175,12 @@ public class PreAggregationITCase {
 
     /** ITCase for last value aggregate function. */
     public static class LastValueAggregation extends FileStoreTableITCase {
+        @Override
+        protected int defaultParallelism() {
+            // set parallelism to 1 so that the order of input data is determined
+            return 1;
+        }
+
         @Override
         protected List<String> ddl() {
             return Collections.singletonList(
@@ -234,6 +246,12 @@ public class PreAggregationITCase {
 
     /** ITCase for last non-null value aggregate function. */
     public static class LastNonNullValueAggregation extends FileStoreTableITCase {
+        @Override
+        protected int defaultParallelism() {
+            // set parallelism to 1 so that the order of input data is determined
+            return 1;
+        }
+
         @Override
         protected List<String> ddl() {
             return Collections.singletonList(
