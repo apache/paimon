@@ -113,7 +113,8 @@ information about that table and time travel through the data.
 ## Options Table
 
 You can query the table's option information which is specified from the DDL
-through Flink SQL. The options not shown will be the default value.
+through Flink SQL. The options not shown will be the default value. You can take
+reference to  [Configuration]({{< ref "docs/development/configuration" >}}).
 
 ```sql
 SELECT * FROM MyTable$options;
