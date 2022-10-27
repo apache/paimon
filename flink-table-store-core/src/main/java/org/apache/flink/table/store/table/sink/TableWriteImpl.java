@@ -58,15 +58,15 @@ public class TableWriteImpl<T> implements TableWrite {
     }
 
     @Override
-    public SinkRecordConverter recordConverter() {
-        return recordConverter;
-    }
-
-    @Override
     public SinkRecord write(RowData rowData) throws Exception {
         SinkRecord record = recordConverter.convert(rowData);
         write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
         return record;
+    }
+
+    @Override
+    public SinkRecord toLogRecord(SinkRecord record) {
+        return recordConverter.convertToLogSinkRecord(record);
     }
 
     @Override

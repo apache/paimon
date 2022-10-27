@@ -22,6 +22,7 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.table.sink.BucketComputer;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -58,4 +59,9 @@ public interface FileStoreTable extends Table, SupportsPartition, SupportsWrite 
 
     @Override
     DataTableScan newScan();
+
+    @Override
+    default BucketComputer bucketComputer() {
+        return new BucketComputer(schema());
+    }
 }

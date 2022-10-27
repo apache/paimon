@@ -18,11 +18,14 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.table.store.table.sink.BucketComputer;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 
 /** An interface for {@link Table} write support. */
-public interface SupportsWrite {
+public interface SupportsWrite extends Table {
+
+    BucketComputer bucketComputer();
 
     TableWrite newWrite(String commitUser);
 
