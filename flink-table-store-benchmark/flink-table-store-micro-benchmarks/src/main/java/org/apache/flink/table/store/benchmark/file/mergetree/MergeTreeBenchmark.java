@@ -27,14 +27,17 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.benchmark.config.ConfigUtil;
 import org.apache.flink.table.store.benchmark.config.FileBenchmarkOptions;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
 import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
 import org.apache.flink.table.store.file.io.RollingFileWriter;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.mergetree.Levels;
-import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
+import org.apache.flink.table.store.file.mergetree.MergeTreeReaders;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
+import org.apache.flink.table.store.file.mergetree.SortedRun;
+import org.apache.flink.table.store.file.mergetree.compact.AbstractCompactRewriter;
 import org.apache.flink.table.store.file.mergetree.compact.CompactRewriter;
 import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
@@ -182,21 +185,7 @@ public class MergeTreeBenchmark {
                         options.sortedRunSizeRatio(),
                         options.numSortedRunCompactionTrigger(),
                         options.maxSortedRunNum());
-        CompactRewriter rewriter =
-                (outputLevel, dropDelete, sections) -> {
-                    RollingFileWriter<KeyValue, DataFileMeta> writer =
-                            compactWriterFactory.createRollingMergeTreeFileWriter(outputLevel);
-                    writer.write(
-                            new RecordReaderIterator<>(
-                                    new MergeTreeReader(
-                                            sections,
-                                            dropDelete,
-                                            compactReaderFactory,
-                                            comparator,
-                                            new DeduplicateMergeFunction())));
-                    writer.close();
-                    return writer.result();
-                };
+        CompactRewriter rewriter = new TestCompactRewriter();
         return new MergeTreeCompactManager(
                 compactExecutor,
                 new Levels(comparator, files, options.numLevels()),
@@ -264,6 +253,27 @@ public class MergeTreeBenchmark {
             key = null;
             kind = null;
             value = null;
+        }
+    }
+
+    private class TestCompactRewriter extends AbstractCompactRewriter {
+
+        @Override
+        public CompactResult rewrite(
+                int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
+                throws Exception {
+            RollingFileWriter<KeyValue, DataFileMeta> writer =
+                    compactWriterFactory.createRollingMergeTreeFileWriter(outputLevel);
+            writer.write(
+                    new RecordReaderIterator<>(
+                            MergeTreeReaders.readerForMergeTree(
+                                    sections,
+                                    dropDelete,
+                                    compactReaderFactory,
+                                    comparator,
+                                    new DeduplicateMergeFunction())));
+            writer.close();
+            return new CompactResult(extractFilesFromSections(sections), writer.result());
         }
     }
 }

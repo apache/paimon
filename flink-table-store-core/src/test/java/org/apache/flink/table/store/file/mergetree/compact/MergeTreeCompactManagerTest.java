@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactUnit;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFileTestUtils;
@@ -203,7 +204,7 @@ public class MergeTreeCompactManagerTest {
                         comparator,
                         2,
                         Integer.MAX_VALUE,
-                        testRewriter(expectedDropDelete));
+                        new TestRewriter(expectedDropDelete));
         manager.triggerCompaction(false);
         manager.getCompactionResult(true);
         List<LevelMinMax> outputs =
@@ -219,8 +220,18 @@ public class MergeTreeCompactManagerTest {
         return (numLevels, runs) -> Optional.of(CompactUnit.fromLevelRuns(numLevels - 1, runs));
     }
 
-    private CompactRewriter testRewriter(boolean expectedDropDelete) {
-        return (outputLevel, dropDelete, sections) -> {
+    private static class TestRewriter extends AbstractCompactRewriter {
+
+        private final boolean expectedDropDelete;
+
+        private TestRewriter(boolean expectedDropDelete) {
+            this.expectedDropDelete = expectedDropDelete;
+        }
+
+        @Override
+        public CompactResult rewrite(
+                int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
+                throws Exception {
             assertThat(dropDelete).isEqualTo(expectedDropDelete);
             int minKey = Integer.MAX_VALUE;
             int maxKey = Integer.MIN_VALUE;
@@ -242,8 +253,10 @@ public class MergeTreeCompactManagerTest {
                     }
                 }
             }
-            return Collections.singletonList(newFile(outputLevel, minKey, maxKey, maxSequence));
-        };
+            return new CompactResult(
+                    extractFilesFromSections(sections),
+                    Collections.singletonList(newFile(outputLevel, minKey, maxKey, maxSequence)));
+        }
     }
 
     private static class LevelMinMax {

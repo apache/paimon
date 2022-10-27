@@ -22,13 +22,23 @@ import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.stream.Collectors;
 
-/** Rewrite sections to the files. */
-public interface CompactRewriter {
+/** Common implementation of {@link CompactRewriter}. */
+public abstract class AbstractCompactRewriter implements CompactRewriter {
 
-    CompactResult rewrite(int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
-            throws Exception;
+    @Override
+    public CompactResult upgrade(int outputLevel, DataFileMeta file) throws Exception {
+        return new CompactResult(file, file.upgrade(outputLevel));
+    }
 
-    CompactResult upgrade(int outputLevel, DataFileMeta file) throws Exception;
+    protected static List<DataFileMeta> extractFilesFromSections(List<List<SortedRun>> sections) {
+        return sections.stream()
+                .flatMap(Collection::stream)
+                .map(SortedRun::files)
+                .flatMap(Collection::stream)
+                .collect(Collectors.toList());
+    }
 }

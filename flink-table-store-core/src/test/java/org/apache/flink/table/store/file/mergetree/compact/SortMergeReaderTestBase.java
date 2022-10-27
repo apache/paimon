@@ -36,7 +36,10 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
 
     @Override
     protected RecordReader<KeyValue> createRecordReader(List<TestReusingRecordReader> readers) {
-        return new SortMergeReader(new ArrayList<>(readers), KEY_COMPARATOR, createMergeFunction());
+        return new SortMergeReader<>(
+                new ArrayList<>(readers),
+                KEY_COMPARATOR,
+                new ReducerMergeFunctionWrapper(createMergeFunction()));
     }
 
     @Test

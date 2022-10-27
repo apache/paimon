@@ -288,6 +288,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         String.format(
                                 "Incremental scan does not accept %s snapshot",
                                 snapshot.commitKind()));
+            case FULL_COMPACTION:
+                if (snapshot.changelogManifestList() == null) {
+                    return Collections.emptyList();
+                } else {
+                    return manifestList.read(snapshot.changelogManifestList());
+                }
             case NONE:
                 if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
                     return manifestList.read(snapshot.deltaManifestList());
