@@ -112,8 +112,8 @@ information about that table and time travel through the data.
 
 ## Options Table
 
-You can query the option information of the table through Flink SQL. The options not
-shown will be the default value.
+You can query the table's option information which is specified from the DDL
+through Flink SQL. The options not shown will be the default value.
 
 ```sql
 SELECT * FROM MyTable$options;
