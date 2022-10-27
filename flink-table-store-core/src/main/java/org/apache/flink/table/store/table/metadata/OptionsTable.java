@@ -24,10 +24,8 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.IteratorRecordReader;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -111,11 +109,7 @@ public class OptionsTable implements Table {
 
         @Override
         public long rowCount() {
-            try {
-                return new SnapshotManager(location).snapshotCount();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+            return options(location).size();
         }
 
         @Override
@@ -157,14 +151,8 @@ public class OptionsTable implements Table {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((OptionsSplit) split).location;
-            SchemaManager schemaManager = new SchemaManager(location);
-            TableSchema schema =
-                    schemaManager
-                            .latest()
-                            .orElseThrow(() -> new RuntimeException("Table not exists."));
-            Map<String, String> options = schema.options();
             Iterator<RowData> rows =
-                    Iterators.transform(options.entrySet().iterator(), this::toRow);
+                    Iterators.transform(options(location).entrySet().iterator(), this::toRow);
             if (projection != null) {
                 rows =
                         Iterators.transform(
@@ -178,5 +166,12 @@ public class OptionsTable implements Table {
                     StringData.fromString(option.getKey()),
                     StringData.fromString(option.getValue()));
         }
+    }
+
+    private static Map<String, String> options(Path location) {
+        return new SchemaManager(location)
+                .latest()
+                .orElseThrow(() -> new RuntimeException("Table not exists."))
+                .options();
     }
 }
