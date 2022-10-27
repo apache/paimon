@@ -20,17 +20,13 @@ package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
-import org.apache.flink.api.connector.source.SourceReader;
-import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
-import org.apache.flink.table.store.table.source.TableRead;
 
 import javax.annotation.Nullable;
 
@@ -41,8 +37,7 @@ import static org.apache.flink.table.store.connector.source.PendingSplitsCheckpo
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 /** {@link Source} of file store. */
-public class FileStoreSource
-        implements Source<RowData, FileStoreSourceSplit, PendingSplitsCheckpoint> {
+public class FileStoreSource extends FlinkSource {
 
     private static final long serialVersionUID = 1L;
 
@@ -54,12 +49,6 @@ public class FileStoreSource
 
     private final boolean latestContinuous;
 
-    @Nullable private final int[][] projectedFields;
-
-    @Nullable private final Predicate predicate;
-
-    @Nullable private final Long limit;
-
     public FileStoreSource(
             FileStoreTable table,
             boolean isContinuous,
@@ -68,36 +57,16 @@ public class FileStoreSource
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
             @Nullable Long limit) {
+        super(table, projectedFields, predicate, limit);
         this.table = table;
         this.isContinuous = isContinuous;
         this.discoveryInterval = discoveryInterval;
         this.latestContinuous = latestContinuous;
-        this.projectedFields = projectedFields;
-        this.predicate = predicate;
-        this.limit = limit;
     }
 
     @Override
     public Boundedness getBoundedness() {
         return isContinuous ? Boundedness.CONTINUOUS_UNBOUNDED : Boundedness.BOUNDED;
-    }
-
-    @Override
-    public SourceReader<RowData, FileStoreSourceSplit> createReader(SourceReaderContext context) {
-        TableRead read = table.newRead();
-        if (projectedFields != null) {
-            read.withProjection(projectedFields);
-        }
-        if (predicate != null) {
-            read.withFilter(predicate);
-        }
-        return new FileStoreSourceReader(context, read, limit);
-    }
-
-    @Override
-    public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> createEnumerator(
-            SplitEnumeratorContext<FileStoreSourceSplit> context) {
-        return restoreEnumerator(context, null);
     }
 
     @Override
@@ -149,15 +118,5 @@ public class FileStoreSource
             Snapshot snapshot = snapshotId == null ? null : snapshotManager.snapshot(snapshotId);
             return new StaticFileStoreSplitEnumerator(context, snapshot, splits);
         }
-    }
-
-    @Override
-    public FileStoreSourceSplitSerializer getSplitSerializer() {
-        return new FileStoreSourceSplitSerializer();
-    }
-
-    @Override
-    public PendingSplitsCheckpointSerializer getEnumeratorCheckpointSerializer() {
-        return new PendingSplitsCheckpointSerializer(getSplitSerializer());
     }
 }

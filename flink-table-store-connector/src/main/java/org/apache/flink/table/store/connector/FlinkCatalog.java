@@ -42,8 +42,9 @@ import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.schema.SchemaChange;
-import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.Table;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -137,17 +138,24 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public CatalogTable getTable(ObjectPath tablePath)
             throws TableNotExistException, CatalogException {
-        TableSchema schema;
+        Table table;
         try {
-            schema = catalog.getTableSchema(tablePath);
+            table = catalog.getTable(tablePath);
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), e.tablePath());
         }
 
-        CatalogTable table = schema.toUpdateSchema().toCatalogTable();
-        // add path to source and sink
-        table.getOptions().put(PATH.key(), catalog.getTableLocation(tablePath).toString());
-        return table;
+        if (table instanceof FileStoreTable) {
+            CatalogTable catalogTable =
+                    ((FileStoreTable) table).schema().toUpdateSchema().toCatalogTable();
+            // add path to source and sink
+            catalogTable
+                    .getOptions()
+                    .put(PATH.key(), catalog.getTableLocation(tablePath).toString());
+            return catalogTable;
+        } else {
+            return new MetadataCatalogTable(table);
+        }
     }
 
     @Override

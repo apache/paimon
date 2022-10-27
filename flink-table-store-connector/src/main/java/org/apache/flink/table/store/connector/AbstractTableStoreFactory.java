@@ -24,6 +24,7 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.table.api.ValidationException;
+import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.factories.DynamicTableFactory;
@@ -34,6 +35,7 @@ import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
 import org.apache.flink.table.store.CoreOptions.LogConsistency;
 import org.apache.flink.table.store.CoreOptions.LogStartupMode;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
+import org.apache.flink.table.store.connector.source.MetadataTableSource;
 import org.apache.flink.table.store.connector.source.TableStoreSource;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
@@ -63,6 +65,10 @@ public abstract class AbstractTableStoreFactory
 
     @Override
     public DynamicTableSource createDynamicTableSource(Context context) {
+        CatalogTable origin = context.getCatalogTable().getOrigin();
+        if (origin instanceof MetadataCatalogTable) {
+            return new MetadataTableSource(((MetadataCatalogTable) origin).table());
+        }
         return new TableStoreSource(
                 context.getObjectIdentifier(),
                 buildFileStoreTable(context),

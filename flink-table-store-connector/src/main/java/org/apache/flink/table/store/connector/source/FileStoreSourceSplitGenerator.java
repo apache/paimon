@@ -18,8 +18,7 @@
 
 package org.apache.flink.table.store.connector.source;
 
-import org.apache.flink.table.store.table.source.DataSplit;
-import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.TableScan;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -36,9 +35,9 @@ public class FileStoreSourceSplitGenerator {
      */
     private final char[] currentId = "0000000000".toCharArray();
 
-    public List<FileStoreSourceSplit> createSplits(DataTableScan.Plan plan) {
+    public List<FileStoreSourceSplit> createSplits(TableScan.Plan plan) {
         return plan.splits().stream()
-                .map(s -> new FileStoreSourceSplit(getNextId(), (DataSplit) s))
+                .map(s -> new FileStoreSourceSplit(getNextId(), s))
                 .collect(Collectors.toList());
     }
 

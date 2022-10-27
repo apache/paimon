@@ -90,3 +90,22 @@ SELECT * FROM orders WHERE order_id=29495;
 
 SELECT * FROM orders WHERE catalog_id=1025 OR order_id=29495;
 ```
+
+## Snapshots Table
+
+You can query the snapshot history information of the table through Flink SQL.
+
+```sql
+SELECT * FROM MyTable$snapshots;
+
++--------------+------------+-----------------+-------------------+--------------+-------------------------+
+|  snapshot_id |  schema_id |     commit_user | commit_identifier |  commit_kind |             commit_time |
++--------------+------------+-----------------+-------------------+--------------+-------------------------+
+|            2 |          0 | 7ca4cd28-98e... |                 2 |       APPEND | 2022-10-26 11:44:15.600 |
+|            1 |          0 | 870062aa-3e9... |                 1 |       APPEND | 2022-10-26 11:44:15.148 |
++--------------+------------+-----------------+-------------------+--------------+-------------------------+
+2 rows in set
+```
+
+By querying one table's snapshots table, you can know the commit and expiration
+information about that table and time travel through the data.

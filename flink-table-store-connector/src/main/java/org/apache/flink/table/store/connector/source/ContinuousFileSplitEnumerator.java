@@ -23,6 +23,7 @@ import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.SnapshotEnumerator;
 import org.apache.flink.table.store.table.source.SnapshotEnumerator.EnumeratorResult;
@@ -92,7 +93,9 @@ public class ContinuousFileSplitEnumerator
     }
 
     private void addSplit(FileStoreSourceSplit split) {
-        bucketSplits.computeIfAbsent(split.split().bucket(), i -> new LinkedList<>()).add(split);
+        bucketSplits
+                .computeIfAbsent(((DataSplit) split.split()).bucket(), i -> new LinkedList<>())
+                .add(split);
     }
 
     @Override
