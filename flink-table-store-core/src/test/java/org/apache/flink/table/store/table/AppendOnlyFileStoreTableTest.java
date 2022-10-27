@@ -47,8 +47,8 @@ import java.util.Random;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.table.sink.SinkRecordConverter.bucket;
-import static org.apache.flink.table.store.table.sink.SinkRecordConverter.hashcode;
+import static org.apache.flink.table.store.table.sink.BucketComputer.bucket;
+import static org.apache.flink.table.store.table.sink.BucketComputer.hashcode;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link AppendOnlyFileStoreTable}. */

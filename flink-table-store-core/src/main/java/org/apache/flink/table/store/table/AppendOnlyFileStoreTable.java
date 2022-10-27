@@ -105,11 +105,9 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWrite newWrite(String commitUser) {
-        SinkRecordConverter recordConverter =
-                new SinkRecordConverter(store.options().bucket(), tableSchema);
         return new TableWriteImpl<>(
                 store.newWrite(commitUser),
-                recordConverter,
+                new SinkRecordConverter(tableSchema),
                 record -> {
                     Preconditions.checkState(
                             record.row().getRowKind() == RowKind.INSERT,
