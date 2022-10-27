@@ -25,12 +25,19 @@ import org.junit.Test;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for catalog tables. */
 public class CatalogTableITCase extends CatalogITCaseBase {
 
     @Test
-    public void testMetadataTable() throws Exception {
+    public void testNotExistMetadataTable() {
+        assertThatThrownBy(() -> sql("SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots"))
+                .hasMessageContaining("Object 'T$snapshots' not found");
+    }
+
+    @Test
+    public void testSnapshotsTable() throws Exception {
         sql("CREATE TABLE T (a INT, b INT)");
         sql("INSERT INTO T VALUES (1, 2)");
         sql("INSERT INTO T VALUES (3, 4)");
@@ -38,5 +45,14 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         List<Row> result = sql("SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots");
         assertThat(result)
                 .containsExactlyInAnyOrder(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
+    }
+
+    @Test
+    public void testOptionsTable() throws Exception {
+        sql("CREATE TABLE T (a INT, b INT)");
+        sql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");
+
+        List<Row> result = sql("SELECT * FROM T$options");
+        assertThat(result).containsExactly(Row.of("snapshot.time-retained", "5 h"));
     }
 }
