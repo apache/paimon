@@ -28,7 +28,7 @@ public class IteratorRecordReader<T> implements RecordReader<T> {
 
     private final Iterator<T> iterator;
 
-    private boolean readed = false;
+    private boolean read = false;
 
     public IteratorRecordReader(Iterator<T> iterator) {
         this.iterator = iterator;
@@ -37,11 +37,11 @@ public class IteratorRecordReader<T> implements RecordReader<T> {
     @Nullable
     @Override
     public RecordIterator<T> readBatch() throws IOException {
-        if (readed) {
+        if (read) {
             return null;
         }
 
-        readed = true;
+        read = true;
         return new RecordIterator<T>() {
             @Override
             public T next() {

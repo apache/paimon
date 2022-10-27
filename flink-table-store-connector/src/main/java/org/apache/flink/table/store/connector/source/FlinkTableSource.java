@@ -63,11 +63,6 @@ public abstract class FlinkTableSource
     }
 
     @Override
-    public String asSummaryString() {
-        return "TableStoreSource";
-    }
-
-    @Override
     public Result applyFilters(List<ResolvedExpression> filters) {
         List<Predicate> converted = new ArrayList<>();
         RowType rowType = table.rowType();

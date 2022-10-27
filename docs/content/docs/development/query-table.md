@@ -107,5 +107,5 @@ SELECT * FROM MyTable$snapshots;
 2 rows in set
 ```
 
-By querying the snapshots table, you can know the snapshot committing information and expiration
-information of the table, and you can time travel through the information.
+By querying one table's snapshots table, you can know the commit and expiration
+information about that table and time travel through the data.

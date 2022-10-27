@@ -24,7 +24,6 @@ import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.types.utils.TypeConversions;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -66,7 +65,7 @@ public class MetadataCatalogTable implements CatalogTable {
 
     @Override
     public Map<String, String> getOptions() {
-        return new HashMap<>();
+        return Collections.emptyMap();
     }
 
     @Override

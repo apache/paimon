@@ -59,4 +59,9 @@ public class MetadataTableSource extends FlinkTableSource {
     public DynamicTableSource copy() {
         return new MetadataTableSource(table, predicate, projectFields, limit);
     }
+
+    @Override
+    public String asSummaryString() {
+        return "TableStore-MetadataSource";
+    }
 }

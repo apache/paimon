@@ -35,8 +35,6 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("INSERT INTO T VALUES (1, 2)");
         sql("INSERT INTO T VALUES (3, 4)");
 
-        tEnv.executeSql("SELECT * FROM T$snapshots").print();
-
         List<Row> result = sql("SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots");
         assertThat(result)
                 .containsExactlyInAnyOrder(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));

@@ -185,6 +185,11 @@ public class TableStoreSource extends FlinkTableSource
     }
 
     @Override
+    public String asSummaryString() {
+        return "TableStore-DataSource";
+    }
+
+    @Override
     public void applyWatermark(WatermarkStrategy<RowData> watermarkStrategy) {
         this.watermarkStrategy = watermarkStrategy;
     }
