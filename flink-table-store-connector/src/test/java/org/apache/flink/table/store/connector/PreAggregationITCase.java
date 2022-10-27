@@ -126,11 +126,18 @@ public class PreAggregationITCase {
 
         @Test
         public void testMergeInMemory() {
+            // VALUES does not guarantee order, but order is important for list aggregations.
+            // So we need to sort the input data.
             batchSql(
-                    "INSERT INTO T6 VALUES "
-                            + "(1, 2, 'first line'),"
-                            + "(1, 2, CAST(NULL AS STRING)), "
-                            + "(1, 2, 'second line')");
+                    "CREATE VIEW myView AS "
+                            + "SELECT b, c, d FROM "
+                            + "(VALUES "
+                            + "  (1, 1, 2, 'first line'),"
+                            + "  (2, 1, 2, CAST(NULL AS STRING)),"
+                            + "  (3, 1, 2, 'second line')"
+                            + ") AS V(a, b, c, d) "
+                            + "ORDER BY a");
+            batchSql("INSERT INTO T6 SELECT * FROM myView");
             List<Row> result = batchSql("SELECT * FROM T6");
             assertThat(result).containsExactlyInAnyOrder(Row.of(1, 2, "first line,second line"));
         }
@@ -197,11 +204,18 @@ public class PreAggregationITCase {
 
         @Test
         public void testMergeInMemory() {
+            // VALUES does not guarantee order, but order is important for last value aggregations.
+            // So we need to sort the input data.
             batchSql(
-                    "INSERT INTO T5 VALUES "
-                            + "(1, 2, CAST(NULL AS INT), CAST('2020-01-01' AS DATE)),"
-                            + "(1, 2, 2, CAST('2020-01-02' AS DATE)), "
-                            + "(1, 2, 3, CAST(NULL AS DATE))");
+                    "CREATE VIEW myView AS "
+                            + "SELECT b, c, d, e FROM "
+                            + "(VALUES "
+                            + "  (1, 1, 2, CAST(NULL AS INT), CAST('2020-01-01' AS DATE)),"
+                            + "  (2, 1, 2, 2, CAST('2020-01-02' AS DATE)),"
+                            + "  (3, 1, 2, 3, CAST(NULL AS DATE))"
+                            + ") AS V(a, b, c, d, e) "
+                            + "ORDER BY a");
+            batchSql("INSERT INTO T5 SELECT * FROM myView");
             List<Row> result = batchSql("SELECT * FROM T5");
             assertThat(result).containsExactlyInAnyOrder(Row.of(1, 2, 3, null));
         }
@@ -268,11 +282,18 @@ public class PreAggregationITCase {
 
         @Test
         public void testMergeInMemory() {
+            // VALUES does not guarantee order, but order is important for last value aggregations.
+            // So we need to sort the input data.
             batchSql(
-                    "INSERT INTO T4 VALUES "
-                            + "(1, 2, CAST(NULL AS INT), CAST('2020-01-01' AS DATE)),"
-                            + "(1, 2, 2, CAST('2020-01-02' AS DATE)), "
-                            + "(1, 2, 3, CAST(NULL AS DATE))");
+                    "CREATE VIEW myView AS "
+                            + "SELECT b, c, d, e FROM "
+                            + "(VALUES "
+                            + "  (1, 1, 2, CAST(NULL AS INT), CAST('2020-01-01' AS DATE)),"
+                            + "  (2, 1, 2, 2, CAST('2020-01-02' AS DATE)),"
+                            + "  (3, 1, 2, 3, CAST(NULL AS DATE))"
+                            + ") AS V(a, b, c, d, e) "
+                            + "ORDER BY a");
+            batchSql("INSERT INTO T4 SELECT * FROM myView");
             List<Row> result = batchSql("SELECT * FROM T4");
             assertThat(result).containsExactlyInAnyOrder(Row.of(1, 2, 3, LocalDate.of(2020, 1, 2)));
         }
