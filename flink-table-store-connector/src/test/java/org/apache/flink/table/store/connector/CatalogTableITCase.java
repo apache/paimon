@@ -25,9 +25,16 @@ import org.junit.Test;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for catalog tables. */
 public class CatalogTableITCase extends CatalogITCaseBase {
+
+    @Test
+    public void testNotExistMetadataTable() {
+        assertThatThrownBy(() -> sql("SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots"))
+                .hasMessageContaining("Object 'T$snapshots' not found");
+    }
 
     @Test
     public void testSnapshotsTable() throws Exception {
