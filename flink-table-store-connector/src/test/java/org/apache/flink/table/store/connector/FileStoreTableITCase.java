@@ -76,8 +76,14 @@ public abstract class FileStoreTableITCase extends AbstractTestBase {
 
     private void prepareConfiguration(TableEnvironment env, String path) {
         Configuration config = env.getConfig().getConfiguration();
-        config.set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 2);
+        config.set(
+                ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM,
+                defaultParallelism());
         config.setString(TABLE_STORE_PREFIX + ROOT_PATH.key(), path);
+    }
+
+    protected int defaultParallelism() {
+        return 2;
     }
 
     private void prepareEnv() {
