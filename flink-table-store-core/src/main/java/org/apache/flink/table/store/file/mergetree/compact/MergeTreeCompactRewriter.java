@@ -25,7 +25,6 @@ import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
 import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
 import org.apache.flink.table.store.file.io.RollingFileWriter;
-import org.apache.flink.table.store.file.mergetree.DropDeleteReader;
 import org.apache.flink.table.store.file.mergetree.MergeTreeReaders;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 import org.apache.flink.table.store.file.utils.RecordReader;
@@ -35,7 +34,7 @@ import java.util.Comparator;
 import java.util.List;
 
 /** Default {@link CompactRewriter} for merge trees. */
-public class MergeTreeCompactRewriter implements CompactRewriter {
+public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
 
     protected final KeyValueFileReaderFactory readerFactory;
     protected final KeyValueFileWriterFactory writerFactory;
@@ -64,22 +63,10 @@ public class MergeTreeCompactRewriter implements CompactRewriter {
         RollingFileWriter<KeyValue, DataFileMeta> writer =
                 writerFactory.createRollingMergeTreeFileWriter(outputLevel);
         RecordReader<KeyValue> sectionsReader =
-                MergeTreeReaders.readerForSections(
-                        sections,
-                        readerFactory,
-                        keyComparator,
-                        new ReducerMergeFunctionWrapper(mergeFunction.copy()));
-        if (dropDelete) {
-            sectionsReader = new DropDeleteReader(sectionsReader);
-        }
+                MergeTreeReaders.readerForMergeTree(
+                        sections, dropDelete, readerFactory, keyComparator, mergeFunction.copy());
         writer.write(new RecordReaderIterator<>(sectionsReader));
         writer.close();
-        return new CompactResult(
-                MergeTreeReaders.extractFilesFromSections(sections), writer.result());
-    }
-
-    @Override
-    public CompactResult upgrade(int outputLevel, DataFileMeta file) throws Exception {
-        return new CompactResult(file, file.upgrade(outputLevel));
+        return new CompactResult(extractFilesFromSections(sections), writer.result());
     }
 }

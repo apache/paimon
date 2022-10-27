@@ -116,7 +116,7 @@ public class FullChangelogMergeTreeCompactRewriter extends MergeTreeCompactRewri
         }
 
         return new CompactResult(
-                MergeTreeReaders.extractFilesFromSections(sections),
+                extractFilesFromSections(sections),
                 compactFileWriter.result(),
                 changelogFileWriter.result());
     }
@@ -128,7 +128,7 @@ public class FullChangelogMergeTreeCompactRewriter extends MergeTreeCompactRewri
                     Collections.singletonList(
                             Collections.singletonList(SortedRun.fromSingle(file))));
         } else {
-            return new CompactResult(file, file.upgrade(outputLevel));
+            return super.upgrade(outputLevel, file);
         }
     }
 }

@@ -23,27 +23,28 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionWrapper;
+import org.apache.flink.table.store.file.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.flink.table.store.file.mergetree.compact.SortMergeReader;
 import org.apache.flink.table.store.file.utils.RecordReader;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /** Utility class to create commonly used {@link RecordReader}s for merge trees. */
 public class MergeTreeReaders {
 
     private MergeTreeReaders() {}
 
-    public static RecordReader<KeyValue> readerForSections(
+    public static RecordReader<KeyValue> readerForMergeTree(
             List<List<SortedRun>> sections,
+            boolean dropDelete,
             KeyValueFileReaderFactory readerFactory,
             Comparator<RowData> userKeyComparator,
-            MergeFunctionWrapper<KeyValue> mergeFunctionWrapper)
+            MergeFunction<KeyValue> mergeFunction)
             throws IOException {
         List<ConcatRecordReader.ReaderSupplier<KeyValue>> readers = new ArrayList<>();
         for (List<SortedRun> section : sections) {
@@ -53,9 +54,13 @@ public class MergeTreeReaders {
                                     section,
                                     readerFactory,
                                     userKeyComparator,
-                                    mergeFunctionWrapper));
+                                    new ReducerMergeFunctionWrapper(mergeFunction)));
         }
-        return ConcatRecordReader.create(readers);
+        RecordReader<KeyValue> reader = ConcatRecordReader.create(readers);
+        if (dropDelete) {
+            reader = new DropDeleteReader(reader);
+        }
+        return reader;
     }
 
     public static RecordReader<KeyValue> readerForSection(
@@ -82,13 +87,5 @@ public class MergeTreeReaders {
             readers.add(() -> readerFactory.createRecordReader(file.fileName(), file.level()));
         }
         return ConcatRecordReader.create(readers);
-    }
-
-    public static List<DataFileMeta> extractFilesFromSections(List<List<SortedRun>> sections) {
-        return sections.stream()
-                .flatMap(Collection::stream)
-                .map(SortedRun::files)
-                .flatMap(Collection::stream)
-                .collect(Collectors.toList());
     }
 }

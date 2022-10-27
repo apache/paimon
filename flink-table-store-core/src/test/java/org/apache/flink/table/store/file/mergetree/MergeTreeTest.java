@@ -35,12 +35,11 @@ import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
 import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
 import org.apache.flink.table.store.file.io.RollingFileWriter;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
-import org.apache.flink.table.store.file.mergetree.compact.CompactRewriter;
+import org.apache.flink.table.store.file.mergetree.compact.AbstractCompactRewriter;
 import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
 import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManager;
-import org.apache.flink.table.store.file.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -362,14 +361,12 @@ public class MergeTreeTest {
     private List<TestRecord> readAll(List<DataFileMeta> files, boolean dropDelete)
             throws Exception {
         RecordReader<KeyValue> reader =
-                MergeTreeReaders.readerForSections(
+                MergeTreeReaders.readerForMergeTree(
                         new IntervalPartition(files, comparator).partition(),
+                        dropDelete,
                         readerFactory,
                         comparator,
-                        new ReducerMergeFunctionWrapper(new DeduplicateMergeFunction()));
-        if (dropDelete) {
-            reader = new DropDeleteReader(reader);
-        }
+                        new DeduplicateMergeFunction());
         List<TestRecord> records = new ArrayList<>();
         try (RecordReaderIterator<KeyValue> iterator = new RecordReaderIterator<>(reader)) {
             while (iterator.hasNext()) {
@@ -398,7 +395,7 @@ public class MergeTreeTest {
         return records;
     }
 
-    private class TestRewriter implements CompactRewriter {
+    private class TestRewriter extends AbstractCompactRewriter {
 
         @Override
         public CompactResult rewrite(
@@ -407,23 +404,15 @@ public class MergeTreeTest {
             RollingFileWriter<KeyValue, DataFileMeta> writer =
                     writerFactory.createRollingMergeTreeFileWriter(outputLevel);
             RecordReader<KeyValue> sectionsReader =
-                    MergeTreeReaders.readerForSections(
+                    MergeTreeReaders.readerForMergeTree(
                             sections,
+                            dropDelete,
                             compactReaderFactory,
                             comparator,
-                            new ReducerMergeFunctionWrapper(new DeduplicateMergeFunction()));
-            if (dropDelete) {
-                sectionsReader = new DropDeleteReader(sectionsReader);
-            }
+                            new DeduplicateMergeFunction());
             writer.write(new RecordReaderIterator<>(sectionsReader));
             writer.close();
-            return new CompactResult(
-                    MergeTreeReaders.extractFilesFromSections(sections), writer.result());
-        }
-
-        @Override
-        public CompactResult upgrade(int outputLevel, DataFileMeta file) {
-            return new CompactResult(file, file.upgrade(outputLevel));
+            return new CompactResult(extractFilesFromSections(sections), writer.result());
         }
     }
 

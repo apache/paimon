@@ -20,7 +20,7 @@ package org.apache.flink.table.store.benchmark.file.mergetree;
 
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.mergetree.MergeTreeReader;
+import org.apache.flink.table.store.file.mergetree.MergeTreeReaders;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
 import org.apache.flink.table.store.file.utils.RecordReader;
@@ -95,7 +95,7 @@ public class MergeTreeReaderBenchmark extends MergeTreeBenchmark {
     @BenchmarkMode(Mode.SingleShotTime)
     public long scanAll() throws Exception {
         try (RecordReader<KeyValue> reader =
-                new MergeTreeReader(
+                MergeTreeReaders.readerForMergeTree(
                         new IntervalPartition(compactedFiles, comparator).partition(),
                         true,
                         readerFactory,
