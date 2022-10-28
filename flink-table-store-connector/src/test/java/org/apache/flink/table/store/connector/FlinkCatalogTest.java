@@ -331,10 +331,8 @@ public class FlinkCatalogTest {
         assertThat(database.getProperties()).isEmpty();
         assertThat(database.getDescription()).isEmpty();
         assertThatThrownBy(() -> catalog.getDatabase(nonExistDbPath.getDatabaseName()))
-                .isInstanceOf(CatalogException.class)
-                .hasRootCauseInstanceOf(
-                        org.apache.flink.table.store.file.catalog.Catalog.DatabaseNotExistException
-                                .class);
+                .isInstanceOf(DatabaseNotExistException.class)
+                .hasMessageContaining("Database non does not exist in Catalog test-catalog.");
     }
 
     @Test

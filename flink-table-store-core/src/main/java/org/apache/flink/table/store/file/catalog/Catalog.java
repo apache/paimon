@@ -23,12 +23,9 @@ import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.table.Database;
 import org.apache.flink.table.store.table.Table;
 
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -61,30 +58,6 @@ public interface Catalog extends AutoCloseable {
      * @return true if the given database exists in the catalog false otherwise
      */
     boolean databaseExists(String databaseName);
-
-    /**
-     * Get the database from this catalog.
-     *
-     * @param databaseName Name of the database
-     * @return The requested database
-     * @throws DatabaseNotExistException if the database does not exist
-     */
-    default Database getDatabase(String databaseName) throws DatabaseNotExistException {
-        if (databaseExists(databaseName)) {
-            return new Database() {
-                @Override
-                public Map<String, String> getProperties() {
-                    return Collections.emptyMap();
-                }
-
-                @Override
-                public Optional<String> getDescription() {
-                    return Optional.empty();
-                }
-            };
-        }
-        throw new DatabaseNotExistException(databaseName);
-    }
 
     /**
      * Create a database.

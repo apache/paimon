@@ -44,7 +44,6 @@ import org.apache.flink.table.factories.Factory;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.table.Database;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.Table;
 
@@ -93,14 +92,12 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     @Override
-    public CatalogDatabase getDatabase(String databaseName) throws CatalogException {
-        try {
-            Database database = catalog.getDatabase(databaseName);
-            return new CatalogDatabaseImpl(
-                    database.getProperties(), database.getDescription().orElse(null));
-        } catch (Catalog.DatabaseNotExistException e) {
-            throw new CatalogException(e);
+    public CatalogDatabase getDatabase(String databaseName)
+            throws CatalogException, DatabaseNotExistException {
+        if (databaseExists(databaseName)) {
+            return new CatalogDatabaseImpl(Collections.emptyMap(), null);
         }
+        throw new DatabaseNotExistException(getName(), databaseName);
     }
 
     @Override
