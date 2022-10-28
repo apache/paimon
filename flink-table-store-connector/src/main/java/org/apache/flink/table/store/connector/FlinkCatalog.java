@@ -23,6 +23,7 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.AbstractCatalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogDatabase;
+import org.apache.flink.table.catalog.CatalogDatabaseImpl;
 import org.apache.flink.table.catalog.CatalogFunction;
 import org.apache.flink.table.catalog.CatalogPartition;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
@@ -88,6 +89,15 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public boolean databaseExists(String databaseName) throws CatalogException {
         return catalog.databaseExists(databaseName);
+    }
+
+    @Override
+    public CatalogDatabase getDatabase(String databaseName)
+            throws CatalogException, DatabaseNotExistException {
+        if (databaseExists(databaseName)) {
+            return new CatalogDatabaseImpl(Collections.emptyMap(), null);
+        }
+        throw new DatabaseNotExistException(getName(), databaseName);
     }
 
     @Override
@@ -298,11 +308,6 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     // --------------------- unsupported methods ----------------------------
-
-    @Override
-    public CatalogDatabase getDatabase(String databaseName) throws CatalogException {
-        throw new UnsupportedOperationException();
-    }
 
     @Override
     public final void alterDatabase(
