@@ -23,6 +23,7 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.AbstractCatalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogDatabase;
+import org.apache.flink.table.catalog.CatalogDatabaseImpl;
 import org.apache.flink.table.catalog.CatalogFunction;
 import org.apache.flink.table.catalog.CatalogPartition;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
@@ -43,6 +44,7 @@ import org.apache.flink.table.factories.Factory;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.table.Database;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.Table;
 
@@ -88,6 +90,17 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public boolean databaseExists(String databaseName) throws CatalogException {
         return catalog.databaseExists(databaseName);
+    }
+
+    @Override
+    public CatalogDatabase getDatabase(String databaseName) throws CatalogException {
+        try {
+            Database database = catalog.getDatabase(databaseName);
+            return new CatalogDatabaseImpl(
+                    database.getProperties(), database.getDescription().orElse(null));
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new CatalogException(e);
+        }
     }
 
     @Override
@@ -298,11 +311,6 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     // --------------------- unsupported methods ----------------------------
-
-    @Override
-    public CatalogDatabase getDatabase(String databaseName) throws CatalogException {
-        throw new UnsupportedOperationException();
-    }
 
     @Override
     public final void alterDatabase(

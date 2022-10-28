@@ -24,6 +24,7 @@ import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
+import org.apache.flink.table.catalog.CatalogDatabase;
 import org.apache.flink.table.catalog.CatalogDatabaseImpl;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.Column;
@@ -321,6 +322,19 @@ public class FlinkCatalogTest {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(), false);
         Assert.assertTrue(catalog.databaseExists("db1"));
+    }
+
+    @Test
+    public void testGetDatabase() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
+        CatalogDatabase database = catalog.getDatabase(path1.getDatabaseName());
+        assertThat(database.getProperties()).isEmpty();
+        assertThat(database.getDescription()).isEmpty();
+        assertThatThrownBy(() -> catalog.getDatabase(nonExistDbPath.getDatabaseName()))
+                .isInstanceOf(CatalogException.class)
+                .hasRootCauseInstanceOf(
+                        org.apache.flink.table.store.file.catalog.Catalog.DatabaseNotExistException
+                                .class);
     }
 
     @Test
