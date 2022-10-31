@@ -86,8 +86,10 @@ public class MergeTreeReaders {
             List<RecordReader<KeyValue>> readerList = region.getReaders();
             supplierList.add(
                     () ->
-                            readerList.size() == 1 ? readerList.get(0) : new SortMergeReader.create(
-                                    readerList, userKeyComparator, mergeFunctionWrapper));
+                            readerList.size() == 1
+                                    ? readerList.get(0)
+                                    : new SortMergeReader(
+                                            readerList, userKeyComparator, mergeFunctionWrapper));
         }
         return ConcatRecordReader.create(supplierList);
     }
@@ -103,5 +105,14 @@ public class MergeTreeReaders {
                             file.maxKey()));
         }
         return new RecordReaderSubRegion<>(index, readers);
+    }
+
+    public static RecordReader<KeyValue> readerForRun(
+            SortedRun run, KeyValueFileReaderFactory readerFactory) throws IOException {
+        List<ConcatRecordReader.ReaderSupplier<KeyValue>> readers = new ArrayList<>();
+        for (DataFileMeta file : run.files()) {
+            readers.add(() -> readerFactory.createRecordReader(file.fileName(), file.level()));
+        }
+        return ConcatRecordReader.create(readers);
     }
 }

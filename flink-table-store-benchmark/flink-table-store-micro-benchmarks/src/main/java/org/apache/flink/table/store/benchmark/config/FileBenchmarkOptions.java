@@ -39,12 +39,12 @@ public class FileBenchmarkOptions {
     public static final ConfigOption<Integer> WRITER_BATCH_COUNT =
             key("benchmark.writer.batch-count")
                     .intType()
-                    .defaultValue(50)
+                    .defaultValue(5000)
                     .withDescription("The number of batches to be written by writer.");
 
     public static final ConfigOption<Integer> WRITER_RECORD_COUNT_PER_BATCH =
             key("benchmark.writer.record-count-per-batch")
                     .intType()
-                    .defaultValue(50000)
+                    .defaultValue(500)
                     .withDescription("The number of records to be written in one batch by writer.");
 }

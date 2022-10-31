@@ -75,7 +75,7 @@ public class MergeTreeReaderBenchmark extends MergeTreeBenchmark {
                     writer.write(kv);
                 }
 
-                RecordWriter.CommitIncrement increment = writer.prepareCommit(false);
+                RecordWriter.CommitIncrement increment = writer.prepareCommit(true);
                 mergeCompacted(newFileNames, compactedFiles, increment);
             }
 
