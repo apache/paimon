@@ -92,7 +92,7 @@ public class TestCommitThread extends Thread {
         }
 
         this.write = safeStore.newWrite();
-        this.commit = testStore.newCommit(UUID.randomUUID().toString());
+        this.commit = testStore.newCommit(UUID.randomUUID().toString()).withCreateEmptyCommit(true);
     }
 
     public List<KeyValue> getResult() {

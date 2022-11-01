@@ -95,9 +95,9 @@ public class FileStoreCommitTest {
     @CsvSource({
         "false,NONE",
         "false,INPUT",
+        "false,FULL_COMPACTION",
         "true,NONE",
         "true,INPUT",
-        "false,FULL_COMPACTION",
         "true,FULL_COMPACTION"
     })
     public void testSingleCommitUser(boolean failing, String changelogProducer) throws Exception {
@@ -109,9 +109,9 @@ public class FileStoreCommitTest {
     @CsvSource({
         "false,NONE",
         "false,INPUT",
+        "false,FULL_COMPACTION",
         "true,NONE",
         "true,INPUT",
-        "false,FULL_COMPACTION",
         "true,FULL_COMPACTION"
     })
     public void testManyCommitUsersNoConflict(boolean failing, String changelogProducer)
@@ -126,9 +126,9 @@ public class FileStoreCommitTest {
     @CsvSource({
         "false,NONE",
         "false,INPUT",
+        "false,FULL_COMPACTION",
         "true,NONE",
         "true,INPUT",
-        "false,FULL_COMPACTION",
         "true,FULL_COMPACTION"
     })
     public void testManyCommitUsersWithConflict(boolean failing, String changelogProducer)
