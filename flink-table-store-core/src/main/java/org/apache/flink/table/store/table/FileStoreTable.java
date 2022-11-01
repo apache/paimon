@@ -27,6 +27,8 @@ import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.types.logical.RowType;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /**
@@ -64,4 +66,7 @@ public interface FileStoreTable extends Table, SupportsPartition, SupportsWrite 
     TableWrite newWrite();
 
     TableCommit newCommit(String user);
+
+    @Nullable
+    Long getSnapshotId();
 }

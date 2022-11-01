@@ -25,17 +25,21 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.sink.TableCommit;
 
+import javax.annotation.Nullable;
+
 /** Abstract {@link FileStoreTable}. */
 public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
     private final Path path;
+    @Nullable private final Long snapshotId;
     protected final TableSchema tableSchema;
 
-    public AbstractFileStoreTable(Path path, TableSchema tableSchema) {
+    public AbstractFileStoreTable(Path path, TableSchema tableSchema, @Nullable Long snapshotId) {
         this.path = path;
         this.tableSchema = tableSchema;
+        this.snapshotId = snapshotId;
     }
 
     protected abstract FileStore<?> store();
@@ -63,5 +67,11 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public TableCommit newCommit(String user) {
         return new TableCommit(store().newCommit(user), store().newExpire());
+    }
+
+    @Nullable
+    @Override
+    public Long getSnapshotId() {
+        return snapshotId;
     }
 }

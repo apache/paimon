@@ -26,18 +26,24 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 
 import static org.apache.flink.table.store.CoreOptions.PATH;
+import static org.apache.flink.table.store.CoreOptions.SNAPSHOT;
 
 /** Factory to create {@link FileStoreTable}. */
 public class FileStoreTableFactory {
-
     public static FileStoreTable create(Path path) {
+        return create(path, -1);
+    }
+
+    public static FileStoreTable create(Path path, long snapshotId) {
         Configuration conf = new Configuration();
         conf.set(PATH, path.toString());
+        conf.set(SNAPSHOT, snapshotId);
         return create(conf);
     }
 
     public static FileStoreTable create(Configuration conf) {
         Path tablePath = CoreOptions.path(conf);
+        long snapshotId = conf.get(SNAPSHOT);
         TableSchema tableSchema =
                 new SchemaManager(tablePath)
                         .latest()
@@ -47,15 +53,22 @@ public class FileStoreTableFactory {
                                                 "Schema file not found in location "
                                                         + tablePath
                                                         + ". Please create table first."));
-        return create(tablePath, tableSchema, conf);
+        return create(tablePath, tableSchema, conf, snapshotId);
     }
 
     public static FileStoreTable create(Path tablePath, TableSchema tableSchema) {
-        return create(tablePath, tableSchema, new Configuration());
+        return create(tablePath, tableSchema, new Configuration(), -1);
+    }
+
+    public static FileStoreTable create(Path tablePath, TableSchema tableSchema, long snapshotId) {
+        return create(tablePath, tableSchema, new Configuration(), snapshotId);
     }
 
     public static FileStoreTable create(
-            Path tablePath, TableSchema tableSchema, Configuration dynamicOptions) {
+            Path tablePath,
+            TableSchema tableSchema,
+            Configuration dynamicOptions,
+            long snapshotId) {
         // merge dynamic options into schema.options
         Configuration newOptions = Configuration.fromMap(tableSchema.options());
         dynamicOptions.toMap().forEach(newOptions::setString);
@@ -64,12 +77,14 @@ public class FileStoreTableFactory {
 
         SchemaManager schemaManager = new SchemaManager(tablePath);
         if (newOptions.get(CoreOptions.WRITE_MODE) == WriteMode.APPEND_ONLY) {
-            return new AppendOnlyFileStoreTable(tablePath, schemaManager, tableSchema);
+            return new AppendOnlyFileStoreTable(tablePath, schemaManager, tableSchema, snapshotId);
         } else {
             if (tableSchema.primaryKeys().isEmpty()) {
-                return new ChangelogValueCountFileStoreTable(tablePath, schemaManager, tableSchema);
+                return new ChangelogValueCountFileStoreTable(
+                        tablePath, schemaManager, tableSchema, snapshotId);
             } else {
-                return new ChangelogWithKeyFileStoreTable(tablePath, schemaManager, tableSchema);
+                return new ChangelogWithKeyFileStoreTable(
+                        tablePath, schemaManager, tableSchema, snapshotId);
             }
         }
     }

@@ -84,6 +84,12 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The file path of this table in the filesystem.");
 
+    public static final ConfigOption<Long> SNAPSHOT =
+            ConfigOptions.key("snapshot")
+                    .longType()
+                    .defaultValue(-1L)
+                    .withDescription("The snapshot id of the table, -1 means the latest snapshot.");
+
     public static final ConfigOption<String> FILE_FORMAT =
             ConfigOptions.key("file.format")
                     .stringType()

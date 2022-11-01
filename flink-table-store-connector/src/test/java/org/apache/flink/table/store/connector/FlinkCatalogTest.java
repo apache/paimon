@@ -37,6 +37,13 @@ import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
+import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.FileStoreTableFactory;
+import org.apache.flink.table.store.table.sink.TableCommit;
+import org.apache.flink.table.store.table.sink.TableWrite;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -53,7 +60,10 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
+import static org.apache.flink.table.store.CoreOptions.PATH;
+import static org.apache.flink.table.store.CoreOptions.SNAPSHOT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -86,6 +96,15 @@ public class FlinkCatalogTest {
                         Column.physical("third", DataTypes.STRING())),
                 Collections.emptyList(),
                 null);
+    }
+
+    private RowData createTableData(String first, int second, String third) {
+        GenericRowData data = new GenericRowData(3);
+        data.setField(0, StringData.fromString(first));
+        data.setField(1, second);
+        data.setField(2, StringData.fromString(third));
+
+        return data;
     }
 
     private CatalogTable createStreamingTable() {
@@ -406,6 +425,62 @@ public class FlinkCatalogTest {
         assertThatThrownBy(() -> catalog.dropDatabase(path1.getDatabaseName(), false, false))
                 .isInstanceOf(DatabaseNotExistException.class)
                 .hasMessage("Database db1 does not exist in Catalog test-catalog.");
+    }
+
+    @Test
+    public void testTableSnapshotSchema() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
+        catalog.createTable(this.path1, this.createTable(), false);
+        CatalogBaseTable table = catalog.getTable(this.path1);
+        Configuration configuration = Configuration.fromMap(table.getOptions());
+        FileStoreTable fileStoreTable = FileStoreTableFactory.create(configuration);
+        TableWrite write = fileStoreTable.newWrite();
+        TableCommit commit = fileStoreTable.newCommit("user");
+
+        CatalogBaseTable latestTable = catalog.getTable(this.path1);
+        assertThat(latestTable.getOptions()).doesNotContainKey(SNAPSHOT.key());
+
+        final int notExistSnapshot = 10;
+        ObjectPath snapshotPath =
+                ObjectPath.fromString(
+                        String.format(
+                                "%s$snapshot$%s", this.path1.getFullName(), notExistSnapshot));
+        assertThatThrownBy(() -> catalog.getTable(snapshotPath))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage(
+                        "Fails to read snapshot from path %s/snapshot/snapshot-%s",
+                        latestTable.getOptions().get(PATH.key()), notExistSnapshot);
+
+        for (int i = 0; i < 10; i++) {
+            for (int j = 0; j < 100; j++) {
+                write.write(
+                        createTableData(
+                                UUID.randomUUID().toString(), i, UUID.randomUUID().toString()));
+            }
+            commit.commit(String.valueOf(i), write.prepareCommit(true));
+        }
+        write.close();
+
+        CatalogBaseTable newLatestTable = catalog.getTable(this.path1);
+        assertThat(newLatestTable.getOptions()).isEqualTo(latestTable.getOptions());
+
+        Long latestSnapshotId = fileStoreTable.snapshotManager().latestSnapshotId();
+        assertThat(latestSnapshotId).isNotNull();
+        assertThat(latestSnapshotId).isGreaterThan(0);
+        for (long snapshotId = 1; snapshotId < latestSnapshotId; snapshotId++) {
+            CatalogBaseTable snapshotTable =
+                    catalog.getTable(
+                            ObjectPath.fromString(
+                                    String.format(
+                                            "%s$snapshot$%s",
+                                            this.path1.getFullName(), snapshotId)));
+            assertThat(snapshotTable.getOptions().get(SNAPSHOT.key()))
+                    .isEqualTo(String.valueOf(snapshotId));
+            assertThat(snapshotTable.getOptions().get(PATH.key()))
+                    .isEqualTo(latestTable.getOptions().get(PATH.key()));
+        }
+
+        catalog.dropTable(this.path1, false);
     }
 
     private void checkEquals(ObjectPath path, CatalogTable t1, CatalogTable t2) {

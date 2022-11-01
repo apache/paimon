@@ -20,12 +20,17 @@ package org.apache.flink.table.store.file.catalog;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.metadata.MetadataTableLoader;
 
 import org.apache.commons.lang3.StringUtils;
+
+import static org.apache.flink.util.Preconditions.checkState;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -42,19 +47,38 @@ public abstract class AbstractCatalog implements Catalog {
         String inputTableName = tablePath.getObjectName();
         if (inputTableName.contains(METADATA_TABLE_SPLITTER)) {
             String[] splits = StringUtils.split(inputTableName, METADATA_TABLE_SPLITTER);
-            if (splits.length != 2) {
+            if (splits.length == 2) {
+                String table = splits[0];
+                String metadata = splits[1];
+                ObjectPath originTablePath = new ObjectPath(tablePath.getDatabaseName(), table);
+                if (!tableExists(originTablePath)) {
+                    throw new TableNotExistException(tablePath);
+                }
+                Path location = getTableLocation(originTablePath);
+                return MetadataTableLoader.load(metadata, location);
+            } else if (splits.length == 3) {
+                String table = splits[0];
+                String snapshotTag = splits[1];
+                int snapshotId = Integer.parseInt(splits[2]);
+                checkState(
+                        StringUtils.equalsIgnoreCase(snapshotTag, SNAPSHOT),
+                        String.format("Table name can only be %s$snapshot$%s", table, snapshotId));
+                ObjectPath originTablePath = new ObjectPath(tablePath.getDatabaseName(), table);
+                if (!tableExists(originTablePath)) {
+                    throw new TableNotExistException(tablePath);
+                }
+                Path location = getTableLocation(originTablePath);
+                Snapshot snapshot = new SnapshotManager(location).snapshot(snapshotId);
+                SchemaManager schemaManager = new SchemaManager(location);
+                TableSchema tableSchema = schemaManager.schema(snapshot.schemaId());
+
+                return FileStoreTableFactory.create(
+                        getTableLocation(originTablePath), tableSchema, snapshotId);
+            } else {
                 throw new IllegalArgumentException(
-                        "Metadata table can only contain one '$' separator, but this is: "
+                        "Metadata table can only contain one or two '$' separator, but this is: "
                                 + inputTableName);
             }
-            String table = splits[0];
-            String metadata = splits[1];
-            ObjectPath originTablePath = new ObjectPath(tablePath.getDatabaseName(), table);
-            if (!tableExists(originTablePath)) {
-                throw new TableNotExistException(tablePath);
-            }
-            Path location = getTableLocation(originTablePath);
-            return MetadataTableLoader.load(metadata, location);
         } else {
             TableSchema tableSchema = getTableSchema(tablePath);
             return FileStoreTableFactory.create(getTableLocation(tablePath), tableSchema);

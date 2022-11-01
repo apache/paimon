@@ -56,6 +56,7 @@ import java.util.Optional;
 
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.flink.table.store.CoreOptions.PATH;
+import static org.apache.flink.table.store.CoreOptions.SNAPSHOT;
 
 /** Catalog for table store. */
 public class FlinkCatalog extends AbstractCatalog {
@@ -156,12 +157,14 @@ public class FlinkCatalog extends AbstractCatalog {
         }
 
         if (table instanceof FileStoreTable) {
-            CatalogTable catalogTable =
-                    ((FileStoreTable) table).schema().toUpdateSchema().toCatalogTable();
+            FileStoreTable storeTable = (FileStoreTable) table;
+            CatalogTable catalogTable = storeTable.schema().toUpdateSchema().toCatalogTable();
             // add path to source and sink
-            catalogTable
-                    .getOptions()
-                    .put(PATH.key(), catalog.getTableLocation(tablePath).toString());
+            Map<String, String> options = catalogTable.getOptions();
+            options.put(PATH.key(), storeTable.location().toString());
+            if (storeTable.getSnapshotId() != null) {
+                options.put(SNAPSHOT.key(), String.valueOf(storeTable.getSnapshotId()));
+            }
             return catalogTable;
         } else {
             return new MetadataCatalogTable(table);

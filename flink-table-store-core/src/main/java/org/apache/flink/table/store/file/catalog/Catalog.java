@@ -38,6 +38,8 @@ public interface Catalog extends AutoCloseable {
 
     String METADATA_TABLE_SPLITTER = "$";
 
+    String SNAPSHOT = "snapshot";
+
     /**
      * Get lock factory from catalog. Lock is used to support multiple concurrent writes on the
      * object store.

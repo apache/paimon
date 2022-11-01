@@ -66,8 +66,8 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     private final KeyValueFileStore store;
 
     ChangelogWithKeyFileStoreTable(
-            Path path, SchemaManager schemaManager, TableSchema tableSchema) {
-        super(path, tableSchema);
+            Path path, SchemaManager schemaManager, TableSchema tableSchema, Long snapshotId) {
+        super(path, tableSchema, snapshotId);
 
         RowType rowType = tableSchema.logicalRowType();
         Configuration conf = Configuration.fromMap(tableSchema.options());

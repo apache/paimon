@@ -486,6 +486,6 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 Arrays.asList("pt", "a"),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogWithKeyFileStoreTable(tablePath, schemaManager, tableSchema);
+        return new ChangelogWithKeyFileStoreTable(tablePath, schemaManager, tableSchema, null);
     }
 }

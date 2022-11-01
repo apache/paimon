@@ -251,6 +251,6 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 Collections.emptyList(),
                                 conf.toMap(),
                                 ""));
-        return new AppendOnlyFileStoreTable(tablePath, schemaManager, tableSchema);
+        return new AppendOnlyFileStoreTable(tablePath, schemaManager, tableSchema, null);
     }
 }

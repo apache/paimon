@@ -51,8 +51,9 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     private final AppendOnlyFileStore store;
 
-    AppendOnlyFileStoreTable(Path path, SchemaManager schemaManager, TableSchema tableSchema) {
-        super(path, tableSchema);
+    AppendOnlyFileStoreTable(
+            Path path, SchemaManager schemaManager, TableSchema tableSchema, Long snapshotId) {
+        super(path, tableSchema, snapshotId);
         this.store =
                 new AppendOnlyFileStore(
                         schemaManager,

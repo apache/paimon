@@ -126,3 +126,23 @@ SELECT * FROM MyTable$options;
 +------------------------+--------------------+
 1 rows in set
 ```
+
+## Table Snapshot Schema
+
+You can query table snapshot's schema with given snapshot id through Flink SQL,
+then you can query from the table snapshot according to the schema.
+
+```sql
+SHOW CREATE TABLE MyTable$snapshot$10;
+
+CREATE TABLE `my_catalog`.`default`.`MyTable$snapshot$10` (
+  `word` VARCHAR(1024) NOT NULL,
+  `cnt` BIGINT,
+  `sum_val` BIGINT,
+  CONSTRAINT `***` PRIMARY KEY (`word`) NOT ENFORCED
+) WITH (
+  'path' = 'file:/***/MyTable',
+  'snapshot' = 10
+)
+
+```
