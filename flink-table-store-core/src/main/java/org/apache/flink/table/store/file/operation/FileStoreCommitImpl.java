@@ -157,10 +157,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             return committableList;
         }
 
-        // check if a committable is already committed by its identifier
-        Map<String, ManifestCommittable> identifiers = new LinkedHashMap<>();
+        // Check if a committable is already committed by its identifier.
+        // We use `identifiers` for checking and `remainingIdentifiers` for the results.
+        Set<String> identifiers = new HashSet<>();
+        Map<String, ManifestCommittable> remainingIdentifiers = new LinkedHashMap<>();
         for (ManifestCommittable committable : committableList) {
-            identifiers.put(committable.identifier(), committable);
+            identifiers.add(committable.identifier());
+            remainingIdentifiers.put(committable.identifier(), committable);
         }
 
         for (long id = latestSnapshotId; id >= Snapshot.FIRST_SNAPSHOT_ID; id--) {
@@ -170,8 +173,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
             Snapshot snapshot = snapshotManager.snapshot(id);
             if (commitUser.equals(snapshot.commitUser())) {
-                if (identifiers.containsKey(snapshot.commitIdentifier())) {
-                    identifiers.remove(snapshot.commitIdentifier());
+                // When we found a presenting identifier, we remove it from `remainingIdentifiers`
+                // but keep it in `identifiers`. This is because different snapshots may have the
+                // same identifier (for example an APPEND snapshot and the following COMPACT
+                // snapshot).
+                if (identifiers.contains(snapshot.commitIdentifier())) {
+                    remainingIdentifiers.remove(snapshot.commitIdentifier());
+                    if (remainingIdentifiers.isEmpty()) {
+                        // early exit, no more identifiers to filter
+                        break;
+                    }
                 } else {
                     // early exit, because committableList must be the latest commits by this
                     // commit user
@@ -180,7 +191,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
-        return new ArrayList<>(identifiers.values());
+        return new ArrayList<>(remainingIdentifiers.values());
     }
 
     @Override

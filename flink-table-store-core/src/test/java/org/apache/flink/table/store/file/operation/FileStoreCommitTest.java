@@ -50,6 +50,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -167,6 +168,31 @@ public class FileStoreCommitTest {
         // this test succeeds if this call does not fail
         store.newCommit(UUID.randomUUID().toString())
                 .filterCommitted(Collections.singletonList(new ManifestCommittable("dummy")));
+    }
+
+    @Test
+    public void testFilterAllCommits() throws Exception {
+        testRandomConcurrentNoConflict(1, false, CoreOptions.ChangelogProducer.NONE);
+        TestFileStore store = createStore(false);
+        SnapshotManager snapshotManager = store.snapshotManager();
+        long latestSnapshotId = snapshotManager.latestSnapshotId();
+
+        LinkedHashSet<String> commitIdentifiers = new LinkedHashSet<>();
+        String user = "";
+        for (long id = Snapshot.FIRST_SNAPSHOT_ID; id <= latestSnapshotId; id++) {
+            Snapshot snapshot = snapshotManager.snapshot(id);
+            commitIdentifiers.add(snapshot.commitIdentifier());
+            user = snapshot.commitUser();
+        }
+
+        // all commit identifiers should be filtered out
+        List<ManifestCommittable> remaining =
+                store.newCommit(user)
+                        .filterCommitted(
+                                commitIdentifiers.stream()
+                                        .map(ManifestCommittable::new)
+                                        .collect(Collectors.toList()));
+        assertThat(remaining).isEmpty();
     }
 
     protected void testRandomConcurrentNoConflict(
