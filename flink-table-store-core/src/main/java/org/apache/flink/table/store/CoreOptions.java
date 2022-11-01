@@ -84,12 +84,14 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The file path of this table in the filesystem.");
 
+    @Internal
+    @Documentation.ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<Long> SNAPSHOT =
             ConfigOptions.key("snapshot")
                     .longType()
                     .noDefaultValue()
                     .withDescription(
-                            "The snapshot id of the table, and if it is not exist, it means the latest snapshot.");
+                            "The snapshot id of the table, and if it is not exist, it means using latest snapshot.");
 
     public static final ConfigOption<String> FILE_FORMAT =
             ConfigOptions.key("file.format")
