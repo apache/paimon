@@ -59,7 +59,7 @@ public abstract class AbstractCatalog implements Catalog {
             } else if (splits.length == 3) {
                 String table = splits[0];
                 String snapshotTag = splits[1];
-                int snapshotId = Integer.parseInt(splits[2]);
+                Long snapshotId = Long.parseLong(splits[2]);
                 checkState(
                         StringUtils.equalsIgnoreCase(snapshotTag, SNAPSHOT),
                         String.format("Table name can only be %s$snapshot$%s", table, snapshotId));

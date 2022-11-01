@@ -31,19 +31,21 @@ import static org.apache.flink.table.store.CoreOptions.SNAPSHOT;
 /** Factory to create {@link FileStoreTable}. */
 public class FileStoreTableFactory {
     public static FileStoreTable create(Path path) {
-        return create(path, -1);
+        return create(path, (Long) null);
     }
 
-    public static FileStoreTable create(Path path, long snapshotId) {
+    public static FileStoreTable create(Path path, Long snapshotId) {
         Configuration conf = new Configuration();
         conf.set(PATH, path.toString());
-        conf.set(SNAPSHOT, snapshotId);
+        if (snapshotId != null) {
+            conf.set(SNAPSHOT, snapshotId);
+        }
         return create(conf);
     }
 
     public static FileStoreTable create(Configuration conf) {
         Path tablePath = CoreOptions.path(conf);
-        long snapshotId = conf.get(SNAPSHOT);
+        Long snapshotId = conf.get(SNAPSHOT);
         TableSchema tableSchema =
                 new SchemaManager(tablePath)
                         .latest()
@@ -57,10 +59,10 @@ public class FileStoreTableFactory {
     }
 
     public static FileStoreTable create(Path tablePath, TableSchema tableSchema) {
-        return create(tablePath, tableSchema, new Configuration(), -1);
+        return create(tablePath, tableSchema, new Configuration(), null);
     }
 
-    public static FileStoreTable create(Path tablePath, TableSchema tableSchema, long snapshotId) {
+    public static FileStoreTable create(Path tablePath, TableSchema tableSchema, Long snapshotId) {
         return create(tablePath, tableSchema, new Configuration(), snapshotId);
     }
 
@@ -68,7 +70,7 @@ public class FileStoreTableFactory {
             Path tablePath,
             TableSchema tableSchema,
             Configuration dynamicOptions,
-            long snapshotId) {
+            Long snapshotId) {
         // merge dynamic options into schema.options
         Configuration newOptions = Configuration.fromMap(tableSchema.options());
         dynamicOptions.toMap().forEach(newOptions::setString);
