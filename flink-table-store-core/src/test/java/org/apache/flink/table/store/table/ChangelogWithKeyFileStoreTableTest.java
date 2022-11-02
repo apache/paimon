@@ -36,14 +36,13 @@ import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.utils.CompatibilityTestUtils;
 import org.apache.flink.types.RowKind;
-
 import org.apache.flink.util.function.FunctionWithException;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
