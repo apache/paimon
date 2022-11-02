@@ -294,6 +294,176 @@ public class SparkReadITCase {
      */
     @Disabled
     @Test
+    public void testRenameColumn() throws Exception {
+        Path tablePath = new Path(warehousePath, "default.db/testRenameColumn");
+        createTestHelper(tablePath);
+
+        List<Row> beforeRename =
+                spark.sql("SHOW CREATE TABLE tablestore.default.testRenameColumn").collectAsList();
+        assertThat(beforeRename.toString())
+                .isEqualTo(
+                        "[[CREATE TABLE testRenameColumn (\n"
+                                + "  `a` INT NOT NULL,\n"
+                                + "  `b` BIGINT,\n"
+                                + "  `c` STRING)\n"
+                                + "]]");
+
+        spark.sql("ALTER TABLE tablestore.default.testRenameColumn RENAME COLUMN a to aa");
+
+        List<Row> afterRename =
+                spark.sql("SHOW CREATE TABLE tablestore.default.testRenameColumn").collectAsList();
+        assertThat(afterRename.toString())
+                .isEqualTo(
+                        "[[CREATE TABLE testRenameColumn (\n"
+                                + "  `aa` INT NOT NULL,\n"
+                                + "  `b` BIGINT,\n"
+                                + "  `c` STRING)\n"
+                                + "]]");
+    }
+
+    @Test
+    public void testRenamePartitionKey() {
+        spark.sql("USE tablestore");
+        spark.sql(
+                "CREATE TABLE default.testRenamePartitionKey (\n"
+                        + "a BIGINT,\n"
+                        + "b STRING) USING tablestore\n"
+                        + "COMMENT 'table comment'\n"
+                        + "PARTITIONED BY (a)\n"
+                        + "TBLPROPERTIES ('foo' = 'bar')");
+
+        List<Row> beforeRename =
+                spark.sql("SHOW CREATE TABLE tablestore.default.testRenamePartitionKey")
+                        .collectAsList();
+        assertThat(beforeRename.toString())
+                .isEqualTo(
+                        "[[CREATE TABLE testRenamePartitionKey (\n"
+                                + "  `a` BIGINT,\n"
+                                + "  `b` STRING)\n"
+                                + "PARTITIONED BY (a)\n"
+                                + "]]");
+
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "ALTER TABLE tablestore.default.testRenamePartitionKey RENAME COLUMN a to aa"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("java.lang.UnsupportedOperationException: Cannot rename partition key");
+    }
+
+    @Test
+    public void testDropSingleColumn() throws Exception {
+        Path tablePath = new Path(warehousePath, "default.db/testDropSingleColumn");
+        createTestHelper(tablePath);
+
+        List<Row> beforeRename =
+                spark.sql("SHOW CREATE TABLE tablestore.default.testDropSingleColumn")
+                        .collectAsList();
+        assertThat(beforeRename.toString())
+                .isEqualTo(
+                        "[[CREATE TABLE testDropSingleColumn (\n"
+                                + "  `a` INT NOT NULL,\n"
+                                + "  `b` BIGINT,\n"
+                                + "  `c` STRING)\n"
+                                + "]]");
+
+        spark.sql("ALTER TABLE tablestore.default.testDropSingleColumn DROP COLUMN a");
+
+        List<Row> afterRename =
+                spark.sql("SHOW CREATE TABLE tablestore.default.testDropSingleColumn")
+                        .collectAsList();
+        assertThat(afterRename.toString())
+                .isEqualTo(
+                        "[[CREATE TABLE testDropSingleColumn (\n"
+                                + "  `b` BIGINT,\n"
+                                + "  `c` STRING)\n"
+                                + "]]");
+    }
+
+    @Test
+    public void testDropColumns() throws Exception {
+        Path tablePath = new Path(warehousePath, "default.db/testDropColumns");
+        createTestHelper(tablePath);
+
+        List<Row> beforeRename =
+                spark.sql("SHOW CREATE TABLE tablestore.default.testDropColumns").collectAsList();
+        assertThat(beforeRename.toString())
+                .isEqualTo(
+                        "[[CREATE TABLE testDropColumns (\n"
+                                + "  `a` INT NOT NULL,\n"
+                                + "  `b` BIGINT,\n"
+                                + "  `c` STRING)\n"
+                                + "]]");
+
+        spark.sql("ALTER TABLE tablestore.default.testDropColumns DROP COLUMNS a, b");
+
+        List<Row> afterRename =
+                spark.sql("SHOW CREATE TABLE tablestore.default.testDropColumns").collectAsList();
+        assertThat(afterRename.toString())
+                .isEqualTo("[[CREATE TABLE testDropColumns (\n" + "  `c` STRING)\n" + "]]");
+    }
+
+    @Test
+    public void testDropPartitionKey() {
+        spark.sql("USE tablestore");
+        spark.sql(
+                "CREATE TABLE default.testDropPartitionKey (\n"
+                        + "a BIGINT,\n"
+                        + "b STRING) USING tablestore\n"
+                        + "COMMENT 'table comment'\n"
+                        + "PARTITIONED BY (a)\n"
+                        + "TBLPROPERTIES ('foo' = 'bar')");
+
+        List<Row> beforeRename =
+                spark.sql("SHOW CREATE TABLE tablestore.default.testDropPartitionKey")
+                        .collectAsList();
+        assertThat(beforeRename.toString())
+                .isEqualTo(
+                        "[[CREATE TABLE testDropPartitionKey (\n"
+                                + "  `a` BIGINT,\n"
+                                + "  `b` STRING)\n"
+                                + "PARTITIONED BY (a)\n"
+                                + "]]");
+
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "ALTER TABLE tablestore.default.testDropPartitionKey DROP COLUMN a"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("java.lang.UnsupportedOperationException: Cannot drop partition key");
+    }
+
+    @Test
+    public void testDropPrimaryKey() {
+        spark.sql("USE tablestore");
+        spark.sql(
+                "CREATE TABLE default.testDropPrimaryKey (\n"
+                        + "a BIGINT,\n"
+                        + "b STRING) USING tablestore\n"
+                        + "COMMENT 'table comment'\n"
+                        + "PARTITIONED BY (a)\n"
+                        + "TBLPROPERTIES ('primary-key' = 'a, b')");
+
+        List<Row> beforeRename =
+                spark.sql("SHOW CREATE TABLE tablestore.default.testDropPrimaryKey")
+                        .collectAsList();
+        assertThat(beforeRename.toString())
+                .isEqualTo(
+                        "[[CREATE TABLE testDropPrimaryKey (\n"
+                                + "  `a` BIGINT NOT NULL,\n"
+                                + "  `b` STRING NOT NULL)\n"
+                                + "PARTITIONED BY (a)\n"
+                                + "]]");
+
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "ALTER TABLE tablestore.default.testDropPrimaryKey DROP COLUMN b"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("java.lang.UnsupportedOperationException: Cannot drop primary key");
+    }
+
+    @Test
     public void testAlterColumnType() throws Exception {
         Path tablePath = new Path(warehousePath, "default.db/testAlterColumnType");
         SimpleTableTestHelper testHelper1 = createTestHelper(tablePath);

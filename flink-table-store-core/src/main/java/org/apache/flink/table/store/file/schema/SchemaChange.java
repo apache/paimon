@@ -45,6 +45,14 @@ public interface SchemaChange {
         return new AddColumn(fieldName, logicalType, isNullable, comment);
     }
 
+    static SchemaChange renameColumn(String fieldName, String newName) {
+        return new RenameColumn(fieldName, newName);
+    }
+
+    static SchemaChange dropColumn(String fieldName) {
+        return new DropColumn(fieldName);
+    }
+
     static SchemaChange updateColumnType(String fieldName, LogicalType newLogicalType) {
         return new UpdateColumnType(fieldName, newLogicalType);
     }
@@ -175,6 +183,75 @@ public interface SchemaChange {
             int result = Objects.hash(logicalType, isNullable, description);
             result = 31 * result + Objects.hashCode(fieldName);
             return result;
+        }
+    }
+
+    /** A SchemaChange to rename a field. */
+    final class RenameColumn implements SchemaChange {
+        private final String fieldName;
+        private final String newName;
+
+        private RenameColumn(String fieldName, String newName) {
+            this.fieldName = fieldName;
+            this.newName = newName;
+        }
+
+        public String fieldName() {
+            return fieldName;
+        }
+
+        public String newName() {
+            return newName;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            RenameColumn that = (RenameColumn) o;
+            return Objects.equals(fieldName, that.fieldName)
+                    && Objects.equals(newName, that.newName);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = Objects.hash(newName);
+            result = 31 * result + Objects.hashCode(fieldName);
+            return result;
+        }
+    }
+
+    /** A SchemaChange to drop a field. */
+    final class DropColumn implements SchemaChange {
+        private final String fieldName;
+
+        private DropColumn(String fieldName) {
+            this.fieldName = fieldName;
+        }
+
+        public String fieldName() {
+            return fieldName;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            DropColumn that = (DropColumn) o;
+            return Objects.equals(fieldName, that.fieldName);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hashCode(fieldName);
         }
     }
 
