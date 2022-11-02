@@ -166,7 +166,7 @@ public class FileStoreCommitTest {
         FileUtils.deleteOrWarn(firstSnapshotPath);
         // this test succeeds if this call does not fail
         store.newCommit(UUID.randomUUID().toString())
-                .filterCommitted(Collections.singletonList(new ManifestCommittable("dummy")));
+                .filterCommitted(Collections.singletonList(new ManifestCommittable(999)));
     }
 
     protected void testRandomConcurrentNoConflict(
@@ -459,7 +459,7 @@ public class FileStoreCommitTest {
                     gen::getPartition,
                     kv -> 0,
                     false,
-                    String.valueOf(i),
+                    (long) i,
                     (commit, committable) -> {
                         commit.commit(committable, Collections.emptyMap());
                         committables.add(committable);

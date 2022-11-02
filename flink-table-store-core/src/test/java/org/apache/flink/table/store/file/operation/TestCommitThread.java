@@ -39,7 +39,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -67,6 +66,8 @@ public class TestCommitThread extends Thread {
     private final AbstractFileStoreWrite<KeyValue> write;
     private final FileStoreCommit commit;
 
+    private long commitIdentifier;
+
     public TestCommitThread(
             RowType keyType,
             RowType valueType,
@@ -93,6 +94,8 @@ public class TestCommitThread extends Thread {
 
         this.write = safeStore.newWrite();
         this.commit = testStore.newCommit(UUID.randomUUID().toString()).withCreateEmptyCommit(true);
+
+        this.commitIdentifier = 0;
     }
 
     public List<KeyValue> getResult() {
@@ -129,8 +132,7 @@ public class TestCommitThread extends Thread {
         for (int i = 0; i < numWrites && !data.isEmpty(); i++) {
             writeData();
         }
-        ManifestCommittable committable =
-                new ManifestCommittable(String.valueOf(new Random().nextLong()));
+        ManifestCommittable committable = new ManifestCommittable(commitIdentifier++);
         for (Map.Entry<BinaryRowData, MergeTreeWriter> entry : writers.entrySet()) {
             RecordWriter.CommitIncrement inc = entry.getValue().prepareCommit(true);
             committable.addFileCommittable(
@@ -143,8 +145,7 @@ public class TestCommitThread extends Thread {
 
     private void doOverwrite() throws Exception {
         BinaryRowData partition = overwriteData();
-        ManifestCommittable committable =
-                new ManifestCommittable(String.valueOf(new Random().nextLong()));
+        ManifestCommittable committable = new ManifestCommittable(commitIdentifier++);
         RecordWriter.CommitIncrement inc = writers.get(partition).prepareCommit(true);
         committable.addFileCommittable(
                 new FileCommittable(partition, 0, inc.newFilesIncrement(), inc.compactIncrement()));
@@ -159,10 +160,10 @@ public class TestCommitThread extends Thread {
     }
 
     private void doFinalCompact() {
+        long identifier = commitIdentifier++;
         while (true) {
             try {
-                ManifestCommittable committable =
-                        new ManifestCommittable(String.valueOf(new Random().nextLong()));
+                ManifestCommittable committable = new ManifestCommittable(identifier);
                 for (BinaryRowData partition : writtenPartitions) {
                     MergeTreeWriter writer =
                             writers.computeIfAbsent(partition, p -> createWriter(p, false));

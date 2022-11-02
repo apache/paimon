@@ -29,18 +29,18 @@ import java.util.Objects;
 /** Manifest commit message. */
 public class ManifestCommittable {
 
-    private final String identifier;
+    private final long identifier;
     private final Map<Integer, Long> logOffsets;
     private final List<FileCommittable> fileCommittables;
 
-    public ManifestCommittable(String identifier) {
+    public ManifestCommittable(long identifier) {
         this.identifier = identifier;
         this.logOffsets = new HashMap<>();
         this.fileCommittables = new ArrayList<>();
     }
 
     public ManifestCommittable(
-            String identifier,
+            long identifier,
             Map<Integer, Long> logOffsets,
             List<FileCommittable> fileCommittables) {
         this.identifier = identifier;
@@ -61,7 +61,7 @@ public class ManifestCommittable {
         logOffsets.put(bucket, offset);
     }
 
-    public String identifier() {
+    public long identifier() {
         return identifier;
     }
 

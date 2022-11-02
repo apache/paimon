@@ -86,7 +86,7 @@ public class SchemaEvolutionTest {
         TableWrite write = table.newWrite();
         write.write(GenericRowData.of(1, 1L));
         write.write(GenericRowData.of(2, 2L));
-        table.newCommit("").commit("0", write.prepareCommit(true));
+        table.newCommit("").commit(0, write.prepareCommit(true));
         write.close();
 
         schemaManager.commitChanges(
@@ -96,7 +96,7 @@ public class SchemaEvolutionTest {
         write = table.newWrite();
         write.write(GenericRowData.of(3, 3L, 3L));
         write.write(GenericRowData.of(4, 4L, 4L));
-        table.newCommit("").commit("1", write.prepareCommit(true));
+        table.newCommit("").commit(1, write.prepareCommit(true));
         write.close();
 
         // read all

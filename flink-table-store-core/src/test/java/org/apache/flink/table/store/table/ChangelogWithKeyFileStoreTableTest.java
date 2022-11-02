@@ -37,11 +37,13 @@ import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.utils.CompatibilityTestUtils;
 import org.apache.flink.types.RowKind;
 
+import org.apache.flink.util.function.FunctionWithException;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -58,9 +60,9 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(1, 10, 200L));
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 11, 101L));
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
         write.write(rowData(1, 11, 55L));
-        commit.commit("1", write.prepareCommit(true));
+        commit.commit(1, write.prepareCommit(true));
         write.close();
 
         List<Split> splits = table.newScan().plan().splits();
@@ -181,7 +183,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowDataWithKind(RowKind.UPDATE_AFTER, 1, 20, 201L));
         write.write(rowDataWithKind(RowKind.UPDATE_BEFORE, 1, 10, 101L));
         write.write(rowDataWithKind(RowKind.UPDATE_AFTER, 1, 10, 102L));
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
         write.close();
 
         List<Split> splits = table.newScan().withIncremental(true).plan().splits();
@@ -216,7 +218,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowDataWithKind(RowKind.DELETE, 2, 10, 210L));
         write.compact(binaryRow(1), 0);
         write.compact(binaryRow(2), 0);
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
 
         List<Split> splits = table.newScan().withIncremental(true).plan().splits();
         TableRead read = table.newRead();
@@ -230,13 +232,13 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(1, 40, 140L));
         write.write(rowData(2, 30, 230L));
         write.write(rowData(2, 40, 240L));
-        commit.commit("1", write.prepareCommit(true));
+        commit.commit(1, write.prepareCommit(true));
 
         write.write(rowDataWithKind(RowKind.DELETE, 1, 40, 140L));
         write.write(rowData(2, 40, 241L));
         write.compact(binaryRow(1), 0);
         write.compact(binaryRow(2), 0);
-        commit.commit("2", write.prepareCommit(true));
+        commit.commit(2, write.prepareCommit(true));
 
         splits = table.newScan().withIncremental(true).plan().splits();
         assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
@@ -248,7 +250,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(1, 20, 121L));
         write.write(rowData(1, 30, 131L));
         write.write(rowData(2, 30, 231L));
-        commit.commit("3", write.prepareCommit(true));
+        commit.commit(3, write.prepareCommit(true));
 
         write.write(rowDataWithKind(RowKind.DELETE, 1, 20, 121L));
         write.write(rowData(1, 30, 132L));
@@ -259,7 +261,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(2, 40, 242L));
         write.compact(binaryRow(1), 0);
         write.compact(binaryRow(2), 0);
-        commit.commit("4", write.prepareCommit(true));
+        commit.commit(4, write.prepareCommit(true));
 
         splits = table.newScan().withIncremental(true).plan().splits();
         assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
@@ -284,16 +286,6 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
-
-        // write another commit
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
-        write.write(rowDataWithKind(RowKind.UPDATE_BEFORE, 1, 10, 102L));
-        write.write(rowDataWithKind(RowKind.UPDATE_AFTER, 1, 10, 103L));
-        write.write(rowDataWithKind(RowKind.INSERT, 1, 20, 201L));
-        write.write(rowDataWithKind(RowKind.DELETE, 2, 10, 301L));
-        commit.commit("2", write.prepareCommit(true));
-        write.close();
 
         List<List<List<String>>> expected =
                 Arrays.asList(
@@ -335,17 +327,45 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                         ChangelogProducer.INPUT,
                         Snapshot.FIRST_SNAPSHOT_ID - 1);
 
-        for (int i = 0; i < 3; i++) {
-            SnapshotEnumerator.EnumeratorResult result = enumerator.call();
-            assertThat(result).isNotNull();
+        FunctionWithException<Integer, Void, Exception> assertNextSnapshot =
+                i -> {
+                    SnapshotEnumerator.EnumeratorResult result = enumerator.call();
+                    assertThat(result).isNotNull();
 
-            List<Split> splits = result.plan.splits();
-            TableRead read = table.newRead();
-            for (int j = 0; j < 2; j++) {
-                assertThat(getResult(read, splits, binaryRow(j + 1), 0, CHANGELOG_ROW_TO_STRING))
-                        .isEqualTo(expected.get(i).get(j));
-            }
+                    List<Split> splits = result.plan.splits();
+                    TableRead read = table.newRead();
+                    for (int j = 0; j < 2; j++) {
+                        assertThat(
+                                        getResult(
+                                                read,
+                                                splits,
+                                                binaryRow(j + 1),
+                                                0,
+                                                CHANGELOG_ROW_TO_STRING))
+                                .isEqualTo(expected.get(i).get(j));
+                    }
+
+                    return null;
+                };
+
+        for (int i = 0; i < 2; i++) {
+            assertNextSnapshot.apply(i);
         }
+
+        // no more changelog
+        assertThat(enumerator.call()).isNull();
+
+        // write another commit
+        TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
+        write.write(rowDataWithKind(RowKind.UPDATE_BEFORE, 1, 10, 102L));
+        write.write(rowDataWithKind(RowKind.UPDATE_AFTER, 1, 10, 103L));
+        write.write(rowDataWithKind(RowKind.INSERT, 1, 20, 201L));
+        write.write(rowDataWithKind(RowKind.DELETE, 2, 10, 301L));
+        commit.commit(2, write.prepareCommit(true));
+        write.close();
+
+        assertNextSnapshot.apply(2);
 
         // no more changelog
         assertThat(enumerator.call()).isNull();
@@ -359,19 +379,19 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(1, 10, 100L));
         write.write(rowData(2, 20, 200L));
         write.write(rowData(1, 11, 101L));
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
 
         write.write(rowData(1, 10, 1000L));
         write.write(rowData(2, 21, 201L));
         write.write(rowData(2, 21, 2001L));
-        commit.commit("1", write.prepareCommit(true));
+        commit.commit(1, write.prepareCommit(true));
 
         write.write(rowData(1, 11, 1001L));
         write.write(rowData(2, 21, 20001L));
         write.write(rowData(2, 22, 202L));
         write.write(rowDataWithKind(RowKind.DELETE, 1, 11, 1001L));
         write.write(rowDataWithKind(RowKind.DELETE, 2, 20, 200L));
-        commit.commit("2", write.prepareCommit(true));
+        commit.commit(2, write.prepareCommit(true));
 
         write.close();
     }
@@ -386,15 +406,15 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
 
         write.write(rowData(1, 30, 300L));
         write.write(rowData(1, 40, 400L));
-        commit.commit("1", write.prepareCommit(true));
+        commit.commit(1, write.prepareCommit(true));
 
         write.write(rowData(1, 50, 500L));
         write.write(rowData(1, 60, 600L));
-        commit.commit("2", write.prepareCommit(true));
+        commit.commit(2, write.prepareCommit(true));
 
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
         List<Split> splits = table.newScan().plan().splits();
@@ -427,7 +447,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         // update pk 60, 10
         write.write(rowData(1, 60, 500L));
         write.write(rowData(1, 10, 10L));
-        commit.commit("3", write.prepareCommit(true));
+        commit.commit(3, write.prepareCommit(true));
 
         write.close();
 
@@ -461,7 +481,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 100L));
         write.write(rowDataWithKind(RowKind.UPDATE_BEFORE, 1, 10, 100L));
         write.write(rowDataWithKind(RowKind.DELETE, 1, 20, 400L));
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
         write.close();
 
         List<Split> splits = table.newScan().plan().splits();
