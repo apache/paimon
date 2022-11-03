@@ -81,7 +81,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
                 manifestFileFactory(),
                 manifestListFactory(),
                 options.bucket(),
-                checkNumOfBuckets);
+                checkNumOfBuckets,
+                options.readCompacted());
     }
 
     @Override

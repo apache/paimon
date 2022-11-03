@@ -28,6 +28,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
@@ -42,6 +43,7 @@ import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.DataSplit;
+import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -58,6 +60,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -314,6 +317,52 @@ public abstract class FileStoreTableTestBase {
             Snapshot snapshot = snapshotManager.snapshot(i);
             assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         }
+    }
+
+    @Test
+    public void testReadCompactedSnapshot() throws Exception {
+        writeCompactData();
+        FileStoreTable table =
+                createFileStoreTable(conf -> conf.set(CoreOptions.READ_COMPACTED, true));
+
+        DataTableScan.DataFilePlan plan = table.newScan().plan();
+        Snapshot compactedSnapshot = table.snapshotManager().snapshot(plan.snapshotId);
+        Iterator<Snapshot> snapshotIterator = table.snapshotManager().snapshots();
+        while (snapshotIterator.hasNext()) {
+            Snapshot snapshot = snapshotIterator.next();
+            if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
+                assertThat(snapshot.id()).isLessThanOrEqualTo(compactedSnapshot.id());
+            }
+        }
+
+        assertThat(compactedSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+        List<Split> splits = plan.splits();
+        TableRead read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING).size())
+                .isGreaterThan(0);
+        assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING).size())
+                .isGreaterThan(0);
+    }
+
+    private void writeCompactData() throws Exception {
+        final int batchCount = 10;
+        final int countPerBatch = 10000;
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf ->
+                                conf.set(CoreOptions.BUCKET, 1)
+                                        .set(CoreOptions.READ_COMPACTED, true)
+                                        .set(CoreOptions.COMPACTION_MAX_FILE_NUM, 10));
+        TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
+
+        for (int i = 0; i < batchCount; i++) {
+            for (int j = 0; j < countPerBatch; j++) {
+                write.write(rowData(j % 2 + 1, i * j, j * 10L));
+            }
+            commit.commit(i, write.prepareCommit(true));
+        }
+        write.close();
     }
 
     protected List<String> getResult(

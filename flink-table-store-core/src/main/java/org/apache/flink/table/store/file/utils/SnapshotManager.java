@@ -90,6 +90,25 @@ public class SnapshotManager {
         }
     }
 
+    public @Nullable Long latestCompactedSnapshotId() {
+        try {
+            Iterator<Snapshot> iterator = snapshots();
+            Long maxCompactedSnapshotId = null;
+            while (iterator.hasNext()) {
+                Snapshot snapshot = iterator.next();
+                if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
+                    if (maxCompactedSnapshotId == null || snapshot.id() > maxCompactedSnapshotId) {
+                        maxCompactedSnapshotId = snapshot.id();
+                    }
+                }
+            }
+
+            return maxCompactedSnapshotId;
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to find latest compacted snapshot id", e);
+        }
+    }
+
     /**
      * Returns a snapshot earlier than the timestamp mills. A non-existent snapshot may be returned
      * if all snapshots are later than the timestamp mills.
