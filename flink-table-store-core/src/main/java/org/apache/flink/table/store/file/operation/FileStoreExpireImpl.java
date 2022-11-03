@@ -32,7 +32,6 @@ import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -100,12 +99,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
         long currentMillis = System.currentTimeMillis();
 
-        Long earliest;
-        try {
-            earliest = snapshotManager.findEarliest();
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to find earliest snapshot id", e);
-        }
+        Long earliest = snapshotManager.earliestSnapshotId();
         if (earliest == null) {
             return;
         }

@@ -233,12 +233,12 @@ public class FileStoreExpireTest {
 
         assertThat(earliest.getFileSystem().exists(earliest)).isTrue();
 
-        Long earliestId = snapshotManager.findEarliest();
+        Long earliestId = snapshotManager.earliestSnapshotId();
 
         // remove earliest hint file
         earliest.getFileSystem().delete(earliest, false);
 
-        assertThat(snapshotManager.findEarliest()).isEqualTo(earliestId);
+        assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(earliestId);
     }
 
     @Test
