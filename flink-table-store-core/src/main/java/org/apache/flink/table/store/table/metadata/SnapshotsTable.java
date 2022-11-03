@@ -65,8 +65,7 @@ public class SnapshotsTable implements Table {
                             new RowType.RowField("schema_id", new BigIntType(false)),
                             new RowType.RowField(
                                     "commit_user", SerializationUtils.newStringType(false)),
-                            new RowType.RowField(
-                                    "commit_identifier", SerializationUtils.newStringType(false)),
+                            new RowType.RowField("commit_identifier", new BigIntType(false)),
                             new RowType.RowField(
                                     "commit_kind", SerializationUtils.newStringType(false)),
                             new RowType.RowField("commit_time", new TimestampType(false, 3))));
@@ -185,7 +184,7 @@ public class SnapshotsTable implements Table {
                     snapshot.id(),
                     snapshot.schemaId(),
                     StringData.fromString(snapshot.commitUser()),
-                    StringData.fromString(snapshot.commitIdentifier()),
+                    snapshot.commitIdentifier(),
                     StringData.fromString(snapshot.commitKind().toString()),
                     TimestampData.fromLocalDateTime(
                             LocalDateTime.ofInstant(

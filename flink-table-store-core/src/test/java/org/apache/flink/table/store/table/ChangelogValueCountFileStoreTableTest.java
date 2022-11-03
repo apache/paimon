@@ -157,20 +157,20 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         write.write(rowData(1, 10, 100L));
         write.write(rowData(2, 20, 200L));
         write.write(rowData(1, 11, 101L));
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
 
         write.write(rowData(2, 21, 201L));
         write.write(rowData(1, 12, 102L));
         write.write(rowData(2, 21, 201L));
         write.write(rowData(2, 21, 201L));
-        commit.commit("1", write.prepareCommit(true));
+        commit.commit(1, write.prepareCommit(true));
 
         write.write(rowData(1, 11, 101L));
         write.write(rowData(2, 22, 202L));
         write.write(rowDataWithKind(RowKind.DELETE, 2, 21, 201L));
         write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 100L));
         write.write(rowDataWithKind(RowKind.DELETE, 2, 21, 201L));
-        commit.commit("2", write.prepareCommit(true));
+        commit.commit(2, write.prepareCommit(true));
 
         write.close();
     }
@@ -184,7 +184,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         // no data file should be produced from this commit
         write.write(rowData(1, 10, 100L));
         write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 100L));
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
         write.close();
 
         // check that no data file is produced

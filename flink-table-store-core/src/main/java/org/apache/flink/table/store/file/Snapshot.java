@@ -38,13 +38,22 @@ import java.util.Map;
 /**
  * This file is the entrance to all data committed at some specific time point.
  *
- * <p>Change list:
+ * <p>Versioned change list:
  *
  * <ul>
  *   <li>Version 1: Initial version for table store <= 0.2. There is no "version" field in json
  *       file.
  *   <li>Version 2: Introduced in table store 0.3. Add "version" field and "changelogManifestList"
  *       field.
+ * </ul>
+ *
+ * <p>Unversioned change list:
+ *
+ * <ul>
+ *   <li>Since table store 0.22 and table store 0.3, commitIdentifier is changed from a String to a
+ *       long value. For table store < 0.22, only Flink connectors have table store sink and they
+ *       use checkpointId as commitIdentifier (which is a long value). Json can automatically
+ *       perform type conversion so there is no compatibility issue.
  * </ul>
  */
 public class Snapshot {
@@ -96,9 +105,15 @@ public class Snapshot {
     @JsonProperty(FIELD_COMMIT_USER)
     private final String commitUser;
 
-    // for deduplication
+    // Mainly for snapshot deduplication.
+    //
+    // If multiple snapshots have the same commitIdentifier, reading from any of these snapshots
+    // must produce the same table.
+    //
+    // If snapshot A has a smaller commitIdentifier than snapshot B, then snapshot A must be
+    // committed before snapshot B, and thus snapshot A must contain older records than snapshot B.
     @JsonProperty(FIELD_COMMIT_IDENTIFIER)
-    private final String commitIdentifier;
+    private final long commitIdentifier;
 
     @JsonProperty(FIELD_COMMIT_KIND)
     private final CommitKind commitKind;
@@ -116,7 +131,7 @@ public class Snapshot {
             String deltaManifestList,
             @Nullable String changelogManifestList,
             String commitUser,
-            String commitIdentifier,
+            long commitIdentifier,
             CommitKind commitKind,
             long timeMillis,
             Map<Integer, Long> logOffsets) {
@@ -143,7 +158,7 @@ public class Snapshot {
             @JsonProperty(FIELD_DELTA_MANIFEST_LIST) String deltaManifestList,
             @JsonProperty(FIELD_CHANGELOG_MANIFEST_LIST) @Nullable String changelogManifestList,
             @JsonProperty(FIELD_COMMIT_USER) String commitUser,
-            @JsonProperty(FIELD_COMMIT_IDENTIFIER) String commitIdentifier,
+            @JsonProperty(FIELD_COMMIT_IDENTIFIER) long commitIdentifier,
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
             @JsonProperty(FIELD_TIME_MILLIS) long timeMillis,
             @JsonProperty(FIELD_LOG_OFFSETS) Map<Integer, Long> logOffsets) {
@@ -198,7 +213,7 @@ public class Snapshot {
     }
 
     @JsonGetter(FIELD_COMMIT_IDENTIFIER)
-    public String commitIdentifier() {
+    public long commitIdentifier() {
         return commitIdentifier;
     }
 
