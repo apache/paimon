@@ -56,8 +56,7 @@ public class ManifestCommittableSerializerTest {
     }
 
     public static ManifestCommittable create() {
-        ManifestCommittable committable =
-                new ManifestCommittable(String.valueOf(new Random().nextLong()));
+        ManifestCommittable committable = new ManifestCommittable(new Random().nextLong());
         addFileCommittables(committable, row(0), 0);
         addFileCommittables(committable, row(0), 1);
         addFileCommittables(committable, row(1), 0);

@@ -78,7 +78,7 @@ public class TableStoreRecordReaderTest {
         write.write(GenericRowData.of(3L, StringData.fromString("World")));
         write.write(GenericRowData.of(1L, StringData.fromString("Hi again")));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 2L, StringData.fromString("Hello")));
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
 
         TableStoreRecordReader reader = read(table, BinaryRowDataUtil.EMPTY_ROW, 0);
         RowDataContainer container = reader.createValue();
@@ -120,7 +120,7 @@ public class TableStoreRecordReaderTest {
         write.write(GenericRowData.of(1, StringData.fromString("Hi")));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 2, StringData.fromString("Hello")));
         write.write(GenericRowData.of(1, StringData.fromString("Hi")));
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
 
         TableStoreRecordReader reader = read(table, BinaryRowDataUtil.EMPTY_ROW, 0);
         RowDataContainer container = reader.createValue();
@@ -160,7 +160,7 @@ public class TableStoreRecordReaderTest {
         write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi")));
         write.write(GenericRowData.of(2, 20L, StringData.fromString("Hello")));
         write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi")));
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
 
         TableStoreRecordReader reader =
                 read(table, BinaryRowDataUtil.EMPTY_ROW, 0, Arrays.asList("c", "a"));

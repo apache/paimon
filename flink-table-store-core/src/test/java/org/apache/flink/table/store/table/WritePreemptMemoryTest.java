@@ -73,7 +73,7 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
             expected.add(BATCH_ROW_TO_STRING.apply(row));
         }
         List<FileCommittable> committables = write.prepareCommit(true);
-        commit.commit("0", committables);
+        commit.commit(0, committables);
         write.close();
 
         // read

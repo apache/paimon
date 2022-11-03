@@ -189,7 +189,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
             dataset.add(new HashMap<>(dataPerBucket));
             dataPerBucket.clear();
         }
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
 
         int partition = random.nextInt(numOfPartition);
         List<Integer> availableBucket = new ArrayList<>(dataset.get(partition).keySet());
@@ -220,17 +220,17 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(1, 10, 100L));
         write.write(rowData(2, 20, 200L));
         write.write(rowData(1, 11, 101L));
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
 
         write.write(rowData(1, 12, 102L));
         write.write(rowData(2, 21, 201L));
         write.write(rowData(2, 22, 202L));
-        commit.commit("1", write.prepareCommit(true));
+        commit.commit(1, write.prepareCommit(true));
 
         write.write(rowData(1, 11, 101L));
         write.write(rowData(2, 21, 201L));
         write.write(rowData(1, 12, 102L));
-        commit.commit("2", write.prepareCommit(true));
+        commit.commit(2, write.prepareCommit(true));
 
         write.close();
     }
