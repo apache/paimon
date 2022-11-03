@@ -372,7 +372,7 @@ public class TestFileStore extends KeyValueFileStore {
         if (actualFiles.remove(latest)) {
             long latestId = snapshotManager.readHint(SnapshotManager.LATEST);
             latest.getFileSystem().delete(latest, false);
-            assertThat(latestId <= snapshotManager.earliestSnapshotId()).isTrue();
+            assertThat(latestId <= snapshotManager.latestSnapshotId()).isTrue();
         }
         actualFiles.remove(latest);
 
