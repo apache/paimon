@@ -76,6 +76,8 @@ public class TableStoreHiveStorageHandlerITCase {
 
     private static String engine;
 
+    private long commitIdentifier;
+
     @BeforeClass
     public static void beforeClass() {
         // TODO Currently FlinkEmbeddedHiveRunner can only be used for one test class,
@@ -98,6 +100,8 @@ public class TableStoreHiveStorageHandlerITCase {
 
         hiveShell.execute("CREATE DATABASE IF NOT EXISTS test_db");
         hiveShell.execute("USE test_db");
+
+        commitIdentifier = 0;
     }
 
     @After
@@ -626,10 +630,10 @@ public class TableStoreHiveStorageHandlerITCase {
         for (RowData rowData : data) {
             write.write(rowData);
             if (ThreadLocalRandom.current().nextInt(5) == 0) {
-                commit.commit(UUID.randomUUID().toString(), write.prepareCommit(false));
+                commit.commit(commitIdentifier++, write.prepareCommit(false));
             }
         }
-        commit.commit(UUID.randomUUID().toString(), write.prepareCommit(true));
+        commit.commit(commitIdentifier++, write.prepareCommit(true));
         write.close();
 
         String tableName = "test_table_" + (UUID.randomUUID().toString().substring(0, 4));
@@ -674,7 +678,7 @@ public class TableStoreHiveStorageHandlerITCase {
         for (GenericRowData rowData : input) {
             write.write(rowData);
         }
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
         write.close();
 
         hiveShell.execute(
@@ -779,17 +783,17 @@ public class TableStoreHiveStorageHandlerITCase {
         TableWrite write = table.newWrite();
         TableCommit commit = table.newCommit("user");
         write.write(GenericRowData.of(1));
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
         write.write(GenericRowData.of((Object) null));
-        commit.commit("1", write.prepareCommit(true));
+        commit.commit(1, write.prepareCommit(true));
         write.write(GenericRowData.of(2));
         write.write(GenericRowData.of(3));
         write.write(GenericRowData.of((Object) null));
-        commit.commit("2", write.prepareCommit(true));
+        commit.commit(2, write.prepareCommit(true));
         write.write(GenericRowData.of(4));
         write.write(GenericRowData.of(5));
         write.write(GenericRowData.of(6));
-        commit.commit("3", write.prepareCommit(true));
+        commit.commit(3, write.prepareCommit(true));
         write.close();
 
         hiveShell.execute(
@@ -875,15 +879,15 @@ public class TableStoreHiveStorageHandlerITCase {
                         375, /* 1971-01-11 */
                         TimestampData.fromLocalDateTime(
                                 LocalDateTime.of(2022, 5, 17, 17, 29, 20))));
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
         write.write(GenericRowData.of(null, null));
-        commit.commit("1", write.prepareCommit(true));
+        commit.commit(1, write.prepareCommit(true));
         write.write(GenericRowData.of(376 /* 1971-01-12 */, null));
         write.write(
                 GenericRowData.of(
                         null,
                         TimestampData.fromLocalDateTime(LocalDateTime.of(2022, 6, 18, 8, 30, 0))));
-        commit.commit("2", write.prepareCommit(true));
+        commit.commit(2, write.prepareCommit(true));
         write.close();
 
         hiveShell.execute(

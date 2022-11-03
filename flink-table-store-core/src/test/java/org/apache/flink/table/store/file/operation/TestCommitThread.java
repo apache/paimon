@@ -36,7 +36,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -61,6 +60,8 @@ public class TestCommitThread extends Thread {
 
     private final FileStoreWrite<KeyValue> write;
     private final FileStoreCommit commit;
+
+    private long commitIdentifier;
 
     public TestCommitThread(
             RowType keyType,
@@ -87,6 +88,8 @@ public class TestCommitThread extends Thread {
 
         this.write = safeStore.newWrite();
         this.commit = testStore.newCommit(UUID.randomUUID().toString()).withCreateEmptyCommit(true);
+
+        this.commitIdentifier = 0;
     }
 
     public List<KeyValue> getResult() {
@@ -122,8 +125,7 @@ public class TestCommitThread extends Thread {
         for (int i = 0; i < numWrites && !data.isEmpty(); i++) {
             writeData();
         }
-        ManifestCommittable committable =
-                new ManifestCommittable(String.valueOf(new Random().nextLong()));
+        ManifestCommittable committable = new ManifestCommittable(commitIdentifier++);
         for (Map.Entry<BinaryRowData, MergeTreeWriter> entry : writers.entrySet()) {
             committable.addFileCommittable(entry.getKey(), 0, entry.getValue().prepareCommit(true));
         }
@@ -133,8 +135,7 @@ public class TestCommitThread extends Thread {
 
     private void doOverwrite() throws Exception {
         BinaryRowData partition = overwriteData();
-        ManifestCommittable committable =
-                new ManifestCommittable(String.valueOf(new Random().nextLong()));
+        ManifestCommittable committable = new ManifestCommittable(commitIdentifier++);
         committable.addFileCommittable(partition, 0, writers.get(partition).prepareCommit(true));
 
         runWithRetry(
