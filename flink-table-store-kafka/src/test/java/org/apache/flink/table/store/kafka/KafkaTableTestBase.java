@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.kafka;
 
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
+import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.test.util.AbstractTestBase;
@@ -95,6 +96,9 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
         env = StreamExecutionEnvironment.getExecutionEnvironment();
         tEnv = StreamTableEnvironment.create(env);
         env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
+        tEnv.getConfig()
+                .getConfiguration()
+                .set(ExecutionCheckpointingOptions.ENABLE_UNALIGNED, false);
 
         // Probe Kafka broker status per 30 seconds
         scheduleTimeoutLogger(

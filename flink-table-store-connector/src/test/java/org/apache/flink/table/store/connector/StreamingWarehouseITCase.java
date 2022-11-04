@@ -36,9 +36,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class StreamingWarehouseITCase extends ReadWriteTableTestBase {
 
     private final StreamTableEnvironment streamTableEnv =
-            StreamTableEnvironment.create(buildStreamEnv(1));
+            TableEnvironmentTestUtils.create(buildStreamEnv(1));
     private final StreamTableEnvironment batchTableEnv =
-            StreamTableEnvironment.create(buildBatchEnv(1), EnvironmentSettings.inBatchMode());
+            TableEnvironmentTestUtils.create(buildBatchEnv(1), EnvironmentSettings.inBatchMode());
 
     @Test
     public void testUserStory() throws Exception {

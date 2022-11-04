@@ -43,7 +43,9 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
 
     @Before
     public void before() throws IOException {
-        tEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
+        tEnv =
+                TableEnvironmentTestUtils.create(
+                        EnvironmentSettings.newInstance().inBatchMode().build());
         tEnv.executeSql(
                 String.format(
                         "CREATE CATALOG TABLE_STORE WITH ("
