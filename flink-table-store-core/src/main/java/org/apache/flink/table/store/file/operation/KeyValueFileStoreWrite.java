@@ -62,6 +62,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     public KeyValueFileStoreWrite(
             SchemaManager schemaManager,
             long schemaId,
+            String commitUser,
             RowType keyType,
             RowType valueType,
             Supplier<Comparator<RowData>> keyComparatorSupplier,
@@ -70,7 +71,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options) {
-        super(snapshotManager, scan, options);
+        super(commitUser, snapshotManager, scan, options);
         this.readerFactoryBuilder =
                 KeyValueFileReaderFactory.builder(
                         schemaManager,

@@ -30,7 +30,6 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
-import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.function.SerializableFunction;
 import org.apache.flink.util.function.SerializableSupplier;
 
@@ -42,7 +41,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
-import java.util.UUID;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -62,6 +60,13 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
      * CommitterOperator#endInput}.
      */
     private final boolean streamingCheckpointEnabled;
+
+    /**
+     * This commitUser is valid only for new jobs. After the job starts, this commitUser will be
+     * recorded into the states of write and commit operators. When the job restarts, commitUser
+     * will be recovered from states and this value is ignored.
+     */
+    private final String initialCommitUser;
 
     /** Group the committable by the checkpoint id. */
     private final NavigableMap<Long, ManifestCommittable> committablesPerCheckpoint;
@@ -85,10 +90,12 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
 
     public CommitterOperator(
             boolean streamingCheckpointEnabled,
+            String initialCommitUser,
             SerializableFunction<String, Committer> committerFactory,
             SerializableSupplier<SimpleVersionedSerializer<ManifestCommittable>>
                     committableSerializer) {
         this.streamingCheckpointEnabled = streamingCheckpointEnabled;
+        this.initialCommitUser = initialCommitUser;
         this.committableSerializer = committableSerializer;
         this.committablesPerCheckpoint = new TreeMap<>();
         this.committerFactory = checkNotNull(committerFactory);
@@ -99,32 +106,14 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
 
-        // commit user name state of this job
         // each job can only have one user name and this name must be consistent across restarts
-        ListState<String> commitUserState =
-                context.getOperatorStateStore()
-                        .getListState(new ListStateDescriptor<>("commit_user_state", String.class));
-        List<String> commitUsers = new ArrayList<>();
-        commitUserState.get().forEach(commitUsers::add);
-        if (context.isRestored()) {
-            Preconditions.checkState(
-                    commitUsers.size() == 1,
-                    "Expecting 1 commit user name when recovering from checkpoint but found "
-                            + commitUsers.size()
-                            + ". This is unexpected.");
-        } else {
-            Preconditions.checkState(
-                    commitUsers.isEmpty(),
-                    "Expecting 0 commit user name for a fresh sink state but found "
-                            + commitUsers.size()
-                            + ". This is unexpected.");
-            String commitUser = UUID.randomUUID().toString();
-            commitUserState.add(commitUser);
-            commitUsers.add(commitUser);
-        }
         // we cannot use job id as commit user name here because user may change job id by creating
         // a savepoint, stop the job and then resume from savepoint
-        committer = committerFactory.apply(commitUsers.get(0));
+        String commitUser =
+                StateUtils.getSingleValueFromState(
+                        context, "commit_user_state", String.class, initialCommitUser);
+        // parallelism of commit operator is always 1, so commitUser will never be null
+        committer = committerFactory.apply(commitUser);
 
         streamingCommitterState =
                 new SimpleVersionedListState<>(

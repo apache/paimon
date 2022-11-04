@@ -46,9 +46,9 @@ public interface FileStore<T> extends Serializable {
 
     FileStoreRead<T> newRead();
 
-    FileStoreWrite<T> newWrite();
+    FileStoreWrite<T> newWrite(String commitUser);
 
-    FileStoreCommit newCommit(String user);
+    FileStoreCommit newCommit(String commitUser);
 
     FileStoreExpire newExpire();
 }

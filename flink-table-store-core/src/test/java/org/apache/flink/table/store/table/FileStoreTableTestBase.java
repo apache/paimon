@@ -58,6 +58,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -111,10 +112,12 @@ public abstract class FileStoreTableTestBase {
     @TempDir java.nio.file.Path tempDir;
 
     protected Path tablePath;
+    protected String commitUser;
 
     @BeforeEach
     public void before() {
         tablePath = new Path(TestAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString());
+        commitUser = UUID.randomUUID().toString();
     }
 
     @AfterEach
@@ -133,19 +136,19 @@ public abstract class FileStoreTableTestBase {
     public void testOverwrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
         write.write(rowData(1, 10, 100L));
         write.write(rowData(2, 20, 200L));
-        commit.commit(0, write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true, 0));
         write.close();
 
-        write = table.newWrite().withOverwrite(true);
-        commit = table.newCommit("user");
+        write = table.newWrite(commitUser).withOverwrite(true);
+        commit = table.newCommit(commitUser);
         write.write(rowData(2, 21, 201L));
         Map<String, String> overwritePartition = new HashMap<>();
         overwritePartition.put("pt", "2");
-        commit.withOverwritePartition(overwritePartition).commit(1, write.prepareCommit(true));
+        commit.withOverwritePartition(overwritePartition).commit(1, write.prepareCommit(true, 1));
         write.close();
 
         List<Split> splits = table.newScan().plan().splits();
@@ -165,13 +168,13 @@ public abstract class FileStoreTableTestBase {
                             conf.set(BUCKET_KEY, "a");
                         });
 
-        TableWrite write = table.newWrite();
+        TableWrite write = table.newWrite(commitUser);
         write.write(rowData(1, 1, 2L));
         write.write(rowData(1, 3, 4L));
         write.write(rowData(1, 5, 6L));
         write.write(rowData(1, 7, 8L));
         write.write(rowData(1, 9, 10L));
-        table.newCommit("user").commit(0, write.prepareCommit(true));
+        table.newCommit(commitUser).commit(0, write.prepareCommit(true, 0));
         write.close();
 
         List<Split> splits =
@@ -187,20 +190,20 @@ public abstract class FileStoreTableTestBase {
     public void testReadFilter() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));
-        commit.commit(0, write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true, 0));
 
         write.write(rowData(1, 30, 300L));
         write.write(rowData(1, 40, 400L));
-        commit.commit(1, write.prepareCommit(true));
+        commit.commit(1, write.prepareCommit(true, 1));
 
         write.write(rowData(1, 50, 500L));
         write.write(rowData(1, 60, 600L));
-        commit.commit(2, write.prepareCommit(true));
+        commit.commit(2, write.prepareCommit(true, 2));
 
         write.close();
 
@@ -215,31 +218,31 @@ public abstract class FileStoreTableTestBase {
     @Test
     public void testPartitionEmptyWriter() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
 
         for (int i = 0; i < 4; i++) {
             // write lots of records, let compaction be slower
             for (int j = 0; j < 1000; j++) {
                 write.write(rowData(1, 10 * i * j, 100L * i * j));
             }
-            commit.commit(i, write.prepareCommit(false));
+            commit.commit(i, write.prepareCommit(false, i));
         }
 
         write.write(rowData(1, 40, 400L));
-        List<FileCommittable> commit4 = write.prepareCommit(false);
+        List<FileCommittable> commit4 = write.prepareCommit(false, 4);
         // trigger compaction, but not wait it.
 
         if (commit4.get(0).compactIncrement().compactBefore().isEmpty()) {
             // commit4 is not a compaction commit
             // do compaction commit5 and compaction commit6
             write.write(rowData(2, 20, 200L));
-            List<FileCommittable> commit5 = write.prepareCommit(true);
+            List<FileCommittable> commit5 = write.prepareCommit(true, 5);
             // wait compaction finish
             // commit5 should be a compaction commit
 
             write.write(rowData(1, 60, 600L));
-            List<FileCommittable> commit6 = write.prepareCommit(true);
+            List<FileCommittable> commit6 = write.prepareCommit(true, 6);
             // if remove writer too fast, will see old files, do another compaction
             // then will be conflicts
 
@@ -250,7 +253,7 @@ public abstract class FileStoreTableTestBase {
             // commit4 is a compaction commit
             // do compaction commit5
             write.write(rowData(2, 20, 200L));
-            List<FileCommittable> commit5 = write.prepareCommit(true);
+            List<FileCommittable> commit5 = write.prepareCommit(true, 5);
             // wait compaction finish
             // commit5 should be a compaction commit
 
@@ -270,11 +273,11 @@ public abstract class FileStoreTableTestBase {
                             conf.set(COMPACTION_MAX_FILE_NUM, 5);
                         });
 
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
         for (int i = 0; i < 10; i++) {
             write.write(rowData(1, 1, 100L));
-            commit.commit(i, write.prepareCommit(true));
+            commit.commit(i, write.prepareCommit(true, i));
         }
         write.close();
 

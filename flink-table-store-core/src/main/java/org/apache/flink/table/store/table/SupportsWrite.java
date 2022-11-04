@@ -24,7 +24,7 @@ import org.apache.flink.table.store.table.sink.TableWrite;
 /** An interface for {@link Table} write support. */
 public interface SupportsWrite {
 
-    TableWrite newWrite();
+    TableWrite newWrite(String commitUser);
 
-    TableCommit newCommit(String user);
+    TableCommit newCommit(String commitUser);
 }

@@ -95,10 +95,10 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public FileStoreCommitImpl newCommit(String user) {
+    public FileStoreCommitImpl newCommit(String commitUser) {
         return new FileStoreCommitImpl(
                 schemaId,
-                user,
+                commitUser,
                 partitionType,
                 pathFactory(),
                 snapshotManager(),

@@ -61,12 +61,13 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
     public AppendOnlyFileStoreWrite(
             AppendOnlyFileStoreRead read,
             long schemaId,
+            String commitUser,
             RowType rowType,
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options) {
-        super(snapshotManager, scan);
+        super(commitUser, snapshotManager, scan);
         this.read = read;
         this.schemaId = schemaId;
         this.rowType = rowType;

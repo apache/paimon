@@ -33,6 +33,7 @@ import org.apache.flink.table.types.logical.RowType;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /** A simple table test helper to write and commit. */
 public class SimpleTableTestHelper {
@@ -57,8 +58,10 @@ public class SimpleTableTestHelper {
         Configuration conf = Configuration.fromMap(options);
         conf.setString("path", path.toString());
         FileStoreTable table = FileStoreTableFactory.create(conf);
-        this.writer = table.newWrite();
-        this.commit = table.newCommit("user");
+
+        String commitUser = UUID.randomUUID().toString();
+        this.writer = table.newWrite(commitUser);
+        this.commit = table.newCommit(commitUser);
 
         this.commitIdentifier = 0;
     }
@@ -68,6 +71,7 @@ public class SimpleTableTestHelper {
     }
 
     public void commit() throws Exception {
-        commit.commit(commitIdentifier++, writer.prepareCommit(true));
+        commit.commit(commitIdentifier, writer.prepareCommit(true, commitIdentifier));
+        commitIdentifier++;
     }
 }

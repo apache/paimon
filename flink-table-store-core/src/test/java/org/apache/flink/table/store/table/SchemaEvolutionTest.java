@@ -49,11 +49,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.assertj.core.api.Assertions.filter;
 
 /** Test for schema evolution. */
 public class SchemaEvolutionTest {
@@ -61,13 +61,14 @@ public class SchemaEvolutionTest {
     @TempDir java.nio.file.Path tempDir;
 
     private Path tablePath;
-
     private SchemaManager schemaManager;
+    private String commitUser;
 
     @BeforeEach
     public void beforeEach() {
         tablePath = new Path(tempDir.toUri());
         schemaManager = new SchemaManager(tablePath);
+        commitUser = UUID.randomUUID().toString();
     }
 
     @Test
@@ -83,20 +84,20 @@ public class SchemaEvolutionTest {
 
         FileStoreTable table = FileStoreTableFactory.create(tablePath);
 
-        TableWrite write = table.newWrite();
+        TableWrite write = table.newWrite(commitUser);
         write.write(GenericRowData.of(1, 1L));
         write.write(GenericRowData.of(2, 2L));
-        table.newCommit("").commit(0, write.prepareCommit(true));
+        table.newCommit(commitUser).commit(0, write.prepareCommit(true, 0));
         write.close();
 
         schemaManager.commitChanges(
                 Collections.singletonList(SchemaChange.addColumn("f3", new BigIntType())));
         table = FileStoreTableFactory.create(tablePath);
 
-        write = table.newWrite();
+        write = table.newWrite(commitUser);
         write.write(GenericRowData.of(3, 3L, 3L));
         write.write(GenericRowData.of(4, 4L, 4L));
-        table.newCommit("").commit(1, write.prepareCommit(true));
+        table.newCommit(commitUser).commit(1, write.prepareCommit(true, 1));
         write.close();
 
         // read all
