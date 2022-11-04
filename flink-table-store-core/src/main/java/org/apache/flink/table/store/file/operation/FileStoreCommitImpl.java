@@ -50,10 +50,10 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
@@ -149,36 +149,20 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             return committableList;
         }
 
-        // if there is no previous snapshots then nothing should be filtered
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
-        if (latestSnapshotId == null) {
-            return committableList;
-        }
-
-        // check if a committable is already committed by its identifier
-        Map<Long, ManifestCommittable> identifiers = new LinkedHashMap<>();
-        for (ManifestCommittable committable : committableList) {
-            identifiers.put(committable.identifier(), committable);
-        }
-
-        for (long id = latestSnapshotId; id >= Snapshot.FIRST_SNAPSHOT_ID; id--) {
-            if (!snapshotManager.snapshotExists(id)) {
-                // snapshots before this are expired
-                break;
-            }
-            Snapshot snapshot = snapshotManager.snapshot(id);
-            if (commitUser.equals(snapshot.commitUser())) {
-                if (identifiers.containsKey(snapshot.commitIdentifier())) {
-                    identifiers.remove(snapshot.commitIdentifier());
-                } else {
-                    // early exit, because committableList must be the latest commits by this
-                    // commit user
-                    break;
+        Optional<Snapshot> latestSnapshot = snapshotManager.latestSnapshotOfUser(commitUser);
+        if (latestSnapshot.isPresent()) {
+            List<ManifestCommittable> result = new ArrayList<>();
+            for (ManifestCommittable committable : committableList) {
+                // if committable is newer than latest snapshot, then it hasn't been committed
+                if (committable.identifier() > latestSnapshot.get().commitIdentifier()) {
+                    result.add(committable);
                 }
             }
+            return result;
+        } else {
+            // if there is no previous snapshots then nothing should be filtered
+            return committableList;
         }
-
-        return new ArrayList<>(identifiers.values());
     }
 
     @Override
