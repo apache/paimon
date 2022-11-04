@@ -313,7 +313,7 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
             env = buildBatchEnv();
             builder.inBatchMode();
         }
-        tEnv = StreamTableEnvironment.create(env, builder.build());
+        tEnv = TableEnvironmentTestUtils.create(env, builder.build());
         tEnv.executeSql(helperTableDdl);
 
         String managedTableDdl;
@@ -406,7 +406,8 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
 
     protected void prepareEnvAndOverwrite(String managedTable, String query) throws Exception {
         final StreamTableEnvironment batchEnv =
-                StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
+                TableEnvironmentTestUtils.create(
+                        buildBatchEnv(), EnvironmentSettings.inBatchMode());
         registerTable(batchEnv, managedTable);
         batchEnv.executeSql(query).await();
     }
