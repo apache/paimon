@@ -100,6 +100,12 @@ CREATE CATALOG my_catalog WITH (
 
 USE CATALOG my_catalog;
 
+-- create a new database
+-- the default database in table store is "default"
+-- you can switch to "default" database in table store: USE `default`;
+CREATE DATABASE my_database;
+USE my_database;
+
 -- create a word count table
 CREATE TABLE word_count (
     word STRING PRIMARY KEY NOT ENFORCED,
