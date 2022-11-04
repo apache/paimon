@@ -34,7 +34,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /** A simple table test helper to write and commit. */
 public class SimpleTableTestHelper {
@@ -61,7 +60,7 @@ public class SimpleTableTestHelper {
         conf.setString("path", path.toString());
         FileStoreTable table = FileStoreTableFactory.create(conf);
 
-        String commitUser = UUID.randomUUID().toString();
+        String commitUser = "user";
         this.writer = table.newWrite(commitUser);
         this.commit = table.newCommit(commitUser);
 
