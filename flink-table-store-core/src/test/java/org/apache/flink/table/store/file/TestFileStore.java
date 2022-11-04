@@ -367,12 +367,12 @@ public class TestFileStore extends KeyValueFileStore {
         if (actualFiles.remove(earliest)) {
             long earliestId = snapshotManager.readHint(SnapshotManager.EARLIEST);
             earliest.getFileSystem().delete(earliest, false);
-            assertThat(earliestId <= snapshotManager.findEarliest()).isTrue();
+            assertThat(earliestId <= snapshotManager.earliestSnapshotId()).isTrue();
         }
         if (actualFiles.remove(latest)) {
             long latestId = snapshotManager.readHint(SnapshotManager.LATEST);
             latest.getFileSystem().delete(latest, false);
-            assertThat(latestId <= snapshotManager.findLatest()).isTrue();
+            assertThat(latestId <= snapshotManager.latestSnapshotId()).isTrue();
         }
         actualFiles.remove(latest);
 
