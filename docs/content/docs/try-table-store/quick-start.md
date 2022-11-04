@@ -102,7 +102,7 @@ USE CATALOG my_catalog;
 
 -- create a new database
 -- the default database in table store is "default"
--- you can switch to "default" database in table store: USE `default`;
+-- you can switch to "default" database with command: USE `default`;
 CREATE DATABASE my_database;
 USE my_database;
 
