@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.utils;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.util.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +30,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.BinaryOperator;
 
@@ -80,6 +82,14 @@ public class SnapshotManager {
         }
     }
 
+    public @Nullable Long earliestSnapshotId() {
+        try {
+            return findEarliest();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to find earliest snapshot id", e);
+        }
+    }
+
     public long snapshotCount() throws IOException {
         return listVersionedFiles(snapshotDirectory(), SNAPSHOT_PREFIX).count();
     }
@@ -90,7 +100,27 @@ public class SnapshotManager {
                 .iterator();
     }
 
-    public Long findLatest() throws IOException {
+    public Optional<Snapshot> latestSnapshotOfUser(String user) {
+        Long latestId = latestSnapshotId();
+        if (latestId == null) {
+            return Optional.empty();
+        }
+
+        long earliestId =
+                Preconditions.checkNotNull(
+                        earliestSnapshotId(),
+                        "Latest snapshot id is not null, but earliest snapshot id is null. "
+                                + "This is unexpected.");
+        for (long id = latestId; id >= earliestId; id--) {
+            Snapshot snapshot = snapshot(id);
+            if (user.equals(snapshot.commitUser())) {
+                return Optional.of(snapshot);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private @Nullable Long findLatest() throws IOException {
         Path snapshotDir = snapshotDirectory();
         FileSystem fs = snapshotDir.getFileSystem();
         if (!fs.exists(snapshotDir)) {
@@ -109,7 +139,7 @@ public class SnapshotManager {
         return findByListFiles(Math::max);
     }
 
-    public Long findEarliest() throws IOException {
+    private @Nullable Long findEarliest() throws IOException {
         Path snapshotDir = snapshotDirectory();
         FileSystem fs = snapshotDir.getFileSystem();
         if (!fs.exists(snapshotDir)) {
