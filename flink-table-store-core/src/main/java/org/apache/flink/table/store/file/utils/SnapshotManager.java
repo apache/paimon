@@ -120,7 +120,7 @@ public class SnapshotManager {
         return Optional.empty();
     }
 
-    private Long findLatest() throws IOException {
+    private @Nullable Long findLatest() throws IOException {
         Path snapshotDir = snapshotDirectory();
         FileSystem fs = snapshotDir.getFileSystem();
         if (!fs.exists(snapshotDir)) {
@@ -139,7 +139,7 @@ public class SnapshotManager {
         return findByListFiles(Math::max);
     }
 
-    private Long findEarliest() throws IOException {
+    private @Nullable Long findEarliest() throws IOException {
         Path snapshotDir = snapshotDirectory();
         FileSystem fs = snapshotDir.getFileSystem();
         if (!fs.exists(snapshotDir)) {
