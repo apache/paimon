@@ -20,9 +20,11 @@ package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
+import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
+import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
@@ -34,6 +36,7 @@ import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.LogSinkFunction;
+import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -108,6 +111,10 @@ public class StoreSink implements Serializable {
                                         .get(ExecutionOptions.RUNTIME_MODE)
                                 == RuntimeExecutionMode.STREAMING
                         && env.getCheckpointConfig().isCheckpointingEnabled();
+        if (streamingCheckpointEnabled) {
+            assertCheckpointConfiguration(env);
+        }
+
         SingleOutputStreamOperator<?> committed =
                 written.transform(
                                 GLOBAL_COMMITTER_NAME,
@@ -123,5 +130,18 @@ public class StoreSink implements Serializable {
                         .setParallelism(1)
                         .setMaxParallelism(1);
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
+    }
+
+    private void assertCheckpointConfiguration(StreamExecutionEnvironment env) {
+        Preconditions.checkArgument(
+                !env.getCheckpointConfig().isUnalignedCheckpointsEnabled(),
+                "Table Store sink currently does not support unaligned checkpoints. Please set "
+                        + ExecutionCheckpointingOptions.ENABLE_UNALIGNED.key()
+                        + " to false.");
+        Preconditions.checkArgument(
+                env.getCheckpointConfig().getCheckpointingMode() == CheckpointingMode.EXACTLY_ONCE,
+                "Table Store sink currently only supports EXACTLY_ONCE checkpoint mode. Please set "
+                        + ExecutionCheckpointingOptions.CHECKPOINTING_MODE.key()
+                        + " to exactly-once");
     }
 }

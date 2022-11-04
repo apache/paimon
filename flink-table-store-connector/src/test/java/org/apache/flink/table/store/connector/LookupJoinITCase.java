@@ -42,7 +42,9 @@ public class LookupJoinITCase extends AbstractTestBase {
 
     @Before
     public void before() throws Exception {
-        env = TableEnvironment.create(EnvironmentSettings.newInstance().inStreamingMode().build());
+        env =
+                TableEnvironmentTestUtils.create(
+                        EnvironmentSettings.newInstance().inStreamingMode().build());
         env.getConfig().getConfiguration().set(CHECKPOINTING_INTERVAL, Duration.ofMillis(100));
         env.getConfig()
                 .getConfiguration()
