@@ -32,9 +32,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
-import static org.apache.flink.table.data.binary.BinaryRowDataUtil.EMPTY_ROW;
 import static org.apache.flink.table.store.file.utils.SerializationUtils.newBytesType;
 import static org.apache.flink.table.store.file.utils.SerializationUtils.newStringType;
+import static org.apache.flink.table.store.utils.BinaryRowDataUtil.EMPTY_ROW;
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 /** Metadata of a data file. */
