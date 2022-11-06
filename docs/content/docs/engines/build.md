@@ -42,9 +42,9 @@ The simplest way of building Table Store is by running:
 mvn clean install -DskipTests
 ```
 
-## Flink 1.15
+## Flink 1.16
 
-You can find Flink 1.15 bundled jar in `./flink-table-store-dist/target/flink-table-store-dist-{{< version >}}.jar`.
+You can find Flink 1.16 bundled jar in `./flink-table-store-dist/target/flink-table-store-dist-{{< version >}}.jar`.
 
 ## Hive
 
@@ -67,6 +67,16 @@ You can find Spark bundled jar in `./flink-table-store-spark/target/flink-table-
 ## Spark2
 
 You can find Spark2 bundled jar in `./flink-table-store-spark2/target/flink-table-store-spark2-{{< version >}}.jar`.
+
+## Flink 1.15
+
+Running:
+
+```bash
+mvn clean install -Dmaven.test.skip=true -Pflink-1.15
+```
+
+You can find Flink 1.15 bundled jar in `./flink-table-store-dist/target/flink-table-store-dist-{{< version >}}.jar`.
 
 ## Flink 1.14
 

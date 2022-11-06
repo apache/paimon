@@ -41,7 +41,7 @@ under the License.
 
     <properties>
         <hive.main.version>2</hive.main.version>
-        <hive.version>2.3.4</hive.version>
+        <hive.version>2.3.9</hive.version>
         <hiverunner.version>4.0.0</hiverunner.version>
         <reflections.version>0.9.8</reflections.version>
     </properties>
@@ -82,6 +82,20 @@ under the License.
             <properties>
                 <hive.main.version>3</hive.main.version>
                 <hive.version>3.1.2</hive.version>
+            </properties>
+        </profile>
+
+        <profile>
+            <id>flink-1.14</id>
+            <properties>
+                <hive.version>2.3.4</hive.version>
+            </properties>
+        </profile>
+
+        <profile>
+            <id>flink-1.15</id>
+            <properties>
+                <hive.version>2.3.4</hive.version>
             </properties>
         </profile>
     </profiles>
