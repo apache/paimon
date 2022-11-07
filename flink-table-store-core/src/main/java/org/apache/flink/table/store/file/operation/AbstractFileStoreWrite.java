@@ -55,7 +55,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Nullable protected IOManager ioManager;
 
-    protected final Map<BinaryRowData, Map<Integer, WriterAndCommit<T>>> writers;
+    protected final Map<BinaryRowData, Map<Integer, WriterWithCommit<T>>> writers;
     private final ExecutorService compactExecutor;
 
     private boolean overwrite = false;
@@ -118,20 +118,20 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
         List<FileCommittable> result = new ArrayList<>();
 
-        Iterator<Map.Entry<BinaryRowData, Map<Integer, WriterAndCommit<T>>>> partIter =
+        Iterator<Map.Entry<BinaryRowData, Map<Integer, WriterWithCommit<T>>>> partIter =
                 writers.entrySet().iterator();
         while (partIter.hasNext()) {
-            Map.Entry<BinaryRowData, Map<Integer, WriterAndCommit<T>>> partEntry = partIter.next();
+            Map.Entry<BinaryRowData, Map<Integer, WriterWithCommit<T>>> partEntry = partIter.next();
             BinaryRowData partition = partEntry.getKey();
-            Iterator<Map.Entry<Integer, WriterAndCommit<T>>> bucketIter =
+            Iterator<Map.Entry<Integer, WriterWithCommit<T>>> bucketIter =
                     partEntry.getValue().entrySet().iterator();
             while (bucketIter.hasNext()) {
-                Map.Entry<Integer, WriterAndCommit<T>> entry = bucketIter.next();
+                Map.Entry<Integer, WriterWithCommit<T>> entry = bucketIter.next();
                 int bucket = entry.getKey();
-                WriterAndCommit<T> writerAndCommit = entry.getValue();
+                WriterWithCommit<T> writerWithCommit = entry.getValue();
 
                 RecordWriter.CommitIncrement increment =
-                        writerAndCommit.writer.prepareCommit(endOfInput);
+                        writerWithCommit.writer.prepareCommit(endOfInput);
                 FileCommittable committable =
                         new FileCommittable(
                                 partition,
@@ -141,16 +141,17 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 result.add(committable);
 
                 if (committable.isEmpty()) {
-                    if (writerAndCommit.lastModifiedCommitIdentifier <= latestCommittedIdentifier) {
+                    if (writerWithCommit.lastModifiedCommitIdentifier
+                            <= latestCommittedIdentifier) {
                         // Clear writer if no update, and if its latest modification has committed.
                         //
                         // We need a mechanism to clear writers, otherwise there will be more and
                         // more such as yesterday's partition that no longer needs to be written.
-                        writerAndCommit.writer.close();
+                        writerWithCommit.writer.close();
                         bucketIter.remove();
                     }
                 } else {
-                    writerAndCommit.lastModifiedCommitIdentifier = commitIdentifier;
+                    writerWithCommit.lastModifiedCommitIdentifier = commitIdentifier;
                 }
             }
 
@@ -164,9 +165,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Override
     public void close() throws Exception {
-        for (Map<Integer, WriterAndCommit<T>> bucketWriters : writers.values()) {
-            for (WriterAndCommit<T> writerAndCommit : bucketWriters.values()) {
-                writerAndCommit.writer.close();
+        for (Map<Integer, WriterWithCommit<T>> bucketWriters : writers.values()) {
+            for (WriterWithCommit<T> writerWithCommit : bucketWriters.values()) {
+                writerWithCommit.writer.close();
             }
         }
         writers.clear();
@@ -174,7 +175,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     private RecordWriter<T> getWriter(BinaryRowData partition, int bucket) {
-        Map<Integer, WriterAndCommit<T>> buckets = writers.get(partition);
+        Map<Integer, WriterWithCommit<T>> buckets = writers.get(partition);
         if (buckets == null) {
             buckets = new HashMap<>();
             writers.put(partition.copy(), buckets);
@@ -182,13 +183,13 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         return buckets.computeIfAbsent(bucket, k -> createWriter(partition.copy(), bucket)).writer;
     }
 
-    private WriterAndCommit<T> createWriter(BinaryRowData partition, int bucket) {
+    private WriterWithCommit<T> createWriter(BinaryRowData partition, int bucket) {
         RecordWriter<T> writer =
                 overwrite
                         ? createEmptyWriter(partition.copy(), bucket, compactExecutor)
                         : createWriter(partition.copy(), bucket, compactExecutor);
         notifyNewWriter(writer);
-        return new WriterAndCommit<>(writer);
+        return new WriterWithCommit<>(writer);
     }
 
     protected void notifyNewWriter(RecordWriter<T> writer) {}
@@ -204,12 +205,12 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             BinaryRowData partition, int bucket, ExecutorService compactExecutor);
 
     /** {@link RecordWriter} with identifier of its last modified commit. */
-    protected static class WriterAndCommit<T> {
+    protected static class WriterWithCommit<T> {
 
         protected final RecordWriter<T> writer;
         private long lastModifiedCommitIdentifier;
 
-        private WriterAndCommit(RecordWriter<T> writer) {
+        private WriterWithCommit(RecordWriter<T> writer) {
             this.writer = writer;
             this.lastModifiedCommitIdentifier = Long.MIN_VALUE;
         }
