@@ -151,9 +151,11 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
         if (enableFailure) {
             FailingAtomicRenameFileSystem.reset(failingName, 100, 1000);
         }
-        tEnv.executeSql(
-                        "INSERT INTO T /*+ OPTIONS('sink.parallelism' = '2') */ SELECT * FROM myView")
-                .await();
+        FailingAtomicRenameFileSystem.retryArtificialException(
+                () ->
+                        tEnv.executeSql(
+                                        "INSERT INTO T /*+ OPTIONS('sink.parallelism' = '2') */ SELECT * FROM myView")
+                                .await());
 
         // check for result
         TableEnvironment bEnv =
