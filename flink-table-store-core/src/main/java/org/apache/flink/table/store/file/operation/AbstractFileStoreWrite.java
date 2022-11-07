@@ -29,11 +29,10 @@ import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.util.concurrent.ExecutorThreadFactory;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.Lists;
-
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -80,7 +79,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     protected List<DataFileMeta> scanExistingFileMetas(BinaryRowData partition, int bucket) {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
-        List<DataFileMeta> existingFileMetas = Lists.newArrayList();
+        List<DataFileMeta> existingFileMetas = new ArrayList<>();
         if (latestSnapshotId != null) {
             // Concat all the DataFileMeta of existing files into existingFileMetas.
             scan.withSnapshot(latestSnapshotId)
@@ -110,11 +109,29 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     @Override
     public List<FileCommittable> prepareCommit(boolean endOfInput, long commitIdentifier)
             throws Exception {
-        long latestCommittedIdentifier =
-                snapshotManager
-                        .latestSnapshotOfUser(commitUser)
-                        .map(Snapshot::commitIdentifier)
-                        .orElse(Long.MIN_VALUE);
+        long latestCommittedIdentifier;
+        if (writers.values().stream()
+                        .map(Map::values)
+                        .flatMap(Collection::stream)
+                        .mapToLong(w -> w.lastModifiedCommitIdentifier)
+                        .max()
+                        .orElse(Long.MIN_VALUE)
+                == Long.MIN_VALUE) {
+            // Optimization for the first commit.
+            //
+            // If this is the first commit, no writer has previous modified commit, so the value of
+            // `latestCommittedIdentifier` does not matter.
+            //
+            // Without this optimization, we may need to scan through all snapshots only to find
+            // that there is no previous snapshot by this user, which is very inefficient.
+            latestCommittedIdentifier = Long.MIN_VALUE;
+        } else {
+            latestCommittedIdentifier =
+                    snapshotManager
+                            .latestSnapshotOfUser(commitUser)
+                            .map(Snapshot::commitIdentifier)
+                            .orElse(Long.MIN_VALUE);
+        }
 
         List<FileCommittable> result = new ArrayList<>();
 
