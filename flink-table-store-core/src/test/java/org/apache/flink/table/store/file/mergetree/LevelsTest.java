@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.UUID;
 
 import static org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,7 +44,6 @@ public class LevelsTest {
 
     @Test
     public void testNonEmptyHighestLevel0() {
-
         Levels levels = new Levels(comparator, Arrays.asList(newFile(0), newFile(0)), 3);
         assertThat(levels.nonEmptyHighestLevel()).isEqualTo(0);
     }
@@ -61,7 +61,14 @@ public class LevelsTest {
         assertThat(levels.nonEmptyHighestLevel()).isEqualTo(2);
     }
 
+    @Test
+    public void testLevel0WithSameSequenceNumbers() {
+        Levels levels = new Levels(comparator, Arrays.asList(newFile(0), newFile(0)), 3);
+        assertThat(levels.allFiles()).hasSize(2);
+    }
+
     public static DataFileMeta newFile(int level) {
-        return new DataFileMeta("", 0, 1, row(0), row(0), null, null, 0, 1, 0, level);
+        return new DataFileMeta(
+                UUID.randomUUID().toString(), 0, 1, row(0), row(0), null, null, 0, 1, 0, level);
     }
 }
