@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -51,7 +52,19 @@ public class Levels {
                         inputFiles.stream().mapToInt(DataFileMeta::level).max().orElse(-1) + 1);
         checkArgument(restoredMaxLevel > 1, "levels must be at least 2.");
         this.level0 =
-                new TreeSet<>(Comparator.comparing(DataFileMeta::maxSequenceNumber).reversed());
+                new TreeSet<>(
+                        (a, b) -> {
+                            if (a.maxSequenceNumber() != b.maxSequenceNumber()) {
+                                // file with larger sequence number should be in front
+                                return Long.compare(b.maxSequenceNumber(), a.maxSequenceNumber());
+                            } else {
+                                // When two or more jobs are writing the same merge tree, it is
+                                // possible that multiple files have the same maxSequenceNumber. In
+                                // this case we have to compare their file names so that files with
+                                // same maxSequenceNumber won't be "de-duplicated" by the tree set.
+                                return a.fileName().compareTo(b.fileName());
+                            }
+                        });
         this.levels = new ArrayList<>();
         for (int i = 1; i < restoredMaxLevel; i++) {
             levels.add(SortedRun.empty());
@@ -62,6 +75,11 @@ public class Levels {
             levelMap.computeIfAbsent(file.level(), level -> new ArrayList<>()).add(file);
         }
         levelMap.forEach((level, files) -> updateLevel(level, emptyList(), files));
+
+        Preconditions.checkState(
+                level0.size() + levels.stream().mapToInt(r -> r.files().size()).sum()
+                        == inputFiles.size(),
+                "Number of files stored in Levels does not equal to the size of inputFiles. This is unexpected.");
     }
 
     public void addLevel0File(DataFileMeta file) {
