@@ -68,7 +68,7 @@ public class StoreWriteOperator extends PrepareCommitOperator {
     /** We listen to this ourselves because we don't have an {@link InternalTimerService}. */
     private long currentWatermark = Long.MIN_VALUE;
 
-    private TableWrite write;
+    @Nullable private TableWrite write;
 
     @Nullable private LogWriteCallback logCallback;
 
