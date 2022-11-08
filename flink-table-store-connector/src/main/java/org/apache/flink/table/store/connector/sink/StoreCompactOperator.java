@@ -45,14 +45,18 @@ public class StoreCompactOperator extends PrepareCommitOperator {
     private static final Logger LOG = LoggerFactory.getLogger(StoreCompactOperator.class);
 
     private final FileStoreTable table;
+    private final String commitUser;
     @Nullable private final Map<String, String> compactPartitionSpec;
 
     private TableScan scan;
     private TableWrite write;
 
     public StoreCompactOperator(
-            FileStoreTable table, @Nullable Map<String, String> compactPartitionSpec) {
+            FileStoreTable table,
+            String commitUser,
+            @Nullable Map<String, String> compactPartitionSpec) {
         this.table = table;
+        this.commitUser = commitUser;
         this.compactPartitionSpec = compactPartitionSpec;
     }
 
@@ -67,7 +71,7 @@ public class StoreCompactOperator extends PrepareCommitOperator {
                             compactPartitionSpec, table.schema().logicalPartitionType()));
         }
 
-        write = table.newWrite();
+        write = table.newWrite(commitUser);
     }
 
     @Override
@@ -102,7 +106,7 @@ public class StoreCompactOperator extends PrepareCommitOperator {
         }
 
         try {
-            return write.prepareCommit(true).stream()
+            return write.prepareCommit(true, checkpointId).stream()
                     .map(c -> new Committable(checkpointId, Committable.Kind.FILE, c))
                     .collect(Collectors.toList());
         } catch (Exception e) {

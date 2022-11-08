@@ -40,15 +40,18 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
     private final MemoryPoolFactory memoryPoolFactory;
 
     public MemoryFileStoreWrite(
-            SnapshotManager snapshotManager, FileStoreScan scan, CoreOptions options) {
-        super(snapshotManager, scan);
+            String commitUser,
+            SnapshotManager snapshotManager,
+            FileStoreScan scan,
+            CoreOptions options) {
+        super(commitUser, snapshotManager, scan);
         HeapMemorySegmentPool memoryPool =
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize());
         this.memoryPoolFactory = new MemoryPoolFactory(memoryPool, this::memoryOwners);
     }
 
     private Iterator<MemoryOwner> memoryOwners() {
-        Iterator<Map<Integer, RecordWriter<T>>> iterator = writers.values().iterator();
+        Iterator<Map<Integer, WriterWithCommit<T>>> iterator = writers.values().iterator();
         return Iterators.concat(
                 new Iterator<Iterator<MemoryOwner>>() {
                     @Override
@@ -60,7 +63,10 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
                     public Iterator<MemoryOwner> next() {
                         return Iterators.transform(
                                 iterator.next().values().iterator(),
-                                writer -> (MemoryOwner) writer);
+                                writerWithCommit ->
+                                        writerWithCommit == null
+                                                ? null
+                                                : (MemoryOwner) (writerWithCommit.writer));
                     }
                 });
     }

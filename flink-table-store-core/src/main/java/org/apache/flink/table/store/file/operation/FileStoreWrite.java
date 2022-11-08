@@ -68,10 +68,11 @@ public interface FileStoreWrite<T> {
      * Prepare commit in the write.
      *
      * @param endOfInput if true, the data writing is ended
+     * @param commitIdentifier identifier of the commit being prepared
      * @return the file committable list
      * @throws Exception the thrown exception
      */
-    List<FileCommittable> prepareCommit(boolean endOfInput) throws Exception;
+    List<FileCommittable> prepareCommit(boolean endOfInput, long commitIdentifier) throws Exception;
 
     /**
      * Close the writer.

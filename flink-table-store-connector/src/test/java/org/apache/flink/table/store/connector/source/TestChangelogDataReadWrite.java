@@ -53,6 +53,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 
@@ -73,6 +74,7 @@ public class TestChangelogDataReadWrite {
     private final FileStorePathFactory pathFactory;
     private final SnapshotManager snapshotManager;
     private final ExecutorService service;
+    private final String commitUser;
 
     public TestChangelogDataReadWrite(String root, ExecutorService service) {
         this.avro = FileFormat.fromIdentifier("avro", new Configuration());
@@ -85,6 +87,7 @@ public class TestChangelogDataReadWrite {
                         CoreOptions.FILE_FORMAT.defaultValue());
         this.snapshotManager = new SnapshotManager(new Path(root));
         this.service = service;
+        this.commitUser = UUID.randomUUID().toString();
     }
 
     public TableRead createReadWithKey() {
@@ -152,6 +155,7 @@ public class TestChangelogDataReadWrite {
                 new KeyValueFileStoreWrite(
                                 new SchemaManager(tablePath),
                                 0,
+                                commitUser,
                                 KEY_TYPE,
                                 VALUE_TYPE,
                                 () -> COMPARATOR,

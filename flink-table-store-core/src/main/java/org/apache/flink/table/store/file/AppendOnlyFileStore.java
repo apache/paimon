@@ -58,10 +58,11 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
     }
 
     @Override
-    public AppendOnlyFileStoreWrite newWrite() {
+    public AppendOnlyFileStoreWrite newWrite(String commitUser) {
         return new AppendOnlyFileStoreWrite(
                 newRead(),
                 schemaId,
+                commitUser,
                 rowType,
                 pathFactory(),
                 snapshotManager(),

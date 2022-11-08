@@ -76,6 +76,7 @@ public class TableStoreHiveStorageHandlerITCase {
 
     private static String engine;
 
+    private String commitUser;
     private long commitIdentifier;
 
     @BeforeClass
@@ -101,6 +102,7 @@ public class TableStoreHiveStorageHandlerITCase {
         hiveShell.execute("CREATE DATABASE IF NOT EXISTS test_db");
         hiveShell.execute("USE test_db");
 
+        commitUser = UUID.randomUUID().toString();
         commitIdentifier = 0;
     }
 
@@ -625,15 +627,17 @@ public class TableStoreHiveStorageHandlerITCase {
 
     private String writeData(FileStoreTable table, String path, List<RowData> data)
             throws Exception {
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
         for (RowData rowData : data) {
             write.write(rowData);
             if (ThreadLocalRandom.current().nextInt(5) == 0) {
-                commit.commit(commitIdentifier++, write.prepareCommit(false));
+                commit.commit(commitIdentifier, write.prepareCommit(false, commitIdentifier));
+                commitIdentifier++;
             }
         }
-        commit.commit(commitIdentifier++, write.prepareCommit(true));
+        commit.commit(commitIdentifier, write.prepareCommit(true, commitIdentifier));
+        commitIdentifier++;
         write.close();
 
         String tableName = "test_table_" + (UUID.randomUUID().toString().substring(0, 4));
@@ -673,12 +677,12 @@ public class TableStoreHiveStorageHandlerITCase {
             }
         }
 
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
         for (GenericRowData rowData : input) {
             write.write(rowData);
         }
-        commit.commit(0, write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true, 0));
         write.close();
 
         hiveShell.execute(
@@ -780,20 +784,20 @@ public class TableStoreHiveStorageHandlerITCase {
 
         // TODO add NaN related tests after FLINK-27627 and FLINK-27628 are fixed
 
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
         write.write(GenericRowData.of(1));
-        commit.commit(0, write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true, 0));
         write.write(GenericRowData.of((Object) null));
-        commit.commit(1, write.prepareCommit(true));
+        commit.commit(1, write.prepareCommit(true, 1));
         write.write(GenericRowData.of(2));
         write.write(GenericRowData.of(3));
         write.write(GenericRowData.of((Object) null));
-        commit.commit(2, write.prepareCommit(true));
+        commit.commit(2, write.prepareCommit(true, 2));
         write.write(GenericRowData.of(4));
         write.write(GenericRowData.of(5));
         write.write(GenericRowData.of(6));
-        commit.commit(3, write.prepareCommit(true));
+        commit.commit(3, write.prepareCommit(true, 3));
         write.close();
 
         hiveShell.execute(
@@ -872,23 +876,23 @@ public class TableStoreHiveStorageHandlerITCase {
                         Collections.emptyList(),
                         Collections.emptyList());
 
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
         write.write(
                 GenericRowData.of(
                         375, /* 1971-01-11 */
                         TimestampData.fromLocalDateTime(
                                 LocalDateTime.of(2022, 5, 17, 17, 29, 20, 100_000_000))));
-        commit.commit(0, write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true, 0));
         write.write(GenericRowData.of(null, null));
-        commit.commit(1, write.prepareCommit(true));
+        commit.commit(1, write.prepareCommit(true, 1));
         write.write(GenericRowData.of(376 /* 1971-01-12 */, null));
         write.write(
                 GenericRowData.of(
                         null,
                         TimestampData.fromLocalDateTime(
                                 LocalDateTime.of(2022, 6, 18, 8, 30, 0, 100_000_000))));
-        commit.commit(2, write.prepareCommit(true));
+        commit.commit(2, write.prepareCommit(true, 2));
         write.close();
 
         hiveShell.execute(
