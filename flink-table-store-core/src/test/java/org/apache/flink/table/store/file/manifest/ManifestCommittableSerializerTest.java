@@ -51,8 +51,7 @@ public class ManifestCommittableSerializerTest {
     }
 
     public static ManifestCommittable create() {
-        ManifestCommittable committable =
-                new ManifestCommittable(String.valueOf(new Random().nextLong()));
+        ManifestCommittable committable = new ManifestCommittable(new Random().nextLong());
         addAndAssert(committable, row(0), 0);
         addAndAssert(committable, row(0), 1);
         addAndAssert(committable, row(1), 0);

@@ -33,7 +33,18 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-/** This file is the entrance to all data committed at some specific time point. */
+/**
+ * This file is the entrance to all data committed at some specific time point.
+ *
+ * <p>Unversioned change list:
+ *
+ * <ul>
+ *   <li>Since table store 0.22 and table store 0.3, commitIdentifier is changed from a String to a
+ *       long value. For table store < 0.22, only Flink connectors have table store sink and they
+ *       use checkpointId as commitIdentifier (which is a long value). Json can automatically
+ *       perform type conversion so there is no compatibility issue.
+ * </ul>
+ */
 public class Snapshot {
 
     public static final long FIRST_SNAPSHOT_ID = 1;
@@ -66,9 +77,15 @@ public class Snapshot {
     @JsonProperty(FIELD_COMMIT_USER)
     private final String commitUser;
 
-    // for deduplication
+    // Mainly for snapshot deduplication.
+    //
+    // If multiple snapshots have the same commitIdentifier, reading from any of these snapshots
+    // must produce the same table.
+    //
+    // If snapshot A has a smaller commitIdentifier than snapshot B, then snapshot A must be
+    // committed before snapshot B, and thus snapshot A must contain older records than snapshot B.
     @JsonProperty(FIELD_COMMIT_IDENTIFIER)
-    private final String commitIdentifier;
+    private final long commitIdentifier;
 
     @JsonProperty(FIELD_COMMIT_KIND)
     private final CommitKind commitKind;
@@ -86,7 +103,7 @@ public class Snapshot {
             @JsonProperty(FIELD_BASE_MANIFEST_LIST) String baseManifestList,
             @JsonProperty(FIELD_DELTA_MANIFEST_LIST) String deltaManifestList,
             @JsonProperty(FIELD_COMMIT_USER) String commitUser,
-            @JsonProperty(FIELD_COMMIT_IDENTIFIER) String commitIdentifier,
+            @JsonProperty(FIELD_COMMIT_IDENTIFIER) long commitIdentifier,
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
             @JsonProperty(FIELD_TIME_MILLIS) long timeMillis,
             @JsonProperty(FIELD_LOG_OFFSETS) Map<Integer, Long> logOffsets) {
@@ -127,7 +144,7 @@ public class Snapshot {
     }
 
     @JsonGetter(FIELD_COMMIT_IDENTIFIER)
-    public String commitIdentifier() {
+    public long commitIdentifier() {
         return commitIdentifier;
     }
 

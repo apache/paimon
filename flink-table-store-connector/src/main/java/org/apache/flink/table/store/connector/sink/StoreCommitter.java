@@ -42,7 +42,7 @@ public class StoreCommitter implements Committer {
 
     @Override
     public ManifestCommittable combine(long checkpointId, List<Committable> committables) {
-        ManifestCommittable fileCommittable = new ManifestCommittable(String.valueOf(checkpointId));
+        ManifestCommittable fileCommittable = new ManifestCommittable(checkpointId);
         for (Committable committable : committables) {
             switch (committable.kind()) {
                 case FILE:

@@ -21,6 +21,7 @@ package org.apache.flink.table.store.table;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
+import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
@@ -29,9 +30,12 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.source.SnapshotEnumerator;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
+import org.apache.flink.table.store.utils.CompatibilityTestUtils;
 import org.apache.flink.types.RowKind;
+import org.apache.flink.util.function.FunctionWithException;
 
 import org.junit.jupiter.api.Test;
 
@@ -54,9 +58,9 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(1, 10, 200L));
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 11, 101L));
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
         write.write(rowData(1, 11, 55L));
-        commit.commit("1", write.prepareCommit(true));
+        commit.commit(1, write.prepareCommit(true));
         write.close();
 
         List<Split> splits = table.newScan().plan().splits;
@@ -174,7 +178,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(1, 10, 101L));
         write.write(rowDataWithKind(RowKind.UPDATE_BEFORE, 1, 10, 101L));
         write.write(rowDataWithKind(RowKind.UPDATE_AFTER, 1, 10, 102L));
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
         write.close();
 
         List<Split> splits = table.newScan().withIncremental(true).plan().splits;
@@ -189,6 +193,97 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 "+U 1|10|102|binary|varbinary"));
     }
 
+    @Test
+    public void testStreamingChangelogCompatibility021() throws Exception {
+        // already contains 2 commits
+        CompatibilityTestUtils.unzip(
+                "compatibility/table-changelog-0.2.1.zip", tablePath.getPath());
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
+
+        List<List<List<String>>> expected =
+                Arrays.asList(
+                        // first changelog snapshot
+                        Arrays.asList(
+                                // partition 1
+                                Arrays.asList(
+                                        "+I 1|10|100|binary|varbinary",
+                                        "+I 1|20|200|binary|varbinary",
+                                        "-D 1|10|100|binary|varbinary",
+                                        "+I 1|10|101|binary|varbinary",
+                                        "-U 1|10|101|binary|varbinary",
+                                        "+U 1|10|102|binary|varbinary"),
+                                // partition 2
+                                Collections.singletonList("+I 2|10|300|binary|varbinary")),
+                        // second changelog snapshot
+                        Arrays.asList(
+                                // partition 1
+                                Collections.singletonList("-D 1|20|200|binary|varbinary"),
+                                // partition 2
+                                Arrays.asList(
+                                        "-U 2|10|300|binary|varbinary",
+                                        "+U 2|10|301|binary|varbinary",
+                                        "+I 2|20|400|binary|varbinary")),
+                        // third changelog snapshot
+                        Arrays.asList(
+                                // partition 1
+                                Arrays.asList(
+                                        "-U 1|10|102|binary|varbinary",
+                                        "+U 1|10|103|binary|varbinary",
+                                        "+I 1|20|201|binary|varbinary"),
+                                // partition 2
+                                Collections.singletonList("-D 2|10|301|binary|varbinary")));
+
+        SnapshotEnumerator enumerator =
+                new SnapshotEnumerator(
+                        tablePath,
+                        table.newScan().withIncremental(true),
+                        Snapshot.FIRST_SNAPSHOT_ID - 1);
+
+        FunctionWithException<Integer, Void, Exception> assertNextSnapshot =
+                i -> {
+                    SnapshotEnumerator.EnumeratorResult result = enumerator.call();
+                    assertThat(result).isNotNull();
+
+                    TableRead read = table.newRead();
+                    for (int j = 0; j < 2; j++) {
+                        assertThat(
+                                        getResult(
+                                                read,
+                                                result.plan.splits,
+                                                binaryRow(j + 1),
+                                                0,
+                                                CHANGELOG_ROW_TO_STRING))
+                                .isEqualTo(expected.get(i).get(j));
+                    }
+
+                    return null;
+                };
+
+        for (int i = 0; i < 2; i++) {
+            assertNextSnapshot.apply(i);
+        }
+
+        // no more changelog
+        assertThat(enumerator.call()).isNull();
+
+        // write another commit
+        TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
+        write.write(rowDataWithKind(RowKind.UPDATE_BEFORE, 1, 10, 102L));
+        write.write(rowDataWithKind(RowKind.UPDATE_AFTER, 1, 10, 103L));
+        write.write(rowDataWithKind(RowKind.INSERT, 1, 20, 201L));
+        write.write(rowDataWithKind(RowKind.DELETE, 2, 10, 301L));
+        commit.commit(2, write.prepareCommit(true));
+        write.close();
+
+        assertNextSnapshot.apply(2);
+
+        // no more changelog
+        assertThat(enumerator.call()).isNull();
+    }
+
     private void writeData() throws Exception {
         FileStoreTable table = createFileStoreTable();
         TableWrite write = table.newWrite();
@@ -197,19 +292,19 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(1, 10, 100L));
         write.write(rowData(2, 20, 200L));
         write.write(rowData(1, 11, 101L));
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
 
         write.write(rowData(1, 10, 1000L));
         write.write(rowData(2, 21, 201L));
         write.write(rowData(2, 21, 2001L));
-        commit.commit("1", write.prepareCommit(true));
+        commit.commit(1, write.prepareCommit(true));
 
         write.write(rowData(1, 11, 1001L));
         write.write(rowData(2, 21, 20001L));
         write.write(rowData(2, 22, 202L));
         write.write(rowDataWithKind(RowKind.DELETE, 1, 11, 1001L));
         write.write(rowDataWithKind(RowKind.DELETE, 2, 20, 200L));
-        commit.commit("2", write.prepareCommit(true));
+        commit.commit(2, write.prepareCommit(true));
 
         write.close();
     }
@@ -224,15 +319,15 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));
-        commit.commit("0", write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true));
 
         write.write(rowData(1, 30, 300L));
         write.write(rowData(1, 40, 400L));
-        commit.commit("1", write.prepareCommit(true));
+        commit.commit(1, write.prepareCommit(true));
 
         write.write(rowData(1, 50, 500L));
         write.write(rowData(1, 60, 600L));
-        commit.commit("2", write.prepareCommit(true));
+        commit.commit(2, write.prepareCommit(true));
 
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
         List<Split> splits = table.newScan().plan().splits;

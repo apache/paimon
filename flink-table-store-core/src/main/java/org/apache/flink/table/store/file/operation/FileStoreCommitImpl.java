@@ -156,7 +156,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         // check if a committable is already committed by its identifier
-        Map<String, ManifestCommittable> identifiers = new LinkedHashMap<>();
+        Map<Long, ManifestCommittable> identifiers = new LinkedHashMap<>();
         for (ManifestCommittable committable : committableList) {
             identifiers.put(committable.identifier(), committable);
         }
@@ -291,7 +291,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private void tryCommit(
             List<ManifestEntry> changes,
-            String hash,
+            long identifier,
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
             Long safeLatestSnapshotId) {
@@ -299,7 +299,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Long latestSnapshotId = snapshotManager.latestSnapshotId();
             if (tryCommitOnce(
                     changes,
-                    hash,
+                    identifier,
                     logOffsets,
                     commitKind,
                     latestSnapshotId,
@@ -312,7 +312,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private void tryOverwrite(
             Predicate partitionFilter,
             List<ManifestEntry> changes,
-            String identifier,
+            long identifier,
             Map<Integer, Long> logOffsets) {
         while (true) {
             Long latestSnapshotId = snapshotManager.latestSnapshotId();
@@ -373,7 +373,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private boolean tryCommitOnce(
             List<ManifestEntry> changes,
-            String identifier,
+            long identifier,
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
             Long latestSnapshotId,

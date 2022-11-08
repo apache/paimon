@@ -31,13 +31,13 @@ import java.util.Objects;
 /** Manifest commit message. */
 public class ManifestCommittable {
 
-    private final String identifier;
+    private final long identifier;
     private final Map<Integer, Long> logOffsets;
     private final Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> newFiles;
     private final Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> compactBefore;
     private final Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> compactAfter;
 
-    public ManifestCommittable(String identifier) {
+    public ManifestCommittable(long identifier) {
         this.identifier = identifier;
         this.logOffsets = new HashMap<>();
         this.newFiles = new HashMap<>();
@@ -46,7 +46,7 @@ public class ManifestCommittable {
     }
 
     public ManifestCommittable(
-            String identifier,
+            long identifier,
             Map<Integer, Long> logOffsets,
             Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> newFiles,
             Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> compactBefore,
@@ -83,7 +83,7 @@ public class ManifestCommittable {
                 .addAll(files);
     }
 
-    public String identifier() {
+    public long identifier() {
         return identifier;
     }
 

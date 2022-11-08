@@ -68,7 +68,7 @@ public class TableCommit implements AutoCloseable {
         return commit.filterCommitted(committables);
     }
 
-    public void commit(String identifier, List<FileCommittable> fileCommittables) {
+    public void commit(long identifier, List<FileCommittable> fileCommittables) {
         ManifestCommittable committable = new ManifestCommittable(identifier);
         for (FileCommittable fileCommittable : fileCommittables) {
             committable.addFileCommittable(
@@ -96,7 +96,7 @@ public class TableCommit implements AutoCloseable {
                 // create an empty committable
                 // identifier is Long.MAX_VALUE, come from batch job
                 // TODO maybe it can be produced by CommitterOperator
-                committable = new ManifestCommittable(String.valueOf(Long.MAX_VALUE));
+                committable = new ManifestCommittable(Long.MAX_VALUE);
             }
             commit.overwrite(overwritePartition, committable, new HashMap<>());
         }

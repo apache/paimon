@@ -59,7 +59,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -84,6 +83,8 @@ public class TestFileStore extends KeyValueFileStore {
     private final RowDataSerializer keySerializer;
     private final RowDataSerializer valueSerializer;
     private final String user;
+
+    private long commitIdentifier;
 
     public static TestFileStore create(
             String format,
@@ -132,6 +133,8 @@ public class TestFileStore extends KeyValueFileStore {
         this.keySerializer = new RowDataSerializer(keyType);
         this.valueSerializer = new RowDataSerializer(valueType);
         this.user = UUID.randomUUID().toString();
+
+        this.commitIdentifier = 0L;
     }
 
     public FileStoreCommitImpl newCommit() {
@@ -197,7 +200,7 @@ public class TestFileStore extends KeyValueFileStore {
             Function<KeyValue, BinaryRowData> partitionCalculator,
             Function<KeyValue, Integer> bucketCalculator,
             boolean emptyWriter,
-            String identifier,
+            Long identifier,
             BiConsumer<FileStoreCommit, ManifestCommittable> commitFunction)
             throws Exception {
         FileStoreWrite<KeyValue> write = newWrite();
@@ -232,8 +235,7 @@ public class TestFileStore extends KeyValueFileStore {
 
         FileStoreCommit commit = newCommit(user);
         ManifestCommittable committable =
-                new ManifestCommittable(
-                        identifier == null ? String.valueOf(new Random().nextLong()) : identifier);
+                new ManifestCommittable(identifier == null ? commitIdentifier++ : identifier);
         for (Map.Entry<BinaryRowData, Map<Integer, RecordWriter<KeyValue>>> entryWithPartition :
                 writers.entrySet()) {
             for (Map.Entry<Integer, RecordWriter<KeyValue>> entryWithBucket :
