@@ -49,6 +49,12 @@ public class CatalogOptions {
                     .noDefaultValue()
                     .withDescription("Uri of metastore server.");
 
+    public static final ConfigOption<Boolean> HMS_EXTERNAL =
+            ConfigOptions.key("hms.external")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Was hms table external.");
+
     public static final ConfigOption<Boolean> LOCK_ENABLED =
             ConfigOptions.key("lock.enabled")
                     .booleanType()
