@@ -13,7 +13,7 @@ jobs:
         uses: actions/setup-java@v1
         with:
           java-version: 1.8
-      - name: Build Flink 1.15
+      - name: Build Flink 1.16
         run: |
           ./mvnw clean install -Dmaven.test.skip=true
       - name: Build Hive 3.1
@@ -25,6 +25,9 @@ jobs:
       - name: Build Hive 2.1
         run: |
           ./mvnw clean install -Dmaven.test.skip=true -Phive-2.1 -f flink-table-store-hive
+      - name: Build Flink 1.15
+        run: |
+          ./mvnw clean install -Dmaven.test.skip=true -Pflink-1.15
       - name: Build Flink 1.14
         run: |
           ./mvnw clean install -Dmaven.test.skip=true -Pflink-1.14

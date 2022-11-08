@@ -73,6 +73,9 @@ mvn clean install -Dcheckstyle.skip=true -Dgpg.skip -DskipTests -Phive-2.1 -f fl
 cp flink-table-store-hive/flink-table-store-hive-catalog/target/flink-table-store-hive-catalog-${RELEASE_VERSION}.jar ${RELEASE_DIR}/flink-table-store-hive-catalog-${RELEASE_VERSION}_2.1.jar
 cp flink-table-store-hive/flink-table-store-hive-connector/target/flink-table-store-hive-connector-${RELEASE_VERSION}.jar ${RELEASE_DIR}/flink-table-store-hive-connector-${RELEASE_VERSION}_2.1.jar
 
+mvn clean install -Dcheckstyle.skip=true -Dgpg.skip -Dmaven.test.skip=true -Pflink-1.15
+cp flink-table-store-dist/target/flink-table-store-dist-${RELEASE_VERSION}.jar ${RELEASE_DIR}/flink-table-store-dist-${RELEASE_VERSION}_1.15.jar
+
 mvn clean install -Dcheckstyle.skip=true -Dgpg.skip -Dmaven.test.skip=true -Pflink-1.14
 cp flink-table-store-dist/target/flink-table-store-dist-${RELEASE_VERSION}.jar ${RELEASE_DIR}/flink-table-store-dist-${RELEASE_VERSION}_1.14.jar
 
@@ -87,6 +90,7 @@ gpg --armor --detach-sig "flink-table-store-hive-connector-${RELEASE_VERSION}_2.
 gpg --armor --detach-sig "flink-table-store-hive-connector-${RELEASE_VERSION}_2.1.jar"
 gpg --armor --detach-sig "flink-table-store-spark-${RELEASE_VERSION}.jar"
 gpg --armor --detach-sig "flink-table-store-spark2-${RELEASE_VERSION}.jar"
+gpg --armor --detach-sig "flink-table-store-dist-${RELEASE_VERSION}_1.15.jar"
 gpg --armor --detach-sig "flink-table-store-dist-${RELEASE_VERSION}_1.14.jar"
 
 $SHASUM "flink-table-store-dist-${RELEASE_VERSION}.jar" > "flink-table-store-dist-${RELEASE_VERSION}.jar.sha512"
@@ -99,4 +103,5 @@ $SHASUM "flink-table-store-hive-connector-${RELEASE_VERSION}_2.2.jar" > "flink-t
 $SHASUM "flink-table-store-hive-connector-${RELEASE_VERSION}_2.1.jar" > "flink-table-store-hive-connector-${RELEASE_VERSION}_2.1.jar.sha512"
 $SHASUM "flink-table-store-spark-${RELEASE_VERSION}.jar" > "flink-table-store-spark-${RELEASE_VERSION}.jar.sha512"
 $SHASUM "flink-table-store-spark2-${RELEASE_VERSION}.jar" > "flink-table-store-spark2-${RELEASE_VERSION}.jar.sha512"
+$SHASUM "flink-table-store-dist-${RELEASE_VERSION}_1.15.jar" > "flink-table-store-dist-${RELEASE_VERSION}_1.15.jar.sha512"
 $SHASUM "flink-table-store-dist-${RELEASE_VERSION}_1.14.jar" > "flink-table-store-dist-${RELEASE_VERSION}_1.14.jar.sha512"

@@ -35,7 +35,7 @@ document will be guided to create a simple dynamic table to read and write it.
 __Note:__ Table Store is only supported since Flink 1.14.
 {{< /hint >}}
 
-[Download Flink 1.15](https://flink.apache.org/downloads.html),
+[Download Flink 1.16](https://flink.apache.org/downloads.html),
 then extract the archive:
 
 ```bash

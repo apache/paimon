@@ -281,7 +281,7 @@ under the License.
                         </goals>
                         <configuration>
                             <sources>
-                                <source>src/main/${flink.version}</source>
+                                <source>src/main/${flink.connector.version}</source>
                             </sources>
                         </configuration>
                     </execution>
