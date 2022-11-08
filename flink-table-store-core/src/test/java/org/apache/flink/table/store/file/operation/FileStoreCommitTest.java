@@ -46,6 +46,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -100,12 +101,12 @@ public class FileStoreCommitTest {
 
         assertThat(latest.getFileSystem().exists(latest)).isTrue();
 
-        Long latestId = snapshotManager.findLatest();
+        Long latestId = snapshotManager.latestSnapshotId();
 
         // remove latest hint file
         latest.getFileSystem().delete(latest, false);
 
-        assertThat(snapshotManager.findLatest()).isEqualTo(latestId);
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(latestId);
     }
 
     @Test
@@ -119,6 +120,31 @@ public class FileStoreCommitTest {
         // this test succeeds if this call does not fail
         store.newCommit(UUID.randomUUID().toString())
                 .filterCommitted(Collections.singletonList(new ManifestCommittable(999)));
+    }
+
+    @Test
+    public void testFilterAllCommits() throws Exception {
+        testRandomConcurrentNoConflict(1, false);
+        TestFileStore store = createStore(false);
+        SnapshotManager snapshotManager = store.snapshotManager();
+        long latestSnapshotId = snapshotManager.latestSnapshotId();
+
+        LinkedHashSet<Long> commitIdentifiers = new LinkedHashSet<>();
+        String user = "";
+        for (long id = Snapshot.FIRST_SNAPSHOT_ID; id <= latestSnapshotId; id++) {
+            Snapshot snapshot = snapshotManager.snapshot(id);
+            commitIdentifiers.add(snapshot.commitIdentifier());
+            user = snapshot.commitUser();
+        }
+
+        // all commit identifiers should be filtered out
+        List<ManifestCommittable> remaining =
+                store.newCommit(user)
+                        .filterCommitted(
+                                commitIdentifiers.stream()
+                                        .map(ManifestCommittable::new)
+                                        .collect(Collectors.toList()));
+        assertThat(remaining).isEmpty();
     }
 
     protected void testRandomConcurrentNoConflict(int numThreads, boolean failing)
@@ -328,7 +354,7 @@ public class FileStoreCommitTest {
                 false,
                 null,
                 (commit, committable) -> commit.commit(committable, Collections.emptyMap()));
-        assertThat(store.snapshotManager().findLatest()).isEqualTo(snapshot.id());
+        assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(snapshot.id());
 
         // commit empty new files
         store.commitDataImpl(
@@ -341,7 +367,7 @@ public class FileStoreCommitTest {
                     commit.withCreateEmptyCommit(true);
                     commit.commit(committable, Collections.emptyMap());
                 });
-        assertThat(store.snapshotManager().findLatest()).isEqualTo(snapshot.id() + 1);
+        assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(snapshot.id() + 1);
     }
 
     @Test
