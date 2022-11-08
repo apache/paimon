@@ -26,7 +26,7 @@ under the License.
 
 # Lookup Join
 
-A [Lookup Join](https://nightlies.apache.org/flink/flink-docs-release-1.15/zh/docs/dev/table/sql/queries/joins/)
+A [Lookup Join](https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/dev/table/sql/queries/joins/)
 is used to enrich a table with data that is queried from Flink Table Store. The join requires one table to have
 a processing time attribute and the other table to be backed by a lookup source connector.
 
@@ -77,8 +77,8 @@ __Note:__ Partitioned or non-pk tables are not supported now.
 Project pushdown can effectively reduce the overhead,
 [FLINK-29138](https://issues.apache.org/jira/browse/FLINK-29138) fixed the bug that
 the project cannot be pushed down to the source. So it is preferable to use a version
-greater than or equal to `flink 1.14.6`, `flink 1.15.3`. Or you can cherry-pick the
-commit to your own Flink branch.
+greater than or equal to `flink 1.14.6`, `flink 1.15.3` and `flink 1.16.0`. Or you can
+cherry-pick the commit to your own Flink branch.
 
 ## RocksDBOptions
 
