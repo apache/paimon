@@ -62,7 +62,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private final int numOfBuckets;
     private final boolean checkNumOfBuckets;
     private final CoreOptions.ChangelogProducer changelogProducer;
-    private final boolean readCompacted;
 
     private final Map<Long, TableSchema> tableSchemas;
     private final SchemaManager schemaManager;
@@ -76,6 +75,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private List<ManifestFileMeta> specifiedManifests = null;
     private boolean isIncremental = false;
     private Integer specifiedLevel = null;
+    private boolean readCompacted = false;
 
     public AbstractFileStoreScan(
             RowType partitionType,
@@ -87,8 +87,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
             boolean checkNumOfBuckets,
-            CoreOptions.ChangelogProducer changelogProducer,
-            boolean readCompacted) {
+            CoreOptions.ChangelogProducer changelogProducer) {
         this.partitionStatsConverter = new FieldStatsArraySerializer(partitionType);
         this.partitionConverter = new RowDataToObjectArrayConverter(partitionType);
         Preconditions.checkArgument(
@@ -103,7 +102,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         this.checkNumOfBuckets = checkNumOfBuckets;
         this.changelogProducer = changelogProducer;
         this.tableSchemas = new HashMap<>();
-        this.readCompacted = readCompacted;
     }
 
     @Override
@@ -168,6 +166,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withIncremental(boolean isIncremental) {
+        if (readCompacted) {
+            throw new IllegalStateException(
+                    String.format(
+                            "Cannot read increment data while %s is true.",
+                            CoreOptions.READ_COMPACTED.key()));
+        }
         this.isIncremental = isIncremental;
         return this;
     }
@@ -175,6 +179,18 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withLevel(int level) {
         this.specifiedLevel = level;
+        return this;
+    }
+
+    @Override
+    public FileStoreScan withReadCompacted(boolean readCompacted) {
+        if (this.isIncremental) {
+            throw new IllegalStateException(
+                    String.format(
+                            "Cannot read compacted data while reading incremental data, %s should be false.",
+                            CoreOptions.READ_COMPACTED.key()));
+        }
+        this.readCompacted = readCompacted;
         return this;
     }
 

@@ -52,6 +52,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link ChangelogWithKeyFileStoreTable}. */
 public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
@@ -576,6 +577,35 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                 .isEqualTo(
                         Collections.singletonList(
                                 "2|10|300|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
+    public void testReadIncrementalWithReadCompacted() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
+        TableWrite write = table.newWrite();
+        TableCommit commit = table.newCommit("user");
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(1, 20, 200L));
+        write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 100L));
+        write.write(rowData(1, 10, 101L));
+        write.write(rowDataWithKind(RowKind.UPDATE_BEFORE, 1, 20, 200L));
+        write.write(rowDataWithKind(RowKind.UPDATE_AFTER, 1, 20, 201L));
+        write.write(rowDataWithKind(RowKind.UPDATE_BEFORE, 1, 10, 101L));
+        write.write(rowDataWithKind(RowKind.UPDATE_AFTER, 1, 10, 102L));
+        commit.commit(0, write.prepareCommit(true));
+        write.close();
+
+        assertThatThrownBy(
+                () -> {
+                    table.newScan().withIncremental(true).withReadCompacted(true).plan();
+                })
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage(
+                        String.format(
+                                "Cannot read compacted data while reading incremental data, %s should be false.",
+                                CoreOptions.READ_COMPACTED.key()));
     }
 
     @Override

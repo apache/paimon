@@ -91,22 +91,24 @@ public class SnapshotManager {
     }
 
     public @Nullable Long latestCompactedSnapshotId() {
-        try {
-            Iterator<Snapshot> iterator = snapshots();
-            Long maxCompactedSnapshotId = null;
-            while (iterator.hasNext()) {
-                Snapshot snapshot = iterator.next();
+        Long latestId = latestSnapshotId();
+        Long earliestId = earliestSnapshotId();
+        if (latestId == null || earliestId == null) {
+            return null;
+        }
+
+        long snapshotId = latestId;
+        while (snapshotId >= earliestId) {
+            if (snapshotExists(snapshotId)) {
+                Snapshot snapshot = snapshot(snapshotId);
                 if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
-                    if (maxCompactedSnapshotId == null || snapshot.id() > maxCompactedSnapshotId) {
-                        maxCompactedSnapshotId = snapshot.id();
-                    }
+                    return snapshot.id();
                 }
             }
-
-            return maxCompactedSnapshotId;
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to find latest compacted snapshot id", e);
+            snapshotId--;
         }
+
+        return null;
     }
 
     /**

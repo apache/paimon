@@ -51,6 +51,8 @@ public interface FileStoreScan {
 
     FileStoreScan withLevel(int level);
 
+    FileStoreScan withReadCompacted(boolean readCompacted);
+
     /** Produce a {@link Plan}. */
     Plan plan();
 

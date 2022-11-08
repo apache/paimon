@@ -77,7 +77,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
             protected void withNonPartitionFilter(Predicate predicate) {
                 scan.withFilter(predicate);
             }
-        };
+        }.withReadCompacted(options().readCompacted());
     }
 
     @Override
