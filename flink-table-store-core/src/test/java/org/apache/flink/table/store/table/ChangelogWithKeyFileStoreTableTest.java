@@ -584,7 +584,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
-        TableWrite write = table.newWrite();
+        TableWrite write = table.newWrite("user");
         TableCommit commit = table.newCommit("user");
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));
@@ -594,13 +594,11 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowDataWithKind(RowKind.UPDATE_AFTER, 1, 20, 201L));
         write.write(rowDataWithKind(RowKind.UPDATE_BEFORE, 1, 10, 101L));
         write.write(rowDataWithKind(RowKind.UPDATE_AFTER, 1, 10, 102L));
-        commit.commit(0, write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true, 0));
         write.close();
 
         assertThatThrownBy(
-                () -> {
-                    table.newScan().withIncremental(true).withReadCompacted(true).plan();
-                })
+                        () -> table.newScan().withIncremental(true).withReadCompacted(true).plan())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage(
                         String.format(

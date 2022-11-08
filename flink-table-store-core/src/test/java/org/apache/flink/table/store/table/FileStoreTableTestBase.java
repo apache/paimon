@@ -374,14 +374,14 @@ public abstract class FileStoreTableTestBase {
                                 conf.set(CoreOptions.BUCKET, 1)
                                         .set(CoreOptions.READ_COMPACTED, true)
                                         .set(CoreOptions.COMPACTION_MAX_FILE_NUM, 10));
-        TableWrite write = table.newWrite();
+        TableWrite write = table.newWrite("user");
         TableCommit commit = table.newCommit("user");
 
         for (int i = 0; i < batchCount; i++) {
             for (int j = 0; j < countPerBatch; j++) {
                 write.write(rowData(j % 2 + 1, i * j, j * 10L));
             }
-            commit.commit(i, write.prepareCommit(true));
+            commit.commit(i, write.prepareCommit(true, i));
         }
         write.close();
     }
