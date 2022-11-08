@@ -28,7 +28,7 @@ public class KafkaLogOptions {
             ConfigOptions.key("kafka.bootstrap.servers")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("Required Kafka server connection string");
+                    .withDescription("Required Kafka server connection string.");
 
     public static final ConfigOption<String> TOPIC =
             ConfigOptions.key("kafka.topic")
