@@ -55,11 +55,11 @@ public abstract class PrepareCommitOperator extends AbstractStreamOperator<Commi
         emitCommittables(true, Long.MAX_VALUE);
     }
 
-    private void emitCommittables(boolean endOfInput, long checkpointId) throws IOException {
-        prepareCommit(endOfInput, checkpointId)
+    private void emitCommittables(boolean blocking, long checkpointId) throws IOException {
+        prepareCommit(blocking, checkpointId)
                 .forEach(committable -> output.collect(new StreamRecord<>(committable)));
     }
 
-    protected abstract List<Committable> prepareCommit(boolean endOfInput, long checkpointId)
+    protected abstract List<Committable> prepareCommit(boolean blocking, long checkpointId)
             throws IOException;
 }

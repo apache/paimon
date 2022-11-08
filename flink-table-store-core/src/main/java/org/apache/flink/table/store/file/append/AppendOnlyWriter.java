@@ -99,10 +99,9 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     }
 
     @Override
-    public CommitIncrement prepareCommit(boolean endOnfInput) throws Exception {
+    public CommitIncrement prepareCommit(boolean blocking) throws Exception {
         flushWriter(false);
-        boolean blocking = endOnfInput || forceCompact;
-        trySyncLatestCompaction(blocking);
+        trySyncLatestCompaction(blocking || forceCompact);
         return drainIncrement();
     }
 

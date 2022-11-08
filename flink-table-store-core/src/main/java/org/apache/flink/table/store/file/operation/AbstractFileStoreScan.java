@@ -66,6 +66,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private Integer specifiedBucket = null;
     private List<ManifestFileMeta> specifiedManifests = null;
     private boolean isIncremental = false;
+    private Integer specifiedLevel = null;
 
     public AbstractFileStoreScan(
             RowType partitionType,
@@ -156,6 +157,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
+    public FileStoreScan withLevel(int level) {
+        this.specifiedLevel = level;
+        return this;
+    }
+
+    @Override
     public Plan plan() {
         List<ManifestFileMeta> manifests = specifiedManifests;
         Long snapshotId = specifiedSnapshotId;
@@ -218,7 +225,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             // however entry.bucket() was computed against the old numOfBuckets
             // and thus the filtered manifest entries might be empty
             // which renders the bucket check invalid
-            if (filterByBucket(file) && filterByBucketSelector(file)) {
+            if (filterByBucket(file) && filterByBucketSelector(file) && filterByLevel(file)) {
                 files.add(file);
             }
         }
@@ -260,6 +267,10 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private boolean filterByBucketSelector(ManifestEntry entry) {
         return (bucketSelector == null
                 || bucketSelector.select(entry.bucket(), entry.totalBuckets()));
+    }
+
+    private boolean filterByLevel(ManifestEntry entry) {
+        return (specifiedLevel == null || entry.file().level() == specifiedLevel);
     }
 
     protected abstract boolean filterByStats(ManifestEntry entry);
