@@ -42,6 +42,7 @@ import javax.annotation.Nullable;
 
 import java.io.Serializable;
 import java.util.Map;
+import java.util.UUID;
 
 /** Sink of dynamic store. */
 public class StoreSink implements Serializable {
@@ -83,11 +84,13 @@ public class StoreSink implements Serializable {
         this.logSinkFunction = logSinkFunction;
     }
 
-    private OneInputStreamOperator<RowData, Committable> createWriteOperator() {
+    private OneInputStreamOperator<RowData, Committable> createWriteOperator(
+            String initialCommitUser) {
         if (compactionTask) {
-            return new StoreCompactOperator(table, compactPartitionSpec);
+            return new StoreCompactOperator(table, initialCommitUser, compactPartitionSpec);
         }
-        return new StoreWriteOperator(table, overwritePartition, logSinkFunction);
+        return new StoreWriteOperator(
+                table, initialCommitUser, overwritePartition, logSinkFunction);
     }
 
     private StoreCommitter createCommitter(String user, boolean createEmptyCommit) {
@@ -100,9 +103,16 @@ public class StoreSink implements Serializable {
     }
 
     public DataStreamSink<?> sinkTo(DataStream<RowData> input) {
+        // This commitUser is valid only for new jobs.
+        // After the job starts, this commitUser will be recorded into the states of write and
+        // commit operators.
+        // When the job restarts, commitUser will be recovered from states and this value is
+        // ignored.
+        String initialCommitUser = UUID.randomUUID().toString();
+
         CommittableTypeInfo typeInfo = new CommittableTypeInfo();
         SingleOutputStreamOperator<Committable> written =
-                input.transform(WRITER_NAME, typeInfo, createWriteOperator())
+                input.transform(WRITER_NAME, typeInfo, createWriteOperator(initialCommitUser))
                         .setParallelism(input.getParallelism());
 
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
@@ -121,6 +131,7 @@ public class StoreSink implements Serializable {
                                 typeInfo,
                                 new CommitterOperator(
                                         streamingCheckpointEnabled,
+                                        initialCommitUser,
                                         // If checkpoint is enabled for streaming job, we have to
                                         // commit new files list even if they're empty.
                                         // Otherwise we can't tell if the commit is successful after

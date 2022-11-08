@@ -30,6 +30,7 @@ import org.apache.flink.core.fs.LocatedFileStatus;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.fs.local.LocalBlockLocation;
 import org.apache.flink.util.ExceptionUtils;
+import org.apache.flink.util.function.RunnableWithException;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -231,6 +232,19 @@ public class FailingAtomicRenameFileSystem extends TestAtomicRenameFileSystem {
         while (true) {
             try {
                 return callable.call();
+            } catch (Throwable t) {
+                if (!ExceptionUtils.findThrowable(t, ArtificialException.class).isPresent()) {
+                    throw t;
+                }
+            }
+        }
+    }
+
+    public static void retryArtificialException(RunnableWithException runnable) throws Exception {
+        while (true) {
+            try {
+                runnable.run();
+                break;
             } catch (Throwable t) {
                 if (!ExceptionUtils.findThrowable(t, ArtificialException.class).isPresent()) {
                     throw t;
