@@ -87,7 +87,7 @@ public abstract class FileStatsExtractorTestBase {
 
     private List<GenericRowData> createData(RowType rowType) {
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        int numRows = random.nextInt(100);
+        int numRows = random.nextInt(1, 100);
         List<List<Object>> columns = new ArrayList<>();
         for (RowType.RowField field : rowType.getFields()) {
             List<Object> column = new ArrayList<>();
