@@ -41,7 +41,7 @@ column_list:
 __IMPORTANT:__ 
 - Checkpointing needs to be enabled when writing to the Table Store in STREAMING mode.
 - `execution.checkpointing.unaligned=true` is not supported when writing to the Table Store in STREAMING mode.
-- `execution.checkpointing.mode=AT_LEAST_ONCE` is not supported when writing to the Table Store in STREAMING mode.
+- `execution.checkpointing.mode=at-least-once` is not supported when writing to the Table Store in STREAMING mode.
 {{< /hint >}}
 
 ## Parallelism

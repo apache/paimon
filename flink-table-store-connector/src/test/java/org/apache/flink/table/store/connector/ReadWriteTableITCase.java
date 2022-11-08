@@ -92,7 +92,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
 
         // test streaming read
         final StreamTableEnvironment streamTableEnv =
-                StreamTableEnvironment.create(buildStreamEnv());
+                TableEnvironmentTestUtils.create(buildStreamEnv());
         registerTable(streamTableEnv, managedTable);
         BlockingIterator<Row, Row> streamIter =
                 collectAndCheck(
@@ -211,7 +211,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
 
         // test streaming read
         final StreamTableEnvironment streamTableEnv =
-                StreamTableEnvironment.create(buildStreamEnv());
+                TableEnvironmentTestUtils.create(buildStreamEnv());
         registerTable(streamTableEnv, managedTable);
         collectAndCheck(
                         streamTableEnv,
@@ -428,7 +428,8 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
 
         // batch read to check data refresh
         final StreamTableEnvironment batchTableEnv =
-                StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
+                TableEnvironmentTestUtils.create(
+                        buildBatchEnv(), EnvironmentSettings.inBatchMode());
         registerTable(batchTableEnv, managedTable);
         collectAndCheck(
                 batchTableEnv,
@@ -1207,7 +1208,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
     @Test
     public void testQueryContainsDefaultFieldName() throws Exception {
         rootPath = TEMPORARY_FOLDER.newFolder().getPath();
-        tEnv = StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
+        tEnv = TableEnvironmentTestUtils.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
         String id = registerData(Collections.singletonList(changelogRow("+I", 1, "abc")));
         tEnv.executeSql(
                 String.format(
@@ -1233,7 +1234,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
     @Test
     public void testLike() throws Exception {
         rootPath = TEMPORARY_FOLDER.newFolder().getPath();
-        tEnv = StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
+        tEnv = TableEnvironmentTestUtils.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
         List<Row> input =
                 Arrays.asList(
                         changelogRow("+I", 1, "test_1"),
@@ -1334,7 +1335,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
     @Test
     public void testIn() throws Exception {
         rootPath = TEMPORARY_FOLDER.newFolder().getPath();
-        tEnv = StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
+        tEnv = TableEnvironmentTestUtils.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
         List<Row> input =
                 Arrays.asList(
                         changelogRow("+I", 1, "aaa"),
@@ -1415,7 +1416,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
     @Test
     public void testChangeBucketNumber() throws Exception {
         rootPath = TEMPORARY_FOLDER.newFolder().getPath();
-        tEnv = StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
+        tEnv = TableEnvironmentTestUtils.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
         tEnv.executeSql(
                 String.format(
                         "CREATE TABLE IF NOT EXISTS rates (\n"
@@ -1483,7 +1484,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
     public void testStreamingInsertOverwrite() throws Exception {
         rootPath = TEMPORARY_FOLDER.newFolder().getPath();
         tEnv =
-                StreamTableEnvironment.create(
+                TableEnvironmentTestUtils.create(
                         buildStreamEnv(), EnvironmentSettings.inStreamingMode());
         tEnv.executeSql(
                 String.format(
