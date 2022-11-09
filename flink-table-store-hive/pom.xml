@@ -84,20 +84,6 @@ under the License.
                 <hive.version>3.1.2</hive.version>
             </properties>
         </profile>
-
-        <profile>
-            <id>flink-1.14</id>
-            <properties>
-                <hive.version>2.3.4</hive.version>
-            </properties>
-        </profile>
-
-        <profile>
-            <id>flink-1.15</id>
-            <properties>
-                <hive.version>2.3.4</hive.version>
-            </properties>
-        </profile>
     </profiles>
 
 </project>
