@@ -18,17 +18,21 @@
 
 package org.apache.flink.table.store.hive;
 
+import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.types.logical.LogicalType;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.SerDeUtils;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -39,6 +43,8 @@ import java.util.stream.Collectors;
 
 /** Column names, types and comments of a Hive table. */
 public class HiveSchema {
+
+    private static final String TABLE_STORE_PREFIX = "tablestore.";
 
     private final TableSchema tableSchema;
 
@@ -61,7 +67,7 @@ public class HiveSchema {
     }
 
     /** Extract {@link HiveSchema} from Hive serde properties. */
-    public static HiveSchema extract(Properties properties) {
+    public static HiveSchema extract(@Nullable Configuration configuration, Properties properties) {
         String location = properties.getProperty(hive_metastoreConstants.META_TABLE_LOCATION);
         if (location == null) {
             String tableName = properties.getProperty(hive_metastoreConstants.META_TABLE_NAME);
@@ -70,6 +76,12 @@ public class HiveSchema {
                             + tableName
                             + ". Currently Flink table store only supports external table for Hive "
                             + "so location property must be set.");
+        }
+        if (configuration != null) {
+            FileSystem.initialize(
+                    org.apache.flink.configuration.Configuration.fromMap(
+                            configuration.getPropsWithPrefix(TABLE_STORE_PREFIX)),
+                    null);
         }
         TableSchema tableSchema =
                 new SchemaManager(new Path(location))
