@@ -50,6 +50,8 @@ import java.util.Map;
 /** A {@link PrepareCommitOperator} to write records. */
 public class StoreWriteOperator extends PrepareCommitOperator {
 
+    private static final long serialVersionUID = 1L;
+
     protected final FileStoreTable table;
 
     /**
@@ -215,12 +217,13 @@ public class StoreWriteOperator extends PrepareCommitOperator {
     }
 
     @Override
-    protected List<Committable> prepareCommit(boolean blocking, long checkpointId)
+    protected List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
             throws IOException {
         List<Committable> committables = new ArrayList<>();
         if (write != null) {
             try {
-                for (FileCommittable committable : write.prepareCommit(blocking, checkpointId)) {
+                for (FileCommittable committable :
+                        write.prepareCommit(doCompaction, checkpointId)) {
                     committables.add(
                             new Committable(checkpointId, Committable.Kind.FILE, committable));
                 }

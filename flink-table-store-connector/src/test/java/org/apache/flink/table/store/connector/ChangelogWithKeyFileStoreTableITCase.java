@@ -137,7 +137,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
                         + "WITH ( "
                         + "'bucket' = '2', "
                         + "'changelog-producer' = 'full-compaction', "
-                        + "'changelog-producer.full-compaction.trigger-interval' = '1s' )");
+                        + "'changelog-producer.compaction-interval' = '1s' )");
 
         Path inputPath = new Path(path, "input");
         sEnv.executeSql(
@@ -248,7 +248,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
                 enableFailure,
                 "'bucket' = '4',"
                         + "'changelog-producer' = 'full-compaction',"
-                        + "'changelog-producer.full-compaction.trigger-interval' = '1s'");
+                        + "'changelog-producer.compaction-interval' = '1s'");
 
         // sleep for a random amount of time to check
         // if we can first read complete records then read incremental records correctly

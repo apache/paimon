@@ -57,11 +57,18 @@ import java.util.TreeMap;
  */
 public class FullChangelogStoreWriteOperator extends StoreWriteOperator {
 
-    private final long checkpointThreshold;
+    private static final long serialVersionUID = 1L;
+
+    private final long fullCompactionThresholdMs;
 
     private transient Set<Tuple2<BinaryRowData, Integer>> currentWrittenBuckets;
     private transient NavigableMap<Long, Set<Tuple2<BinaryRowData, Integer>>> writtenBuckets;
     private transient ListState<Tuple3<Long, BinaryRowData, Integer>> writtenBucketState;
+
+    private transient Long currentFirstWriteMs;
+    private transient NavigableMap<Long, Long> firstWriteMs;
+    private transient ListState<Tuple2<Long, Long>> firstWriteMsState;
+
     private transient Long snapshotIdentifierToCheck;
 
     public FullChangelogStoreWriteOperator(
@@ -69,9 +76,9 @@ public class FullChangelogStoreWriteOperator extends StoreWriteOperator {
             String initialCommitUser,
             @Nullable Map<String, String> overwritePartition,
             @Nullable LogSinkFunction logSinkFunction,
-            long checkpointThreshold) {
+            long fullCompactionThresholdMs) {
         super(table, initialCommitUser, overwritePartition, logSinkFunction);
-        this.checkpointThreshold = checkpointThreshold;
+        this.fullCompactionThresholdMs = fullCompactionThresholdMs;
     }
 
     @SuppressWarnings("unchecked")
@@ -103,6 +110,18 @@ public class FullChangelogStoreWriteOperator extends StoreWriteOperator {
                                         .computeIfAbsent(t.f0, k -> new HashSet<>())
                                         .add(Tuple2.of(t.f1, t.f2)));
 
+        TupleSerializer<Tuple2<Long, Long>> firstWriteMsStateSerializer =
+                new TupleSerializer<>(
+                        (Class<Tuple2<Long, Long>>) (Class<?>) Tuple2.class,
+                        new TypeSerializer[] {LongSerializer.INSTANCE, LongSerializer.INSTANCE});
+        firstWriteMsState =
+                context.getOperatorStateStore()
+                        .getListState(
+                                new ListStateDescriptor<>(
+                                        "first_write_ms", firstWriteMsStateSerializer));
+        firstWriteMs = new TreeMap<>();
+        firstWriteMsState.get().forEach(t -> firstWriteMs.put(t.f0, t.f1));
+
         snapshotIdentifierToCheck = null;
     }
 
@@ -110,6 +129,7 @@ public class FullChangelogStoreWriteOperator extends StoreWriteOperator {
     public void open() throws Exception {
         super.open();
         currentWrittenBuckets = new HashSet<>();
+        currentFirstWriteMs = null;
     }
 
     @Override
@@ -122,6 +142,10 @@ public class FullChangelogStoreWriteOperator extends StoreWriteOperator {
         // we first check if the tuple exists to minimize copying
         if (!currentWrittenBuckets.contains(Tuple2.of(partition, bucket))) {
             currentWrittenBuckets.add(Tuple2.of(partition.copy(), bucket));
+        }
+
+        if (currentFirstWriteMs == null) {
+            currentFirstWriteMs = System.currentTimeMillis();
         }
     }
 
@@ -137,15 +161,22 @@ public class FullChangelogStoreWriteOperator extends StoreWriteOperator {
             }
         }
         writtenBucketState.update(writtenBucketList);
+
+        List<Tuple2<Long, Long>> firstWriteMsList = new ArrayList<>();
+        for (Map.Entry<Long, Long> entry : firstWriteMs.entrySet()) {
+            firstWriteMsList.add(Tuple2.of(entry.getKey(), entry.getValue()));
+        }
+        firstWriteMsState.update(firstWriteMsList);
     }
 
     @Override
-    protected List<Committable> prepareCommit(boolean blocking, long checkpointId)
+    protected List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
             throws IOException {
         if (snapshotIdentifierToCheck != null) {
             Optional<Snapshot> snapshot = findSnapshot(snapshotIdentifierToCheck);
             if (snapshot.map(s -> s.commitKind() == Snapshot.CommitKind.COMPACT).orElse(false)) {
                 writtenBuckets.headMap(snapshotIdentifierToCheck, true).clear();
+                firstWriteMs.headMap(snapshotIdentifierToCheck, true).clear();
                 snapshotIdentifierToCheck = null;
             }
         }
@@ -155,17 +186,19 @@ public class FullChangelogStoreWriteOperator extends StoreWriteOperator {
                     .computeIfAbsent(checkpointId, k -> new HashSet<>())
                     .addAll(currentWrittenBuckets);
             currentWrittenBuckets.clear();
+            firstWriteMs.putIfAbsent(checkpointId, currentFirstWriteMs);
+            currentFirstWriteMs = null;
         }
 
         if (snapshotIdentifierToCheck == null // wait for last forced full compaction to complete
                 && !writtenBuckets.isEmpty() // there should be something to compact
-                && checkpointId - writtenBuckets.navigableKeySet().first() + 1
-                        >= checkpointThreshold // checkpoints without full compaction exceeds
+                && System.currentTimeMillis() - firstWriteMs.firstEntry().getValue()
+                        >= fullCompactionThresholdMs // time without full compaction exceeds
         ) {
-            blocking = true;
+            doCompaction = true;
         }
 
-        if (blocking) {
+        if (doCompaction) {
             snapshotIdentifierToCheck = checkpointId;
             Set<Tuple2<BinaryRowData, Integer>> compactedBuckets = new HashSet<>();
             for (Set<Tuple2<BinaryRowData, Integer>> buckets : writtenBuckets.values()) {
@@ -183,7 +216,7 @@ public class FullChangelogStoreWriteOperator extends StoreWriteOperator {
             }
         }
 
-        return super.prepareCommit(blocking, checkpointId);
+        return super.prepareCommit(doCompaction, checkpointId);
     }
 
     private Optional<Snapshot> findSnapshot(long identifierToCheck) {
@@ -198,6 +231,10 @@ public class FullChangelogStoreWriteOperator extends StoreWriteOperator {
             return Optional.empty();
         }
 
+        // We must find the snapshot whose identifier is exactly `identifierToCheck`.
+        // We can't just compare with the latest snapshot identifier by this user (like what we do
+        // in `AbstractFileStoreWrite`), because even if the latest snapshot identifier is newer,
+        // compact changes may still be discarded due to commit conflicts.
         for (long id = latestId; id >= earliestId; id--) {
             Snapshot snapshot = snapshotManager.snapshot(id);
             if (!snapshot.commitUser().equals(commitUser)) {
@@ -206,6 +243,8 @@ public class FullChangelogStoreWriteOperator extends StoreWriteOperator {
             if (snapshot.commitIdentifier() == identifierToCheck) {
                 return Optional.of(snapshot);
             } else if (snapshot.commitIdentifier() < identifierToCheck) {
+                // We're searching from new snapshots to old ones. So if we find an older
+                // identifier, we can make sure our target snapshot will never occur.
                 return Optional.empty();
             }
         }

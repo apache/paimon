@@ -96,6 +96,8 @@ public class FileStoreSource extends FlinkSource {
                 if (table.options().changelogProducer()
                                 == CoreOptions.ChangelogProducer.FULL_COMPACTION
                         && isContinuous) {
+                    // Read the results of the last full compaction.
+                    // Only full compaction results will appear on the max level.
                     plan = scan.withLevel(table.options().numLevels() - 1).plan();
                 } else {
                     plan = scan.plan();

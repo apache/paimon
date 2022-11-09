@@ -84,23 +84,18 @@ public class StoreSink implements Serializable {
     }
 
     private OneInputStreamOperator<RowData, Committable> createWriteOperator(
-            CheckpointConfig checkpointConfig, String initialCommitUser) {
+            String initialCommitUser) {
         if (compactionTask) {
             return new StoreCompactOperator(table, initialCommitUser, compactPartitionSpec);
         }
 
         if (table.options().changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION) {
-            long checkpointInterval = checkpointConfig.getCheckpointInterval();
-            long checkpointThreshold =
-                    table.options().changelogProducerFullCompactionTriggerInterval().toMillis()
-                            / checkpointInterval;
-            checkpointThreshold = Math.max(1L, checkpointThreshold);
             return new FullChangelogStoreWriteOperator(
                     table,
                     initialCommitUser,
                     overwritePartition,
                     logSinkFunction,
-                    checkpointThreshold);
+                    table.options().changelogProducerFullCompactionTriggerInterval().toMillis());
         }
 
         return new StoreWriteOperator(
@@ -130,10 +125,7 @@ public class StoreSink implements Serializable {
 
         CommittableTypeInfo typeInfo = new CommittableTypeInfo();
         SingleOutputStreamOperator<Committable> written =
-                input.transform(
-                                WRITER_NAME,
-                                typeInfo,
-                                createWriteOperator(checkpointConfig, initialCommitUser))
+                input.transform(WRITER_NAME, typeInfo, createWriteOperator(initialCommitUser))
                         .setParallelism(input.getParallelism());
 
         boolean streamingCheckpointEnabled =

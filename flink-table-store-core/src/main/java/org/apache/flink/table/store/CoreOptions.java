@@ -300,7 +300,7 @@ public class CoreOptions implements Serializable {
                                     + "it can be read directly during stream reads.");
 
     public static final ConfigOption<Duration> CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL =
-            ConfigOptions.key("changelog-producer.full-compaction.trigger-interval")
+            ConfigOptions.key("changelog-producer.compaction-interval")
                     .durationType()
                     .defaultValue(Duration.ofMinutes(30))
                     .withDescription(
