@@ -57,8 +57,10 @@ public class SimpleTableTestHelper {
         Configuration conf = Configuration.fromMap(options);
         conf.setString("path", path.toString());
         FileStoreTable table = FileStoreTableFactory.create(conf);
-        this.writer = table.newWrite();
-        this.commit = table.newCommit("user");
+
+        String commitUser = "user";
+        this.writer = table.newWrite(commitUser);
+        this.commit = table.newCommit(commitUser);
 
         this.commitIdentifier = 0;
     }
@@ -68,6 +70,7 @@ public class SimpleTableTestHelper {
     }
 
     public void commit() throws Exception {
-        commit.commit(commitIdentifier++, writer.prepareCommit(true));
+        commit.commit(commitIdentifier, writer.prepareCommit(true, commitIdentifier));
+        commitIdentifier++;
     }
 }

@@ -23,6 +23,7 @@ import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.memory.MemoryPoolFactory;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
@@ -38,8 +39,12 @@ public abstract class MemoryTableWrite<T> extends AbstractTableWrite<T> {
     private final MemoryPoolFactory memoryPoolFactory;
 
     protected MemoryTableWrite(
-            FileStoreWrite<T> write, SinkRecordConverter recordConverter, CoreOptions options) {
-        super(write, recordConverter);
+            String commitUser,
+            SnapshotManager snapshotManager,
+            FileStoreWrite<T> write,
+            SinkRecordConverter recordConverter,
+            CoreOptions options) {
+        super(commitUser, snapshotManager, write, recordConverter);
 
         HeapMemorySegmentPool memoryPool =
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize());
@@ -47,7 +52,7 @@ public abstract class MemoryTableWrite<T> extends AbstractTableWrite<T> {
     }
 
     private Iterator<MemoryOwner> memoryOwners() {
-        Iterator<Map<Integer, RecordWriter<T>>> iterator = writers.values().iterator();
+        Iterator<Map<Integer, WriterWithCommit<T>>> iterator = writers.values().iterator();
         return Iterators.concat(
                 new Iterator<Iterator<MemoryOwner>>() {
                     @Override
@@ -59,7 +64,10 @@ public abstract class MemoryTableWrite<T> extends AbstractTableWrite<T> {
                     public Iterator<MemoryOwner> next() {
                         return Iterators.transform(
                                 iterator.next().values().iterator(),
-                                writer -> (MemoryOwner) writer);
+                                writerWithCommit ->
+                                        writerWithCommit == null
+                                                ? null
+                                                : (MemoryOwner) (writerWithCommit.writer));
                     }
                 });
     }
