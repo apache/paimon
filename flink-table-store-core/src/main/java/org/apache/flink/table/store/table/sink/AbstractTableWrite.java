@@ -18,14 +18,16 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.writer.RecordWriter;
 import org.apache.flink.util.concurrent.ExecutorThreadFactory;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -40,15 +42,23 @@ import java.util.concurrent.Executors;
  */
 public abstract class AbstractTableWrite<T> implements TableWrite {
 
+    private final String commitUser;
+    private final SnapshotManager snapshotManager;
     private final FileStoreWrite<T> write;
     private final SinkRecordConverter recordConverter;
 
-    protected final Map<BinaryRowData, Map<Integer, RecordWriter<T>>> writers;
+    protected final Map<BinaryRowData, Map<Integer, WriterWithCommit<T>>> writers;
     private final ExecutorService compactExecutor;
 
     private boolean overwrite = false;
 
-    protected AbstractTableWrite(FileStoreWrite<T> write, SinkRecordConverter recordConverter) {
+    protected AbstractTableWrite(
+            String commitUser,
+            SnapshotManager snapshotManager,
+            FileStoreWrite<T> write,
+            SinkRecordConverter recordConverter) {
+        this.commitUser = commitUser;
+        this.snapshotManager = snapshotManager;
         this.write = write;
         this.recordConverter = recordConverter;
 
@@ -78,30 +88,65 @@ public abstract class AbstractTableWrite<T> implements TableWrite {
     }
 
     @Override
-    public List<FileCommittable> prepareCommit(boolean endOfInput) throws Exception {
+    public List<FileCommittable> prepareCommit(boolean endOfInput, long commitIdentifier)
+            throws Exception {
+        long latestCommittedIdentifier;
+        if (writers.values().stream()
+                        .map(Map::values)
+                        .flatMap(Collection::stream)
+                        .mapToLong(w -> w.lastModifiedCommitIdentifier)
+                        .max()
+                        .orElse(Long.MIN_VALUE)
+                == Long.MIN_VALUE) {
+            // Optimization for the first commit.
+            //
+            // If this is the first commit, no writer has previous modified commit, so the value of
+            // `latestCommittedIdentifier` does not matter.
+            //
+            // Without this optimization, we may need to scan through all snapshots only to find
+            // that there is no previous snapshot by this user, which is very inefficient.
+            latestCommittedIdentifier = Long.MIN_VALUE;
+        } else {
+            latestCommittedIdentifier =
+                    snapshotManager
+                            .latestSnapshotOfUser(commitUser)
+                            .map(Snapshot::commitIdentifier)
+                            .orElse(Long.MIN_VALUE);
+        }
+
         List<FileCommittable> result = new ArrayList<>();
 
-        Iterator<Map.Entry<BinaryRowData, Map<Integer, RecordWriter<T>>>> partIter =
+        Iterator<Map.Entry<BinaryRowData, Map<Integer, WriterWithCommit<T>>>> partIter =
                 writers.entrySet().iterator();
         while (partIter.hasNext()) {
-            Map.Entry<BinaryRowData, Map<Integer, RecordWriter<T>>> partEntry = partIter.next();
+            Map.Entry<BinaryRowData, Map<Integer, WriterWithCommit<T>>> partEntry = partIter.next();
             BinaryRowData partition = partEntry.getKey();
-            Iterator<Map.Entry<Integer, RecordWriter<T>>> bucketIter =
+            Iterator<Map.Entry<Integer, WriterWithCommit<T>>> bucketIter =
                     partEntry.getValue().entrySet().iterator();
             while (bucketIter.hasNext()) {
-                Map.Entry<Integer, RecordWriter<T>> entry = bucketIter.next();
+                Map.Entry<Integer, WriterWithCommit<T>> entry = bucketIter.next();
                 int bucket = entry.getKey();
-                RecordWriter<T> writer = entry.getValue();
+                WriterWithCommit<T> writerWithCommit = entry.getValue();
+
                 FileCommittable committable =
-                        new FileCommittable(partition, bucket, writer.prepareCommit(endOfInput));
+                        new FileCommittable(
+                                partition,
+                                bucket,
+                                writerWithCommit.writer.prepareCommit(endOfInput));
                 result.add(committable);
 
-                // clear if no update
-                // we need a mechanism to clear writers, otherwise there will be more and more
-                // such as yesterday's partition that no longer needs to be written.
                 if (committable.increment().isEmpty()) {
-                    writer.close();
-                    bucketIter.remove();
+                    if (writerWithCommit.lastModifiedCommitIdentifier
+                            <= latestCommittedIdentifier) {
+                        // Clear writer if no update, and if its latest modification has committed.
+                        //
+                        // We need a mechanism to clear writers, otherwise there will be more and
+                        // more such as yesterday's partition that no longer needs to be written.
+                        writerWithCommit.writer.close();
+                        bucketIter.remove();
+                    }
+                } else {
+                    writerWithCommit.lastModifiedCommitIdentifier = commitIdentifier;
                 }
             }
 
@@ -115,40 +160,47 @@ public abstract class AbstractTableWrite<T> implements TableWrite {
 
     @Override
     public void close() throws Exception {
-        for (Map<Integer, RecordWriter<T>> bucketWriters : writers.values()) {
-            for (RecordWriter<T> writer : bucketWriters.values()) {
-                writer.close();
+        for (Map<Integer, WriterWithCommit<T>> bucketWriters : writers.values()) {
+            for (WriterWithCommit<T> writerWithCommit : bucketWriters.values()) {
+                writerWithCommit.writer.close();
             }
         }
         writers.clear();
         compactExecutor.shutdownNow();
     }
 
-    @VisibleForTesting
-    public Map<BinaryRowData, Map<Integer, RecordWriter<T>>> writers() {
-        return writers;
-    }
-
     protected abstract void writeSinkRecord(SinkRecord record, RecordWriter<T> writer)
             throws Exception;
 
     private RecordWriter<T> getWriter(BinaryRowData partition, int bucket) {
-        Map<Integer, RecordWriter<T>> buckets = writers.get(partition);
+        Map<Integer, WriterWithCommit<T>> buckets = writers.get(partition);
         if (buckets == null) {
             buckets = new HashMap<>();
             writers.put(partition.copy(), buckets);
         }
-        return buckets.computeIfAbsent(bucket, k -> createWriter(partition.copy(), bucket));
+        return buckets.computeIfAbsent(bucket, k -> createWriter(partition.copy(), bucket)).writer;
     }
 
-    private RecordWriter<T> createWriter(BinaryRowData partition, int bucket) {
+    private WriterWithCommit<T> createWriter(BinaryRowData partition, int bucket) {
         RecordWriter<T> writer =
                 overwrite
                         ? write.createEmptyWriter(partition.copy(), bucket, compactExecutor)
                         : write.createWriter(partition.copy(), bucket, compactExecutor);
         notifyNewWriter(writer);
-        return writer;
+        return new WriterWithCommit<>(writer);
     }
 
     protected void notifyNewWriter(RecordWriter<T> writer) {}
+
+    /** {@link RecordWriter} with identifier of its last modified commit. */
+    protected static class WriterWithCommit<T> {
+
+        protected final RecordWriter<T> writer;
+        private long lastModifiedCommitIdentifier;
+
+        private WriterWithCommit(RecordWriter<T> writer) {
+            this.writer = writer;
+            this.lastModifiedCommitIdentifier = Long.MIN_VALUE;
+        }
+    }
 }

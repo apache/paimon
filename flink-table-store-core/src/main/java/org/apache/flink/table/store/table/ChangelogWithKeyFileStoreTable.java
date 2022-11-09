@@ -196,7 +196,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableWrite newWrite() {
+    public TableWrite newWrite(String commitUser) {
         SinkRecordConverter recordConverter =
                 new SinkRecordConverter(store.options().bucket(), tableSchema);
         SequenceGenerator sequenceGenerator =
@@ -204,7 +204,8 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                         .sequenceField()
                         .map(field -> new SequenceGenerator(field, schema().logicalRowType()))
                         .orElse(null);
-        return new MemoryTableWrite<KeyValue>(store.newWrite(), recordConverter, store.options()) {
+        return new MemoryTableWrite<KeyValue>(
+                commitUser, snapshotManager(), store.newWrite(), recordConverter, store.options()) {
 
             private final KeyValue kv = new KeyValue();
 

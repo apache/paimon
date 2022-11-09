@@ -28,6 +28,7 @@ import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.SnapshotEnumerator;
@@ -53,14 +54,14 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     public void testSequenceNumber() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(conf -> conf.set(CoreOptions.SEQUENCE_FIELD, "b"));
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
         write.write(rowData(1, 10, 200L));
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 11, 101L));
-        commit.commit(0, write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true, 0));
         write.write(rowData(1, 11, 55L));
-        commit.commit(1, write.prepareCommit(true));
+        commit.commit(1, write.prepareCommit(true, 1));
         write.close();
 
         List<Split> splits = table.newScan().plan().splits;
@@ -171,14 +172,14 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
         write.write(rowData(1, 10, 100L));
         write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 100L));
         write.write(rowData(1, 10, 101L));
         write.write(rowDataWithKind(RowKind.UPDATE_BEFORE, 1, 10, 101L));
         write.write(rowDataWithKind(RowKind.UPDATE_AFTER, 1, 10, 102L));
-        commit.commit(0, write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true, 0));
         write.close();
 
         List<Split> splits = table.newScan().withIncremental(true).plan().splits;
@@ -269,13 +270,13 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(enumerator.call()).isNull();
 
         // write another commit
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
         write.write(rowDataWithKind(RowKind.UPDATE_BEFORE, 1, 10, 102L));
         write.write(rowDataWithKind(RowKind.UPDATE_AFTER, 1, 10, 103L));
         write.write(rowDataWithKind(RowKind.INSERT, 1, 20, 201L));
         write.write(rowDataWithKind(RowKind.DELETE, 2, 10, 301L));
-        commit.commit(2, write.prepareCommit(true));
+        commit.commit(2, write.prepareCommit(true, 2));
         write.close();
 
         assertNextSnapshot.apply(2);
@@ -286,25 +287,25 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     private void writeData() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(2, 20, 200L));
         write.write(rowData(1, 11, 101L));
-        commit.commit(0, write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true, 0));
 
         write.write(rowData(1, 10, 1000L));
         write.write(rowData(2, 21, 201L));
         write.write(rowData(2, 21, 2001L));
-        commit.commit(1, write.prepareCommit(true));
+        commit.commit(1, write.prepareCommit(true, 1));
 
         write.write(rowData(1, 11, 1001L));
         write.write(rowData(2, 21, 20001L));
         write.write(rowData(2, 22, 202L));
         write.write(rowDataWithKind(RowKind.DELETE, 1, 11, 1001L));
         write.write(rowDataWithKind(RowKind.DELETE, 2, 20, 200L));
-        commit.commit(2, write.prepareCommit(true));
+        commit.commit(2, write.prepareCommit(true, 2));
 
         write.close();
     }
@@ -314,20 +315,20 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     public void testReadFilter() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));
-        commit.commit(0, write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true, 0));
 
         write.write(rowData(1, 30, 300L));
         write.write(rowData(1, 40, 400L));
-        commit.commit(1, write.prepareCommit(true));
+        commit.commit(1, write.prepareCommit(true, 1));
 
         write.write(rowData(1, 50, 500L));
         write.write(rowData(1, 60, 600L));
-        commit.commit(2, write.prepareCommit(true));
+        commit.commit(2, write.prepareCommit(true, 2));
 
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
         List<Split> splits = table.newScan().plan().splits;
@@ -339,6 +340,36 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                         Arrays.asList("1|30|300|binary|varbinary", "1|40|400|binary|varbinary"));
 
         write.close();
+    }
+
+    @Test
+    public void testSlowCommit() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(1, 20, 200L));
+        List<FileCommittable> committables0 = write.prepareCommit(false, 0);
+
+        write.write(rowData(2, 10, 300L));
+        List<FileCommittable> committables1 = write.prepareCommit(false, 1);
+
+        write.write(rowData(1, 20, 201L));
+        List<FileCommittable> committables2 = write.prepareCommit(true, 2);
+
+        commit.commit(0, committables0);
+        commit.commit(1, committables1);
+        commit.commit(2, committables2);
+
+        write.close();
+
+        List<Split> splits = table.newScan().plan().splits;
+        TableRead read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
+                .isEqualTo(Arrays.asList("1|10|100|binary|varbinary", "1|20|201|binary|varbinary"));
+        assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
+                .isEqualTo(Collections.singletonList("2|10|300|binary|varbinary"));
     }
 
     @Override
