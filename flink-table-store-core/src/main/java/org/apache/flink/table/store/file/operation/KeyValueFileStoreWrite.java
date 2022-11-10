@@ -42,6 +42,9 @@ import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.RowType;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -52,6 +55,8 @@ import static org.apache.flink.table.store.file.io.DataFileMeta.getMaxSequenceNu
 
 /** {@link FileStoreWrite} for {@link org.apache.flink.table.store.file.KeyValueFileStore}. */
 public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
+
+    private static final Logger LOG = LoggerFactory.getLogger(KeyValueFileStoreWrite.class);
 
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
     private final KeyValueFileWriterFactory.Builder writerFactoryBuilder;
@@ -111,6 +116,15 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             int bucket,
             List<DataFileMeta> restoreFiles,
             ExecutorService compactExecutor) {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Creating merge tree writer for partition {} bucket {} from restored files {}",
+                    partition,
+                    bucket,
+                    restoreFiles);
+            new RuntimeException().printStackTrace();
+        }
+
         KeyValueFileWriterFactory writerFactory = writerFactoryBuilder.build(partition, bucket);
         Comparator<RowData> keyComparator = keyComparatorSupplier.get();
         Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());

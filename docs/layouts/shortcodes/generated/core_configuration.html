@@ -33,6 +33,12 @@
             <td>Whether to double write to a changelog file. This changelog file keeps the details of data changes, it can be read directly during stream reads.<br /><br />Possible values:<ul><li>"none": No changelog file.</li><li>"input": Double write to a changelog file when flushing memory table, the changelog is from input.</li><li>"full-compaction": Generate changelog files with each full compaction.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>changelog-producer.compaction-interval</h5></td>
+            <td style="word-wrap: break-word;">30 min</td>
+            <td>Duration</td>
+            <td>When changelog-producer is set to FULL_COMPACTION, full compaction will be constantly triggered after this interval.</td>
+        </tr>
+        <tr>
             <td><h5>commit.force-compact</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>

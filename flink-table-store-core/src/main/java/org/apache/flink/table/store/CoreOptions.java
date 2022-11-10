@@ -299,6 +299,17 @@ public class CoreOptions implements Serializable {
                                     + "This changelog file keeps the details of data changes, "
                                     + "it can be read directly during stream reads.");
 
+    public static final ConfigOption<Duration> CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL =
+            ConfigOptions.key("changelog-producer.compaction-interval")
+                    .durationType()
+                    .defaultValue(Duration.ofMinutes(30))
+                    .withDescription(
+                            "When "
+                                    + CHANGELOG_PRODUCER.key()
+                                    + " is set to "
+                                    + ChangelogProducer.FULL_COMPACTION.name()
+                                    + ", full compaction will be constantly triggered after this interval.");
+
     @Immutable
     public static final ConfigOption<String> SEQUENCE_FIELD =
             ConfigOptions.key("sequence.field")
@@ -514,6 +525,10 @@ public class CoreOptions implements Serializable {
 
     public ChangelogProducer changelogProducer() {
         return options.get(CHANGELOG_PRODUCER);
+    }
+
+    public Duration changelogProducerFullCompactionTriggerInterval() {
+        return options.get(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL);
     }
 
     public Optional<String> sequenceField() {

@@ -104,7 +104,6 @@ public class UniversalCompactionTest {
         assertThat(pick.isPresent()).isTrue();
         results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
         // 3 should be in the candidate, by size ratio after picking by file num
-        System.out.println(pick.get().outputLevel());
         assertThat(results).isEqualTo(new long[] {1, 2});
     }
 
@@ -125,7 +124,6 @@ public class UniversalCompactionTest {
         assertThat(pick.isPresent()).isTrue();
         results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
         // 3 should be in the candidate, by size ratio after picking by file num
-        System.out.println(pick.get().outputLevel());
         assertThat(results).isEqualTo(new long[] {1, 2, 3});
     }
 

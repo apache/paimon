@@ -20,16 +20,19 @@ package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
+import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
+import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.utils.StreamExecutionEnvironmentUtils;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
@@ -54,17 +57,12 @@ public class StoreSink implements Serializable {
     private static final String GLOBAL_COMMITTER_NAME = "Global Committer";
 
     private final ObjectIdentifier tableIdentifier;
-
     private final FileStoreTable table;
 
     private final boolean compactionTask;
-
     @Nullable private final Map<String, String> compactPartitionSpec;
-
     @Nullable private final CatalogLock.Factory lockFactory;
-
     @Nullable private final Map<String, String> overwritePartition;
-
     @Nullable private final LogSinkFunction logSinkFunction;
 
     public StoreSink(
@@ -77,6 +75,7 @@ public class StoreSink implements Serializable {
             @Nullable LogSinkFunction logSinkFunction) {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
+
         this.compactionTask = compactionTask;
         this.compactPartitionSpec = compactPartitionSpec;
         this.lockFactory = lockFactory;
@@ -89,6 +88,16 @@ public class StoreSink implements Serializable {
         if (compactionTask) {
             return new StoreCompactOperator(table, initialCommitUser, compactPartitionSpec);
         }
+
+        if (table.options().changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION) {
+            return new FullChangelogStoreWriteOperator(
+                    table,
+                    initialCommitUser,
+                    overwritePartition,
+                    logSinkFunction,
+                    table.options().changelogProducerFullCompactionTriggerInterval().toMillis());
+        }
+
         return new StoreWriteOperator(
                 table, initialCommitUser, overwritePartition, logSinkFunction);
     }
@@ -110,17 +119,18 @@ public class StoreSink implements Serializable {
         // ignored.
         String initialCommitUser = UUID.randomUUID().toString();
 
+        StreamExecutionEnvironment env = input.getExecutionEnvironment();
+        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
+        CheckpointConfig checkpointConfig = env.getCheckpointConfig();
+
         CommittableTypeInfo typeInfo = new CommittableTypeInfo();
         SingleOutputStreamOperator<Committable> written =
                 input.transform(WRITER_NAME, typeInfo, createWriteOperator(initialCommitUser))
                         .setParallelism(input.getParallelism());
 
-        StreamExecutionEnvironment env = input.getExecutionEnvironment();
         boolean streamingCheckpointEnabled =
-                StreamExecutionEnvironmentUtils.getConfiguration(env)
-                                        .get(ExecutionOptions.RUNTIME_MODE)
-                                == RuntimeExecutionMode.STREAMING
-                        && env.getCheckpointConfig().isCheckpointingEnabled();
+                conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING
+                        && checkpointConfig.isCheckpointingEnabled();
         if (streamingCheckpointEnabled) {
             assertCheckpointConfiguration(env);
         }

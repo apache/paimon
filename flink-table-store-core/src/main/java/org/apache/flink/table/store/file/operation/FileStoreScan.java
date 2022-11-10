@@ -49,6 +49,8 @@ public interface FileStoreScan {
 
     FileStoreScan withIncremental(boolean isIncremental);
 
+    FileStoreScan withLevel(int level);
+
     /** Produce a {@link Plan}. */
     Plan plan();
 

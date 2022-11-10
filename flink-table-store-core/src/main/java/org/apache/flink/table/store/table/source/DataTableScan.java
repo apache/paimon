@@ -91,6 +91,11 @@ public abstract class DataTableScan implements TableScan {
         return this;
     }
 
+    public DataTableScan withLevel(int level) {
+        scan.withLevel(level);
+        return this;
+    }
+
     @VisibleForTesting
     public DataTableScan withBucket(int bucket) {
         scan.withBucket(bucket);

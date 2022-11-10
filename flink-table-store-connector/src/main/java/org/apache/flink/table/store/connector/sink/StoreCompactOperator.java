@@ -75,7 +75,7 @@ public class StoreCompactOperator extends PrepareCommitOperator {
     }
 
     @Override
-    protected List<Committable> prepareCommit(boolean endOfInput, long checkpointId)
+    protected List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
             throws IOException {
         int task = getRuntimeContext().getIndexOfThisSubtask();
         int numTask = getRuntimeContext().getNumberOfParallelSubtasks();

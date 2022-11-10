@@ -67,12 +67,12 @@ public interface FileStoreWrite<T> {
     /**
      * Prepare commit in the write.
      *
-     * @param endOfInput if true, the data writing is ended
+     * @param blocking if this method need to wait for current compaction to complete
      * @param commitIdentifier identifier of the commit being prepared
      * @return the file committable list
      * @throws Exception the thrown exception
      */
-    List<FileCommittable> prepareCommit(boolean endOfInput, long commitIdentifier) throws Exception;
+    List<FileCommittable> prepareCommit(boolean blocking, long commitIdentifier) throws Exception;
 
     /**
      * Close the writer.

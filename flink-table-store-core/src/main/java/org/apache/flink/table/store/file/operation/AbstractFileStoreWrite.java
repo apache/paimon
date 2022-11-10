@@ -29,6 +29,9 @@ import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.util.concurrent.ExecutorThreadFactory;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
@@ -47,6 +50,8 @@ import java.util.concurrent.Executors;
  * @param <T> type of record to write.
  */
 public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
+
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractFileStoreWrite.class);
 
     private final String commitUser;
     private final SnapshotManager snapshotManager;
@@ -68,7 +73,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         this.writers = new HashMap<>();
         this.compactExecutor =
                 Executors.newSingleThreadScheduledExecutor(
-                        new ExecutorThreadFactory("compaction-thread"));
+                        new ExecutorThreadFactory(
+                                Thread.currentThread().getName() + "-compaction"));
     }
 
     @Override
@@ -107,7 +113,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     @Override
-    public List<FileCommittable> prepareCommit(boolean endOfInput, long commitIdentifier)
+    public List<FileCommittable> prepareCommit(boolean blocking, long commitIdentifier)
             throws Exception {
         long latestCommittedIdentifier;
         if (writers.values().stream()
@@ -148,7 +154,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 WriterWithCommit<T> writerWithCommit = entry.getValue();
 
                 RecordWriter.CommitIncrement increment =
-                        writerWithCommit.writer.prepareCommit(endOfInput);
+                        writerWithCommit.writer.prepareCommit(blocking);
                 FileCommittable committable =
                         new FileCommittable(
                                 partition,
@@ -164,6 +170,16 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         //
                         // We need a mechanism to clear writers, otherwise there will be more and
                         // more such as yesterday's partition that no longer needs to be written.
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug(
+                                    "Closing writer for partition {}, bucket {}. "
+                                            + "Writer's last modified identifier is {}, "
+                                            + "while latest committed identifier is {}",
+                                    partition,
+                                    bucket,
+                                    writerWithCommit.lastModifiedCommitIdentifier,
+                                    latestCommittedIdentifier);
+                        }
                         writerWithCommit.writer.close();
                         bucketIter.remove();
                     }
@@ -201,6 +217,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     private WriterWithCommit<T> createWriter(BinaryRowData partition, int bucket) {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Creating writer for partition {}, bucket {}", partition, bucket);
+        }
         RecordWriter<T> writer =
                 overwrite
                         ? createEmptyWriter(partition.copy(), bucket, compactExecutor)
