@@ -111,7 +111,7 @@ public class StoreSink implements Serializable {
                         .withLock(lock));
     }
 
-    public DataStreamSink<?> sinkTo(DataStream<RowData> input) {
+    public DataStreamSink<?> sinkFrom(DataStream<RowData> input) {
         // This commitUser is valid only for new jobs.
         // After the job starts, this commitUser will be recorded into the states of write and
         // commit operators.
