@@ -83,6 +83,49 @@ under the License.
                 <hive.main.version>3</hive.main.version>
                 <hive.version>3.1.2</hive.version>
             </properties>
+            <dependencies>
+                <!-- For Hive 3.1.2, package org.apache.hadoop.hive.metastore.api relies on this dependency-->
+                <dependency>
+                    <groupId>org.apache.hive</groupId>
+                    <artifactId>hive-standalone-metastore</artifactId>
+                    <version>${hive.version}</version>
+                    <exclusions>
+                        <exclusion>
+                            <groupId>log4j</groupId>
+                            <artifactId>log4j</artifactId>
+                        </exclusion>
+                        <exclusion>
+                            <groupId>org.slf4j</groupId>
+                            <artifactId>slf4j-log4j12</artifactId>
+                        </exclusion>
+                </exclusions>
+                </dependency>
+            </dependencies>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-shade-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>shade-flink</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>shade</goal>
+                                </goals>
+                                <configuration>
+                                    <dependencyReducedPomLocation>${project.basedir}/target/dependency-reduced-pom.xml</dependencyReducedPomLocation>
+                                    <artifactSet>
+                                        <includes combine.children="append">
+                                            <include>org.apache.hive:hive-standalone-metastore</include>
+                                        </includes>
+                                    </artifactSet>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
         </profile>
     </profiles>
 
