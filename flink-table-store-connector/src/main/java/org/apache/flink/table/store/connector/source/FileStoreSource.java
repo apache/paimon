@@ -22,6 +22,7 @@ import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -82,6 +83,7 @@ public class FileStoreSource extends FlinkSource {
         Long snapshotId;
         Collection<FileStoreSourceSplit> splits;
         if (checkpoint == null) {
+            // TODO refactor split initialization logic into split enumerator or snapshot enumerator
             // first, create new enumerator, plan splits
             if (latestContinuous) {
                 checkArgument(
@@ -90,7 +92,16 @@ public class FileStoreSource extends FlinkSource {
                 snapshotId = snapshotManager.latestSnapshotId();
                 splits = new ArrayList<>();
             } else {
-                DataTableScan.DataFilePlan plan = scan.plan();
+                DataTableScan.DataFilePlan plan;
+                if (table.options().changelogProducer()
+                                == CoreOptions.ChangelogProducer.FULL_COMPACTION
+                        && isContinuous) {
+                    // Read the results of the last full compaction.
+                    // Only full compaction results will appear on the max level.
+                    plan = scan.withLevel(table.options().numLevels() - 1).plan();
+                } else {
+                    plan = scan.plan();
+                }
                 snapshotId = plan.snapshotId;
                 splits = new FileStoreSourceSplitGenerator().createSplits(plan);
             }

@@ -40,7 +40,7 @@ public interface TableWrite {
 
     void compact(BinaryRowData partition, int bucket) throws Exception;
 
-    List<FileCommittable> prepareCommit(boolean endOfInput, long commitIdentifier) throws Exception;
+    List<FileCommittable> prepareCommit(boolean blocking, long commitIdentifier) throws Exception;
 
     void close() throws Exception;
 }

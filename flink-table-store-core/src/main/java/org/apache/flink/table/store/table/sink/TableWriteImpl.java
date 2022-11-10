@@ -75,9 +75,9 @@ public class TableWriteImpl<T> implements TableWrite {
     }
 
     @Override
-    public List<FileCommittable> prepareCommit(boolean endOfInput, long commitIdentifier)
+    public List<FileCommittable> prepareCommit(boolean blocking, long commitIdentifier)
             throws Exception {
-        return write.prepareCommit(endOfInput, commitIdentifier);
+        return write.prepareCommit(blocking, commitIdentifier);
     }
 
     @Override

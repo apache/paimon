@@ -24,6 +24,7 @@ import org.apache.flink.table.store.file.compact.CompactFutureManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactUnit;
 import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.mergetree.LevelSortedRun;
 import org.apache.flink.table.store.file.mergetree.Levels;
 import org.apache.flink.util.Preconditions;
 
@@ -31,6 +32,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -79,20 +81,27 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     @Override
     public void triggerCompaction(boolean fullCompaction) {
         Optional<CompactUnit> optionalUnit;
+        List<LevelSortedRun> runs = levels.levelSortedRuns();
         if (fullCompaction) {
             Preconditions.checkState(
                     taskFuture == null,
                     "A compaction task is still running while the user "
                             + "forces a new compaction. This is unexpected.");
-            optionalUnit =
-                    CompactStrategy.pickFullCompaction(
-                            levels.numberOfLevels(), levels.levelSortedRuns());
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Trigger forced full compaciton. Picking from the following runs\n{}",
+                        runs);
+            }
+            optionalUnit = CompactStrategy.pickFullCompaction(levels.numberOfLevels(), runs);
         } else {
             if (taskFuture != null) {
                 return;
             }
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Trigger normal compaciton. Picking from the following runs\n{}", runs);
+            }
             optionalUnit =
-                    strategy.pick(levels.numberOfLevels(), levels.levelSortedRuns())
+                    strategy.pick(levels.numberOfLevels(), runs)
                             .map(unit -> unit.files().size() < 2 ? null : unit);
         }
 
@@ -154,7 +163,21 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     public Optional<CompactResult> getCompactionResult(boolean blocking)
             throws ExecutionException, InterruptedException {
         Optional<CompactResult> result = innerGetCompactionResult(blocking);
-        result.ifPresent(r -> levels.update(r.before(), r.after()));
+        result.ifPresent(
+                r -> {
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug(
+                                "Update levels in compact manager with these changes:\nBefore:\n{}\nAfter:\n{}",
+                                r.before(),
+                                r.after());
+                    }
+                    levels.update(r.before(), r.after());
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug(
+                                "Levels in compact manager updated. Current runs are\n{}",
+                                levels.levelSortedRuns());
+                    }
+                });
         return result;
     }
 }
