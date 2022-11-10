@@ -36,7 +36,9 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.stream.Collectors;
@@ -80,7 +82,7 @@ public class HiveSchema {
         if (configuration != null) {
             FileSystem.initialize(
                     org.apache.flink.configuration.Configuration.fromMap(
-                            configuration.getPropsWithPrefix(TABLE_STORE_PREFIX)),
+                            getPropsWithPrefix(configuration, TABLE_STORE_PREFIX)),
                     null);
         }
         TableSchema tableSchema =
@@ -112,6 +114,30 @@ public class HiveSchema {
         }
 
         return new HiveSchema(tableSchema);
+    }
+
+    /**
+     * Constructs a mapping of configuration and includes all properties that start with the
+     * specified configuration prefix. Property names in the mapping are trimmed to remove the
+     * configuration prefix.
+     *
+     * <p>Note: this is directly copied from {@link Configuration} to make E2E test happy, since
+     * this method is introduced since 2.8 but we are using a hive container with hadoop-2.7.4.
+     *
+     * @param confPrefix configuration prefix
+     * @return mapping of configuration properties with prefix stripped
+     */
+    private static Map<String, String> getPropsWithPrefix(Configuration conf, String confPrefix) {
+        Map<String, String> configMap = new HashMap<>();
+        for (Map.Entry<String, String> entry : conf) {
+            String name = entry.getKey();
+            if (name.startsWith(confPrefix)) {
+                String value = conf.get(name);
+                name = name.substring(confPrefix.length());
+                configMap.put(name, value);
+            }
+        }
+        return configMap;
     }
 
     private static void checkSchemaMatched(

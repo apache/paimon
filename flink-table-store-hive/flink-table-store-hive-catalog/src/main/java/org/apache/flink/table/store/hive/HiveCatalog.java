@@ -150,7 +150,6 @@ public class HiveCatalog extends AbstractCatalog {
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         try {
             return client.getAllTables(databaseName).stream()
-                    .parallel()
                     .filter(
                             tableName ->
                                     tableStoreTableExists(
