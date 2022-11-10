@@ -111,6 +111,6 @@ public class FlinkSinkBuilder {
                         lockFactory,
                         overwritePartition,
                         logSinkFunction);
-        return sink.sinkTo(new DataStream<>(env, partitioned));
+        return sink.sinkFrom(new DataStream<>(env, partitioned));
     }
 }
