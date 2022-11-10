@@ -241,14 +241,17 @@ public class HiveCatalogITCase {
                                 "  'uri' = '',",
                                 "  'warehouse' = '" + path + "',",
                                 "  'lock.enabled' = 'true',",
-                                "  'hms.external' = 'true'",
+                                "  'table.type' = 'EXTERNAL_TABLE'",
                                 ")"))
                 .await();
         tEnv.executeSql("USE CATALOG my_hive_external").await();
         tEnv.executeSql("USE test_db").await();
         tEnv.executeSql("CREATE TABLE T ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
                 .await();
-        Assert.assertTrue(hiveShell.executeQuery("DESC FORMATTED t").contains("Table Type:         \tEXTERNAL_TABLE      \tNULL"));
+        Assert.assertTrue(
+                hiveShell
+                        .executeQuery("DESC FORMATTED t")
+                        .contains("Table Type:         \tEXTERNAL_TABLE      \tNULL"));
     }
 
     @Test

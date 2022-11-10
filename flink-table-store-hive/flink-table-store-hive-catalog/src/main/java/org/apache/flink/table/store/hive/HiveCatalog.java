@@ -54,8 +54,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.CatalogOptions.HMS_EXTERNAL;
 import static org.apache.flink.table.store.CatalogOptions.LOCK_ENABLED;
+import static org.apache.flink.table.store.CatalogOptions.TABLE_TYPE;
 import static org.apache.flink.table.store.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.flink.table.store.hive.HiveCatalogLock.checkMaxSleep;
 
@@ -228,7 +228,8 @@ public class HiveCatalog extends AbstractCatalog {
         }
         Table table = newHmsTable(tablePath);
 
-        if (hiveConf.getBoolean(HMS_EXTERNAL.key(), false)) {
+        if (hiveConf.getEnum(TABLE_TYPE.key(), TableType.MANAGED_TABLE)
+                .equals(TableType.EXTERNAL_TABLE)) {
             table.setTableType(TableType.EXTERNAL_TABLE.toString());
             table.getParameters().put("EXTERNAL", "TRUE");
         }
