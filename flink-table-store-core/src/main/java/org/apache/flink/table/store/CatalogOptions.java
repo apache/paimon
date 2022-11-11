@@ -54,7 +54,7 @@ public class CatalogOptions {
             ConfigOptions.key("table.type")
                     .enumType(TableType.class)
                     .defaultValue(TableType.MANAGED_TABLE)
-                    .withDescription("Table type of hms table, MANAGED_TABLE/EXTERNAL_TABLE.");
+                    .withDescription("Type of table.");
 
     public static final ConfigOption<Boolean> LOCK_ENABLED =
             ConfigOptions.key("lock.enabled")

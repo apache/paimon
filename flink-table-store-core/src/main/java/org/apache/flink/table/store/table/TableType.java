@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.table;
 
-/** TableType enum of catalog table. */
+/** Enum of catalog table type. */
 public enum TableType {
     MANAGED_TABLE,
     EXTERNAL_TABLE
