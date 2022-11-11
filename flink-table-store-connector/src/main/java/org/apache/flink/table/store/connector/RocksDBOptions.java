@@ -53,7 +53,7 @@ public class RocksDBOptions {
             key("lookup.cache-rows")
                     .longType()
                     .defaultValue(10_000L)
-                    .withDescription("The maximum number of rows to store in the cache");
+                    .withDescription("The maximum number of rows to store in the cache.");
 
     // --------------------------------------------------------------------------
     // Provided configurable DBOptions within Flink
