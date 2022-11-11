@@ -20,6 +20,7 @@ package org.apache.flink.table.store.spark;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
+import org.apache.flink.core.plugin.PluginUtils;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 
 import org.apache.spark.sql.connector.catalog.SessionConfigSupport;
@@ -34,11 +35,11 @@ import java.util.Map;
 /** The spark source for table store. */
 public class SparkSource implements DataSourceRegister, SessionConfigSupport {
 
+    /** Not use 'table-store' here, the '-' is not allowed in SQL */
     private static final String SHORT_NAME = "tablestore";
 
     @Override
     public String shortName() {
-        // Not use 'table-store' here, the '-' is not allowed in SQL
         return SHORT_NAME;
     }
 
@@ -66,7 +67,8 @@ public class SparkSource implements DataSourceRegister, SessionConfigSupport {
             StructType schema, Transform[] partitioning, Map<String, String> options) {
         Configuration configuration =
                 Configuration.fromMap(SparkCaseSensitiveConverter.convert(options));
-        FileSystem.initialize(configuration, null);
+        FileSystem.initialize(
+                configuration, PluginUtils.createPluginManagerFromRootFolder(configuration));
         return new SparkTable(FileStoreTableFactory.create(Configuration.fromMap(options)));
     }
 

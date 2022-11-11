@@ -20,6 +20,7 @@ package org.apache.flink.table.store.spark;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
+import org.apache.flink.core.plugin.PluginUtils;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
@@ -72,7 +73,8 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         this.name = name;
         Configuration configuration =
                 Configuration.fromMap(SparkCaseSensitiveConverter.convert(options));
-        FileSystem.initialize(configuration, null);
+        FileSystem.initialize(
+                configuration, PluginUtils.createPluginManagerFromRootFolder(configuration));
         this.catalog = CatalogFactory.createCatalog(configuration);
     }
 

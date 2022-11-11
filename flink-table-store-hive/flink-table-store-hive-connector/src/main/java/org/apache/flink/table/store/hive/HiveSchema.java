@@ -20,6 +20,7 @@ package org.apache.flink.table.store.hive;
 
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.core.plugin.PluginUtils;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -80,10 +81,11 @@ public class HiveSchema {
                             + "so location property must be set.");
         }
         if (configuration != null) {
-            FileSystem.initialize(
+            org.apache.flink.configuration.Configuration flinkConf =
                     org.apache.flink.configuration.Configuration.fromMap(
-                            getPropsWithPrefix(configuration, TABLE_STORE_PREFIX)),
-                    null);
+                            getPropsWithPrefix(configuration, TABLE_STORE_PREFIX));
+            FileSystem.initialize(
+                    flinkConf, PluginUtils.createPluginManagerFromRootFolder(flinkConf));
         }
         TableSchema tableSchema =
                 new SchemaManager(new Path(location))
