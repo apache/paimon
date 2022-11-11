@@ -92,8 +92,9 @@ public class TestCommitThread extends Thread {
                                     .collect(Collectors.joining("\n")));
         }
 
-        this.write = safeStore.newWrite();
-        this.commit = testStore.newCommit(UUID.randomUUID().toString()).withCreateEmptyCommit(true);
+        String commitUser = UUID.randomUUID().toString();
+        this.write = safeStore.newWrite(commitUser);
+        this.commit = testStore.newCommit(commitUser).withCreateEmptyCommit(true);
 
         this.commitIdentifier = 0;
     }

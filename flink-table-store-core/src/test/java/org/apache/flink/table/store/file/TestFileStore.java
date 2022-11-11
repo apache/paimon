@@ -82,7 +82,7 @@ public class TestFileStore extends KeyValueFileStore {
     private final String root;
     private final RowDataSerializer keySerializer;
     private final RowDataSerializer valueSerializer;
-    private final String user;
+    private final String commitUser;
 
     private long commitIdentifier;
 
@@ -105,13 +105,13 @@ public class TestFileStore extends KeyValueFileStore {
         this.root = root;
         this.keySerializer = new RowDataSerializer(keyType);
         this.valueSerializer = new RowDataSerializer(valueType);
-        this.user = UUID.randomUUID().toString();
+        this.commitUser = UUID.randomUUID().toString();
 
         this.commitIdentifier = 0L;
     }
 
     public FileStoreCommitImpl newCommit() {
-        return super.newCommit(user);
+        return super.newCommit(commitUser);
     }
 
     public FileStoreExpireImpl newExpire(
@@ -176,7 +176,7 @@ public class TestFileStore extends KeyValueFileStore {
             Long identifier,
             BiConsumer<FileStoreCommit, ManifestCommittable> commitFunction)
             throws Exception {
-        AbstractFileStoreWrite<KeyValue> write = newWrite();
+        AbstractFileStoreWrite<KeyValue> write = newWrite(commitUser);
         Map<BinaryRowData, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
         for (KeyValue kv : kvs) {
             BinaryRowData partition = partitionCalculator.apply(kv);
@@ -206,7 +206,7 @@ public class TestFileStore extends KeyValueFileStore {
                     .write(kv);
         }
 
-        FileStoreCommit commit = newCommit(user);
+        FileStoreCommit commit = newCommit(commitUser);
         ManifestCommittable committable =
                 new ManifestCommittable(identifier == null ? commitIdentifier++ : identifier);
         for (Map.Entry<BinaryRowData, Map<Integer, RecordWriter<KeyValue>>> entryWithPartition :

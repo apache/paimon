@@ -36,6 +36,7 @@ Apache Hive and Apache Spark.
 |:----------|:---------|:-----------------------------------------------------|--------------------|
 | Flink     | 1.14     | read, write, create/drop table, create/drop database | Projection, Filter |
 | Flink     | 1.15     | read, write, create/drop table, create/drop database | Projection, Filter |
+| Flink     | 1.16     | read, write, create/drop table, create/drop database | Projection, Filter |
 | Hive      | 2.1      | read                                                 | Projection, Filter |
 | Hive      | 2.1 CDH 6.3 | read                                                 | Projection, Filter |
 | Hive      | 2.2      | read                                                 | Projection, Filter |

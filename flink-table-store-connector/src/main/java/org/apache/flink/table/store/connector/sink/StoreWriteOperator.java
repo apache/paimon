@@ -50,7 +50,16 @@ import java.util.Map;
 /** A {@link PrepareCommitOperator} to write records. */
 public class StoreWriteOperator extends PrepareCommitOperator {
 
-    private final FileStoreTable table;
+    private static final long serialVersionUID = 1L;
+
+    protected final FileStoreTable table;
+
+    /**
+     * This commitUser is valid only for new jobs. After the job starts, this commitUser will be
+     * recorded into the states of write and commit operators. When the job restarts, commitUser
+     * will be recovered from states and this value is ignored.
+     */
+    private final String initialCommitUser;
 
     @Nullable private final Map<String, String> overwritePartition;
 
@@ -61,15 +70,20 @@ public class StoreWriteOperator extends PrepareCommitOperator {
     /** We listen to this ourselves because we don't have an {@link InternalTimerService}. */
     private long currentWatermark = Long.MIN_VALUE;
 
-    private TableWrite write;
+    @Nullable protected transient TableWrite write;
 
-    @Nullable private LogWriteCallback logCallback;
+    /** This is the real commit user read from state. */
+    @Nullable protected transient String commitUser;
+
+    @Nullable private transient LogWriteCallback logCallback;
 
     public StoreWriteOperator(
             FileStoreTable table,
+            String initialCommitUser,
             @Nullable Map<String, String> overwritePartition,
             @Nullable LogSinkFunction logSinkFunction) {
         this.table = table;
+        this.initialCommitUser = initialCommitUser;
         this.overwritePartition = overwritePartition;
         this.logSinkFunction = logSinkFunction;
     }
@@ -88,18 +102,31 @@ public class StoreWriteOperator extends PrepareCommitOperator {
     @Override
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
+
         if (logSinkFunction != null) {
             StreamingFunctionUtils.restoreFunctionState(context, logSinkFunction);
+        }
+
+        // each job can only have one user name and this name must be consistent across restarts
+        // we cannot use job id as commit user name here because user may change job id by creating
+        // a savepoint, stop the job and then resume from savepoint
+        commitUser =
+                StateUtils.getSingleValueFromState(
+                        context, "commit_user_state", String.class, initialCommitUser);
+        // see comments of StateUtils.getSingleValueFromState for why commitUser may be null
+        if (commitUser == null) {
+            write = null;
+        } else {
+            write =
+                    table.newWrite(commitUser)
+                            .withIOManager(getContainingTask().getEnvironment().getIOManager())
+                            .withOverwrite(overwritePartition != null);
         }
     }
 
     @Override
     public void open() throws Exception {
         super.open();
-        this.write =
-                table.newWrite()
-                        .withIOManager(getContainingTask().getEnvironment().getIOManager())
-                        .withOverwrite(overwritePartition != null);
         this.sinkContext = new SimpleContext(getProcessingTimeService());
         if (logSinkFunction != null) {
             FunctionUtils.openFunction(logSinkFunction, new Configuration());
@@ -120,6 +147,10 @@ public class StoreWriteOperator extends PrepareCommitOperator {
 
     @Override
     public void processElement(StreamRecord<RowData> element) throws Exception {
+        writeRecord(element);
+    }
+
+    protected SinkRecord writeRecord(StreamRecord<RowData> element) throws Exception {
         sinkContext.timestamp = element.hasTimestamp() ? element.getTimestamp() : null;
 
         SinkRecord record;
@@ -134,6 +165,8 @@ public class StoreWriteOperator extends PrepareCommitOperator {
             SinkRecord logRecord = write.recordConverter().convertToLogSinkRecord(record);
             logSinkFunction.invoke(logRecord, sinkContext);
         }
+
+        return record;
     }
 
     @Override
@@ -184,15 +217,19 @@ public class StoreWriteOperator extends PrepareCommitOperator {
     }
 
     @Override
-    protected List<Committable> prepareCommit(boolean endOfInput, long checkpointId)
+    protected List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
             throws IOException {
         List<Committable> committables = new ArrayList<>();
-        try {
-            for (FileCommittable committable : write.prepareCommit(endOfInput)) {
-                committables.add(new Committable(checkpointId, Committable.Kind.FILE, committable));
+        if (write != null) {
+            try {
+                for (FileCommittable committable :
+                        write.prepareCommit(doCompaction, checkpointId)) {
+                    committables.add(
+                            new Committable(checkpointId, Committable.Kind.FILE, committable));
+                }
+            } catch (Exception e) {
+                throw new IOException(e);
             }
-        } catch (Exception e) {
-            throw new IOException(e);
         }
 
         if (logCallback != null) {

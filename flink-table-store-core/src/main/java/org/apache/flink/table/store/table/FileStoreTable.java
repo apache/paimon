@@ -22,8 +22,6 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.table.sink.TableCommit;
-import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -60,8 +58,4 @@ public interface FileStoreTable extends Table, SupportsPartition, SupportsWrite 
 
     @Override
     DataTableScan newScan();
-
-    TableWrite newWrite();
-
-    TableCommit newCommit(String user);
 }

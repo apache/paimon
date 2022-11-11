@@ -447,7 +447,7 @@ will return either `(1, 1.0, 'AAA'), (2, 2.0, 'BBB'), (1, 1.0, 'AAA'), (3, 3.0, 
 
 ### Supported Flink Data Type
 
-Users can refer to [Flink Data Types](https://nightlies.apache.org/flink/flink-docs-release-1.15/docs/dev/table/types/).
+Users can refer to [Flink Data Types](https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/dev/table/types/).
 {{< hint info >}}
 __Note:__ `MULTISET` is **not supported** for all `write-mode`, and `MAP` is **only supported** as a non-primary key field in a primary-keyed table.
 {{< /hint >}}

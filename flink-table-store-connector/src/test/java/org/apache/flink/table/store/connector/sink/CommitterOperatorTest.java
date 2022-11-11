@@ -51,6 +51,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -67,10 +68,12 @@ public class CommitterOperatorTest {
 
     @TempDir public java.nio.file.Path tempDir;
     private Path tablePath;
+    private String initialCommitUser;
 
     @BeforeEach
     public void before() {
         tablePath = new Path(tempDir.toString());
+        initialCommitUser = UUID.randomUUID().toString();
     }
 
     @Test
@@ -81,12 +84,12 @@ public class CommitterOperatorTest {
                 createTestHarness(table);
         testHarness.open();
 
-        TableWrite write = table.newWrite();
+        TableWrite write = table.newWrite(initialCommitUser);
         write.write(GenericRowData.of(1, 10L));
         write.write(GenericRowData.of(2, 20L));
 
         long timestamp = 1;
-        for (FileCommittable committable : write.prepareCommit(false)) {
+        for (FileCommittable committable : write.prepareCommit(false, 8)) {
             testHarness.processElement(
                     new Committable(8, Committable.Kind.FILE, committable), timestamp++);
         }
@@ -129,10 +132,10 @@ public class CommitterOperatorTest {
         long cpId = 0;
         for (int i = 0; i < 10; i++) {
             cpId++;
-            TableWrite write = table.newWrite();
+            TableWrite write = table.newWrite(initialCommitUser);
             write.write(GenericRowData.of(1, 10L));
             write.write(GenericRowData.of(2, 20L));
-            for (FileCommittable committable : write.prepareCommit(false)) {
+            for (FileCommittable committable : write.prepareCommit(false, cpId)) {
                 testHarness.processElement(
                         new Committable(cpId, Committable.Kind.FILE, committable), 1);
             }
@@ -192,6 +195,7 @@ public class CommitterOperatorTest {
         CommitterOperator operator =
                 new CommitterOperator(
                         true,
+                        initialCommitUser,
                         user -> new StoreCommitter(table.newCommit(user)),
                         ManifestCommittableSerializer::new);
         TypeSerializer<Committable> serializer =

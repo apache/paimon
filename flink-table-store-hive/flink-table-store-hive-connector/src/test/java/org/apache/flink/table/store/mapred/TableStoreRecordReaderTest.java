@@ -36,6 +36,7 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -46,6 +47,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -53,6 +55,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class TableStoreRecordReaderTest {
 
     @TempDir java.nio.file.Path tempDir;
+    private String commitUser;
+
+    @BeforeEach
+    public void beforeEach() {
+        commitUser = UUID.randomUUID().toString();
+    }
 
     @Test
     public void testPk() throws Exception {
@@ -71,14 +79,14 @@ public class TableStoreRecordReaderTest {
                         Collections.emptyList(),
                         Collections.singletonList("a"));
 
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
         write.write(GenericRowData.of(1L, StringData.fromString("Hi")));
         write.write(GenericRowData.of(2L, StringData.fromString("Hello")));
         write.write(GenericRowData.of(3L, StringData.fromString("World")));
         write.write(GenericRowData.of(1L, StringData.fromString("Hi again")));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 2L, StringData.fromString("Hello")));
-        commit.commit(0, write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true, 0));
 
         TableStoreRecordReader reader = read(table, BinaryRowDataUtil.EMPTY_ROW, 0);
         RowDataContainer container = reader.createValue();
@@ -112,15 +120,15 @@ public class TableStoreRecordReaderTest {
                         Collections.emptyList(),
                         Collections.emptyList());
 
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
         write.write(GenericRowData.of(1, StringData.fromString("Hi")));
         write.write(GenericRowData.of(2, StringData.fromString("Hello")));
         write.write(GenericRowData.of(3, StringData.fromString("World")));
         write.write(GenericRowData.of(1, StringData.fromString("Hi")));
         write.write(GenericRowData.ofKind(RowKind.DELETE, 2, StringData.fromString("Hello")));
         write.write(GenericRowData.of(1, StringData.fromString("Hi")));
-        commit.commit(0, write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true, 0));
 
         TableStoreRecordReader reader = read(table, BinaryRowDataUtil.EMPTY_ROW, 0);
         RowDataContainer container = reader.createValue();
@@ -155,12 +163,12 @@ public class TableStoreRecordReaderTest {
                         Collections.emptyList(),
                         Collections.emptyList());
 
-        TableWrite write = table.newWrite();
-        TableCommit commit = table.newCommit("user");
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
         write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi")));
         write.write(GenericRowData.of(2, 20L, StringData.fromString("Hello")));
         write.write(GenericRowData.of(1, 10L, StringData.fromString("Hi")));
-        commit.commit(0, write.prepareCommit(true));
+        commit.commit(0, write.prepareCommit(true, 0));
 
         TableStoreRecordReader reader =
                 read(table, BinaryRowDataUtil.EMPTY_ROW, 0, Arrays.asList("c", "a"));
