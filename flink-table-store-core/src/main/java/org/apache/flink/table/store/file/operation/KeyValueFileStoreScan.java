@@ -23,11 +23,17 @@ import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
+import org.apache.flink.table.store.file.schema.SchemaFieldTypeExtractor;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.RowType;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.pickTransformFieldMapping;
@@ -36,7 +42,11 @@ import static org.apache.flink.table.store.file.predicate.PredicateBuilder.split
 /** {@link FileStoreScan} for {@link org.apache.flink.table.store.file.KeyValueFileStore}. */
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
-    private final FieldStatsArraySerializer keyStatsConverter;
+    //    private final FieldStatsArraySerializer keyStatsConverter;
+    private final Map<Long, FieldStatsArraySerializer> schemaKeyStatsConverters;
+    private final SchemaManager schemaManager;
+    private final TableSchema tableSchema;
+    private final SchemaFieldTypeExtractor schemaFieldTypeExtractor;
     private final RowType keyType;
 
     private Predicate keyFilter;
@@ -46,6 +56,9 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             RowType bucketKeyType,
             RowType keyType,
             SnapshotManager snapshotManager,
+            SchemaManager schemaManager,
+            TableSchema tableSchema,
+            SchemaFieldTypeExtractor schemaFieldTypeExtractor,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
@@ -60,7 +73,10 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 numOfBuckets,
                 checkNumOfBuckets,
                 changelogProducer);
-        this.keyStatsConverter = new FieldStatsArraySerializer(keyType);
+        this.schemaManager = schemaManager;
+        this.tableSchema = tableSchema;
+        this.schemaFieldTypeExtractor = schemaFieldTypeExtractor;
+        this.schemaKeyStatsConverters = new HashMap<>();
         this.keyType = keyType;
     }
 
@@ -83,6 +99,25 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         return keyFilter == null
                 || keyFilter.test(
                         entry.file().rowCount(),
-                        entry.file().keyStats().fields(keyStatsConverter, entry.file().rowCount()));
+                        entry.file()
+                                .keyStats()
+                                .fields(
+                                        getFieldStatsArraySerializer(entry.file().schemaId()),
+                                        entry.file().rowCount()));
+    }
+
+    private FieldStatsArraySerializer getFieldStatsArraySerializer(long schemaId) {
+        return schemaKeyStatsConverters.computeIfAbsent(
+                schemaId,
+                id -> {
+                    TableSchema schema = schemaManager.schema(id);
+                    return new FieldStatsArraySerializer(
+                            schemaFieldTypeExtractor.keyType(schema),
+                            tableSchema.id() == id
+                                    ? null
+                                    : SchemaEvolutionUtil.createIndexMapping(
+                                            schemaFieldTypeExtractor.keyFields(tableSchema),
+                                            schemaFieldTypeExtractor.keyFields(schema)));
+                });
     }
 }

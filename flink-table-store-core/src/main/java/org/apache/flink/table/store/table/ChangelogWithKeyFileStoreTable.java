@@ -31,6 +31,8 @@ import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFun
 import org.apache.flink.table.store.file.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.schema.DataField;
+import org.apache.flink.table.store.file.schema.SchemaFieldTypeExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -108,12 +110,13 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                         options,
                         tableSchema.logicalPartitionType(),
                         addKeyNamePrefix(tableSchema.logicalBucketKeyType()),
-                        addKeyNamePrefix(tableSchema.logicalTrimmedPrimaryKeysType()),
+                        ChangelogWithKeySchemaFieldTypeExtractor.EXTRACTOR.keyType(tableSchema),
                         rowType,
+                        ChangelogWithKeySchemaFieldTypeExtractor.EXTRACTOR,
                         mergeFunction);
     }
 
-    private RowType addKeyNamePrefix(RowType type) {
+    private static RowType addKeyNamePrefix(RowType type) {
         // add prefix to avoid conflict with value
         return new RowType(
                 type.getFields().stream()
@@ -214,5 +217,22 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public KeyValueFileStore store() {
         return store;
+    }
+
+    static class ChangelogWithKeySchemaFieldTypeExtractor implements SchemaFieldTypeExtractor {
+        static final ChangelogWithKeySchemaFieldTypeExtractor EXTRACTOR =
+                new ChangelogWithKeySchemaFieldTypeExtractor();
+
+        private ChangelogWithKeySchemaFieldTypeExtractor() {}
+
+        @Override
+        public RowType keyType(TableSchema schema) {
+            return addKeyNamePrefix(schema.logicalTrimmedPrimaryKeysType());
+        }
+
+        @Override
+        public List<DataField> keyFields(TableSchema schema) {
+            return schema.trimmedPrimaryKeysFields();
+        }
     }
 }

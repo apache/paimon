@@ -24,6 +24,7 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreRead;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreWrite;
+import org.apache.flink.table.store.file.schema.SchemaFieldTypeExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.KeyComparatorSupplier;
 import org.apache.flink.table.types.logical.RowType;
@@ -39,6 +40,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final RowType bucketKeyType;
     private final RowType keyType;
     private final RowType valueType;
+    private final SchemaFieldTypeExtractor schemaFieldTypeExtractor;
     private final Supplier<Comparator<RowData>> keyComparatorSupplier;
     private final MergeFunction<KeyValue> mergeFunction;
 
@@ -50,11 +52,13 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             RowType bucketKeyType,
             RowType keyType,
             RowType valueType,
+            SchemaFieldTypeExtractor schemaFieldTypeExtractor,
             MergeFunction<KeyValue> mergeFunction) {
         super(schemaManager, schemaId, options, partitionType);
         this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
         this.valueType = valueType;
+        this.schemaFieldTypeExtractor = schemaFieldTypeExtractor;
         this.mergeFunction = mergeFunction;
         this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
     }
@@ -99,6 +103,9 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 bucketKeyType,
                 keyType,
                 snapshotManager(),
+                schemaManager,
+                schemaManager.schema(schemaId),
+                schemaFieldTypeExtractor,
                 manifestFileFactory(),
                 manifestListFactory(),
                 options.bucket(),

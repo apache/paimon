@@ -29,6 +29,8 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.schema.DataField;
+import org.apache.flink.table.store.file.schema.SchemaFieldTypeExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -46,6 +48,8 @@ import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
+
+import java.util.List;
 
 /** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode without primary keys. */
 public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
@@ -70,6 +74,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                         tableSchema.logicalBucketKeyType(),
                         tableSchema.logicalRowType(),
                         countType,
+                        ValueCountTableSchemaFieldTypeExtractor.EXTRACTOR,
                         mergeFunction);
     }
 
@@ -145,5 +150,26 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     @Override
     public KeyValueFileStore store() {
         return store;
+    }
+
+    /**
+     * {@link SchemaFieldTypeExtractor} implementation for {@link
+     * ChangelogValueCountFileStoreTable}.
+     */
+    static class ValueCountTableSchemaFieldTypeExtractor implements SchemaFieldTypeExtractor {
+        static final ValueCountTableSchemaFieldTypeExtractor EXTRACTOR =
+                new ValueCountTableSchemaFieldTypeExtractor();
+
+        private ValueCountTableSchemaFieldTypeExtractor() {}
+
+        @Override
+        public RowType keyType(TableSchema schema) {
+            return schema.logicalRowType();
+        }
+
+        @Override
+        public List<DataField> keyFields(TableSchema schema) {
+            return schema.fields();
+        }
     }
 }

@@ -29,7 +29,11 @@ import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
+import org.apache.flink.table.store.file.schema.DataField;
+import org.apache.flink.table.store.file.schema.RowDataType;
+import org.apache.flink.table.store.file.schema.SchemaFieldTypeExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
@@ -45,6 +49,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -90,12 +95,13 @@ public class KeyValueFileStoreReadTest {
         RowType partitionType =
                 RowType.of(new LogicalType[] {new IntType(false)}, new String[] {"c"});
         RowDataSerializer partitionSerializer = new RowDataSerializer(partitionType);
+        List<String> keyNames = Arrays.asList("a", "b", "c");
         RowType keyType =
                 RowType.of(
                         new LogicalType[] {
                             new IntType(false), new IntType(false), new IntType(false)
                         },
-                        new String[] {"a", "b", "c"});
+                        keyNames.toArray(new String[0]));
         RowType projectedKeyType = RowType.of(new IntType(false), new IntType(false));
         RowDataSerializer projectedKeySerializer = new RowDataSerializer(projectedKeyType);
         RowType valueType =
@@ -103,7 +109,25 @@ public class KeyValueFileStoreReadTest {
         RowDataSerializer valueSerializer = new RowDataSerializer(valueType);
 
         TestFileStore store =
-                createStore(partitionType, keyType, valueType, new ValueCountMergeFunction());
+                createStore(
+                        partitionType,
+                        keyType,
+                        valueType,
+                        new SchemaFieldTypeExtractor() {
+                            @Override
+                            public RowType keyType(TableSchema schema) {
+                                return (RowType)
+                                        new RowDataType(false, keyFields(schema)).logicalType();
+                            }
+
+                            @Override
+                            public List<DataField> keyFields(TableSchema schema) {
+                                return schema.fields().stream()
+                                        .filter(f -> keyNames.contains(f.name()))
+                                        .collect(Collectors.toList());
+                            }
+                        },
+                        new ValueCountMergeFunction());
         List<KeyValue> readData =
                 writeThenRead(
                         data,
@@ -142,6 +166,7 @@ public class KeyValueFileStoreReadTest {
                         TestKeyValueGenerator.DEFAULT_PART_TYPE,
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                        TestKeyValueGenerator.TestSchemaFieldTypeExtractor.EXTRACTOR,
                         new DeduplicateMergeFunction());
 
         RowDataSerializer projectedValueSerializer =
@@ -230,6 +255,7 @@ public class KeyValueFileStoreReadTest {
             RowType partitionType,
             RowType keyType,
             RowType valueType,
+            SchemaFieldTypeExtractor extractor,
             MergeFunction<KeyValue> mergeFunction)
             throws Exception {
         SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
@@ -254,6 +280,7 @@ public class KeyValueFileStoreReadTest {
                         partitionType,
                         keyType,
                         valueType,
+                        extractor,
                         mergeFunction)
                 .build();
     }

@@ -23,11 +23,16 @@ import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.RowType;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.pickTransformFieldMapping;
@@ -36,7 +41,10 @@ import static org.apache.flink.table.store.file.predicate.PredicateBuilder.split
 /** {@link FileStoreScan} for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
-    private final FieldStatsArraySerializer rowStatsConverter;
+    //    private final FieldStatsArraySerializer rowStatsConverter;
+    private final SchemaManager schemaManager;
+    private final TableSchema tableSchema;
+    private final Map<Long, FieldStatsArraySerializer> schemaRowStatsConverters;
     private final RowType rowType;
 
     private Predicate filter;
@@ -46,6 +54,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             RowType bucketKeyType,
             RowType rowType,
             SnapshotManager snapshotManager,
+            SchemaManager schemaManager,
+            TableSchema tableSchema,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
@@ -59,7 +69,9 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 numOfBuckets,
                 checkNumOfBuckets,
                 CoreOptions.ChangelogProducer.NONE);
-        this.rowStatsConverter = new FieldStatsArraySerializer(rowType);
+        this.schemaManager = schemaManager;
+        this.tableSchema = tableSchema;
+        this.schemaRowStatsConverters = new HashMap<>();
         this.rowType = rowType;
     }
 
@@ -84,6 +96,22 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                         entry.file().rowCount(),
                         entry.file()
                                 .valueStats()
-                                .fields(rowStatsConverter, entry.file().rowCount()));
+                                .fields(
+                                        getFieldStatsArraySerializer(entry.file().schemaId()),
+                                        entry.file().rowCount()));
+    }
+
+    private FieldStatsArraySerializer getFieldStatsArraySerializer(long schemaId) {
+        return schemaRowStatsConverters.computeIfAbsent(
+                schemaId,
+                id -> {
+                    TableSchema schema = schemaManager.schema(id);
+                    return new FieldStatsArraySerializer(
+                            schema.logicalRowType(),
+                            tableSchema.id() == id
+                                    ? null
+                                    : SchemaEvolutionUtil.createIndexMapping(
+                                            tableSchema.fields(), schema.fields()));
+                });
     }
 }
