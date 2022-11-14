@@ -199,10 +199,6 @@ public class SchemaManager implements Serializable {
                             newFields,
                             update.fieldName(),
                             (field) -> {
-                                AtomicInteger dummyId = new AtomicInteger(0);
-                                DataType newType =
-                                        TableSchema.toDataType(
-                                                update.newLogicalType(), new AtomicInteger(0));
                                 checkState(
                                         LogicalTypeCasts.supportsImplicitCast(
                                                 field.type().logicalType, update.newLogicalType()),
@@ -211,6 +207,10 @@ public class SchemaManager implements Serializable {
                                                 field.name(),
                                                 field.type().logicalType,
                                                 update.newLogicalType()));
+                                AtomicInteger dummyId = new AtomicInteger(0);
+                                DataType newType =
+                                        TableSchema.toDataType(
+                                                update.newLogicalType(), new AtomicInteger(0));
                                 if (dummyId.get() != 0) {
                                     throw new RuntimeException(
                                             String.format(
