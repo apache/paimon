@@ -104,7 +104,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 keyType,
                 snapshotManager(),
                 schemaManager,
-                schemaManager.schema(schemaId),
+                schemaId,
                 schemaFieldTypeExtractor,
                 manifestFileFactory(),
                 manifestListFactory(),

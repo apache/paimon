@@ -41,9 +41,6 @@ import static org.apache.flink.table.store.file.predicate.PredicateBuilder.split
 /** {@link FileStoreScan} for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
-    //    private final FieldStatsArraySerializer rowStatsConverter;
-    private final SchemaManager schemaManager;
-    private final TableSchema tableSchema;
     private final Map<Long, FieldStatsArraySerializer> schemaRowStatsConverters;
     private final RowType rowType;
 
@@ -55,7 +52,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             RowType rowType,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
-            TableSchema tableSchema,
+            long schemaId,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
@@ -64,13 +61,13 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 partitionType,
                 bucketKeyType,
                 snapshotManager,
+                schemaManager,
+                schemaId,
                 manifestFileFactory,
                 manifestListFactory,
                 numOfBuckets,
                 checkNumOfBuckets,
                 CoreOptions.ChangelogProducer.NONE);
-        this.schemaManager = schemaManager;
-        this.tableSchema = tableSchema;
         this.schemaRowStatsConverters = new HashMap<>();
         this.rowType = rowType;
     }
@@ -105,7 +102,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
         return schemaRowStatsConverters.computeIfAbsent(
                 schemaId,
                 id -> {
-                    TableSchema schema = schemaManager.schema(id);
+                    TableSchema tableSchema = getTableSchema();
+                    TableSchema schema = getTableSchema(id);
                     return new FieldStatsArraySerializer(
                             schema.logicalRowType(),
                             tableSchema.id() == id

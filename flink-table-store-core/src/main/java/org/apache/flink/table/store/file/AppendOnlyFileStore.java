@@ -77,7 +77,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
                 rowType,
                 snapshotManager(),
                 schemaManager,
-                schemaManager.schema(schemaId),
+                schemaId,
                 manifestFileFactory(),
                 manifestListFactory(),
                 options.bucket(),

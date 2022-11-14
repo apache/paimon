@@ -42,10 +42,7 @@ import static org.apache.flink.table.store.file.predicate.PredicateBuilder.split
 /** {@link FileStoreScan} for {@link org.apache.flink.table.store.file.KeyValueFileStore}. */
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
-    //    private final FieldStatsArraySerializer keyStatsConverter;
     private final Map<Long, FieldStatsArraySerializer> schemaKeyStatsConverters;
-    private final SchemaManager schemaManager;
-    private final TableSchema tableSchema;
     private final SchemaFieldTypeExtractor schemaFieldTypeExtractor;
     private final RowType keyType;
 
@@ -57,7 +54,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             RowType keyType,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
-            TableSchema tableSchema,
+            long schemaId,
             SchemaFieldTypeExtractor schemaFieldTypeExtractor,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
@@ -68,13 +65,13 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 partitionType,
                 bucketKeyType,
                 snapshotManager,
+                schemaManager,
+                schemaId,
                 manifestFileFactory,
                 manifestListFactory,
                 numOfBuckets,
                 checkNumOfBuckets,
                 changelogProducer);
-        this.schemaManager = schemaManager;
-        this.tableSchema = tableSchema;
         this.schemaFieldTypeExtractor = schemaFieldTypeExtractor;
         this.schemaKeyStatsConverters = new HashMap<>();
         this.keyType = keyType;
@@ -106,14 +103,15 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                                         entry.file().rowCount()));
     }
 
-    private FieldStatsArraySerializer getFieldStatsArraySerializer(long schemaId) {
+    private FieldStatsArraySerializer getFieldStatsArraySerializer(long id) {
         return schemaKeyStatsConverters.computeIfAbsent(
-                schemaId,
-                id -> {
-                    TableSchema schema = schemaManager.schema(id);
+                id,
+                key -> {
+                    final TableSchema tableSchema = getTableSchema();
+                    final TableSchema schema = getTableSchema(key);
                     return new FieldStatsArraySerializer(
                             schemaFieldTypeExtractor.keyType(schema),
-                            tableSchema.id() == id
+                            tableSchema.id() == key
                                     ? null
                                     : SchemaEvolutionUtil.createIndexMapping(
                                             schemaFieldTypeExtractor.keyFields(tableSchema),
