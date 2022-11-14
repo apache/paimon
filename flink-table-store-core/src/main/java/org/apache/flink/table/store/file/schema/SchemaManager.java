@@ -207,8 +207,10 @@ public class SchemaManager implements Serializable {
                                         LogicalTypeCasts.supportsImplicitCast(
                                                 field.type().logicalType, update.newLogicalType()),
                                         String.format(
-                                                "Row type %s cannot be converted to %s without loosing information.",
-                                                field.type().logicalType, update.newLogicalType()));
+                                                "Column type %s[%s] cannot be converted to %s without loosing information.",
+                                                field.name(),
+                                                field.type().logicalType,
+                                                update.newLogicalType()));
                                 if (dummyId.get() != 0) {
                                     throw new RuntimeException(
                                             String.format(

@@ -169,8 +169,8 @@ public class SchemaEvolutionTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage(
                         String.format(
-                                "Row type %s cannot be converted to %s without loosing information.",
-                                new BigIntType(), new IntType()));
+                                "Column type %s[%s] cannot be converted to %s without loosing information.",
+                                "f0", new BigIntType(), new IntType()));
     }
 
     private List<Row> readRecords(FileStoreTable table, Predicate filter) throws IOException {
