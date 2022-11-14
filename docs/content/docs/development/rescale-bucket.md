@@ -45,7 +45,7 @@ FROM table_identifier
 
 Please note that
 - `ALTER TABLE` only modifies the table's metadata and will **NOT** reorganize or reformat existing data. 
-  Reorganize exiting data must be achieved by `INSERT OVERWRITE`.
+  Reorganize existing data must be achieved by `INSERT OVERWRITE`.
 - Rescale bucket number does not influence the read and running write jobs.
 - Once the bucket number is changed, any newly scheduled `INSERT INTO` jobs which write to without-reorganized 
   existing table/partition will throw a `TableException` with message like 
