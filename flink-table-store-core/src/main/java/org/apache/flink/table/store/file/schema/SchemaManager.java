@@ -33,6 +33,7 @@ import org.apache.flink.table.store.file.utils.AtomicFileWriter;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.logical.utils.LogicalTypeCasts;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.commons.lang3.StringUtils;
@@ -54,6 +55,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.utils.FileUtils.listVersionedFiles;
+import static org.apache.flink.util.Preconditions.checkState;
 
 /** Schema Manager to manage schema versions. */
 public class SchemaManager implements Serializable {
@@ -201,6 +203,12 @@ public class SchemaManager implements Serializable {
                                 DataType newType =
                                         TableSchema.toDataType(
                                                 update.newLogicalType(), new AtomicInteger(0));
+                                checkState(
+                                        LogicalTypeCasts.supportsImplicitCast(
+                                                field.type().logicalType, update.newLogicalType()),
+                                        String.format(
+                                                "Row type %s cannot be converted to %s without loosing information.",
+                                                field.type().logicalType, update.newLogicalType()));
                                 if (dummyId.get() != 0) {
                                     throw new RuntimeException(
                                             String.format(
