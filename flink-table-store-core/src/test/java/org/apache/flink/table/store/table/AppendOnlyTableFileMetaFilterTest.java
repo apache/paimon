@@ -20,8 +20,14 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
+import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.file.stats.BinaryTableStats;
 
 import org.junit.jupiter.api.BeforeEach;
+
+import java.util.Map;
 
 /** Tests for meta files in {@link AppendOnlyFileStoreTable} with schema evolution. */
 public class AppendOnlyTableFileMetaFilterTest extends FileMetaFilterTestBase {
@@ -30,5 +36,16 @@ public class AppendOnlyTableFileMetaFilterTest extends FileMetaFilterTestBase {
     public void before() throws Exception {
         super.before();
         tableConfig.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
+    }
+
+    @Override
+    protected FileStoreTable createFileStoreTable(Map<Long, TableSchema> tableSchemas) {
+        SchemaManager schemaManager = new TestingSchemaManager(tablePath, tableSchemas);
+        return new AppendOnlyFileStoreTable(tablePath, schemaManager, schemaManager.latest().get());
+    }
+
+    @Override
+    protected BinaryTableStats getTableValueStats(DataFileMeta fileMeta) {
+        return fileMeta.valueStats();
     }
 }

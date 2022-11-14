@@ -34,6 +34,7 @@ import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.TraceableFileSystem;
 import org.apache.flink.table.store.format.FieldStats;
@@ -149,7 +150,7 @@ public abstract class FileMetaFilterTestBase {
                             .containsAll(filesName);
 
                     for (DataFileMeta fileMeta : fileMetaList) {
-                        FieldStats[] statsArray = fileMeta.valueStats().fields(null);
+                        FieldStats[] statsArray = getTableValueStats(fileMeta).fields(null);
                         assertThat(statsArray.length).isEqualTo(6);
                         if (filesName.contains(fileMeta.fileName())) {
                             assertThat(statsArray[0].minValue()).isNotNull();
@@ -180,7 +181,10 @@ public abstract class FileMetaFilterTestBase {
                             assertThat(statsArray[5].maxValue()).isNotNull();
                         }
                     }
-                });
+                },
+                getPrimaryKeyNames(),
+                tableConfig,
+                this::createFileStoreTable);
     }
 
     @Test
@@ -248,7 +252,7 @@ public abstract class FileMetaFilterTestBase {
                     Set<String> filterFileNames = new HashSet<>();
                     for (DataSplit dataSplit : filterAllFilePlan.splits) {
                         for (DataFileMeta dataFileMeta : dataSplit.files()) {
-                            FieldStats[] fieldStats = dataFileMeta.valueStats().fields(null);
+                            FieldStats[] fieldStats = getTableValueStats(dataFileMeta).fields(null);
                             int minValue = (Integer) fieldStats[1].minValue();
                             int maxValue = (Integer) fieldStats[1].maxValue();
                             if (minValue >= 14
@@ -260,7 +264,10 @@ public abstract class FileMetaFilterTestBase {
                         }
                     }
                     assertThat(filterFileNames).isEqualTo(fileNames);
-                });
+                },
+                getPrimaryKeyNames(),
+                tableConfig,
+                this::createFileStoreTable);
     }
 
     @Test
@@ -313,7 +320,7 @@ public abstract class FileMetaFilterTestBase {
                     Set<String> filterFileNames = new HashSet<>();
                     for (DataSplit dataSplit : allFilePlan.splits) {
                         for (DataFileMeta dataFileMeta : dataSplit.files()) {
-                            FieldStats[] fieldStats = dataFileMeta.valueStats().fields(null);
+                            FieldStats[] fieldStats = getTableValueStats(dataFileMeta).fields(null);
                             Integer minValue = (Integer) fieldStats[3].minValue();
                             Integer maxValue = (Integer) fieldStats[3].maxValue();
                             if (minValue != null
@@ -325,7 +332,10 @@ public abstract class FileMetaFilterTestBase {
                         }
                     }
                     assertThat(filterFileNames).isEqualTo(fileNames);
-                });
+                },
+                getPrimaryKeyNames(),
+                tableConfig,
+                this::createFileStoreTable);
     }
 
     @Test
@@ -341,7 +351,10 @@ public abstract class FileMetaFilterTestBase {
                     FileStoreTable table = createFileStoreTable(schemas);
                     checkFilterRowCount(table, 0, 1, 7L);
                     checkFilterRowCount(table, 0, 2, 5L);
-                });
+                },
+                getPrimaryKeyNames(),
+                tableConfig,
+                this::createFileStoreTable);
     }
 
     @Test
@@ -363,40 +376,26 @@ public abstract class FileMetaFilterTestBase {
                     Predicate predicate = builder.between(2, 115L, 120L);
                     DataTableScan.DataFilePlan plan = table.newScan().withFilter(predicate).plan();
                     checkFilterRowCount(plan, 6L);
-                });
+                },
+                getPrimaryKeyNames(),
+                tableConfig,
+                this::createFileStoreTable);
     }
 
     protected List<String> getPrimaryKeyNames() {
         return PRIMARY_KEY_NAMES;
     }
 
-    protected void checkFilterRowCount(
-            FileStoreTable table, int index, int value, long expectedRowCount) {
-        PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
-        DataTableScan.DataFilePlan plan =
-                table.newScan().withFilter(builder.equal(index, value)).plan();
-        checkFilterRowCount(plan, expectedRowCount);
-    }
+    protected abstract FileStoreTable createFileStoreTable(Map<Long, TableSchema> tableSchemas);
 
-    protected void checkFilterRowCount(DataTableScan.DataFilePlan plan, long expectedRowCount) {
-        List<DataFileMeta> fileMetaList =
-                plan.splits.stream().flatMap(s -> s.files().stream()).collect(Collectors.toList());
-        checkFilterRowCount(fileMetaList, expectedRowCount);
-    }
+    protected abstract BinaryTableStats getTableValueStats(DataFileMeta fileMeta);
 
-    protected void checkFilterRowCount(List<DataFileMeta> fileMetaList, long expectedRowCount) {
-        assertThat(fileMetaList.stream().mapToLong(DataFileMeta::rowCount).sum())
-                .isEqualTo(expectedRowCount);
-    }
-
-    protected FileStoreTable createFileStoreTable(Map<Long, TableSchema> tableSchemas) {
-        SchemaManager schemaManager = new TestingSchemaManager(tablePath, tableSchemas);
-        return new AppendOnlyFileStoreTable(tablePath, schemaManager, schemaManager.latest().get());
-    }
-
-    protected <R> void writeAndCheckFileMeta(
+    public static <R> void writeAndCheckFileMeta(
             Function<Map<Long, TableSchema>, R> firstChecker,
-            BiConsumer<R, Map<Long, TableSchema>> secondChecker)
+            BiConsumer<R, Map<Long, TableSchema>> secondChecker,
+            List<String> primaryKeyNames,
+            Configuration tableConfig,
+            Function<Map<Long, TableSchema>, FileStoreTable> createFileStoreTable)
             throws Exception {
         Map<Long, TableSchema> tableSchemas = new HashMap<>();
         tableSchemas.put(
@@ -406,10 +405,10 @@ public abstract class FileMetaFilterTestBase {
                         SCHEMA_0_FIELDS,
                         5,
                         PARTITION_NAMES,
-                        PRIMARY_KEY_NAMES,
+                        primaryKeyNames,
                         tableConfig.toMap(),
                         ""));
-        FileStoreTable table = createFileStoreTable(tableSchemas);
+        FileStoreTable table = createFileStoreTable.apply(tableSchemas);
         TableWrite write = table.newWrite("user");
         TableCommit commit = table.newCommit("user");
 
@@ -474,10 +473,10 @@ public abstract class FileMetaFilterTestBase {
                         SCHEMA_1_FIELDS,
                         8,
                         PARTITION_NAMES,
-                        PRIMARY_KEY_NAMES,
+                        primaryKeyNames,
                         tableConfig.toMap(),
                         ""));
-        table = createFileStoreTable(tableSchemas);
+        table = createFileStoreTable.apply(tableSchemas);
         write = table.newWrite("user");
         commit = table.newCommit("user");
 
@@ -535,6 +534,27 @@ public abstract class FileMetaFilterTestBase {
         write.close();
 
         secondChecker.accept(result, tableSchemas);
+    }
+
+    protected static void checkFilterRowCount(
+            FileStoreTable table, int index, int value, long expectedRowCount) {
+        PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
+        DataTableScan.DataFilePlan plan =
+                table.newScan().withFilter(builder.equal(index, value)).plan();
+        checkFilterRowCount(plan, expectedRowCount);
+    }
+
+    protected static void checkFilterRowCount(
+            DataTableScan.DataFilePlan plan, long expectedRowCount) {
+        List<DataFileMeta> fileMetaList =
+                plan.splits.stream().flatMap(s -> s.files().stream()).collect(Collectors.toList());
+        checkFilterRowCount(fileMetaList, expectedRowCount);
+    }
+
+    protected static void checkFilterRowCount(
+            List<DataFileMeta> fileMetaList, long expectedRowCount) {
+        assertThat(fileMetaList.stream().mapToLong(DataFileMeta::rowCount).sum())
+                .isEqualTo(expectedRowCount);
     }
 
     /** {@link SchemaManager} subclass for testing. */

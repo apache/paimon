@@ -20,11 +20,16 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
+import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.file.stats.BinaryTableStats;
 
 import org.junit.jupiter.api.BeforeEach;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /** Tests for meta files in {@link ChangelogValueCountFileStoreTable} with schema evolution. */
 public class ChangelogValueCountFileMetaFilterTest extends FileMetaFilterTestBase {
@@ -38,5 +43,17 @@ public class ChangelogValueCountFileMetaFilterTest extends FileMetaFilterTestBas
     @Override
     protected List<String> getPrimaryKeyNames() {
         return Collections.emptyList();
+    }
+
+    @Override
+    protected FileStoreTable createFileStoreTable(Map<Long, TableSchema> tableSchemas) {
+        SchemaManager schemaManager = new TestingSchemaManager(tablePath, tableSchemas);
+        return new ChangelogValueCountFileStoreTable(
+                tablePath, schemaManager, schemaManager.latest().get());
+    }
+
+    @Override
+    protected BinaryTableStats getTableValueStats(DataFileMeta fileMeta) {
+        return fileMeta.keyStats();
     }
 }
