@@ -241,7 +241,7 @@ public class HiveCatalogITCase {
                                 "  'uri' = '',",
                                 "  'warehouse' = '" + path + "',",
                                 "  'lock.enabled' = 'true',",
-                                "  'table.type' = 'EXTERNAL_TABLE'",
+                                "  'table.type' = 'EXTERNAL'",
                                 ")"))
                 .await();
         tEnv.executeSql("USE CATALOG my_hive_external").await();

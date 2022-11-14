@@ -53,7 +53,7 @@ public class CatalogOptions {
     public static final ConfigOption<TableType> TABLE_TYPE =
             ConfigOptions.key("table.type")
                     .enumType(TableType.class)
-                    .defaultValue(TableType.MANAGED_TABLE)
+                    .defaultValue(TableType.MANAGED)
                     .withDescription("Type of table.");
 
     public static final ConfigOption<Boolean> LOCK_ENABLED =
