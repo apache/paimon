@@ -20,10 +20,11 @@ package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.types.logical.RowType;
 
+import java.io.Serializable;
 import java.util.List;
 
 /** Extractor of schema for different tables. */
-public interface SchemaFieldTypeExtractor {
+public interface SchemaFieldTypeExtractor extends Serializable {
     /**
      * Extract key type from table schema.
      *

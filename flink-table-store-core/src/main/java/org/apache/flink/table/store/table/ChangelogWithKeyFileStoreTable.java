@@ -220,6 +220,8 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     static class ChangelogWithKeySchemaFieldTypeExtractor implements SchemaFieldTypeExtractor {
+        private static final long serialVersionUID = 1L;
+
         static final ChangelogWithKeySchemaFieldTypeExtractor EXTRACTOR =
                 new ChangelogWithKeySchemaFieldTypeExtractor();
 

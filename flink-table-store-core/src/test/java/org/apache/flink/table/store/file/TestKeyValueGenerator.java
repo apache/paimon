@@ -332,6 +332,8 @@ public class TestKeyValueGenerator {
 
     /** {@link SchemaFieldTypeExtractor} implementation for test. */
     public static class TestSchemaFieldTypeExtractor implements SchemaFieldTypeExtractor {
+        private static final long serialVersionUID = 1L;
+
         public static final TestSchemaFieldTypeExtractor EXTRACTOR =
                 new TestSchemaFieldTypeExtractor();
 

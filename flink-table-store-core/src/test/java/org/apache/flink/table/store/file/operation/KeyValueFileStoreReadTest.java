@@ -114,6 +114,8 @@ public class KeyValueFileStoreReadTest {
                         keyType,
                         valueType,
                         new SchemaFieldTypeExtractor() {
+                            private static final long serialVersionUID = 1L;
+
                             @Override
                             public RowType keyType(TableSchema schema) {
                                 return (RowType)

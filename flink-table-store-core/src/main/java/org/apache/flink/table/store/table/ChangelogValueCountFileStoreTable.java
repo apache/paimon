@@ -157,6 +157,8 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
      * ChangelogValueCountFileStoreTable}.
      */
     static class ValueCountTableSchemaFieldTypeExtractor implements SchemaFieldTypeExtractor {
+        private static final long serialVersionUID = 1L;
+
         static final ValueCountTableSchemaFieldTypeExtractor EXTRACTOR =
                 new ValueCountTableSchemaFieldTypeExtractor();
 
