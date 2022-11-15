@@ -19,6 +19,8 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.table.api.DataTypes;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.file.Snapshot;
@@ -36,6 +38,8 @@ import org.apache.flink.table.store.table.source.SnapshotEnumerator;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.utils.CompatibilityTestUtils;
+import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.function.FunctionWithException;
 
@@ -45,11 +49,41 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ChangelogWithKeyFileStoreTable}. */
 public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
+
+    protected static final RowType COMPATIBILITY_ROW_TYPE =
+            RowType.of(
+                    new LogicalType[] {
+                        DataTypes.INT().getLogicalType(),
+                        DataTypes.INT().getLogicalType(),
+                        DataTypes.BIGINT().getLogicalType(),
+                        DataTypes.BINARY(1).getLogicalType(),
+                        DataTypes.VARBINARY(1).getLogicalType()
+                    },
+                    new String[] {"pt", "a", "b", "c", "d"});
+
+    protected static final Function<RowData, String> COMPATIBILITY_BATCH_ROW_TO_STRING =
+            rowData ->
+                    rowData.getInt(0)
+                            + "|"
+                            + rowData.getInt(1)
+                            + "|"
+                            + rowData.getLong(2)
+                            + "|"
+                            + new String(rowData.getBinary(3))
+                            + "|"
+                            + new String(rowData.getBinary(4));
+
+    protected static final Function<RowData, String> COMPATIBILITY_CHANGELOG_ROW_TO_STRING =
+            rowData ->
+                    rowData.getRowKind().shortString()
+                            + " "
+                            + COMPATIBILITY_BATCH_ROW_TO_STRING.apply(rowData);
 
     @Test
     public void testSequenceNumber() throws Exception {
@@ -68,7 +102,10 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         List<Split> splits = table.newScan().plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
-                .isEqualTo(Arrays.asList("1|10|200|binary|varbinary", "1|11|101|binary|varbinary"));
+                .isEqualTo(
+                        Arrays.asList(
+                                "1|10|200|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|11|101|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Test
@@ -79,10 +116,14 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         List<Split> splits = table.newScan().plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
-                .isEqualTo(Collections.singletonList("1|10|1000|binary|varbinary"));
+                .isEqualTo(
+                        Collections.singletonList(
+                                "1|10|1000|binary|varbinary|mapKey:mapVal|multiset"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
                 .isEqualTo(
-                        Arrays.asList("2|21|20001|binary|varbinary", "2|22|202|binary|varbinary"));
+                        Arrays.asList(
+                                "2|21|20001|binary|varbinary|mapKey:mapVal|multiset",
+                                "2|22|202|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Test
@@ -113,7 +154,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                         Arrays.asList(
                                 // only filter on key should be performed,
                                 // and records from the same file should also be selected
-                                "2|21|20001|binary|varbinary", "2|22|202|binary|varbinary"));
+                                "2|21|20001|binary|varbinary|mapKey:mapVal|multiset",
+                                "2|22|202|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Test
@@ -124,13 +166,15 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         List<Split> splits = table.newScan().withIncremental(true).plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
-                .isEqualTo(Collections.singletonList("-1|11|1001|binary|varbinary"));
+                .isEqualTo(
+                        Collections.singletonList(
+                                "-1|11|1001|binary|varbinary|mapKey:mapVal|multiset"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
                         Arrays.asList(
-                                "-2|20|200|binary|varbinary",
-                                "+2|21|20001|binary|varbinary",
-                                "+2|22|202|binary|varbinary"));
+                                "-2|20|200|binary|varbinary|mapKey:mapVal|multiset",
+                                "+2|21|20001|binary|varbinary|mapKey:mapVal|multiset",
+                                "+2|22|202|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Test
@@ -163,9 +207,9 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                         Arrays.asList(
                                 // only filter on key should be performed,
                                 // and records from the same file should also be selected
-                                "-2|20|200|binary|varbinary",
-                                "+2|21|20001|binary|varbinary",
-                                "+2|22|202|binary|varbinary"));
+                                "-2|20|200|binary|varbinary|mapKey:mapVal|multiset",
+                                "+2|21|20001|binary|varbinary|mapKey:mapVal|multiset",
+                                "+2|22|202|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Test
@@ -190,14 +234,14 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
-                        "+I 1|10|100|binary|varbinary",
-                        "+I 1|20|200|binary|varbinary",
-                        "-D 1|10|100|binary|varbinary",
-                        "+I 1|10|101|binary|varbinary",
-                        "-U 1|20|200|binary|varbinary",
-                        "+U 1|20|201|binary|varbinary",
-                        "-U 1|10|101|binary|varbinary",
-                        "+U 1|10|102|binary|varbinary");
+                        "+I 1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                        "+I 1|20|200|binary|varbinary|mapKey:mapVal|multiset",
+                        "-D 1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                        "+I 1|10|101|binary|varbinary|mapKey:mapVal|multiset",
+                        "-U 1|20|200|binary|varbinary|mapKey:mapVal|multiset",
+                        "+U 1|20|201|binary|varbinary|mapKey:mapVal|multiset",
+                        "-U 1|10|101|binary|varbinary|mapKey:mapVal|multiset",
+                        "+U 1|10|102|binary|varbinary|mapKey:mapVal|multiset");
     }
 
     @Test
@@ -224,9 +268,10 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
-                        "+I 1|10|110|binary|varbinary", "+I 1|20|120|binary|varbinary");
+                        "+I 1|10|110|binary|varbinary|mapKey:mapVal|multiset",
+                        "+I 1|20|120|binary|varbinary|mapKey:mapVal|multiset");
         assertThat(getResult(read, splits, binaryRow(2), 0, CHANGELOG_ROW_TO_STRING))
-                .containsExactlyInAnyOrder("+I 2|20|220|binary|varbinary");
+                .containsExactlyInAnyOrder("+I 2|20|220|binary|varbinary|mapKey:mapVal|multiset");
 
         write.write(rowData(1, 30, 130L));
         write.write(rowData(1, 40, 140L));
@@ -242,10 +287,11 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         splits = table.newScan().withIncremental(true).plan().splits();
         assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
-                .containsExactlyInAnyOrder("+I 1|30|130|binary|varbinary");
+                .containsExactlyInAnyOrder("+I 1|30|130|binary|varbinary|mapKey:mapVal|multiset");
         assertThat(getResult(read, splits, binaryRow(2), 0, CHANGELOG_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
-                        "+I 2|30|230|binary|varbinary", "+I 2|40|241|binary|varbinary");
+                        "+I 2|30|230|binary|varbinary|mapKey:mapVal|multiset",
+                        "+I 2|40|241|binary|varbinary|mapKey:mapVal|multiset");
 
         write.write(rowData(1, 20, 121L));
         write.write(rowData(1, 30, 131L));
@@ -266,17 +312,17 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         splits = table.newScan().withIncremental(true).plan().splits();
         assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
-                        "-D 1|20|120|binary|varbinary",
-                        "-U 1|30|130|binary|varbinary",
-                        "+U 1|30|132|binary|varbinary",
-                        "+I 1|40|141|binary|varbinary");
+                        "-D 1|20|120|binary|varbinary|mapKey:mapVal|multiset",
+                        "-U 1|30|130|binary|varbinary|mapKey:mapVal|multiset",
+                        "+U 1|30|132|binary|varbinary|mapKey:mapVal|multiset",
+                        "+I 1|40|141|binary|varbinary|mapKey:mapVal|multiset");
         assertThat(getResult(read, splits, binaryRow(2), 0, CHANGELOG_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
-                        "-D 2|20|220|binary|varbinary",
-                        "-U 2|30|230|binary|varbinary",
-                        "+U 2|30|231|binary|varbinary",
-                        "-U 2|40|241|binary|varbinary",
-                        "+U 2|40|242|binary|varbinary");
+                        "-D 2|20|220|binary|varbinary|mapKey:mapVal|multiset",
+                        "-U 2|30|230|binary|varbinary|mapKey:mapVal|multiset",
+                        "+U 2|30|231|binary|varbinary|mapKey:mapVal|multiset",
+                        "-U 2|40|241|binary|varbinary|mapKey:mapVal|multiset",
+                        "+U 2|40|242|binary|varbinary|mapKey:mapVal|multiset");
     }
 
     @Test
@@ -285,7 +331,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         CompatibilityTestUtils.unzip("compatibility/table-changelog-0.2.zip", tablePath.getPath());
         FileStoreTable table =
                 createFileStoreTable(
-                        conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
+                        conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT),
+                        COMPATIBILITY_ROW_TYPE);
 
         List<List<List<String>>> expected =
                 Arrays.asList(
@@ -341,7 +388,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                                 splits,
                                                 binaryRow(j + 1),
                                                 0,
-                                                CHANGELOG_ROW_TO_STRING))
+                                                COMPATIBILITY_CHANGELOG_ROW_TO_STRING))
                                 .isEqualTo(expected.get(i).get(j));
                     }
 
@@ -423,13 +470,17 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         TableRead read = table.newRead().withFilter(builder.equal(1, 30));
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
-                        Arrays.asList("1|30|300|binary|varbinary", "1|40|400|binary|varbinary"));
+                        Arrays.asList(
+                                "1|30|300|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|40|400|binary|varbinary|mapKey:mapVal|multiset"));
 
         // push down value filter b = 300L
         read = table.newRead().withFilter(builder.equal(2, 300L));
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
-                        Arrays.asList("1|30|300|binary|varbinary", "1|40|400|binary|varbinary"));
+                        Arrays.asList(
+                                "1|30|300|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|40|400|binary|varbinary|mapKey:mapVal|multiset"));
 
         // push down both key filter and value filter
         read =
@@ -439,10 +490,10 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
                         Arrays.asList(
-                                "1|10|100|binary|varbinary",
-                                "1|20|200|binary|varbinary",
-                                "1|30|300|binary|varbinary",
-                                "1|40|400|binary|varbinary"));
+                                "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|20|200|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|30|300|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|40|400|binary|varbinary|mapKey:mapVal|multiset"));
 
         // update pk 60, 10
         write.write(rowData(1, 60, 500L));
@@ -457,12 +508,12 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
                         Arrays.asList(
-                                "1|10|10|binary|varbinary",
-                                "1|20|200|binary|varbinary",
-                                "1|30|300|binary|varbinary",
-                                "1|40|400|binary|varbinary",
-                                "1|50|500|binary|varbinary",
-                                "1|60|500|binary|varbinary"));
+                                "1|10|10|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|20|200|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|30|300|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|40|400|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|50|500|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|60|500|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Test
@@ -487,7 +538,9 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         List<Split> splits = table.newScan().plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
-                .isEqualTo(Collections.singletonList("1|10|200|binary|varbinary"));
+                .isEqualTo(
+                        Collections.singletonList(
+                                "1|10|200|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Test
@@ -515,13 +568,23 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         List<Split> splits = table.newScan().plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
-                .isEqualTo(Arrays.asList("1|10|100|binary|varbinary", "1|20|201|binary|varbinary"));
+                .isEqualTo(
+                        Arrays.asList(
+                                "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|20|201|binary|varbinary|mapKey:mapVal|multiset"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
-                .isEqualTo(Collections.singletonList("2|10|300|binary|varbinary"));
+                .isEqualTo(
+                        Collections.singletonList(
+                                "2|10|300|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Override
     protected FileStoreTable createFileStoreTable(Consumer<Configuration> configure)
+            throws Exception {
+        return createFileStoreTable(configure, ROW_TYPE);
+    }
+
+    private FileStoreTable createFileStoreTable(Consumer<Configuration> configure, RowType rowType)
             throws Exception {
         Configuration conf = new Configuration();
         conf.set(CoreOptions.PATH, tablePath.toString());
@@ -531,7 +594,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         TableSchema tableSchema =
                 schemaManager.commitNewVersion(
                         new UpdateSchema(
-                                ROW_TYPE,
+                                rowType,
                                 Collections.singletonList("pt"),
                                 Arrays.asList("pt", "a"),
                                 conf.toMap(),

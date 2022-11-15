@@ -64,18 +64,18 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
                         Arrays.asList(
-                                "1|10|100|binary|varbinary",
-                                "1|11|101|binary|varbinary",
-                                "1|12|102|binary|varbinary",
-                                "1|11|101|binary|varbinary",
-                                "1|12|102|binary|varbinary"));
+                                "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|11|101|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|12|102|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|11|101|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|12|102|binary|varbinary|mapKey:mapVal|multiset"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
                         Arrays.asList(
-                                "2|20|200|binary|varbinary",
-                                "2|21|201|binary|varbinary",
-                                "2|22|202|binary|varbinary",
-                                "2|21|201|binary|varbinary"));
+                                "2|20|200|binary|varbinary|mapKey:mapVal|multiset",
+                                "2|21|201|binary|varbinary|mapKey:mapVal|multiset",
+                                "2|22|202|binary|varbinary|mapKey:mapVal|multiset",
+                                "2|21|201|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Test
@@ -104,10 +104,10 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
                         Arrays.asList(
-                                "2|21|201|binary|varbinary",
+                                "2|21|201|binary|varbinary|mapKey:mapVal|multiset",
                                 // this record is in the same file with the first "2|21|201"
-                                "2|22|202|binary|varbinary",
-                                "2|21|201|binary|varbinary"));
+                                "2|22|202|binary|varbinary|mapKey:mapVal|multiset",
+                                "2|21|201|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Test
@@ -119,9 +119,13 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
-                        Arrays.asList("+1|11|101|binary|varbinary", "+1|12|102|binary|varbinary"));
+                        Arrays.asList(
+                                "+1|11|101|binary|varbinary|mapKey:mapVal|multiset",
+                                "+1|12|102|binary|varbinary|mapKey:mapVal|multiset"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
-                .isEqualTo(Collections.singletonList("+2|21|201|binary|varbinary"));
+                .isEqualTo(
+                        Collections.singletonList(
+                                "+2|21|201|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Test
@@ -150,9 +154,9 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
                         Arrays.asList(
-                                "+1|11|101|binary|varbinary",
+                                "+1|11|101|binary|varbinary|mapKey:mapVal|multiset",
                                 // this record is in the same file with "+1|11|101"
-                                "+1|12|102|binary|varbinary"));
+                                "+1|12|102|binary|varbinary|mapKey:mapVal|multiset"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING)).isEmpty();
     }
 

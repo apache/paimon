@@ -37,8 +37,10 @@ import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.store.utils.Projection;
 import org.apache.flink.table.types.logical.ArrayType;
+import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.MapType;
+import org.apache.flink.table.types.logical.MultisetType;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.orc.TypeDescription;
@@ -111,10 +113,10 @@ public class OrcFileFormat extends FileFormat {
      */
     @Override
     public BulkWriter.Factory<RowData> createWriterFactory(RowType type) {
-        LogicalType[] orcTypes = type.getChildren().toArray(new LogicalType[0]);
+        LogicalType refinedType = refineLogicalType(type);
+        LogicalType[] orcTypes = refinedType.getChildren().toArray(new LogicalType[0]);
 
-        TypeDescription typeDescription =
-                OrcSplitReaderUtil.logicalTypeToOrcType(refineLogicalType(type));
+        TypeDescription typeDescription = OrcSplitReaderUtil.logicalTypeToOrcType(refinedType);
         Vectorizer<RowData> vectorizer =
                 new RowDataVectorizer(typeDescription.toString(), orcTypes);
 
@@ -145,6 +147,11 @@ public class OrcFileFormat extends FileFormat {
                 return new MapType(
                         refineLogicalType(mapType.getKeyType()),
                         refineLogicalType(mapType.getValueType()));
+            case MULTISET:
+                MultisetType multisetType = (MultisetType) type;
+                return new MapType(
+                        refineLogicalType(multisetType.getElementType()),
+                        refineLogicalType(new IntType(false)));
             case ROW:
                 RowType rowType = (RowType) type;
                 return new RowType(

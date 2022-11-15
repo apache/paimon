@@ -47,6 +47,8 @@ object GenerateUtils {
 
   val ARRAY_DATA: String = className[ArrayData]
 
+  val MAP_DATA: String = className[MapData]
+
   val ROW_DATA: String = className[RowData]
 
   val BINARY_STRING: String = className[BinaryStringData]
@@ -135,8 +137,8 @@ object GenerateUtils {
     case TINYINT | SMALLINT | INTEGER | BIGINT | FLOAT | DOUBLE | DATE | TIME_WITHOUT_TIME_ZONE |
         INTERVAL_YEAR_MONTH | INTERVAL_DAY_TIME =>
       s"($leftTerm > $rightTerm ? 1 : $leftTerm < $rightTerm ? -1 : 0)"
-    case TIMESTAMP_WITH_TIME_ZONE | MULTISET | MAP =>
-      throw new UnsupportedOperationException() // TODO support MULTISET and MAP?
+    case TIMESTAMP_WITH_TIME_ZONE =>
+      throw new UnsupportedOperationException()
     case ARRAY =>
       val at = t.asInstanceOf[ArrayType]
       val compareFunc = newName("compareArray")
@@ -144,6 +146,32 @@ object GenerateUtils {
       val funcCode: String =
         s"""
           public int $compareFunc($ARRAY_DATA a, $ARRAY_DATA b) {
+            $compareCode
+            return 0;
+          }
+        """
+      ctx.addReusableMember(funcCode)
+      s"$compareFunc($leftTerm, $rightTerm)"
+    case MAP =>
+      val at = t.asInstanceOf[MapType]
+      val compareFunc = newName("compareMap")
+      val compareCode = generateMapCompare(ctx, nullsIsLast = false, at, "a", "b")
+      val funcCode: String =
+        s"""
+          public int $compareFunc($MAP_DATA a, $MAP_DATA b) {
+            $compareCode
+            return 0;
+          }
+        """
+      ctx.addReusableMember(funcCode)
+      s"$compareFunc($leftTerm, $rightTerm)"
+    case MULTISET =>
+      val at = t.asInstanceOf[MultisetType]
+      val compareFunc = newName("compareMultiset")
+      val compareCode = generateMultisetCompare(ctx, nullsIsLast = false, at, "a", "b")
+      val funcCode: String =
+        s"""
+          public int $compareFunc($MAP_DATA a, $MAP_DATA b) {
             $compareCode
             return 0;
           }
@@ -219,12 +247,12 @@ object GenerateUtils {
     val comp = newName("comp")
     val typeTerm = primitiveTypeTermForType(elementType)
     s"""
-        int $lengthA = a.size();
-        int $lengthB = b.size();
+        int $lengthA = $leftTerm.size();
+        int $lengthB = $rightTerm.size();
         int $minLength = ($lengthA > $lengthB) ? $lengthB : $lengthA;
         for (int $i = 0; $i < $minLength; $i++) {
-          boolean $isNullA = a.isNullAt($i);
-          boolean $isNullB = b.isNullAt($i);
+          boolean $isNullA = $leftTerm.isNullAt($i);
+          boolean $isNullB = $rightTerm.isNullAt($i);
           if ($isNullA && $isNullB) {
             // Continue to compare the next element
           } else if ($isNullA) {
@@ -247,6 +275,71 @@ object GenerateUtils {
           return 1;
         }
       """
+  }
+
+  /** Generates code for comparing map. */
+  def generateMapCompare(
+      ctx: CodeGeneratorContext,
+      nullsIsLast: Boolean,
+      mapType: MapType,
+      leftTerm: String,
+      rightTerm: String): String = {
+    val keyArrayType = new ArrayType(mapType.getKeyType)
+    val valueArrayType = new ArrayType(mapType.getKeyType)
+    generateMapDataCompare(ctx, nullsIsLast, leftTerm, rightTerm, keyArrayType, valueArrayType)
+  }
+
+  /** Generates code for comparing multiset. */
+  def generateMultisetCompare(
+      ctx: CodeGeneratorContext,
+      nullsIsLast: Boolean,
+      multisetType: MultisetType,
+      leftTerm: String,
+      rightTerm: String): String = {
+    val keyArrayType = new ArrayType(multisetType.getElementType)
+    val valueArrayType = new ArrayType(new IntType(false))
+    generateMapDataCompare(ctx, nullsIsLast, leftTerm, rightTerm, keyArrayType, valueArrayType)
+  }
+
+  def generateMapDataCompare(
+      ctx: CodeGeneratorContext,
+      nullsIsLast: Boolean,
+      leftTerm: String,
+      rightTerm: String,
+      keyArrayType: ArrayType,
+      valueArrayType: ArrayType): String = {
+    val keyArrayTerm = primitiveTypeTermForType(keyArrayType)
+    val valueArrayTerm = primitiveTypeTermForType(valueArrayType)
+    val lengthA = newName("lengthA")
+    val lengthB = newName("lengthB")
+    val comp = newName("comp")
+    val keyArrayA = newName("keyArrayA")
+    val keyArrayB = newName("keyArrayB")
+    val valueArrayA = newName("valueArrayA")
+    val valueArrayB = newName("valueArrayB")
+    s"""
+        int $lengthA = $leftTerm.size();
+        int $lengthB = $rightTerm.size();
+        if ($lengthA == $lengthB) {
+          $keyArrayTerm $keyArrayA = $leftTerm.keyArray();
+          $keyArrayTerm $keyArrayB = $rightTerm.keyArray();
+          int $comp = ${generateCompare(ctx, keyArrayType, nullsIsLast, keyArrayA, keyArrayB)};
+          if ($comp == 0) {
+            $valueArrayTerm $valueArrayA = $leftTerm.valueArray();
+            $valueArrayTerm $valueArrayB = $rightTerm.valueArray();
+            $comp = ${generateCompare(ctx, valueArrayType, nullsIsLast, valueArrayA, valueArrayB)};
+            if ($comp != 0) {
+              return $comp;
+            }
+          } else {
+            return $comp;
+          }
+        } else if ($lengthA < $lengthB) {
+          return -1;
+        } else if ($lengthA > $lengthB) {
+          return 1;
+        }
+     """
   }
 
   /** Generates code for comparing row keys. */
