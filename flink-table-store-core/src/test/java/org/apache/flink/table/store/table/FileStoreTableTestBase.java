@@ -22,8 +22,10 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.DataTypes;
+import org.apache.flink.table.data.GenericMapData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
 import org.apache.flink.table.store.file.Snapshot;
@@ -80,9 +82,11 @@ public abstract class FileStoreTableTestBase {
                         DataTypes.INT().getLogicalType(),
                         DataTypes.BIGINT().getLogicalType(),
                         DataTypes.BINARY(1).getLogicalType(),
-                        DataTypes.VARBINARY(1).getLogicalType()
+                        DataTypes.VARBINARY(1).getLogicalType(),
+                        DataTypes.MAP(DataTypes.VARCHAR(8), DataTypes.VARCHAR(8)).getLogicalType(),
+                        DataTypes.MULTISET(DataTypes.VARCHAR(8)).getLogicalType()
                     },
-                    new String[] {"pt", "a", "b", "c", "d"});
+                    new String[] {"pt", "a", "b", "c", "d", "e", "f"});
     protected static final int[] PROJECTION = new int[] {2, 1};
     protected static final Function<RowData, String> BATCH_ROW_TO_STRING =
             rowData ->
@@ -94,7 +98,14 @@ public abstract class FileStoreTableTestBase {
                             + "|"
                             + new String(rowData.getBinary(3))
                             + "|"
-                            + new String(rowData.getBinary(4));
+                            + new String(rowData.getBinary(4))
+                            + "|"
+                            + String.format(
+                                    "%s:%s",
+                                    rowData.getMap(5).keyArray().getString(0).toString(),
+                                    rowData.getMap(5).valueArray().getString(0))
+                            + "|"
+                            + rowData.getMap(6).keyArray().getString(0).toString();
     protected static final Function<RowData, String> BATCH_PROJECTED_ROW_TO_STRING =
             rowData -> rowData.getLong(0) + "|" + rowData.getInt(1);
     protected static final Function<RowData, String> STREAMING_ROW_TO_STRING =
@@ -154,9 +165,13 @@ public abstract class FileStoreTableTestBase {
         List<Split> splits = table.newScan().plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
-                .hasSameElementsAs(Collections.singletonList("1|10|100|binary|varbinary"));
+                .hasSameElementsAs(
+                        Collections.singletonList(
+                                "1|10|100|binary|varbinary|mapKey:mapVal|multiset"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
-                .hasSameElementsAs(Collections.singletonList("2|21|201|binary|varbinary"));
+                .hasSameElementsAs(
+                        Collections.singletonList(
+                                "2|21|201|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Test
@@ -212,7 +227,9 @@ public abstract class FileStoreTableTestBase {
         TableRead read = table.newRead().withFilter(builder.equal(2, 300L));
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
-                        Arrays.asList("1|30|300|binary|varbinary", "1|40|400|binary|varbinary"));
+                        Arrays.asList(
+                                "1|30|300|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|40|400|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Test
@@ -342,7 +359,15 @@ public abstract class FileStoreTableTestBase {
 
     protected GenericRowData rowData(Object... values) {
         return GenericRowData.of(
-                values[0], values[1], values[2], "binary".getBytes(), "varbinary".getBytes());
+                values[0],
+                values[1],
+                values[2],
+                "binary".getBytes(),
+                "varbinary".getBytes(),
+                new GenericMapData(
+                        Collections.singletonMap(
+                                StringData.fromString("mapKey"), StringData.fromString("mapVal"))),
+                new GenericMapData(Collections.singletonMap(StringData.fromString("multiset"), 1)));
     }
 
     protected GenericRowData rowDataWithKind(RowKind rowKind, Object... values) {
@@ -352,7 +377,11 @@ public abstract class FileStoreTableTestBase {
                 values[1],
                 values[2],
                 "binary".getBytes(),
-                "varbinary".getBytes());
+                "varbinary".getBytes(),
+                new GenericMapData(
+                        Collections.singletonMap(
+                                StringData.fromString("mapKey"), StringData.fromString("mapVal"))),
+                new GenericMapData(Collections.singletonMap(StringData.fromString("multiset"), 1)));
     }
 
     protected FileStoreTable createFileStoreTable(int numOfBucket) throws Exception {

@@ -25,7 +25,9 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.GenericArrayData;
+import org.apache.flink.table.data.GenericMapData;
 import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.data.MapData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.data.binary.BinaryStringData;
@@ -33,7 +35,10 @@ import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BinaryType;
 import org.apache.flink.table.types.logical.CharType;
 import org.apache.flink.table.types.logical.DecimalType;
+import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.MapType;
+import org.apache.flink.table.types.logical.MultisetType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.TimestampType;
 import org.apache.flink.table.types.logical.VarBinaryType;
@@ -46,7 +51,9 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -158,6 +165,10 @@ public abstract class FileStatsExtractorTestBase {
                 return randomTimestampData((TimestampType) type);
             case ARRAY:
                 return randomArray((ArrayType) type);
+            case MAP:
+                return randomMap((MapType) type);
+            case MULTISET:
+                return randomMultiset((MultisetType) type);
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported type " + type.asSummaryString());
@@ -208,6 +219,25 @@ public abstract class FileStatsExtractorTestBase {
             javaArray[i] = createField(type.getElementType());
         }
         return new GenericArrayData(javaArray);
+    }
+
+    private MapData randomMap(MapType type) {
+        int length = ThreadLocalRandom.current().nextInt(10);
+        Map<Object, Object> javaMap = new HashMap<>(length);
+        for (int i = 0; i < length; i++) {
+            javaMap.put(createField(type.getKeyType()), createField(type.getValueType()));
+        }
+        return new GenericMapData(javaMap);
+    }
+
+    private MapData randomMultiset(MultisetType type) {
+        int length = ThreadLocalRandom.current().nextInt(10);
+        Map<Object, Object> javaMap = new HashMap<>(length);
+        IntType intType = new IntType(false);
+        for (int i = 0; i < length; i++) {
+            javaMap.put(createField(type.getElementType()), createField(intType));
+        }
+        return new GenericMapData(javaMap);
     }
 
     protected abstract FileFormat createFormat();

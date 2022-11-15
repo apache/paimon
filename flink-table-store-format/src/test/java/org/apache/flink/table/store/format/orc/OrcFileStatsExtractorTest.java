@@ -31,6 +31,8 @@ import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.DoubleType;
 import org.apache.flink.table.types.logical.FloatType;
 import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.types.logical.MapType;
+import org.apache.flink.table.types.logical.MultisetType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.SmallIntType;
 import org.apache.flink.table.types.logical.TimestampType;
@@ -66,6 +68,8 @@ public class OrcFileStatsExtractorTest extends FileStatsExtractorTestBase {
                 new TimestampType(3),
                 // orc reader & writer currently cannot preserve a high precision timestamp
                 // new TimestampType(9),
-                new ArrayType(new IntType()));
+                new ArrayType(new IntType()),
+                new MapType(new VarCharType(8), new VarCharType(8)),
+                new MultisetType(new VarCharType(8)));
     }
 }
