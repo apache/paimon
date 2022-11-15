@@ -147,6 +147,32 @@ public class SchemaEvolutionTest {
                 .hasMessage("The column [%s] exists in the table[%s].", columnName, tablePath);
     }
 
+    @Test
+    public void testUpdateFieldType() throws Exception {
+        UpdateSchema updateSchema =
+                new UpdateSchema(
+                        RowType.of(new IntType(), new BigIntType()),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        schemaManager.commitNewVersion(updateSchema);
+
+        schemaManager.commitChanges(
+                Collections.singletonList(SchemaChange.updateColumnType("f0", new BigIntType())));
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.updateColumnType(
+                                                        "f0", new IntType()))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage(
+                        String.format(
+                                "Column type %s[%s] cannot be converted to %s without loosing information.",
+                                "f0", new BigIntType(), new IntType()));
+    }
+
     private List<Row> readRecords(FileStoreTable table, Predicate filter) throws IOException {
         RowRowConverter converter =
                 RowRowConverter.create(
