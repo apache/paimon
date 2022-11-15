@@ -25,8 +25,12 @@ import static org.apache.flink.configuration.description.TextElement.text;
 
 /** Enum of catalog table type. */
 public enum TableType implements DescribedEnum {
-    MANAGED("MANAGED_TABLE", "Table Store owned table where the entire lifecycle of the table data is managed."),
-    EXTERNAL("EXTERNAL_TABLE", "The table where Table Store has loose coupling with the data stored in external locations.");
+    MANAGED(
+            "MANAGED_TABLE",
+            "Table Store owned table where the entire lifecycle of the table data is managed."),
+    EXTERNAL(
+            "EXTERNAL_TABLE",
+            "The table where Table Store has loose coupling with the data stored in external locations.");
 
     private final String value;
     private final String description;
