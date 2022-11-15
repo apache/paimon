@@ -252,6 +252,9 @@ public class HiveCatalogITCase {
                 hiveShell
                         .executeQuery("DESC FORMATTED t")
                         .contains("Table Type:         \tEXTERNAL_TABLE      \tNULL"));
+        tEnv.executeSql("DROP TABLE T").await();
+        Path tablePath = new Path(path, "test_db.db/T");
+        Assert.assertTrue(tablePath.getFileSystem().exists(tablePath));
     }
 
     @Test
