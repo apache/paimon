@@ -21,6 +21,7 @@ package org.apache.flink.table.store;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.table.store.file.catalog.FileSystemCatalogFactory;
+import org.apache.flink.table.store.table.TableType;
 
 import java.time.Duration;
 
@@ -48,6 +49,12 @@ public class CatalogOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("Uri of metastore server.");
+
+    public static final ConfigOption<TableType> TABLE_TYPE =
+            ConfigOptions.key("table.type")
+                    .enumType(TableType.class)
+                    .defaultValue(TableType.MANAGED)
+                    .withDescription("Type of table.");
 
     public static final ConfigOption<Boolean> LOCK_ENABLED =
             ConfigOptions.key("lock.enabled")
