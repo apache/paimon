@@ -28,6 +28,7 @@ import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.table.TableType;
 import org.apache.flink.util.StringUtils;
 
 import org.apache.hadoop.conf.Configuration;
@@ -35,7 +36,6 @@ import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.RetryingMetaStoreClient;
-import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.api.AlreadyExistsException;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
@@ -55,6 +55,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.CatalogOptions.LOCK_ENABLED;
+import static org.apache.flink.table.store.CatalogOptions.TABLE_TYPE;
 import static org.apache.flink.table.store.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.flink.table.store.hive.HiveCatalogLock.checkMaxSleep;
 
@@ -278,6 +279,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     private Table newHmsTable(ObjectPath tablePath) {
         long currentTimeMillis = System.currentTimeMillis();
+        final TableType tableType = hiveConf.getEnum(TABLE_TYPE.key(), TableType.MANAGED);
         Table table =
                 new Table(
                         tablePath.getObjectName(),
@@ -292,9 +294,12 @@ public class HiveCatalog extends AbstractCatalog {
                         new HashMap<>(),
                         null,
                         null,
-                        TableType.MANAGED_TABLE.toString());
+                        tableType.toString());
         table.getParameters()
                 .put(hive_metastoreConstants.META_TABLE_STORAGE, STORAGE_HANDLER_CLASS_NAME);
+        if (TableType.EXTERNAL.equals(tableType)) {
+            table.getParameters().put("EXTERNAL", "TRUE");
+        }
         return table;
     }
 
