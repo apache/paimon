@@ -628,7 +628,7 @@ public class CoreOptions implements Serializable {
 
     /** Specifies the log changelog mode for table. */
     public enum LogChangelogMode implements DescribedEnum {
-        AUTO("auto", "Upsert for table with primary key, all for table without primary key.."),
+        AUTO("auto", "Upsert for table with primary key, all for table without primary key."),
 
         ALL("all", "The log system stores all changes including UPDATE_BEFORE."),
 
