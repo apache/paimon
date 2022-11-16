@@ -42,7 +42,7 @@ public interface AtomicFileWriter {
         RecoverableWriter recoverableWriter = null;
         try {
             recoverableWriter = fs.createRecoverableWriter();
-        } catch (UnsupportedOperationException ignore) {
+        } catch (Throwable ignore) {
         }
 
         if (recoverableWriter == null || fs.getKind() == FileSystemKind.FILE_SYSTEM) {
