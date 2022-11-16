@@ -20,23 +20,17 @@ package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.BinaryType;
-import org.apache.flink.table.types.logical.BooleanType;
-import org.apache.flink.table.types.logical.CharType;
-import org.apache.flink.table.types.logical.DateType;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.DoubleType;
-import org.apache.flink.table.types.logical.FloatType;
-import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.types.logical.DistinctType;
+import org.apache.flink.table.types.logical.LegacyTypeInformationType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.MapType;
 import org.apache.flink.table.types.logical.MultisetType;
+import org.apache.flink.table.types.logical.NullType;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.SmallIntType;
-import org.apache.flink.table.types.logical.TimestampType;
-import org.apache.flink.table.types.logical.TinyIntType;
-import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.table.types.logical.StructuredType;
+import org.apache.flink.table.types.logical.SymbolType;
+import org.apache.flink.table.types.logical.UnresolvedUserDefinedType;
+import org.apache.flink.table.types.logical.UserDefinedType;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.StringUtils;
 
@@ -320,19 +314,17 @@ public class TableSchema implements Serializable {
         }
     }
 
-    public static final List<Class<? extends LogicalType>> PRIMARY_KEY_LOGICAL_TYPE_CLASSES =
+    public static final List<Class<? extends LogicalType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
             Arrays.asList(
-                    TinyIntType.class,
-                    SmallIntType.class,
-                    IntType.class,
-                    BigIntType.class,
-                    BooleanType.class,
-                    FloatType.class,
-                    DoubleType.class,
-                    VarCharType.class,
-                    CharType.class,
-                    BinaryType.class,
-                    TimestampType.class,
-                    DecimalType.class,
-                    DateType.class);
+                    MapType.class,
+                    ArrayType.class,
+                    RowType.class,
+                    UserDefinedType.class,
+                    DistinctType.class,
+                    StructuredType.class,
+                    MultisetType.class,
+                    NullType.class,
+                    LegacyTypeInformationType.class,
+                    SymbolType.class,
+                    UnresolvedUserDefinedType.class);
 }

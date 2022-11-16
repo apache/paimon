@@ -168,13 +168,14 @@ public class SchemaManager implements Serializable {
             for (String primaryKeyName : primaryKeys) {
                 RowType.RowField rowField = rowFields.get(StringUtils.lowerCase(primaryKeyName));
                 LogicalType logicalType = rowField.getType();
-                if (TableSchema.PRIMARY_KEY_LOGICAL_TYPE_CLASSES.stream()
-                        .noneMatch(c -> c.isInstance(logicalType))) {
+                if (TableSchema.PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES.stream()
+                        .anyMatch(c -> c.isInstance(logicalType))) {
                     throw new UnsupportedOperationException(
                             String.format(
-                                    "Only support to create primary key in [%s], the type of column[%s] is [%s]",
+                                    "Don't support to create primary key in [%s], the type of column[%s] is [%s]",
                                     StringUtils.join(
-                                            TableSchema.PRIMARY_KEY_LOGICAL_TYPE_CLASSES.stream()
+                                            TableSchema.PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES
+                                                    .stream()
                                                     .map(Class::getSimpleName)
                                                     .collect(Collectors.toList()),
                                             ","),

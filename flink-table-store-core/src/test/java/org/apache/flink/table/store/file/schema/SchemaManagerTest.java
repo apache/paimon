@@ -199,9 +199,9 @@ public class SchemaManagerTest {
         assertThatThrownBy(() -> manager.commitNewVersion(mapPrimaryKeySchema))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage(
-                        "Only support to create primary key in [%s], the type of column[%s] is [%s]",
+                        "Don't support to create primary key in [%s], the type of column[%s] is [%s]",
                         StringUtils.join(
-                                TableSchema.PRIMARY_KEY_LOGICAL_TYPE_CLASSES.stream()
+                                TableSchema.PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES.stream()
                                         .map(Class::getSimpleName)
                                         .collect(Collectors.toList()),
                                 ","),
