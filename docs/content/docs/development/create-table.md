@@ -296,6 +296,24 @@ Use approach one if you have a large number of filtered queries
 with only `user_id`, and use approach two if you have a large
 number of filtered queries with only `catalog_id`.
 
+The primary key data types currently supported by the table store
+are as follows:
+```
+| TinyIntType
+| SmallIntType
+| IntType.class
+| BigIntType
+| BooleanType
+| FloatType
+| DoubleType
+| VarCharType
+| CharType
+| BinaryType
+| TimestampType
+| DecimalType
+| DateType
+```
+
 ## Partial Update
 
 You can configure partial update from options:
