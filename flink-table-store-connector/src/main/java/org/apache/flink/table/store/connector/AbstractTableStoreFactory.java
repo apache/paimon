@@ -33,7 +33,6 @@ import org.apache.flink.table.factories.DynamicTableSourceFactory;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
 import org.apache.flink.table.store.CoreOptions.LogConsistency;
-import org.apache.flink.table.store.CoreOptions.LogStartupMode;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.connector.source.MetadataTableSource;
 import org.apache.flink.table.store.connector.source.TableStoreSource;
@@ -54,7 +53,6 @@ import java.util.Set;
 
 import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
-import static org.apache.flink.table.store.CoreOptions.LOG_SCAN;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.NONE;
 import static org.apache.flink.table.store.log.LogStoreTableFactory.discoverLogStoreFactory;
@@ -132,12 +130,6 @@ public abstract class AbstractTableStoreFactory
         if (consistency == LogConsistency.EVENTUAL) {
             throw new ValidationException(
                     "File store continuous reading dose not support eventual consistency mode.");
-        }
-        LogStartupMode startupMode = options.get(LOG_SCAN);
-        if (startupMode == LogStartupMode.FROM_TIMESTAMP) {
-            throw new ValidationException(
-                    "File store continuous reading dose not support from_timestamp scan mode, "
-                            + "you can add timestamp filters instead.");
         }
     }
 

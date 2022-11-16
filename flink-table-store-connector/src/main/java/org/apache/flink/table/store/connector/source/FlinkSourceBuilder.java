@@ -47,6 +47,7 @@ import static org.apache.flink.table.store.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.flink.table.store.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.flink.table.store.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 import static org.apache.flink.table.store.CoreOptions.LOG_SCAN;
+import static org.apache.flink.table.store.CoreOptions.LOG_SCAN_TIMESTAMP_MILLS;
 import static org.apache.flink.table.store.CoreOptions.MERGE_ENGINE;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED;
 
@@ -117,12 +118,14 @@ public class FlinkSourceBuilder {
         return conf.get(CONTINUOUS_DISCOVERY_INTERVAL).toMillis();
     }
 
-    private FileStoreSource buildFileSource(boolean isContinuous, boolean continuousScanLatest) {
+    private FileStoreSource buildFileSource(
+            boolean isContinuous, LogStartupMode startupMode, Long startupMills) {
         return new FileStoreSource(
                 table,
                 isContinuous,
                 discoveryIntervalMills(),
-                continuousScanLatest,
+                startupMode,
+                startupMills,
                 projectedFields,
                 predicate,
                 limit);
@@ -150,20 +153,20 @@ public class FlinkSourceBuilder {
 
             LogStartupMode startupMode = conf.get(LOG_SCAN);
             if (logSourceProvider == null) {
-                return buildFileSource(true, startupMode == LogStartupMode.LATEST);
+                return buildFileSource(true, startupMode, conf.get(LOG_SCAN_TIMESTAMP_MILLS));
             } else {
                 if (startupMode != LogStartupMode.FULL) {
                     return logSourceProvider.createSource(null);
                 }
                 return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
-                                buildFileSource(false, false))
+                                buildFileSource(false, startupMode, null))
                         .addSource(
                                 new LogHybridSourceFactory(logSourceProvider),
                                 Boundedness.CONTINUOUS_UNBOUNDED)
                         .build();
             }
         } else {
-            return buildFileSource(false, false);
+            return buildFileSource(false, LogStartupMode.FULL, null);
         }
     }
 
