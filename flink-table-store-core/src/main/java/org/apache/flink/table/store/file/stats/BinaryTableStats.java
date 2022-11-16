@@ -103,7 +103,7 @@ public class BinaryTableStats {
                         serializeBinaryRow(min()),
                         serializeBinaryRow(max()),
                         new GenericArrayData(nullCounts()))
-                : GenericRowData.of(row.getBinary(0), row.getBinary(1), row.getArray(2));
+                : row;
     }
 
     public static BinaryTableStats fromRowData(RowData row) {
