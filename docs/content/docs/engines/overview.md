@@ -43,9 +43,9 @@ Apache Hive and Apache Spark.
 | Hive      | 2.3      | read                                                 | Projection, Filter |
 | Hive      | 3.1      | read                                                 | Projection, Filter |
 | Spark     | 2.4      | read                                                 | Projection, Filter |
-| Spark     | 3.0      | read                                                 | Projection, Filter |
-| Spark     | 3.1      | read                                                 | Projection, Filter |
-| Spark     | 3.2      | read                                                 | Projection, Filter |
-| Spark     | 3.3      | read                                                 | Projection, Filter |
+| Spark     | 3.0      | read, create/drop table, create/drop database        | Projection, Filter |
+| Spark     | 3.1      | read, create/drop table, create/drop database        | Projection, Filter |
+| Spark     | 3.2      | read, create/drop table, create/drop database        | Projection, Filter |
+| Spark     | 3.3      | read, create/drop table, create/drop database        | Projection, Filter |
 | Trino     | 358      | read                                                 | Projection, Filter |
 | Trino     | 388      | read                                                 | Projection, Filter |
