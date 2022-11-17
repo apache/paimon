@@ -163,24 +163,17 @@ public class SchemaManager implements Serializable {
         if (!primaryKeys.isEmpty()) {
             Map<String, RowType.RowField> rowFields = new HashMap<>();
             for (RowType.RowField rowField : updateSchema.rowType().getFields()) {
-                rowFields.put(StringUtils.lowerCase(rowField.getName()), rowField);
+                rowFields.put(rowField.getName(), rowField);
             }
             for (String primaryKeyName : primaryKeys) {
-                RowType.RowField rowField = rowFields.get(StringUtils.lowerCase(primaryKeyName));
+                RowType.RowField rowField = rowFields.get(primaryKeyName);
                 LogicalType logicalType = rowField.getType();
                 if (TableSchema.PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES.stream()
                         .anyMatch(c -> c.isInstance(logicalType))) {
                     throw new UnsupportedOperationException(
                             String.format(
-                                    "Don't support to create primary key in [%s], the type of column[%s] is [%s]",
-                                    StringUtils.join(
-                                            TableSchema.PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES
-                                                    .stream()
-                                                    .map(Class::getSimpleName)
-                                                    .collect(Collectors.toList()),
-                                            ","),
-                                    primaryKeyName,
-                                    logicalType.getClass().getSimpleName()));
+                                    "The type %s in primary key field %s is unsupported",
+                                    logicalType.getClass().getSimpleName(), primaryKeyName));
                 }
             }
         }

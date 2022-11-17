@@ -27,7 +27,6 @@ import org.apache.flink.table.types.logical.MapType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
 
-import org.apache.commons.lang3.StringUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -199,14 +198,8 @@ public class SchemaManagerTest {
         assertThatThrownBy(() -> manager.commitNewVersion(mapPrimaryKeySchema))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage(
-                        "Don't support to create primary key in [%s], the type of column[%s] is [%s]",
-                        StringUtils.join(
-                                TableSchema.PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES.stream()
-                                        .map(Class::getSimpleName)
-                                        .collect(Collectors.toList()),
-                                ","),
-                        "f0",
-                        MapType.class.getSimpleName());
+                        "The type %s in primary key field %s is unsupported",
+                        MapType.class.getSimpleName(), "f0");
 
         RowType doublePrimaryKeyType =
                 RowType.of(new DoubleType(), new BigIntType(), new VarCharType());
