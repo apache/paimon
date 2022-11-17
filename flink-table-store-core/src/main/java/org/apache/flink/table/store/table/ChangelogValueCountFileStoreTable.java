@@ -74,7 +74,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                         new CoreOptions(tableSchema.options()),
                         tableSchema.logicalPartitionType(),
                         tableSchema.logicalBucketKeyType(),
-                        extractor.keyType(extractor.keyFields(tableSchema)),
+                        RowDataType.toRowType(false, extractor.keyFields(tableSchema)),
                         countType,
                         extractor,
                         mergeFunction);
@@ -162,11 +162,6 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                 new ValueCountTableKeyFieldsExtractor();
 
         private ValueCountTableKeyFieldsExtractor() {}
-
-        @Override
-        public RowType keyType(List<DataField> keyFields) {
-            return (RowType) new RowDataType(false, keyFields).logicalType();
-        }
 
         @Override
         public List<DataField> keyFields(TableSchema schema) {

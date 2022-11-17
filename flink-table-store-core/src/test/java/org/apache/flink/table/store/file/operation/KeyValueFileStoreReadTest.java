@@ -31,7 +31,6 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.KeyFieldsExtractor;
-import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
@@ -115,11 +114,6 @@ public class KeyValueFileStoreReadTest {
                         valueType,
                         new KeyFieldsExtractor() {
                             private static final long serialVersionUID = 1L;
-
-                            @Override
-                            public RowType keyType(List<DataField> keyFields) {
-                                return (RowType) new RowDataType(false, keyFields).logicalType();
-                            }
 
                             @Override
                             public List<DataField> keyFields(TableSchema schema) {

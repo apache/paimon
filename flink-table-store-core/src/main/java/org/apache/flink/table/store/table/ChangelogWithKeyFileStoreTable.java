@@ -112,7 +112,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                         options,
                         tableSchema.logicalPartitionType(),
                         addKeyNamePrefix(tableSchema.logicalBucketKeyType()),
-                        extractor.keyType(extractor.keyFields(tableSchema)),
+                        RowDataType.toRowType(false, extractor.keyFields(tableSchema)),
                         rowType,
                         extractor,
                         mergeFunction);
@@ -129,6 +129,18 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                                                 f.getType(),
                                                 f.getDescription().orElse(null)))
                         .collect(Collectors.toList()));
+    }
+
+    private static List<DataField> addKeyNamePrefix(List<DataField> keyFields) {
+        return keyFields.stream()
+                .map(
+                        f ->
+                                new DataField(
+                                        f.id(),
+                                        KEY_FIELD_PREFIX + f.name(),
+                                        f.type(),
+                                        f.description()))
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -230,13 +242,8 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         private ChangelogWithKeyKeyFieldsExtractor() {}
 
         @Override
-        public RowType keyType(List<DataField> keyFields) {
-            return addKeyNamePrefix((RowType) new RowDataType(false, keyFields).logicalType());
-        }
-
-        @Override
         public List<DataField> keyFields(TableSchema schema) {
-            return schema.trimmedPrimaryKeysFields();
+            return addKeyNamePrefix(schema.trimmedPrimaryKeysFields());
         }
     }
 }

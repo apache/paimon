@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.types.logical.RowType;
-
 import java.io.Serializable;
 import java.util.List;
 
@@ -32,12 +30,4 @@ public interface KeyFieldsExtractor extends Serializable {
      * @return the key fields
      */
     List<DataField> keyFields(TableSchema schema);
-
-    /**
-     * Extract key type from table schema.
-     *
-     * @param keyFields the data fields of key type
-     * @return the key type
-     */
-    RowType keyType(List<DataField> keyFields);
 }

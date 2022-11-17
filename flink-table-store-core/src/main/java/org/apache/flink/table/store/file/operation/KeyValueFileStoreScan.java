@@ -25,6 +25,7 @@ import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.KeyFieldsExtractor;
+import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -112,7 +113,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                     final TableSchema schema = scanTableSchema(key);
                     final List<DataField> keyFields = keyFieldsExtractor.keyFields(schema);
                     return new FieldStatsArraySerializer(
-                            keyFieldsExtractor.keyType(keyFields),
+                            RowDataType.toRowType(false, keyFields),
                             tableSchema.id() == key
                                     ? null
                                     : SchemaEvolutionUtil.createIndexMapping(

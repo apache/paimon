@@ -27,7 +27,6 @@ import org.apache.flink.table.runtime.generated.RecordComparator;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.KeyFieldsExtractor;
-import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
@@ -337,25 +336,10 @@ public class TestKeyValueGenerator {
         public static final TestKeyFieldsExtractor EXTRACTOR = new TestKeyFieldsExtractor();
 
         @Override
-        public RowType keyType(List<DataField> keyFields) {
-            return (RowType)
-                    new RowDataType(
-                                    false,
-                                    keyFields.stream()
-                                            .map(
-                                                    f ->
-                                                            new DataField(
-                                                                    f.id(),
-                                                                    "key_" + f.name(),
-                                                                    f.type()))
-                                            .collect(Collectors.toList()))
-                            .logicalType();
-        }
-
-        @Override
         public List<DataField> keyFields(TableSchema schema) {
             return schema.fields().stream()
                     .filter(f -> KEY_NAME_LIST.contains(f.name()))
+                    .map(f -> new DataField(f.id(), "key_" + f.name(), f.type(), f.description()))
                     .collect(Collectors.toList());
         }
     }
