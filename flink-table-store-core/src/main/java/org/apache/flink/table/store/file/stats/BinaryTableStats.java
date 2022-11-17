@@ -22,7 +22,6 @@ import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.format.FieldStats;
 
 import javax.annotation.Nullable;
@@ -32,32 +31,34 @@ import java.util.Objects;
 
 import static org.apache.flink.table.store.file.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.flink.table.store.file.utils.SerializationUtils.serializeBinaryRow;
+import static org.apache.flink.util.Preconditions.checkNotNull;
 
-/**
- * A serialized row bytes to cache {@link FieldStats}.
- *
- * <p>TODO: {@link Predicate} get min and max from {@link BinaryRowData}, lazily deserialization.
- */
+/** A serialized row bytes to cache {@link FieldStats}. */
 public class BinaryTableStats {
 
-    private final BinaryRowData min;
-    private final BinaryRowData max;
-    private final long[] nullCounts;
-
+    @Nullable private RowData row;
     @Nullable private FieldStats[] cacheArray;
+    @Nullable private BinaryRowData cacheMin;
+    @Nullable private BinaryRowData cacheMax;
+    @Nullable private long[] cacheNullCounts;
 
-    public BinaryTableStats(BinaryRowData min, BinaryRowData max, long[] nullCounts) {
-        this(min, max, nullCounts, null);
+    public BinaryTableStats(RowData row) {
+        this.row = row;
     }
 
     public BinaryTableStats(
-            BinaryRowData min,
-            BinaryRowData max,
-            long[] nullCounts,
+            BinaryRowData cacheMin, BinaryRowData cacheMax, long[] cacheNullCounts) {
+        this(cacheMin, cacheMax, cacheNullCounts, null);
+    }
+
+    public BinaryTableStats(
+            BinaryRowData cacheMin,
+            BinaryRowData cacheMax,
+            long[] cacheNullCounts,
             @Nullable FieldStats[] cacheArray) {
-        this.min = min;
-        this.max = max;
-        this.nullCounts = nullCounts;
+        this.cacheMin = cacheMin;
+        this.cacheMax = cacheMax;
+        this.cacheNullCounts = cacheNullCounts;
         this.cacheArray = cacheArray;
     }
 
@@ -73,27 +74,40 @@ public class BinaryTableStats {
     }
 
     public BinaryRowData min() {
-        return min;
+        if (cacheMin == null) {
+            checkNotNull(row);
+            cacheMin = deserializeBinaryRow(this.row.getBinary(0));
+        }
+        return cacheMin;
     }
 
     public BinaryRowData max() {
-        return max;
+        if (cacheMax == null) {
+            checkNotNull(row);
+            cacheMax = deserializeBinaryRow(this.row.getBinary(1));
+        }
+        return cacheMax;
     }
 
     public long[] nullCounts() {
-        return nullCounts;
+        if (cacheNullCounts == null) {
+            checkNotNull(row);
+            cacheNullCounts = row.getArray(2).toLongArray();
+        }
+        return cacheNullCounts;
     }
 
     public RowData toRowData() {
-        return GenericRowData.of(
-                serializeBinaryRow(min), serializeBinaryRow(max), new GenericArrayData(nullCounts));
+        return row == null
+                ? GenericRowData.of(
+                        serializeBinaryRow(min()),
+                        serializeBinaryRow(max()),
+                        new GenericArrayData(nullCounts()))
+                : row;
     }
 
     public static BinaryTableStats fromRowData(RowData row) {
-        return new BinaryTableStats(
-                deserializeBinaryRow(row.getBinary(0)),
-                deserializeBinaryRow(row.getBinary(1)),
-                row.getArray(2).toLongArray());
+        return new BinaryTableStats(row);
     }
 
     @Override
@@ -105,15 +119,15 @@ public class BinaryTableStats {
             return false;
         }
         BinaryTableStats that = (BinaryTableStats) o;
-        return Objects.equals(min, that.min)
-                && Objects.equals(max, that.max)
-                && Arrays.equals(nullCounts, that.nullCounts);
+        return Objects.equals(min(), that.min())
+                && Objects.equals(max(), that.max())
+                && Arrays.equals(nullCounts(), that.nullCounts());
     }
 
     @Override
     public int hashCode() {
-        int result = Objects.hash(min, max);
-        result = 31 * result + Arrays.hashCode(nullCounts);
+        int result = Objects.hash(min(), max());
+        result = 31 * result + Arrays.hashCode(nullCounts());
         return result;
     }
 }
