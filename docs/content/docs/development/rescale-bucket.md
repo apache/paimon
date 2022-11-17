@@ -88,6 +88,21 @@ WITH (
     'bucket' = '16'
 );
 
+-- like from a kafka table 
+CREATE temporary TABLE raw_orders(
+    trade_order_id BIGINT,
+    item_id BIGINT,
+    item_price BIGINT,
+    gmt_create STRING,
+    order_status STRING
+) WITH (
+    'connector' = 'kafka',
+    'topic' = '...',
+    'properties.bootstrap.servers' = '...',
+    'format' = 'csv'
+    ...
+);
+
 -- streaming insert as bucket num = 16
 INSERT INTO verified_orders
 SELECT trade_order_id,
@@ -95,7 +110,7 @@ SELECT trade_order_id,
        item_price,
        DATE_FORMAT(gmt_create, 'yyyy-MM-dd') AS dt
 FROM raw_orders
-WHERE order_status = 'verified'
+WHERE order_status = 'verified';
 ```
 The pipeline has been running well for the past few weeks. However, the data volume has grown fast recently, 
 and the job's latency keeps increasing. To improve the data freshness, users can 
@@ -110,7 +125,7 @@ and the job's latency keeps increasing. To improve the data freshness, users can
 - Increase the bucket number
   ```sql
   -- scaling out
-  ALTER TABLE verified_orders SET ('bucket' = '32')
+  ALTER TABLE verified_orders SET ('bucket' = '32');
   ```
 - Switch to the batch mode and overwrite the current partition(s) to which the streaming job is writing
   ```sql
@@ -122,7 +137,7 @@ and the job's latency keeps increasing. To improve the data freshness, users can
          item_id,
          item_price
   FROM verified_orders
-  WHERE dt = '2022-06-22' AND order_status = 'verified'
+  WHERE dt = '2022-06-22';
   
   -- case 2: there are late events updating the historical partitions, but the range does not exceed 3 days
   INSERT OVERWRITE verified_orders
@@ -131,7 +146,7 @@ and the job's latency keeps increasing. To improve the data freshness, users can
          item_price,
          dt
   FROM verified_orders
-  WHERE dt IN ('2022-06-20', '2022-06-21', '2022-06-22') AND order_status = 'verified'
+  WHERE dt IN ('2022-06-20', '2022-06-21', '2022-06-22');
   ```
 - After overwrite job finished, switch back to streaming mode. And now, the parallelism can be increased alongside with bucket number to restore the streaming job from the savepoint 
 ( see [Start a SQL Job from a savepoint](https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/dev/table/sqlclient/#start-a-sql-job-from-a-savepoint) )
@@ -145,5 +160,5 @@ and the job's latency keeps increasing. To improve the data freshness, users can
        item_price,
        DATE_FORMAT(gmt_create, 'yyyy-MM-dd') AS dt
   FROM raw_orders
-  WHERE order_status = 'verified'
+  WHERE order_status = 'verified';
   ```
