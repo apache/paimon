@@ -20,6 +20,7 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
@@ -76,6 +77,11 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         RowData.FieldGetter[] fieldGetters = new RowData.FieldGetter[fieldTypes.size()];
         for (int i = 0; i < fieldTypes.size(); i++) {
             fieldGetters[i] = RowDataUtils.createNullCheckingFieldGetter(fieldTypes.get(i), i);
+        }
+        String sequenceField = conf.get(CoreOptions.SEQUENCE_FIELD);
+        if (sequenceField != null && !rowType.getFieldNames().contains(sequenceField)) {
+            throw new ValidationException(
+                    String.format("Nonexistent sequence field: '%s'", sequenceField));
         }
 
         MergeFunction<KeyValue> mergeFunction;
