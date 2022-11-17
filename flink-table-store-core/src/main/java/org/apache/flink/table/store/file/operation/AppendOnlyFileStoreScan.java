@@ -102,8 +102,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
         return schemaRowStatsConverters.computeIfAbsent(
                 schemaId,
                 id -> {
-                    TableSchema tableSchema = getTableSchema();
-                    TableSchema schema = getTableSchema(id);
+                    TableSchema tableSchema = scanTableSchema();
+                    TableSchema schema = scanTableSchema(id);
                     return new FieldStatsArraySerializer(
                             schema.logicalRowType(),
                             tableSchema.id() == id

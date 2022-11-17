@@ -71,7 +71,7 @@ public class KeyValueFileStoreScanTest {
                                 TestKeyValueGenerator.DEFAULT_PART_TYPE,
                                 TestKeyValueGenerator.KEY_TYPE,
                                 TestKeyValueGenerator.DEFAULT_ROW_TYPE,
-                                TestKeyValueGenerator.TestSchemaFieldTypeExtractor.EXTRACTOR,
+                                TestKeyValueGenerator.TestKeyFieldsExtractor.EXTRACTOR,
                                 new DeduplicateMergeFunction())
                         .build();
         snapshotManager = store.snapshotManager();

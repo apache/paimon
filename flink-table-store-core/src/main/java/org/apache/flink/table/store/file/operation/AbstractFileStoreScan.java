@@ -257,11 +257,11 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         };
     }
 
-    protected TableSchema getTableSchema() {
-        return getTableSchema(this.schemaId);
+    protected TableSchema scanTableSchema() {
+        return scanTableSchema(this.schemaId);
     }
 
-    protected TableSchema getTableSchema(long id) {
+    protected TableSchema scanTableSchema(long id) {
         return tableSchemas.computeIfAbsent(id, key -> schemaManager.schema(id));
     }
 

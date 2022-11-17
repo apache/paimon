@@ -24,15 +24,7 @@ import java.io.Serializable;
 import java.util.List;
 
 /** Extractor of schema for different tables. */
-public interface SchemaFieldTypeExtractor extends Serializable {
-    /**
-     * Extract key type from table schema.
-     *
-     * @param schema the table schema
-     * @return the key type
-     */
-    RowType keyType(TableSchema schema);
-
+public interface KeyFieldsExtractor extends Serializable {
     /**
      * Extract key fields from table schema.
      *
@@ -40,4 +32,12 @@ public interface SchemaFieldTypeExtractor extends Serializable {
      * @return the key fields
      */
     List<DataField> keyFields(TableSchema schema);
+
+    /**
+     * Extract key type from table schema.
+     *
+     * @param keyFields the data fields of key type
+     * @return the key type
+     */
+    RowType keyType(List<DataField> keyFields);
 }

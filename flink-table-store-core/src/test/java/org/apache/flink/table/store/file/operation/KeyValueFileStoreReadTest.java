@@ -30,8 +30,8 @@ import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunct
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.schema.DataField;
+import org.apache.flink.table.store.file.schema.KeyFieldsExtractor;
 import org.apache.flink.table.store.file.schema.RowDataType;
-import org.apache.flink.table.store.file.schema.SchemaFieldTypeExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
@@ -113,13 +113,12 @@ public class KeyValueFileStoreReadTest {
                         partitionType,
                         keyType,
                         valueType,
-                        new SchemaFieldTypeExtractor() {
+                        new KeyFieldsExtractor() {
                             private static final long serialVersionUID = 1L;
 
                             @Override
-                            public RowType keyType(TableSchema schema) {
-                                return (RowType)
-                                        new RowDataType(false, keyFields(schema)).logicalType();
+                            public RowType keyType(List<DataField> keyFields) {
+                                return (RowType) new RowDataType(false, keyFields).logicalType();
                             }
 
                             @Override
@@ -168,7 +167,7 @@ public class KeyValueFileStoreReadTest {
                         TestKeyValueGenerator.DEFAULT_PART_TYPE,
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
-                        TestKeyValueGenerator.TestSchemaFieldTypeExtractor.EXTRACTOR,
+                        TestKeyValueGenerator.TestKeyFieldsExtractor.EXTRACTOR,
                         new DeduplicateMergeFunction());
 
         RowDataSerializer projectedValueSerializer =
@@ -257,7 +256,7 @@ public class KeyValueFileStoreReadTest {
             RowType partitionType,
             RowType keyType,
             RowType valueType,
-            SchemaFieldTypeExtractor extractor,
+            KeyFieldsExtractor extractor,
             MergeFunction<KeyValue> mergeFunction)
             throws Exception {
         SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));

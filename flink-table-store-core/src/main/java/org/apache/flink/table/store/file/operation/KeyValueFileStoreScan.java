@@ -23,8 +23,9 @@ import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.schema.DataField;
+import org.apache.flink.table.store.file.schema.KeyFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
-import org.apache.flink.table.store.file.schema.SchemaFieldTypeExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
@@ -43,7 +44,7 @@ import static org.apache.flink.table.store.file.predicate.PredicateBuilder.split
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     private final Map<Long, FieldStatsArraySerializer> schemaKeyStatsConverters;
-    private final SchemaFieldTypeExtractor schemaFieldTypeExtractor;
+    private final KeyFieldsExtractor keyFieldsExtractor;
     private final RowType keyType;
 
     private Predicate keyFilter;
@@ -55,7 +56,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
             long schemaId,
-            SchemaFieldTypeExtractor schemaFieldTypeExtractor,
+            KeyFieldsExtractor keyFieldsExtractor,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
@@ -72,7 +73,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 numOfBuckets,
                 checkNumOfBuckets,
                 changelogProducer);
-        this.schemaFieldTypeExtractor = schemaFieldTypeExtractor;
+        this.keyFieldsExtractor = keyFieldsExtractor;
         this.schemaKeyStatsConverters = new HashMap<>();
         this.keyType = keyType;
     }
@@ -107,15 +108,15 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         return schemaKeyStatsConverters.computeIfAbsent(
                 id,
                 key -> {
-                    final TableSchema tableSchema = getTableSchema();
-                    final TableSchema schema = getTableSchema(key);
+                    final TableSchema tableSchema = scanTableSchema();
+                    final TableSchema schema = scanTableSchema(key);
+                    final List<DataField> keyFields = keyFieldsExtractor.keyFields(schema);
                     return new FieldStatsArraySerializer(
-                            schemaFieldTypeExtractor.keyType(schema),
+                            keyFieldsExtractor.keyType(keyFields),
                             tableSchema.id() == key
                                     ? null
                                     : SchemaEvolutionUtil.createIndexMapping(
-                                            schemaFieldTypeExtractor.keyFields(tableSchema),
-                                            schemaFieldTypeExtractor.keyFields(schema)));
+                                            keyFieldsExtractor.keyFields(tableSchema), keyFields));
                 });
     }
 }

@@ -32,7 +32,8 @@ import org.apache.flink.table.store.file.mergetree.compact.aggregate.AggregateMe
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.DataField;
-import org.apache.flink.table.store.file.schema.SchemaFieldTypeExtractor;
+import org.apache.flink.table.store.file.schema.KeyFieldsExtractor;
+import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -103,6 +104,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         }
 
         CoreOptions options = new CoreOptions(conf);
+        KeyFieldsExtractor extractor = ChangelogWithKeyKeyFieldsExtractor.EXTRACTOR;
         this.store =
                 new KeyValueFileStore(
                         schemaManager,
@@ -110,9 +112,9 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                         options,
                         tableSchema.logicalPartitionType(),
                         addKeyNamePrefix(tableSchema.logicalBucketKeyType()),
-                        ChangelogWithKeySchemaFieldTypeExtractor.EXTRACTOR.keyType(tableSchema),
+                        extractor.keyType(extractor.keyFields(tableSchema)),
                         rowType,
-                        ChangelogWithKeySchemaFieldTypeExtractor.EXTRACTOR,
+                        extractor,
                         mergeFunction);
     }
 
@@ -219,17 +221,17 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         return store;
     }
 
-    static class ChangelogWithKeySchemaFieldTypeExtractor implements SchemaFieldTypeExtractor {
+    static class ChangelogWithKeyKeyFieldsExtractor implements KeyFieldsExtractor {
         private static final long serialVersionUID = 1L;
 
-        static final ChangelogWithKeySchemaFieldTypeExtractor EXTRACTOR =
-                new ChangelogWithKeySchemaFieldTypeExtractor();
+        static final ChangelogWithKeyKeyFieldsExtractor EXTRACTOR =
+                new ChangelogWithKeyKeyFieldsExtractor();
 
-        private ChangelogWithKeySchemaFieldTypeExtractor() {}
+        private ChangelogWithKeyKeyFieldsExtractor() {}
 
         @Override
-        public RowType keyType(TableSchema schema) {
-            return addKeyNamePrefix(schema.logicalTrimmedPrimaryKeysType());
+        public RowType keyType(List<DataField> keyFields) {
+            return addKeyNamePrefix((RowType) new RowDataType(false, keyFields).logicalType());
         }
 
         @Override

@@ -30,7 +30,8 @@ import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFuncti
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.DataField;
-import org.apache.flink.table.store.file.schema.SchemaFieldTypeExtractor;
+import org.apache.flink.table.store.file.schema.KeyFieldsExtractor;
+import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -65,6 +66,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                 RowType.of(
                         new LogicalType[] {new BigIntType(false)}, new String[] {"_VALUE_COUNT"});
         MergeFunction<KeyValue> mergeFunction = new ValueCountMergeFunction();
+        KeyFieldsExtractor extractor = ValueCountTableKeyFieldsExtractor.EXTRACTOR;
         this.store =
                 new KeyValueFileStore(
                         schemaManager,
@@ -72,9 +74,9 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                         new CoreOptions(tableSchema.options()),
                         tableSchema.logicalPartitionType(),
                         tableSchema.logicalBucketKeyType(),
-                        tableSchema.logicalRowType(),
+                        extractor.keyType(extractor.keyFields(tableSchema)),
                         countType,
-                        ValueCountTableSchemaFieldTypeExtractor.EXTRACTOR,
+                        extractor,
                         mergeFunction);
     }
 
@@ -152,21 +154,18 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
         return store;
     }
 
-    /**
-     * {@link SchemaFieldTypeExtractor} implementation for {@link
-     * ChangelogValueCountFileStoreTable}.
-     */
-    static class ValueCountTableSchemaFieldTypeExtractor implements SchemaFieldTypeExtractor {
+    /** {@link KeyFieldsExtractor} implementation for {@link ChangelogValueCountFileStoreTable}. */
+    static class ValueCountTableKeyFieldsExtractor implements KeyFieldsExtractor {
         private static final long serialVersionUID = 1L;
 
-        static final ValueCountTableSchemaFieldTypeExtractor EXTRACTOR =
-                new ValueCountTableSchemaFieldTypeExtractor();
+        static final ValueCountTableKeyFieldsExtractor EXTRACTOR =
+                new ValueCountTableKeyFieldsExtractor();
 
-        private ValueCountTableSchemaFieldTypeExtractor() {}
+        private ValueCountTableKeyFieldsExtractor() {}
 
         @Override
-        public RowType keyType(TableSchema schema) {
-            return schema.logicalRowType();
+        public RowType keyType(List<DataField> keyFields) {
+            return (RowType) new RowDataType(false, keyFields).logicalType();
         }
 
         @Override

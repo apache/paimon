@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.file.schema;
 
+import javax.annotation.Nullable;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +36,7 @@ public class SchemaEvolutionUtil {
      * @param dataFields the fields of underlying data
      * @return the index mapping
      */
+    @Nullable
     public static int[] createIndexMapping(
             List<DataField> tableFields, List<DataField> dataFields) {
         int[] indexMapping = new int[tableFields.size()];
