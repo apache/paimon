@@ -20,7 +20,6 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
@@ -53,7 +52,6 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link ChangelogWithKeyFileStoreTable}. */
 public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
@@ -578,16 +576,6 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                 .isEqualTo(
                         Collections.singletonList(
                                 "2|10|300|binary|varbinary|mapKey:mapVal|multiset"));
-    }
-
-    @Test
-    public void testInvalidSequenceField() {
-        assertThatThrownBy(
-                        () ->
-                                createFileStoreTable(
-                                        conf -> conf.set(CoreOptions.SEQUENCE_FIELD, "x")))
-                .isInstanceOf(ValidationException.class)
-                .hasMessageContaining("Nonexistent sequence field: 'x'");
     }
 
     @Override
