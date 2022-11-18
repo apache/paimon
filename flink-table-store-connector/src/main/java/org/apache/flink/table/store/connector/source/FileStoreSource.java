@@ -51,14 +51,14 @@ public class FileStoreSource extends FlinkSource {
 
     private final LogStartupMode startupMode;
 
-    private final Long startupMills;
+    @Nullable private final Long startupMills;
 
     public FileStoreSource(
             FileStoreTable table,
             boolean isContinuous,
             long discoveryInterval,
             LogStartupMode startupMode,
-            Long startupMills,
+            @Nullable Long startupMills,
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
             @Nullable Long limit) {
