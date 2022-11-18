@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.core.fs.FileSystemKind;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
@@ -45,6 +46,8 @@ import org.apache.flink.table.types.logical.RowType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -63,6 +66,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final Supplier<Comparator<RowData>> keyComparatorSupplier;
     private final MergeFunction<KeyValue> mergeFunction;
     private final CoreOptions options;
+    private final FileStorePathFactory pathFactory;
 
     public KeyValueFileStoreWrite(
             SchemaManager schemaManager,
@@ -96,6 +100,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         this.keyComparatorSupplier = keyComparatorSupplier;
         this.mergeFunction = mergeFunction;
         this.options = options;
+        this.pathFactory = pathFactory;
     }
 
     @Override
@@ -140,7 +145,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         compactExecutor,
                         levels);
         return new MergeTreeWriter(
-                options.writeBufferSpillable(),
+                bufferSpillable(),
                 options.localSortMaxNumFileHandles(),
                 ioManager,
                 compactManager,
@@ -150,6 +155,15 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 writerFactory,
                 options.commitForceCompact(),
                 options.changelogProducer());
+    }
+
+    private boolean bufferSpillable() {
+        try {
+            return options.writeBufferSpillable(
+                    pathFactory.root().getFileSystem().getKind() != FileSystemKind.FILE_SYSTEM);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     private CompactManager createCompactManager(
