@@ -39,6 +39,9 @@ public class CompatibilityTestUtils {
             ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
                 File file = new File(targetDirectory, entry.getName());
+                if (!file.toPath().normalize().startsWith(targetDirectory)) {
+                    throw new IOException("Bad zip entry");
+                }
 
                 if (entry.isDirectory()) {
                     file.mkdirs();
