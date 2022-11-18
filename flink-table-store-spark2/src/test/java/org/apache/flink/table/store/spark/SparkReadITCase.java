@@ -37,6 +37,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.List;
 
@@ -55,7 +56,7 @@ public class SparkReadITCase {
 
     @BeforeAll
     public static void startSpark() throws Exception {
-        warehouse = File.createTempFile("warehouse", null);
+        warehouse = Files.createTempFile("warehouse", null).toFile();
         assertThat(warehouse.delete()).isTrue();
         Path warehousePath = new Path("file:" + warehouse);
         spark = SparkSession.builder().master("local[2]").getOrCreate();
