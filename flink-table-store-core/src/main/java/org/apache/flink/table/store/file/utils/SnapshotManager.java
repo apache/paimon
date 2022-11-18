@@ -90,6 +90,10 @@ public class SnapshotManager {
         }
     }
 
+    /**
+     * Returns a snapshot earlier than the timestamp mills. A non-existent snapshot may be returned
+     * if all snapshots are later than the timestamp mills.
+     */
     public @Nullable Long earlierThanTimeMills(long timestampMills) {
         Long earliest = earliestSnapshotId();
         Long latest = latestSnapshotId();
