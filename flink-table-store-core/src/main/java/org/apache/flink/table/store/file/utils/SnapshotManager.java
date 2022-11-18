@@ -97,15 +97,13 @@ public class SnapshotManager {
             return null;
         }
 
-        long snapshotId = latestId;
-        while (snapshotId >= earliestId) {
+        for (long snapshotId = latestId; snapshotId >= earliestId; snapshotId--) {
             if (snapshotExists(snapshotId)) {
                 Snapshot snapshot = snapshot(snapshotId);
                 if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
                     return snapshot.id();
                 }
             }
-            snapshotId--;
         }
 
         return null;
