@@ -31,6 +31,9 @@ import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFun
 import org.apache.flink.table.store.file.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.schema.DataField;
+import org.apache.flink.table.store.file.schema.KeyFieldsExtractor;
+import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -101,6 +104,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         }
 
         CoreOptions options = new CoreOptions(conf);
+        KeyFieldsExtractor extractor = ChangelogWithKeyKeyFieldsExtractor.EXTRACTOR;
         this.store =
                 new KeyValueFileStore(
                         schemaManager,
@@ -108,12 +112,13 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                         options,
                         tableSchema.logicalPartitionType(),
                         addKeyNamePrefix(tableSchema.logicalBucketKeyType()),
-                        addKeyNamePrefix(tableSchema.logicalTrimmedPrimaryKeysType()),
+                        RowDataType.toRowType(false, extractor.keyFields(tableSchema)),
                         rowType,
+                        extractor,
                         mergeFunction);
     }
 
-    private RowType addKeyNamePrefix(RowType type) {
+    private static RowType addKeyNamePrefix(RowType type) {
         // add prefix to avoid conflict with value
         return new RowType(
                 type.getFields().stream()
@@ -124,6 +129,18 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                                                 f.getType(),
                                                 f.getDescription().orElse(null)))
                         .collect(Collectors.toList()));
+    }
+
+    private static List<DataField> addKeyNamePrefix(List<DataField> keyFields) {
+        return keyFields.stream()
+                .map(
+                        f ->
+                                new DataField(
+                                        f.id(),
+                                        KEY_FIELD_PREFIX + f.name(),
+                                        f.type(),
+                                        f.description()))
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -214,5 +231,19 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public KeyValueFileStore store() {
         return store;
+    }
+
+    static class ChangelogWithKeyKeyFieldsExtractor implements KeyFieldsExtractor {
+        private static final long serialVersionUID = 1L;
+
+        static final ChangelogWithKeyKeyFieldsExtractor EXTRACTOR =
+                new ChangelogWithKeyKeyFieldsExtractor();
+
+        private ChangelogWithKeyKeyFieldsExtractor() {}
+
+        @Override
+        public List<DataField> keyFields(TableSchema schema) {
+            return addKeyNamePrefix(schema.trimmedPrimaryKeysFields());
+        }
     }
 }

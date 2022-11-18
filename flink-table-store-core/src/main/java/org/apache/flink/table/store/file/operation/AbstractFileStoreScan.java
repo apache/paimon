@@ -29,6 +29,8 @@ import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.predicate.BucketSelector;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
@@ -41,7 +43,9 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -59,6 +63,10 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private final boolean checkNumOfBuckets;
     private final CoreOptions.ChangelogProducer changelogProducer;
 
+    private final Map<Long, TableSchema> tableSchemas;
+    private final SchemaManager schemaManager;
+    private final long schemaId;
+
     private Predicate partitionFilter;
     private BucketSelector bucketSelector;
 
@@ -72,6 +80,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             RowType partitionType,
             RowType bucketKeyType,
             SnapshotManager snapshotManager,
+            SchemaManager schemaManager,
+            long schemaId,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
@@ -83,11 +93,14 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 bucketKeyType.getFieldCount() > 0, "The bucket keys should not be empty.");
         this.bucketKeyType = bucketKeyType;
         this.snapshotManager = snapshotManager;
+        this.schemaManager = schemaManager;
+        this.schemaId = schemaId;
         this.manifestFileFactory = manifestFileFactory;
         this.manifestList = manifestListFactory.create();
         this.numOfBuckets = numOfBuckets;
         this.checkNumOfBuckets = checkNumOfBuckets;
         this.changelogProducer = changelogProducer;
+        this.tableSchemas = new HashMap<>();
     }
 
     @Override
@@ -242,6 +255,14 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 return files;
             }
         };
+    }
+
+    protected TableSchema scanTableSchema() {
+        return scanTableSchema(this.schemaId);
+    }
+
+    protected TableSchema scanTableSchema(long id) {
+        return tableSchemas.computeIfAbsent(id, key -> schemaManager.schema(id));
     }
 
     private boolean filterManifestFileMeta(ManifestFileMeta manifest) {

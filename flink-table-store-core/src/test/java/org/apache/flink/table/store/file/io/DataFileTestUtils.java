@@ -86,4 +86,14 @@ public class DataFileTestUtils {
         writer.complete();
         return row;
     }
+
+    public static BinaryRowData row(int... values) {
+        BinaryRowData row = new BinaryRowData(values.length);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+        for (int i = 0; i < values.length; i++) {
+            writer.writeInt(i, values[i]);
+        }
+        writer.complete();
+        return row;
+    }
 }

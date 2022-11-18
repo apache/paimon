@@ -43,7 +43,13 @@ public class FieldStatsArraySerializer {
 
     private final RowData.FieldGetter[] fieldGetters;
 
+    @Nullable private final int[] indexMapping;
+
     public FieldStatsArraySerializer(RowType type) {
+        this(type, null);
+    }
+
+    public FieldStatsArraySerializer(RowType type, int[] indexMapping) {
         RowType safeType = toAllFieldsNullableRowType(type);
         this.serializer = new RowDataSerializer(safeType);
         this.fieldGetters =
@@ -53,6 +59,7 @@ public class FieldStatsArraySerializer {
                                         RowDataUtils.createNullCheckingFieldGetter(
                                                 safeType.getTypeAt(i), i))
                         .toArray(RowData.FieldGetter[]::new);
+        this.indexMapping = indexMapping;
     }
 
     public BinaryTableStats toBinary(FieldStats[] stats) {
@@ -77,10 +84,11 @@ public class FieldStatsArraySerializer {
     }
 
     public FieldStats[] fromBinary(BinaryTableStats array, @Nullable Long rowCount) {
-        int fieldCount = fieldGetters.length;
+        int fieldCount = indexMapping == null ? fieldGetters.length : indexMapping.length;
         FieldStats[] stats = new FieldStats[fieldCount];
         for (int i = 0; i < fieldCount; i++) {
-            if (i >= array.min().getArity()) {
+            int fieldIndex = indexMapping == null ? i : indexMapping[i];
+            if (fieldIndex < 0 || fieldIndex >= array.min().getArity()) {
                 // simple evolution for add column
                 if (rowCount == null) {
                     throw new RuntimeException("Schema Evolution for stats needs row count.");
@@ -89,9 +97,9 @@ public class FieldStatsArraySerializer {
             } else {
                 stats[i] =
                         new FieldStats(
-                                fieldGetters[i].getFieldOrNull(array.min()),
-                                fieldGetters[i].getFieldOrNull(array.max()),
-                                array.nullCounts()[i]);
+                                fieldGetters[fieldIndex].getFieldOrNull(array.min()),
+                                fieldGetters[fieldIndex].getFieldOrNull(array.max()),
+                                array.nullCounts()[fieldIndex]);
             }
         }
         return stats;

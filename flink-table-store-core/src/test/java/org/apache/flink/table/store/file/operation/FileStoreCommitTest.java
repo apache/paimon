@@ -537,6 +537,7 @@ public class FileStoreCommitTest {
                         TestKeyValueGenerator.DEFAULT_PART_TYPE,
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                        TestKeyValueGenerator.TestKeyFieldsExtractor.EXTRACTOR,
                         new DeduplicateMergeFunction())
                 .changelogProducer(changelogProducer)
                 .build();

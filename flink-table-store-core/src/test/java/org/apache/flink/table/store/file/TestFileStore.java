@@ -38,6 +38,7 @@ import org.apache.flink.table.store.file.operation.FileStoreCommitImpl;
 import org.apache.flink.table.store.file.operation.FileStoreExpireImpl;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
+import org.apache.flink.table.store.file.schema.KeyFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
@@ -92,6 +93,7 @@ public class TestFileStore extends KeyValueFileStore {
             RowType partitionType,
             RowType keyType,
             RowType valueType,
+            KeyFieldsExtractor keyFieldsExtractor,
             MergeFunction<KeyValue> mergeFunction) {
         super(
                 new SchemaManager(options.path()),
@@ -101,6 +103,7 @@ public class TestFileStore extends KeyValueFileStore {
                 keyType,
                 keyType,
                 valueType,
+                keyFieldsExtractor,
                 mergeFunction);
         this.root = root;
         this.keySerializer = new RowDataSerializer(keyType);
@@ -453,6 +456,7 @@ public class TestFileStore extends KeyValueFileStore {
         private final RowType partitionType;
         private final RowType keyType;
         private final RowType valueType;
+        private final KeyFieldsExtractor keyFieldsExtractor;
         private final MergeFunction<KeyValue> mergeFunction;
 
         private CoreOptions.ChangelogProducer changelogProducer;
@@ -464,6 +468,7 @@ public class TestFileStore extends KeyValueFileStore {
                 RowType partitionType,
                 RowType keyType,
                 RowType valueType,
+                KeyFieldsExtractor keyFieldsExtractor,
                 MergeFunction<KeyValue> mergeFunction) {
             this.format = format;
             this.root = root;
@@ -471,6 +476,7 @@ public class TestFileStore extends KeyValueFileStore {
             this.partitionType = partitionType;
             this.keyType = keyType;
             this.valueType = valueType;
+            this.keyFieldsExtractor = keyFieldsExtractor;
             this.mergeFunction = mergeFunction;
 
             this.changelogProducer = CoreOptions.ChangelogProducer.NONE;
@@ -500,7 +506,13 @@ public class TestFileStore extends KeyValueFileStore {
             conf.set(CoreOptions.CHANGELOG_PRODUCER, changelogProducer);
 
             return new TestFileStore(
-                    root, new CoreOptions(conf), partitionType, keyType, valueType, mergeFunction);
+                    root,
+                    new CoreOptions(conf),
+                    partitionType,
+                    keyType,
+                    valueType,
+                    keyFieldsExtractor,
+                    mergeFunction);
         }
     }
 }
