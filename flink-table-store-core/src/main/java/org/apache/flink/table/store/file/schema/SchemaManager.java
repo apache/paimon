@@ -32,6 +32,7 @@ import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnType;
 import org.apache.flink.table.store.file.utils.AtomicFileWriter;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
+import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.utils.LogicalTypeCasts;
 import org.apache.flink.util.Preconditions;
@@ -108,6 +109,7 @@ public class SchemaManager implements Serializable {
         List<String> primaryKeys = updateSchema.primaryKeys();
         Map<String, String> options = updateSchema.options();
 
+        validatePrimaryKeysType(updateSchema, primaryKeys);
         while (true) {
             long id;
             int highestFieldId;
@@ -153,6 +155,26 @@ public class SchemaManager implements Serializable {
             boolean success = commit(newSchema);
             if (success) {
                 return newSchema;
+            }
+        }
+    }
+
+    private void validatePrimaryKeysType(UpdateSchema updateSchema, List<String> primaryKeys) {
+        if (!primaryKeys.isEmpty()) {
+            Map<String, RowType.RowField> rowFields = new HashMap<>();
+            for (RowType.RowField rowField : updateSchema.rowType().getFields()) {
+                rowFields.put(rowField.getName(), rowField);
+            }
+            for (String primaryKeyName : primaryKeys) {
+                RowType.RowField rowField = rowFields.get(primaryKeyName);
+                LogicalType logicalType = rowField.getType();
+                if (TableSchema.PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES.stream()
+                        .anyMatch(c -> c.isInstance(logicalType))) {
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "The type %s in primary key field %s is unsupported",
+                                    logicalType.getClass().getSimpleName(), primaryKeyName));
+                }
             }
         }
     }
