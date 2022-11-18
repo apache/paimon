@@ -23,11 +23,19 @@ import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.schema.DataField;
+import org.apache.flink.table.store.file.schema.KeyFieldsExtractor;
+import org.apache.flink.table.store.file.schema.RowDataType;
+import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
+import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.RowType;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.pickTransformFieldMapping;
@@ -36,7 +44,8 @@ import static org.apache.flink.table.store.file.predicate.PredicateBuilder.split
 /** {@link FileStoreScan} for {@link org.apache.flink.table.store.file.KeyValueFileStore}. */
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
-    private final FieldStatsArraySerializer keyStatsConverter;
+    private final Map<Long, FieldStatsArraySerializer> schemaKeyStatsConverters;
+    private final KeyFieldsExtractor keyFieldsExtractor;
     private final RowType keyType;
 
     private Predicate keyFilter;
@@ -46,6 +55,9 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             RowType bucketKeyType,
             RowType keyType,
             SnapshotManager snapshotManager,
+            SchemaManager schemaManager,
+            long schemaId,
+            KeyFieldsExtractor keyFieldsExtractor,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
@@ -55,12 +67,15 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 partitionType,
                 bucketKeyType,
                 snapshotManager,
+                schemaManager,
+                schemaId,
                 manifestFileFactory,
                 manifestListFactory,
                 numOfBuckets,
                 checkNumOfBuckets,
                 changelogProducer);
-        this.keyStatsConverter = new FieldStatsArraySerializer(keyType);
+        this.keyFieldsExtractor = keyFieldsExtractor;
+        this.schemaKeyStatsConverters = new HashMap<>();
         this.keyType = keyType;
     }
 
@@ -83,6 +98,26 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         return keyFilter == null
                 || keyFilter.test(
                         entry.file().rowCount(),
-                        entry.file().keyStats().fields(keyStatsConverter, entry.file().rowCount()));
+                        entry.file()
+                                .keyStats()
+                                .fields(
+                                        getFieldStatsArraySerializer(entry.file().schemaId()),
+                                        entry.file().rowCount()));
+    }
+
+    private FieldStatsArraySerializer getFieldStatsArraySerializer(long id) {
+        return schemaKeyStatsConverters.computeIfAbsent(
+                id,
+                key -> {
+                    final TableSchema tableSchema = scanTableSchema();
+                    final TableSchema schema = scanTableSchema(key);
+                    final List<DataField> keyFields = keyFieldsExtractor.keyFields(schema);
+                    return new FieldStatsArraySerializer(
+                            RowDataType.toRowType(false, keyFields),
+                            tableSchema.id() == key
+                                    ? null
+                                    : SchemaEvolutionUtil.createIndexMapping(
+                                            keyFieldsExtractor.keyFields(tableSchema), keyFields));
+                });
     }
 }

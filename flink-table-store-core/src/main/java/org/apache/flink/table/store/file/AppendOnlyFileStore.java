@@ -76,6 +76,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
                 bucketKeyType.getFieldCount() == 0 ? rowType : bucketKeyType,
                 rowType,
                 snapshotManager(),
+                schemaManager,
+                schemaId,
                 manifestFileFactory(),
                 manifestListFactory(),
                 options.bucket(),

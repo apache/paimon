@@ -195,20 +195,25 @@ public class TableSchema implements Serializable {
         return projectedLogicalRowType(trimmedPrimaryKeys());
     }
 
+    public List<DataField> trimmedPrimaryKeysFields() {
+        return projectedDataFields(trimmedPrimaryKeys());
+    }
+
     public int[] projection(List<String> projectedFieldNames) {
         List<String> fieldNames = fieldNames();
         return projectedFieldNames.stream().mapToInt(fieldNames::indexOf).toArray();
     }
 
-    private RowType projectedLogicalRowType(List<String> projectedFieldNames) {
+    private List<DataField> projectedDataFields(List<String> projectedFieldNames) {
         List<String> fieldNames = fieldNames();
+        return projectedFieldNames.stream()
+                .map(k -> fields.get(fieldNames.indexOf(k)))
+                .collect(Collectors.toList());
+    }
+
+    private RowType projectedLogicalRowType(List<String> projectedFieldNames) {
         return (RowType)
-                new RowDataType(
-                                false,
-                                projectedFieldNames.stream()
-                                        .map(k -> fields.get(fieldNames.indexOf(k)))
-                                        .collect(Collectors.toList()))
-                        .logicalType;
+                new RowDataType(false, projectedDataFields(projectedFieldNames)).logicalType;
     }
 
     public TableSchema copy(Map<String, String> newOptions) {

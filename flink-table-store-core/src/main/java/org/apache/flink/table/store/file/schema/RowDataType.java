@@ -40,7 +40,7 @@ public class RowDataType extends DataType {
         this.fields = fields;
     }
 
-    private static RowType toRowType(boolean isNullable, List<DataField> fields) {
+    public static RowType toRowType(boolean isNullable, List<DataField> fields) {
         List<RowType.RowField> typeFields = new ArrayList<>(fields.size());
         for (DataField field : fields) {
             typeFields.add(
