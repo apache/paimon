@@ -198,12 +198,4 @@ public class ContinuousFileStoreITCase extends FileStoreTableITCase {
                                 "SELECT * FROM T1 /*+ OPTIONS('log.consistency'='eventual') */"),
                 "File store continuous reading dose not support eventual consistency mode");
     }
-
-    @Test
-    public void testUnsupportedStartupTimestamp() {
-        assertThatThrownBy(
-                () -> streamSqlIter("SELECT * FROM T1 /*+ OPTIONS('log.scan'='from-timestamp') */"),
-                "File store continuous reading dose not support from_timestamp scan mode, "
-                        + "you can add timestamp filters instead.");
-    }
 }
