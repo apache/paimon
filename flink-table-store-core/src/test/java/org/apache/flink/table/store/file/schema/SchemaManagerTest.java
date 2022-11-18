@@ -21,7 +21,9 @@ package org.apache.flink.table.store.file.schema;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.types.logical.BigIntType;
+import org.apache.flink.table.types.logical.DoubleType;
 import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.types.logical.MapType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
 
@@ -47,6 +49,7 @@ import java.util.stream.IntStream;
 
 import static org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test for {@link SchemaManager}. */
@@ -181,5 +184,44 @@ public class SchemaManagerTest {
                         IntStream.range(0, threadNumber)
                                 .mapToObj(String::valueOf)
                                 .toArray(String[]::new));
+    }
+
+    @Test
+    public void testPrimaryKeyType() throws Exception {
+        final RowType mapPrimaryKeyType =
+                RowType.of(
+                        new MapType(new IntType(), new BigIntType()),
+                        new BigIntType(),
+                        new VarCharType());
+        final UpdateSchema mapPrimaryKeySchema =
+                new UpdateSchema(mapPrimaryKeyType, partitionKeys, primaryKeys, options, "");
+        assertThatThrownBy(() -> manager.commitNewVersion(mapPrimaryKeySchema))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "The type %s in primary key field %s is unsupported",
+                        MapType.class.getSimpleName(), "f0");
+
+        RowType doublePrimaryKeyType =
+                RowType.of(new DoubleType(), new BigIntType(), new VarCharType());
+        final UpdateSchema doublePrimaryKeySchema =
+                new UpdateSchema(doublePrimaryKeyType, partitionKeys, primaryKeys, options, "");
+
+        TableSchema tableSchema =
+                retryArtificialException(() -> manager.commitNewVersion(doublePrimaryKeySchema));
+
+        Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
+
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", new AtomicDataType(new DoubleType(false))),
+                        new DataField(1, "f1", new AtomicDataType(new BigIntType(false))),
+                        new DataField(2, "f2", new AtomicDataType(new VarCharType())));
+
+        assertThat(latest.isPresent()).isTrue();
+        assertThat(tableSchema).isEqualTo(latest.get());
+        assertThat(tableSchema.fields()).isEqualTo(fields);
+        assertThat(tableSchema.partitionKeys()).isEqualTo(partitionKeys);
+        assertThat(tableSchema.primaryKeys()).isEqualTo(primaryKeys);
+        assertThat(tableSchema.options()).isEqualTo(options);
     }
 }
