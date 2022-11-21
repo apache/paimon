@@ -20,12 +20,14 @@ package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.file.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
@@ -42,14 +44,19 @@ public abstract class DataTableScan implements TableScan {
     private final FileStoreScan scan;
     private final TableSchema tableSchema;
     private final FileStorePathFactory pathFactory;
+    private final CoreOptions options;
 
     private boolean isIncremental = false;
 
     protected DataTableScan(
-            FileStoreScan scan, TableSchema tableSchema, FileStorePathFactory pathFactory) {
+            FileStoreScan scan,
+            TableSchema tableSchema,
+            FileStorePathFactory pathFactory,
+            CoreOptions options) {
         this.scan = scan;
         this.tableSchema = tableSchema;
         this.pathFactory = pathFactory;
+        this.options = options;
     }
 
     public DataTableScan withSnapshot(long snapshotId) {
@@ -141,6 +148,14 @@ public abstract class DataTableScan implements TableScan {
     protected abstract SplitGenerator splitGenerator(FileStorePathFactory pathFactory);
 
     protected abstract void withNonPartitionFilter(Predicate predicate);
+
+    public CoreOptions options() {
+        return options;
+    }
+
+    public SnapshotManager snapshotManager() {
+        return new SnapshotManager(pathFactory.root());
+    }
 
     /** Scanning plan containing snapshot ID and input splits. */
     public static class DataFilePlan implements Plan {

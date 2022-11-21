@@ -168,6 +168,19 @@ public class ContinuousFileStoreITCase extends FileStoreTableITCase {
                         Row.of("10", "11", "12"),
                         Row.of("13", "14", "15"));
         iterator.close();
+
+        // from end
+        iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                sql,
+                                snapshotManager
+                                                .snapshot(snapshotManager.latestSnapshotId())
+                                                .timeMillis()
+                                        + 1));
+        batchSql("INSERT INTO T1 VALUES ('16', '17', '18')");
+        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("16", "17", "18"));
+        iterator.close();
     }
 
     @Test
