@@ -142,6 +142,12 @@ public class SchemaManager implements Serializable {
                 id = 0;
             }
 
+            String sequenceField = options.get(CoreOptions.SEQUENCE_FIELD.key());
+            Preconditions.checkArgument(
+                    sequenceField == null || rowType.getFieldNames().contains(sequenceField),
+                    "Nonexistent sequence field: '%s'",
+                    sequenceField);
+
             TableSchema newSchema =
                     new TableSchema(
                             id,

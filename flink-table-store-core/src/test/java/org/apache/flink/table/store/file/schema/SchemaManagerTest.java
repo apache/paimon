@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.DoubleType;
@@ -106,6 +107,19 @@ public class SchemaManagerTest {
         assertThat(tableSchema.partitionKeys()).isEqualTo(partitionKeys);
         assertThat(tableSchema.primaryKeys()).isEqualTo(primaryKeys);
         assertThat(tableSchema.options()).isEqualTo(options);
+
+        assertThatThrownBy(
+                        () ->
+                                manager.commitNewVersion(
+                                        new UpdateSchema(
+                                                rowType,
+                                                partitionKeys,
+                                                primaryKeys,
+                                                Collections.singletonMap(
+                                                        CoreOptions.SEQUENCE_FIELD.key(), "f4"),
+                                                "")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Nonexistent sequence field: 'f4'");
     }
 
     @Test
