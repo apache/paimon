@@ -184,6 +184,15 @@ public class ContinuousFileStoreITCase extends FileStoreTableITCase {
     }
 
     @Test
+    public void testLackStartupTimestamp() {
+        assertThatThrownBy(
+                        () ->
+                                streamSqlIter(
+                                        "SELECT * FROM T1 /*+ OPTIONS('log.scan'='from-timestamp') */"))
+                .hasMessageContaining("Unable to create a source for reading table");
+    }
+
+    @Test
     public void testIgnoreOverwrite() throws TimeoutException {
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(streamSqlIter("SELECT * FROM T1"));
