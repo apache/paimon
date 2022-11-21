@@ -51,6 +51,20 @@ CREATE TABLE customers (
 
 -- Launch a streaming job to update customers table
 INSERT INTO customers ...
+
+-- Create a temporary left table, like from kafka
+CREATE TEMPORARY TABLE Orders (
+  order_id INT,
+  total INT,
+  customer_id INT,
+  proc_time AS PROCTIME()
+) WITH (
+  'connector' = 'kafka',
+  'topic' = '...',
+  'properties.bootstrap.servers' = '...',
+  'format' = 'csv'
+  ...
+);
 ```
 
 Then, you can use this table in lookup join.
