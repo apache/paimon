@@ -28,7 +28,6 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializerTest;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.format.FlushingFileFormat;
-import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
@@ -53,6 +52,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 
+import static org.apache.flink.table.store.file.TestKeyValueGenerator.createTestSchemaManager;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -259,7 +259,7 @@ public class KeyValueFileReadWriteTest {
         FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(path));
         KeyValueFileReaderFactory.Builder builder =
                 KeyValueFileReaderFactory.builder(
-                        new SchemaManager(new Path(path)),
+                        createTestSchemaManager(new Path(path)),
                         0,
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,

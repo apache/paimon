@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
@@ -29,6 +30,7 @@ import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
+import org.apache.flink.table.store.file.schema.AtomicDataType;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -124,7 +126,12 @@ public class KeyValueFileStoreReadTest {
 
                             @Override
                             public List<DataField> valueFields(TableSchema schema) {
-                                return schema.fields();
+                                return Collections.singletonList(
+                                        new DataField(
+                                                0,
+                                                "count",
+                                                new AtomicDataType(
+                                                        DataTypes.BIGINT().getLogicalType())));
                             }
                         },
                         ValueCountMergeFunction.factory().create());
