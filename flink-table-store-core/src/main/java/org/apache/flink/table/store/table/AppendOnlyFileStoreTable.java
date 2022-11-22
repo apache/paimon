@@ -66,7 +66,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public DataTableScan newScan() {
         AppendOnlyFileStoreScan scan = store.newScan();
-        return new DataTableScan(scan, tableSchema, store.pathFactory()) {
+        return new DataTableScan(scan, tableSchema, store.pathFactory(), options()) {
             @Override
             protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
                 return new AppendOnlySplitGenerator(

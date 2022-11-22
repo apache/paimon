@@ -90,6 +90,26 @@ public class SnapshotManager {
         }
     }
 
+    /**
+     * Returns a snapshot earlier than the timestamp mills. A non-existent snapshot may be returned
+     * if all snapshots are later than the timestamp mills.
+     */
+    public @Nullable Long earlierThanTimeMills(long timestampMills) {
+        Long earliest = earliestSnapshotId();
+        Long latest = latestSnapshotId();
+        if (earliest == null || latest == null) {
+            return null;
+        }
+
+        for (long i = latest; i >= earliest; i--) {
+            long commitTime = snapshot(i).timeMillis();
+            if (commitTime < timestampMills) {
+                return i;
+            }
+        }
+        return earliest - 1;
+    }
+
     public long snapshotCount() throws IOException {
         return listVersionedFiles(snapshotDirectory(), SNAPSHOT_PREFIX).count();
     }
