@@ -112,14 +112,14 @@ public class CodeGenLoader {
 
     // Singleton lazy initialization
 
-    private static CodeGenLoader INSTANCE;
+    private static CodeGenLoader instance;
 
     public static synchronized CodeGenLoader getInstance() {
-        if (INSTANCE == null) {
+        if (instance == null) {
             // Avoid NoClassDefFoundError without cause by exception
-            INSTANCE = new CodeGenLoader();
+            instance = new CodeGenLoader();
         }
-        return INSTANCE;
+        return instance;
     }
 
     public <T> T discover(Class<T> clazz) {
