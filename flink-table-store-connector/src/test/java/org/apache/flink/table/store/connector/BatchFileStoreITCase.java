@@ -43,4 +43,10 @@ public class BatchFileStoreITCase extends FileStoreTableITCase {
         batchSql("INSERT OVERWRITE T SELECT * FROM T WHERE 1 <> 1");
         assertThat(batchSql("SELECT * FROM T")).isEmpty();
     }
+
+    @Test
+    public void testReadCompactedEmpty() {
+        batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
+        assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('read.compacted'='true') */")).isEmpty();
+    }
 }

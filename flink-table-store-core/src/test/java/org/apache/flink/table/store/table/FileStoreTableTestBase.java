@@ -74,7 +74,6 @@ import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
 import static org.apache.flink.table.store.CoreOptions.COMPACTION_MAX_FILE_NUM;
 import static org.apache.flink.table.store.CoreOptions.WRITE_COMPACTION_SKIP;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Base test class for {@link FileStoreTable}. */
 public abstract class FileStoreTableTestBase {
@@ -349,20 +348,6 @@ public abstract class FileStoreTableTestBase {
                 .isEqualTo(getResult(read, compactedSplits, binaryRow(1), 0, BATCH_ROW_TO_STRING));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
                 .isEqualTo(getResult(read, compactedSplits, binaryRow(2), 0, BATCH_ROW_TO_STRING));
-    }
-
-    @Test
-    public void testReadCompactedWithIncremental() throws Exception {
-        writeCompactData();
-        FileStoreTable table = createFileStoreTable();
-
-        assertThatThrownBy(
-                        () -> table.newScan().withReadCompacted(true).withIncremental(true).plan())
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage(
-                        String.format(
-                                "Cannot read increment data while %s is true.",
-                                CoreOptions.READ_COMPACTED.key()));
     }
 
     private void writeCompactData() throws Exception {

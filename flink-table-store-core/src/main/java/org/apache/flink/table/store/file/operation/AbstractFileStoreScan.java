@@ -166,12 +166,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withIncremental(boolean isIncremental) {
-        if (readCompacted) {
-            throw new IllegalStateException(
-                    String.format(
-                            "Cannot read increment data while %s is true.",
-                            CoreOptions.READ_COMPACTED.key()));
-        }
         this.isIncremental = isIncremental;
         return this;
     }
@@ -184,12 +178,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withReadCompacted(boolean readCompacted) {
-        if (this.isIncremental) {
-            throw new IllegalStateException(
-                    String.format(
-                            "Cannot read compacted data while reading incremental data, %s should be false.",
-                            CoreOptions.READ_COMPACTED.key()));
-        }
         this.readCompacted = readCompacted;
         return this;
     }
