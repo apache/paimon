@@ -22,13 +22,17 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.table.source.DataTableScan.DataFilePlan;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.concurrent.Callable;
+
+import static org.apache.flink.table.store.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 
 /** Enumerator to enumerate incremental snapshots. */
 public class SnapshotEnumerator implements Callable<SnapshotEnumerator.EnumeratorResult> {
@@ -85,7 +89,7 @@ public class SnapshotEnumerator implements Callable<SnapshotEnumerator.Enumerato
                 continue;
             }
 
-            DataTableScan.DataFilePlan plan = scan.withSnapshot(nextSnapshotId).plan();
+            DataFilePlan plan = scan.withSnapshot(nextSnapshotId).plan();
             EnumeratorResult result = new EnumeratorResult(nextSnapshotId, plan);
             LOG.debug("Find snapshot id {}.", nextSnapshotId);
 
@@ -99,11 +103,48 @@ public class SnapshotEnumerator implements Callable<SnapshotEnumerator.Enumerato
 
         public final long snapshotId;
 
-        public final DataTableScan.DataFilePlan plan;
+        public final DataFilePlan plan;
 
-        private EnumeratorResult(long snapshotId, DataTableScan.DataFilePlan plan) {
+        private EnumeratorResult(long snapshotId, DataFilePlan plan) {
             this.snapshotId = snapshotId;
             this.plan = plan;
+        }
+    }
+
+    /** Startup snapshot enumerator, this is the first plan for continuous reading. */
+    public static DataFilePlan startup(DataTableScan scan) {
+        CoreOptions options = scan.options();
+        SnapshotManager snapshotManager = scan.snapshotManager();
+        CoreOptions.LogStartupMode startupMode = options.logStartupMode();
+        switch (startupMode) {
+            case FULL:
+                DataFilePlan plan;
+                if (options.changelogProducer() == FULL_COMPACTION) {
+                    // Read the results of the last full compaction.
+                    // Only full compaction results will appear on the max level.
+                    plan = scan.withLevel(options.numLevels() - 1).plan();
+                } else {
+                    plan = scan.plan();
+                }
+                return plan;
+            case LATEST:
+                return new DataFilePlan(
+                        snapshotManager.latestSnapshotId(), Collections.emptyList());
+            case FROM_TIMESTAMP:
+                Long timestampMills = options.logScanTimestampMills();
+                if (timestampMills == null) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "%s can not be null when you use %s for %s",
+                                    CoreOptions.LOG_SCAN_TIMESTAMP_MILLS.key(),
+                                    CoreOptions.LogStartupMode.FROM_TIMESTAMP,
+                                    CoreOptions.LOG_SCAN.key()));
+                }
+                return new DataFilePlan(
+                        snapshotManager.earlierThanTimeMills(timestampMills),
+                        Collections.emptyList());
+            default:
+                throw new UnsupportedOperationException("Unsupported startup mode: " + startupMode);
         }
     }
 }

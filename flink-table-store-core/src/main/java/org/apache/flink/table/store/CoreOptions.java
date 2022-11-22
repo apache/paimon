@@ -527,6 +527,14 @@ public class CoreOptions implements Serializable {
         return options.get(CHANGELOG_PRODUCER);
     }
 
+    public LogStartupMode logStartupMode() {
+        return options.get(LOG_SCAN);
+    }
+
+    public Long logScanTimestampMills() {
+        return options.get(LOG_SCAN_TIMESTAMP_MILLS);
+    }
+
     public Duration changelogProducerFullCompactionTriggerInterval() {
         return options.get(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL);
     }

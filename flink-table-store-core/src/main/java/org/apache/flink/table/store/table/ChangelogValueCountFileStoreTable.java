@@ -83,7 +83,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     @Override
     public DataTableScan newScan() {
         KeyValueFileStoreScan scan = store.newScan();
-        return new DataTableScan(scan, tableSchema, store.pathFactory()) {
+        return new DataTableScan(scan, tableSchema, store.pathFactory(), options()) {
             @Override
             protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
                 return new MergeTreeSplitGenerator(
