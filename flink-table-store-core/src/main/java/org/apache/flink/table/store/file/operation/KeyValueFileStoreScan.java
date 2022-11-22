@@ -24,7 +24,7 @@ import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.DataField;
-import org.apache.flink.table.store.file.schema.KeyFieldsExtractor;
+import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -45,7 +45,7 @@ import static org.apache.flink.table.store.file.predicate.PredicateBuilder.split
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     private final Map<Long, FieldStatsArraySerializer> schemaKeyStatsConverters;
-    private final KeyFieldsExtractor keyFieldsExtractor;
+    private final KeyValueFieldsExtractor keyValueFieldsExtractor;
     private final RowType keyType;
 
     private Predicate keyFilter;
@@ -57,7 +57,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
             long schemaId,
-            KeyFieldsExtractor keyFieldsExtractor,
+            KeyValueFieldsExtractor keyValueFieldsExtractor,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
@@ -76,7 +76,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 checkNumOfBuckets,
                 changelogProducer,
                 readCompacted);
-        this.keyFieldsExtractor = keyFieldsExtractor;
+        this.keyValueFieldsExtractor = keyValueFieldsExtractor;
         this.schemaKeyStatsConverters = new HashMap<>();
         this.keyType = keyType;
     }
@@ -113,13 +113,14 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 key -> {
                     final TableSchema tableSchema = scanTableSchema();
                     final TableSchema schema = scanTableSchema(key);
-                    final List<DataField> keyFields = keyFieldsExtractor.keyFields(schema);
+                    final List<DataField> keyFields = keyValueFieldsExtractor.keyFields(schema);
                     return new FieldStatsArraySerializer(
                             RowDataType.toRowType(false, keyFields),
                             tableSchema.id() == key
                                     ? null
                                     : SchemaEvolutionUtil.createIndexMapping(
-                                            keyFieldsExtractor.keyFields(tableSchema), keyFields));
+                                            keyValueFieldsExtractor.keyFields(tableSchema),
+                                            keyFields));
                 });
     }
 }

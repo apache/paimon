@@ -46,7 +46,7 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
     @Test
     @Override
     public void testTableScan() throws Exception {
-        writeAndCheckFileMeta(
+        writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
                     DataTableScan.DataFilePlan plan = table.newScan().plan();
@@ -68,7 +68,7 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
     @Test
     @Override
     public void testTableScanFilterExistFields() throws Exception {
-        writeAndCheckFileMeta(
+        writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
                     // results of field "b" in [14, 19] in SCHEMA_0_FIELDS, "b" is renamed to "d" in
@@ -99,7 +99,7 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
     @Test
     @Override
     public void testTableScanFilterNewFields() throws Exception {
-        writeAndCheckFileMeta(
+        writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
                     DataTableScan.DataFilePlan plan = table.newScan().plan();

@@ -26,7 +26,7 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.generated.RecordComparator;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.schema.DataField;
-import org.apache.flink.table.store.file.schema.KeyFieldsExtractor;
+import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
@@ -329,11 +329,12 @@ public class TestKeyValueGenerator {
         MULTI_PARTITIONED
     }
 
-    /** {@link KeyFieldsExtractor} implementation for test. */
-    public static class TestKeyFieldsExtractor implements KeyFieldsExtractor {
+    /** {@link KeyValueFieldsExtractor} implementation for test. */
+    public static class TestKeyValueFieldsExtractor implements KeyValueFieldsExtractor {
         private static final long serialVersionUID = 1L;
 
-        public static final TestKeyFieldsExtractor EXTRACTOR = new TestKeyFieldsExtractor();
+        public static final TestKeyValueFieldsExtractor EXTRACTOR =
+                new TestKeyValueFieldsExtractor();
 
         @Override
         public List<DataField> keyFields(TableSchema schema) {
@@ -341,6 +342,11 @@ public class TestKeyValueGenerator {
                     .filter(f -> KEY_NAME_LIST.contains(f.name()))
                     .map(f -> new DataField(f.id(), "key_" + f.name(), f.type(), f.description()))
                     .collect(Collectors.toList());
+        }
+
+        @Override
+        public List<DataField> valueFields(TableSchema schema) {
+            return schema.fields();
         }
     }
 }

@@ -84,7 +84,10 @@ public class MergeTreeReaders {
             SortedRun run, KeyValueFileReaderFactory readerFactory) throws IOException {
         List<ConcatRecordReader.ReaderSupplier<KeyValue>> readers = new ArrayList<>();
         for (DataFileMeta file : run.files()) {
-            readers.add(() -> readerFactory.createRecordReader(file.fileName(), file.level()));
+            readers.add(
+                    () ->
+                            readerFactory.createRecordReader(
+                                    file.schemaId(), file.fileName(), file.level()));
         }
         return ConcatRecordReader.create(readers);
     }

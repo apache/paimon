@@ -37,6 +37,7 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactRewriter;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
+import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
@@ -79,7 +80,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
-            CoreOptions options) {
+            CoreOptions options,
+            KeyValueFieldsExtractor extractor) {
         super(commitUser, snapshotManager, scan, options);
         this.readerFactoryBuilder =
                 KeyValueFileReaderFactory.builder(
@@ -88,7 +90,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         keyType,
                         valueType,
                         options.fileFormat(),
-                        pathFactory);
+                        pathFactory,
+                        extractor);
         this.writerFactoryBuilder =
                 KeyValueFileWriterFactory.builder(
                         schemaId,

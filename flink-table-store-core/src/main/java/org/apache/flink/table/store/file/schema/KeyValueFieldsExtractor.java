@@ -22,7 +22,7 @@ import java.io.Serializable;
 import java.util.List;
 
 /** Extractor of schema for different tables. */
-public interface KeyFieldsExtractor extends Serializable {
+public interface KeyValueFieldsExtractor extends Serializable {
     /**
      * Extract key fields from table schema.
      *
@@ -30,4 +30,12 @@ public interface KeyFieldsExtractor extends Serializable {
      * @return the key fields
      */
     List<DataField> keyFields(TableSchema schema);
+
+    /**
+     * Extract value fields from table schema.
+     *
+     * @param schema the table schema
+     * @return the value fields
+     */
+    List<DataField> valueFields(TableSchema schema);
 }
