@@ -52,7 +52,6 @@ import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.table.SchemaEvolutionTableTestBase;
 import org.apache.flink.table.store.utils.BinaryRowDataUtil;
-import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
@@ -111,7 +110,15 @@ public class MergeTreeTest {
     }
 
     private SchemaManager createTestingSchemaManager(Path path) {
-        TableSchema schema = new TableSchema(0, new ArrayList<>(), -1, new ArrayList<>(), new ArrayList<>(), new HashMap<>(), "");
+        TableSchema schema =
+                new TableSchema(
+                        0,
+                        new ArrayList<>(),
+                        -1,
+                        new ArrayList<>(),
+                        new ArrayList<>(),
+                        new HashMap<>(),
+                        "");
         Map<Long, TableSchema> schemas = new HashMap<>();
         schemas.put(schema.id(), schema);
 
