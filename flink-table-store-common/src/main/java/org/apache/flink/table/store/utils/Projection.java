@@ -26,6 +26,7 @@ import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.utils.TypeConversions;
 import org.apache.flink.util.Preconditions;
 
+import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -65,6 +66,27 @@ public abstract class Projection {
     /** Same as {@link #project(DataType)}, but accepting and returning {@link LogicalType}. */
     public LogicalType project(LogicalType logicalType) {
         return this.project(TypeConversions.fromLogicalToDataType(logicalType)).getLogicalType();
+    }
+
+    /** Project array. */
+    public <T> T[] project(T[] array) {
+        int[] project = toTopLevelIndexes();
+        @SuppressWarnings("unchecked")
+        T[] ret = (T[]) Array.newInstance(array.getClass().getComponentType(), project.length);
+        for (int i = 0; i < project.length; i++) {
+            ret[i] = array[project[i]];
+        }
+        return ret;
+    }
+
+    /** Project list. */
+    public <T> List<T> project(List<T> list) {
+        int[] project = toTopLevelIndexes();
+        List<T> ret = new ArrayList<>();
+        for (int i : project) {
+            ret.add(list.get(i));
+        }
+        return ret;
     }
 
     /** @return {@code true} whether this projection is nested or not. */

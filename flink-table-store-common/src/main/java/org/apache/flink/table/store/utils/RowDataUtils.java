@@ -284,6 +284,14 @@ public class RowDataUtils {
         return bd.longValue();
     }
 
+    public static RowData.FieldGetter[] createFieldGetters(List<LogicalType> fieldTypes) {
+        RowData.FieldGetter[] fieldGetters = new RowData.FieldGetter[fieldTypes.size()];
+        for (int i = 0; i < fieldTypes.size(); i++) {
+            fieldGetters[i] = createNullCheckingFieldGetter(fieldTypes.get(i), i);
+        }
+        return fieldGetters;
+    }
+
     public static RowData.FieldGetter createNullCheckingFieldGetter(
             LogicalType logicalType, int index) {
         RowData.FieldGetter getter = RowData.createFieldGetter(logicalType, index);

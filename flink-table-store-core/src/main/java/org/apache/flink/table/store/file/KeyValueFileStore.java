@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreRead;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreWrite;
@@ -42,7 +42,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final RowType valueType;
     private final KeyFieldsExtractor keyFieldsExtractor;
     private final Supplier<Comparator<RowData>> keyComparatorSupplier;
-    private final MergeFunction<KeyValue> mergeFunction;
+    private final MergeFunctionFactory<KeyValue> mfFactory;
 
     public KeyValueFileStore(
             SchemaManager schemaManager,
@@ -53,13 +53,13 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             RowType keyType,
             RowType valueType,
             KeyFieldsExtractor keyFieldsExtractor,
-            MergeFunction<KeyValue> mergeFunction) {
+            MergeFunctionFactory<KeyValue> mfFactory) {
         super(schemaManager, schemaId, options, partitionType);
         this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
         this.valueType = valueType;
         this.keyFieldsExtractor = keyFieldsExtractor;
-        this.mergeFunction = mergeFunction;
+        this.mfFactory = mfFactory;
         this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
     }
 
@@ -76,7 +76,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 keyType,
                 valueType,
                 newKeyComparator(),
-                mergeFunction,
+                mfFactory,
                 options.fileFormat(),
                 pathFactory());
     }
@@ -90,7 +90,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 keyType,
                 valueType,
                 keyComparatorSupplier,
-                mergeFunction,
+                mfFactory.create(null),
                 pathFactory(),
                 snapshotManager(),
                 newScan(true),

@@ -27,7 +27,7 @@ import org.apache.flink.table.store.file.mergetree.MergeTreeReaders;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
-import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionWrapper;
 import org.apache.flink.table.store.file.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -63,7 +63,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     private final TableSchema tableSchema;
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
     private final Comparator<RowData> keyComparator;
-    private final MergeFunction<KeyValue> mergeFunction;
+    private final MergeFunctionFactory<KeyValue> mfFactory;
     private final boolean valueCountMode;
 
     @Nullable private int[][] keyProjectedFields;
@@ -72,13 +72,15 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     @Nullable private List<Predicate> filtersForNonOverlappedSection;
 
+    @Nullable private int[][] valueProjection;
+
     public KeyValueFileStoreRead(
             SchemaManager schemaManager,
             long schemaId,
             RowType keyType,
             RowType valueType,
             Comparator<RowData> keyComparator,
-            MergeFunction<KeyValue> mergeFunction,
+            MergeFunctionFactory<KeyValue> mfFactory,
             FileFormat fileFormat,
             FileStorePathFactory pathFactory) {
         this.tableSchema = schemaManager.schema(schemaId);
@@ -86,7 +88,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                 KeyValueFileReaderFactory.builder(
                         schemaManager, schemaId, keyType, valueType, fileFormat, pathFactory);
         this.keyComparator = keyComparator;
-        this.mergeFunction = mergeFunction;
+        this.mfFactory = mfFactory;
         this.valueCountMode = tableSchema.trimmedPrimaryKeys().isEmpty();
     }
 
@@ -97,6 +99,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     }
 
     public KeyValueFileStoreRead withValueProjection(int[][] projectedFields) {
+        this.valueProjection = projectedFields;
         readerFactoryBuilder.withValueProjection(projectedFields);
         return this;
     }
@@ -169,7 +172,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
             List<ConcatRecordReader.ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
             MergeFunctionWrapper<KeyValue> mergeFuncWrapper =
-                    new ReducerMergeFunctionWrapper(mergeFunction.copy());
+                    new ReducerMergeFunctionWrapper(mfFactory.create(valueProjection));
             for (List<SortedRun> section :
                     new IntervalPartition(split.files(), keyComparator).partition()) {
                 sectionReaders.add(

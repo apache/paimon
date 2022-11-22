@@ -30,6 +30,7 @@ import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreRead;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreWrite;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -108,7 +109,7 @@ public class TestChangelogDataReadWrite {
                         KEY_TYPE,
                         VALUE_TYPE,
                         COMPARATOR,
-                        new DeduplicateMergeFunction(),
+                        MergeFunctionFactory.of(new DeduplicateMergeFunction()),
                         avro,
                         pathFactory);
         return new KeyValueTableRead(read) {

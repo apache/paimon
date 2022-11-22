@@ -698,8 +698,7 @@ public class PreAggregationITCase {
                             + "CAST(100000 AS BIGINT), -1.11, CAST(1.11 AS DOUBLE)), "
                             + "(1, 2, 3, 10.00, CAST(1 AS TINYINT), CAST(1 AS SMALLINT), "
                             + "CAST(10000000 AS BIGINT), 0, CAST(-1.11 AS DOUBLE))");
-            List<Row> result = batchSql("SELECT * FROM T1");
-            assertThat(result)
+            assertThat(batchSql("SELECT * FROM T1"))
                     .containsExactlyInAnyOrder(
                             Row.of(
                                     1,
@@ -711,6 +710,10 @@ public class PreAggregationITCase {
                                     (long) 10101000,
                                     (float) 0,
                                     1.11));
+
+            // projection
+            assertThat(batchSql("SELECT f,e FROM T1"))
+                    .containsExactlyInAnyOrder(Row.of((float) 0, (long) 10101000));
         }
 
         @Test
