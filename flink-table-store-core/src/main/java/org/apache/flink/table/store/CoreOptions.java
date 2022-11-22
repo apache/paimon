@@ -192,8 +192,9 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Boolean> WRITE_BUFFER_SPILLABLE =
             ConfigOptions.key("write-buffer-spillable")
                     .booleanType()
-                    .defaultValue(true)
-                    .withDescription("Whether the write buffer can be spillable.");
+                    .noDefaultValue()
+                    .withDescription(
+                            "Whether the write buffer can be spillable. Enabled by default when using object storage.");
 
     public static final ConfigOption<Integer> LOCAL_SORT_MAX_NUM_FILE_HANDLES =
             ConfigOptions.key("local-sort.max-num-file-handles")
@@ -459,8 +460,8 @@ public class CoreOptions implements Serializable {
         return options.get(WRITE_BUFFER_SIZE).getBytes();
     }
 
-    public boolean writeBufferSpillable() {
-        return options.get(WRITE_BUFFER_SPILLABLE);
+    public boolean writeBufferSpillable(boolean usingObjectStore) {
+        return options.getOptional(WRITE_BUFFER_SPILLABLE).orElse(usingObjectStore);
     }
 
     public int localSortMaxNumFileHandles() {
