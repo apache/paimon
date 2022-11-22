@@ -461,11 +461,7 @@ public class CoreOptions implements Serializable {
     }
 
     public boolean writeBufferSpillable(boolean usingObjectStore) {
-        Boolean bufferSpillable = options.get(WRITE_BUFFER_SPILLABLE);
-        if (bufferSpillable == null) {
-            bufferSpillable = usingObjectStore;
-        }
-        return bufferSpillable;
+        return options.getOptional(WRITE_BUFFER_SPILLABLE).orElse(usingObjectStore);
     }
 
     public int localSortMaxNumFileHandles() {
