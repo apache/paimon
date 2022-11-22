@@ -155,6 +155,18 @@ public class SchemaEvolutionUtilTest {
                         keyFields,
                         tableFields1);
         assertThat(table2Table1IndexMapping).containsExactly(0, 1, 2, 3, -1, 4, 5);
+
+        int[] emptyIndexMapping =
+                SchemaEvolutionUtil.createIndexMapping(
+                        new int[] {0, 1, 2, 3, 4},
+                        3,
+                        keyFields,
+                        tableFields2,
+                        new int[] {0, 1, 2, 3, 4},
+                        3,
+                        keyFields,
+                        tableFields2);
+        assertThat(emptyIndexMapping).isNull();
     }
 
     @Test

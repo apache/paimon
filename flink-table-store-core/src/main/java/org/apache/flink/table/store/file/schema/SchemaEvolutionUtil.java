@@ -134,7 +134,7 @@ public class SchemaEvolutionUtil {
             int dataFieldIndex = dataKeyFieldIdList.indexOf(fieldId);
             indexMapping[i] = Ints.indexOf(dataKeyProjection, dataFieldIndex);
         }
-        if (tableProjection.length > tableKeyCount + 2) {
+        if (tableProjection.length >= tableKeyCount + 2) {
             // seq and value kind
             for (int i = tableKeyCount; i < tableKeyCount + 2; i++) {
                 indexMapping[i] = i + dataKeyCount - tableKeyCount;
