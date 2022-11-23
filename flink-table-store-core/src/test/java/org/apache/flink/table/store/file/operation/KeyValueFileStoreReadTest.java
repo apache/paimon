@@ -162,7 +162,7 @@ public class KeyValueFileStoreReadTest {
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                         TestKeyValueGenerator.TestKeyFieldsExtractor.EXTRACTOR,
-                        new DeduplicateMergeFunction());
+                        DeduplicateMergeFunction.factory().create());
 
         RowDataSerializer projectedValueSerializer =
                 new RowDataSerializer(

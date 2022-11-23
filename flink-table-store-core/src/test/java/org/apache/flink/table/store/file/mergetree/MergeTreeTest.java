@@ -263,7 +263,7 @@ public class MergeTreeTest {
                         createCompactManager(service, files),
                         maxSequenceNumber,
                         comparator,
-                        new DeduplicateMergeFunction(),
+                        DeduplicateMergeFunction.factory().create(),
                         writerFactory,
                         options.commitForceCompact(),
                         ChangelogProducer.NONE);
@@ -366,7 +366,7 @@ public class MergeTreeTest {
                         dropDelete,
                         readerFactory,
                         comparator,
-                        new DeduplicateMergeFunction());
+                        DeduplicateMergeFunction.factory().create());
         List<TestRecord> records = new ArrayList<>();
         try (RecordReaderIterator<KeyValue> iterator = new RecordReaderIterator<>(reader)) {
             while (iterator.hasNext()) {
@@ -409,7 +409,7 @@ public class MergeTreeTest {
                             dropDelete,
                             compactReaderFactory,
                             comparator,
-                            new DeduplicateMergeFunction());
+                            DeduplicateMergeFunction.factory().create());
             writer.write(new RecordReaderIterator<>(sectionsReader));
             writer.close();
             return new CompactResult(extractFilesFromSections(sections), writer.result());

@@ -143,7 +143,7 @@ public abstract class SortBufferWriteBufferTestBase {
 
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
-            return new DeduplicateMergeFunction();
+            return DeduplicateMergeFunction.factory().create();
         }
     }
 
