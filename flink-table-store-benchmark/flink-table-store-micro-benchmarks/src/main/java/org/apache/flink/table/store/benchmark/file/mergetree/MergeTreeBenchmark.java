@@ -168,7 +168,7 @@ public class MergeTreeBenchmark {
                         createCompactManager(service, files),
                         maxSequenceNumber,
                         comparator,
-                        new DeduplicateMergeFunction(),
+                        DeduplicateMergeFunction.factory().create(),
                         writerFactory,
                         options.commitForceCompact(),
                         CoreOptions.ChangelogProducer.NONE);
@@ -271,7 +271,7 @@ public class MergeTreeBenchmark {
                                     dropDelete,
                                     compactReaderFactory,
                                     comparator,
-                                    new DeduplicateMergeFunction())));
+                                    DeduplicateMergeFunction.factory().create())));
             writer.close();
             return new CompactResult(extractFilesFromSections(sections), writer.result());
         }
