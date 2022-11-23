@@ -100,7 +100,7 @@ public class MergeTreeReaderBenchmark extends MergeTreeBenchmark {
                         true,
                         readerFactory,
                         comparator,
-                        new DeduplicateMergeFunction())) {
+                        DeduplicateMergeFunction.factory().create())) {
             long sum = 0;
             try (RecordReaderIterator<KeyValue> iterator = new RecordReaderIterator<>(reader)) {
                 while (iterator.hasNext()) {
