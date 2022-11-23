@@ -71,13 +71,22 @@ public class ValueCountMergeFunction implements MergeFunction<KeyValue> {
                 GenericRowData.of(total));
     }
 
-    @Override
-    public MergeFunction<KeyValue> copy() {
-        return new ValueCountMergeFunction();
-    }
-
     private long count(RowData value) {
         checkArgument(!value.isNullAt(0), "Value count should not be null.");
         return value.getLong(0);
+    }
+
+    public static MergeFunctionFactory<KeyValue> factory() {
+        return new Factory();
+    }
+
+    private static class Factory implements MergeFunctionFactory<KeyValue> {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
+            return new ValueCountMergeFunction();
+        }
     }
 }

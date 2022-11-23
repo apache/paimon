@@ -26,7 +26,6 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueFileStore;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.aggregate.AggregateMergeFunction;
@@ -49,11 +48,7 @@ import org.apache.flink.table.store.table.source.MergeTreeSplitGenerator;
 import org.apache.flink.table.store.table.source.SplitGenerator;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
-import org.apache.flink.table.store.utils.Projection;
-import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
-
-import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -61,7 +56,6 @@ import java.util.stream.Collectors;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.pickTransformFieldMapping;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.splitAnd;
-import static org.apache.flink.table.store.utils.RowDataUtils.createFieldGetters;
 
 /** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode with primary keys. */
 public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
@@ -82,17 +76,17 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         MergeFunctionFactory<KeyValue> mfFactory;
         switch (mergeEngine) {
             case DEDUPLICATE:
-                mfFactory = MergeFunctionFactory.of(new DeduplicateMergeFunction());
+                mfFactory = DeduplicateMergeFunction.factory();
                 break;
             case PARTIAL_UPDATE:
                 mfFactory =
-                        new PartialUpdateMergeFunctionFactory(
+                        PartialUpdateMergeFunction.factory(
                                 conf.get(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE),
                                 rowType.getChildren());
                 break;
             case AGGREGATE:
                 mfFactory =
-                        new AggregateMergeFunctionFactory(
+                        AggregateMergeFunction.factory(
                                 conf,
                                 tableSchema.fieldNames(),
                                 rowType.getChildren(),
@@ -243,67 +237,6 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         @Override
         public List<DataField> keyFields(TableSchema schema) {
             return addKeyNamePrefix(schema.trimmedPrimaryKeysFields());
-        }
-    }
-
-    private static class PartialUpdateMergeFunctionFactory
-            implements MergeFunctionFactory<KeyValue> {
-
-        private static final long serialVersionUID = 1L;
-
-        private final boolean ignoreDelete;
-        private final List<LogicalType> tableTypes;
-
-        private PartialUpdateMergeFunctionFactory(
-                boolean ignoreDelete, List<LogicalType> tableTypes) {
-            this.ignoreDelete = ignoreDelete;
-            this.tableTypes = tableTypes;
-        }
-
-        @Override
-        public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
-            List<LogicalType> fieldTypes = tableTypes;
-            if (projection != null) {
-                fieldTypes = Projection.of(projection).project(tableTypes);
-            }
-            return new PartialUpdateMergeFunction(createFieldGetters(fieldTypes), ignoreDelete);
-        }
-    }
-
-    private static class AggregateMergeFunctionFactory implements MergeFunctionFactory<KeyValue> {
-
-        private static final long serialVersionUID = 1L;
-
-        private final Configuration conf;
-        private final List<String> tableNames;
-        private final List<LogicalType> tableTypes;
-        private final List<String> primaryKeys;
-
-        private AggregateMergeFunctionFactory(
-                Configuration conf,
-                List<String> tableNames,
-                List<LogicalType> tableTypes,
-                List<String> primaryKeys) {
-            this.conf = conf;
-            this.tableNames = tableNames;
-            this.tableTypes = tableTypes;
-            this.primaryKeys = primaryKeys;
-        }
-
-        @Override
-        public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
-            List<String> fieldNames = tableNames;
-            List<LogicalType> fieldTypes = tableTypes;
-            if (projection != null) {
-                Projection project = Projection.of(projection);
-                fieldNames = project.project(tableNames);
-                fieldTypes = project.project(tableTypes);
-            }
-
-            return new AggregateMergeFunction(
-                    createFieldGetters(fieldTypes),
-                    new AggregateMergeFunction.RowAggregator(
-                            conf, fieldNames, fieldTypes, primaryKeys));
         }
     }
 }

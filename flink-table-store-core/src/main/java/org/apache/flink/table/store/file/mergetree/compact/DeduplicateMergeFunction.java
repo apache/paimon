@@ -48,8 +48,17 @@ public class DeduplicateMergeFunction implements MergeFunction<KeyValue> {
         return latestKv;
     }
 
-    @Override
-    public MergeFunction<KeyValue> copy() {
-        return new DeduplicateMergeFunction();
+    public static MergeFunctionFactory<KeyValue> factory() {
+        return new Factory();
+    }
+
+    private static class Factory implements MergeFunctionFactory<KeyValue> {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
+            return new DeduplicateMergeFunction();
+        }
     }
 }

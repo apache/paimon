@@ -25,7 +25,6 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueFileStore;
 import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -76,7 +75,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                         RowDataType.toRowType(false, extractor.keyFields(tableSchema)),
                         countType,
                         extractor,
-                        MergeFunctionFactory.of(new ValueCountMergeFunction()));
+                        ValueCountMergeFunction.factory());
     }
 
     @Override

@@ -27,25 +27,4 @@ import java.io.Serializable;
 public interface MergeFunctionFactory<T> extends Serializable {
 
     MergeFunction<T> create(@Nullable int[][] projection);
-
-    static <T> MergeFunctionFactory<T> of(MergeFunction<T> mergeFunction) {
-        return new InstanceFactory<>(mergeFunction);
-    }
-
-    /** A {@link MergeFunctionFactory} from a {@link MergeFunction} instance. */
-    class InstanceFactory<T> implements MergeFunctionFactory<T> {
-
-        private static final long serialVersionUID = 1L;
-
-        private final MergeFunction<T> mergeFunction;
-
-        public InstanceFactory(MergeFunction<T> mergeFunction) {
-            this.mergeFunction = mergeFunction;
-        }
-
-        @Override
-        public MergeFunction<T> create(@Nullable int[][] projection) {
-            return mergeFunction;
-        }
-    }
 }

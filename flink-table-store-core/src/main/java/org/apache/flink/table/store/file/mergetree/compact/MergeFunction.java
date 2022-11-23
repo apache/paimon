@@ -40,7 +40,4 @@ public interface MergeFunction<T> extends Serializable {
     /** Get current merged value. Return null if this merged result should be skipped. */
     @Nullable
     T getResult();
-
-    /** Create a new merge function object with the same functionality as this one. */
-    MergeFunction<T> copy();
 }

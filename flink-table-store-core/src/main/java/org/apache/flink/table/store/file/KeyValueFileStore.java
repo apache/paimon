@@ -90,7 +90,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 keyType,
                 valueType,
                 keyComparatorSupplier,
-                mfFactory.create(null),
+                mfFactory,
                 pathFactory(),
                 snapshotManager(),
                 newScan(true),
