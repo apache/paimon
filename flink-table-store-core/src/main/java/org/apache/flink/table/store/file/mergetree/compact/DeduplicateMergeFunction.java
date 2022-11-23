@@ -28,9 +28,9 @@ import javax.annotation.Nullable;
  */
 public class DeduplicateMergeFunction implements MergeFunction<KeyValue> {
 
-    private static final long serialVersionUID = 1L;
+    private KeyValue latestKv;
 
-    private transient KeyValue latestKv;
+    protected DeduplicateMergeFunction() {}
 
     @Override
     public void reset() {

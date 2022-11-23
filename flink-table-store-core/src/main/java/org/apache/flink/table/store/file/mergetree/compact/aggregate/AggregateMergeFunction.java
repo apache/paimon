@@ -44,16 +44,14 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  */
 public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
-    private static final long serialVersionUID = 1L;
-
     private final RowData.FieldGetter[] getters;
     private final RowAggregator rowAggregator;
 
-    private transient KeyValue latestKv;
-    private transient GenericRowData row;
-    private transient KeyValue reused;
+    private KeyValue latestKv;
+    private GenericRowData row;
+    private KeyValue reused;
 
-    public AggregateMergeFunction(RowData.FieldGetter[] getters, RowAggregator rowAggregator) {
+    protected AggregateMergeFunction(RowData.FieldGetter[] getters, RowAggregator rowAggregator) {
         this.getters = getters;
         this.rowAggregator = rowAggregator;
     }

@@ -151,7 +151,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 compactManager,
                 getMaxSequenceNumber(restoreFiles),
                 keyComparator,
-                mfFactory.create(null),
+                mfFactory.create(),
                 writerFactory,
                 options.commitForceCompact(),
                 options.changelogProducer());

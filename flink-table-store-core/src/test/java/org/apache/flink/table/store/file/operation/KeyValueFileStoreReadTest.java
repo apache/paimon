@@ -122,7 +122,7 @@ public class KeyValueFileStoreReadTest {
                                         .collect(Collectors.toList());
                             }
                         },
-                        new ValueCountMergeFunction());
+                        ValueCountMergeFunction.factory().create());
         List<KeyValue> readData =
                 writeThenRead(
                         data,

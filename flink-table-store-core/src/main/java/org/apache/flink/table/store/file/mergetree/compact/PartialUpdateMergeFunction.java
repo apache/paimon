@@ -37,16 +37,14 @@ import static org.apache.flink.table.store.utils.RowDataUtils.createFieldGetters
  */
 public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
-    private static final long serialVersionUID = 1L;
-
     private final RowData.FieldGetter[] getters;
     private final boolean ignoreDelete;
 
-    private transient KeyValue latestKv;
-    private transient GenericRowData row;
-    private transient KeyValue reused;
+    private KeyValue latestKv;
+    private GenericRowData row;
+    private KeyValue reused;
 
-    public PartialUpdateMergeFunction(RowData.FieldGetter[] getters, boolean ignoreDelete) {
+    protected PartialUpdateMergeFunction(RowData.FieldGetter[] getters, boolean ignoreDelete) {
         this.getters = getters;
         this.ignoreDelete = ignoreDelete;
     }

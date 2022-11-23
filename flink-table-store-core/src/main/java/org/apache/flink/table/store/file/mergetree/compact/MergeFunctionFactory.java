@@ -26,5 +26,9 @@ import java.io.Serializable;
 @FunctionalInterface
 public interface MergeFunctionFactory<T> extends Serializable {
 
+    default MergeFunction<T> create() {
+        return create(null);
+    }
+
     MergeFunction<T> create(@Nullable int[][] projection);
 }

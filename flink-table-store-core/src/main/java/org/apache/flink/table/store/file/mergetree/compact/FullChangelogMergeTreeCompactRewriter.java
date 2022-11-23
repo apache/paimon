@@ -78,7 +78,7 @@ public class FullChangelogMergeTreeCompactRewriter extends MergeTreeCompactRewri
                                 runReaders,
                                 keyComparator,
                                 new FullChangelogMergeFunctionWrapper(
-                                        mfFactory.create(null), maxLevel));
+                                        mfFactory.create(), maxLevel));
                     });
         }
 

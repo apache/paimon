@@ -162,7 +162,7 @@ public abstract class SortBufferWriteBufferTestBase {
 
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
-            return new ValueCountMergeFunction();
+            return ValueCountMergeFunction.factory().create();
         }
 
         @Test

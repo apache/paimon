@@ -64,7 +64,7 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
                 writerFactory.createRollingMergeTreeFileWriter(outputLevel);
         RecordReader<KeyValue> sectionsReader =
                 MergeTreeReaders.readerForMergeTree(
-                        sections, dropDelete, readerFactory, keyComparator, mfFactory.create(null));
+                        sections, dropDelete, readerFactory, keyComparator, mfFactory.create());
         writer.write(new RecordReaderIterator<>(sectionsReader));
         writer.close();
         return new CompactResult(extractFilesFromSections(sections), writer.result());

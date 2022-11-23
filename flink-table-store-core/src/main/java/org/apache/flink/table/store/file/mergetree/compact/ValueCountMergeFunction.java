@@ -33,11 +33,11 @@ import static org.apache.flink.util.Preconditions.checkArgument;
  */
 public class ValueCountMergeFunction implements MergeFunction<KeyValue> {
 
-    private static final long serialVersionUID = 1L;
+    private KeyValue latestKv;
+    private long total;
+    private KeyValue reused;
 
-    private transient KeyValue latestKv;
-    private transient long total;
-    private transient KeyValue reused;
+    protected ValueCountMergeFunction() {}
 
     @Override
     public void reset() {

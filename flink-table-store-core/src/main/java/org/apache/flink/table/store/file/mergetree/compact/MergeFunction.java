@@ -22,14 +22,12 @@ import org.apache.flink.table.store.file.KeyValue;
 
 import javax.annotation.Nullable;
 
-import java.io.Serializable;
-
 /**
  * Merge function to merge multiple {@link KeyValue}s.
  *
  * @param <T> result type
  */
-public interface MergeFunction<T> extends Serializable {
+public interface MergeFunction<T> {
 
     /** Reset the merge function to its default state. */
     void reset();
