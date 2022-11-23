@@ -20,6 +20,7 @@ package org.apache.flink.table.store.utils;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /** Utils for local file. */
@@ -32,13 +33,12 @@ public class LocalFileUtils {
      * @param path the original path.
      * @return the path that replaced symbolic links with real path.
      */
-    public static java.nio.file.Path getTargetPathIfContainsSymbolicPath(java.nio.file.Path path)
-            throws IOException {
-        java.nio.file.Path targetPath = path;
-        java.nio.file.Path suffixPath = Paths.get("");
+    public static Path getTargetPathIfContainsSymbolicPath(Path path) throws IOException {
+        Path targetPath = path;
+        Path suffixPath = Paths.get("");
         while (path != null && path.getFileName() != null) {
             if (Files.isSymbolicLink(path)) {
-                java.nio.file.Path linkedPath = path.toRealPath();
+                Path linkedPath = path.toRealPath();
                 targetPath = Paths.get(linkedPath.toString(), suffixPath.toString());
                 break;
             }
