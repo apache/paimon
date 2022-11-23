@@ -26,9 +26,9 @@ import org.apache.flink.api.common.typeutils.base.LongSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.typeutils.runtime.TupleSerializer;
+import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
-import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
@@ -36,10 +36,7 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.sink.LogSinkFunction;
 import org.apache.flink.table.store.table.sink.SinkRecord;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -52,40 +49,36 @@ import java.util.Set;
 import java.util.TreeMap;
 
 /**
- * A {@link StoreWriteOperator} for {@link
- * org.apache.flink.table.store.CoreOptions.ChangelogProducer#FULL_COMPACTION} changelog producer.
+ * {@link StoreSinkWrite} for {@link CoreOptions.ChangelogProducer#FULL_COMPACTION} changelog
+ * producer. This writer will perform full compaction once in a while.
  */
-public class FullChangelogStoreWriteOperator extends StoreWriteOperator {
-
-    private static final long serialVersionUID = 1L;
+public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
 
     private final long fullCompactionThresholdMs;
 
-    private transient Set<Tuple2<BinaryRowData, Integer>> currentWrittenBuckets;
-    private transient NavigableMap<Long, Set<Tuple2<BinaryRowData, Integer>>> writtenBuckets;
-    private transient ListState<Tuple3<Long, BinaryRowData, Integer>> writtenBucketState;
+    private final Set<Tuple2<BinaryRowData, Integer>> currentWrittenBuckets;
+    private final NavigableMap<Long, Set<Tuple2<BinaryRowData, Integer>>> writtenBuckets;
+    private final ListState<Tuple3<Long, BinaryRowData, Integer>> writtenBucketState;
 
-    private transient Long currentFirstWriteMs;
-    private transient NavigableMap<Long, Long> firstWriteMs;
-    private transient ListState<Tuple2<Long, Long>> firstWriteMsState;
+    private Long currentFirstWriteMs;
+    private final NavigableMap<Long, Long> firstWriteMs;
+    private final ListState<Tuple2<Long, Long>> firstWriteMsState;
 
-    private transient Long snapshotIdentifierToCheck;
+    private Long snapshotIdentifierToCheck;
 
-    public FullChangelogStoreWriteOperator(
+    public FullChangelogStoreSinkWrite(
             FileStoreTable table,
+            StateInitializationContext context,
             String initialCommitUser,
-            @Nullable Map<String, String> overwritePartition,
-            @Nullable LogSinkFunction logSinkFunction,
-            long fullCompactionThresholdMs) {
-        super(table, initialCommitUser, overwritePartition, logSinkFunction);
+            IOManager ioManager,
+            boolean isOverwrite,
+            long fullCompactionThresholdMs)
+            throws Exception {
+        super(table, context, initialCommitUser, ioManager, isOverwrite);
+
         this.fullCompactionThresholdMs = fullCompactionThresholdMs;
-    }
 
-    @SuppressWarnings("unchecked")
-    @Override
-    public void initializeState(StateInitializationContext context) throws Exception {
-        super.initializeState(context);
-
+        currentWrittenBuckets = new HashSet<>();
         TupleSerializer<Tuple3<Long, BinaryRowData, Integer>> writtenBucketStateSerializer =
                 new TupleSerializer<>(
                         (Class<Tuple3<Long, BinaryRowData, Integer>>) (Class<?>) Tuple3.class,
@@ -110,6 +103,7 @@ public class FullChangelogStoreWriteOperator extends StoreWriteOperator {
                                         .computeIfAbsent(t.f0, k -> new HashSet<>())
                                         .add(Tuple2.of(t.f1, t.f2)));
 
+        currentFirstWriteMs = null;
         TupleSerializer<Tuple2<Long, Long>> firstWriteMsStateSerializer =
                 new TupleSerializer<>(
                         (Class<Tuple2<Long, Long>>) (Class<?>) Tuple2.class,
@@ -126,18 +120,20 @@ public class FullChangelogStoreWriteOperator extends StoreWriteOperator {
     }
 
     @Override
-    public void open() throws Exception {
-        super.open();
-        currentWrittenBuckets = new HashSet<>();
-        currentFirstWriteMs = null;
+    public SinkRecord write(RowData rowData) throws Exception {
+        SinkRecord sinkRecord = super.write(rowData);
+        touchBucket(sinkRecord.partition(), sinkRecord.bucket());
+        return sinkRecord;
     }
 
     @Override
-    public void processElement(StreamRecord<RowData> element) throws Exception {
-        SinkRecord record = writeRecord(element);
+    public void compact(BinaryRowData partition, int bucket, boolean fullCompaction)
+            throws Exception {
+        super.compact(partition, bucket, fullCompaction);
+        touchBucket(partition, bucket);
+    }
 
-        BinaryRowData partition = record.partition();
-        int bucket = record.bucket();
+    private void touchBucket(BinaryRowData partition, int bucket) {
         // partition is a reused BinaryRowData
         // we first check if the tuple exists to minimize copying
         if (!currentWrittenBuckets.contains(Tuple2.of(partition, bucket))) {
@@ -150,27 +146,7 @@ public class FullChangelogStoreWriteOperator extends StoreWriteOperator {
     }
 
     @Override
-    public void snapshotState(StateSnapshotContext context) throws Exception {
-        super.snapshotState(context);
-
-        List<Tuple3<Long, BinaryRowData, Integer>> writtenBucketList = new ArrayList<>();
-        for (Map.Entry<Long, Set<Tuple2<BinaryRowData, Integer>>> entry :
-                writtenBuckets.entrySet()) {
-            for (Tuple2<BinaryRowData, Integer> bucket : entry.getValue()) {
-                writtenBucketList.add(Tuple3.of(entry.getKey(), bucket.f0, bucket.f1));
-            }
-        }
-        writtenBucketState.update(writtenBucketList);
-
-        List<Tuple2<Long, Long>> firstWriteMsList = new ArrayList<>();
-        for (Map.Entry<Long, Long> entry : firstWriteMs.entrySet()) {
-            firstWriteMsList.add(Tuple2.of(entry.getKey(), entry.getValue()));
-        }
-        firstWriteMsState.update(firstWriteMsList);
-    }
-
-    @Override
-    protected List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
+    public List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
             throws IOException {
         if (snapshotIdentifierToCheck != null) {
             Optional<Snapshot> snapshot = findSnapshot(snapshotIdentifierToCheck);
@@ -259,5 +235,25 @@ public class FullChangelogStoreWriteOperator extends StoreWriteOperator {
                                 + CoreOptions.SNAPSHOT_NUM_RETAINED_MIN,
                         commitUser,
                         identifierToCheck));
+    }
+
+    @Override
+    public void snapshotState(StateSnapshotContext context) throws Exception {
+        super.snapshotState(context);
+
+        List<Tuple3<Long, BinaryRowData, Integer>> writtenBucketList = new ArrayList<>();
+        for (Map.Entry<Long, Set<Tuple2<BinaryRowData, Integer>>> entry :
+                writtenBuckets.entrySet()) {
+            for (Tuple2<BinaryRowData, Integer> bucket : entry.getValue()) {
+                writtenBucketList.add(Tuple3.of(entry.getKey(), bucket.f0, bucket.f1));
+            }
+        }
+        writtenBucketState.update(writtenBucketList);
+
+        List<Tuple2<Long, Long>> firstWriteMsList = new ArrayList<>();
+        for (Map.Entry<Long, Long> entry : firstWriteMs.entrySet()) {
+            firstWriteMsList.add(Tuple2.of(entry.getKey(), entry.getValue()));
+        }
+        firstWriteMsState.update(firstWriteMsList);
     }
 }

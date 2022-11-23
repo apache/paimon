@@ -82,17 +82,28 @@ public class StoreSink implements Serializable {
             return new StoreCompactOperator(table, initialCommitUser, compactPartitionSpec);
         }
 
+        boolean isOverwrite = overwritePartition != null;
+        StoreSinkWrite.Provider writeProvider;
         if (table.options().changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION) {
-            return new FullChangelogStoreWriteOperator(
-                    table,
-                    initialCommitUser,
-                    overwritePartition,
-                    logSinkFunction,
-                    table.options().changelogProducerFullCompactionTriggerInterval().toMillis());
+            long fullCompactionThresholdMs =
+                    table.options().changelogProducerFullCompactionTriggerInterval().toMillis();
+            writeProvider =
+                    (table, context, ioManager) ->
+                            new FullChangelogStoreSinkWrite(
+                                    table,
+                                    context,
+                                    initialCommitUser,
+                                    ioManager,
+                                    isOverwrite,
+                                    fullCompactionThresholdMs);
+        } else {
+            writeProvider =
+                    (table, context, ioManager) ->
+                            new StoreSinkWriteImpl(
+                                    table, context, initialCommitUser, ioManager, isOverwrite);
         }
 
-        return new StoreWriteOperator(
-                table, initialCommitUser, overwritePartition, logSinkFunction);
+        return new StoreWriteOperator(table, logSinkFunction, writeProvider);
     }
 
     private StoreCommitter createCommitter(String user, boolean createEmptyCommit) {
