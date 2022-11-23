@@ -336,7 +336,7 @@ public class SchemaManager implements Serializable {
     }
 
     private boolean commit(TableSchema newSchema) throws Exception {
-        CoreOptions.validateTableOptions(newSchema, new CoreOptions(newSchema.options()));
+        CoreOptions.validateTableSchema(newSchema);
 
         Path schemaPath = toSchemaPath(newSchema.id());
         FileSystem fs = schemaPath.getFileSystem();

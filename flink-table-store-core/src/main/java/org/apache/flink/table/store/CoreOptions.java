@@ -697,9 +697,9 @@ public class CoreOptions implements Serializable {
      * <p>TODO validate all items in schema and all keys in options.
      *
      * @param schema the schema to be validated
-     * @param options the options to be validated
      */
-    public static void validateTableOptions(TableSchema schema, CoreOptions options) {
+    public static void validateTableSchema(TableSchema schema) {
+        CoreOptions options = new CoreOptions(schema.options());
         if (options.logStartupMode() == LogStartupMode.FROM_TIMESTAMP) {
             if (options.logScanTimestampMills() == null) {
                 throw new IllegalArgumentException(

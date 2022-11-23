@@ -61,11 +61,10 @@ public class FileStoreTableFactory {
         dynamicOptions.toMap().forEach(newOptions::setString);
         newOptions.set(PATH, tablePath.toString());
 
-        // validate merged options
-        CoreOptions.validateTableOptions(tableSchema, new CoreOptions(newOptions));
-
         // copy a new table store to contain dynamic options
         tableSchema = tableSchema.copy(newOptions.toMap());
+        // validate schema wit new options
+        CoreOptions.validateTableSchema(tableSchema);
 
         SchemaManager schemaManager = new SchemaManager(tablePath);
         if (newOptions.get(CoreOptions.WRITE_MODE) == WriteMode.APPEND_ONLY) {
