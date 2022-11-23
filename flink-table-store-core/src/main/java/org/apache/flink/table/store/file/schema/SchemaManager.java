@@ -22,6 +22,7 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.schema.SchemaChange.AddColumn;
 import org.apache.flink.table.store.file.schema.SchemaChange.RemoveOption;
@@ -336,6 +337,8 @@ public class SchemaManager implements Serializable {
     }
 
     private boolean commit(TableSchema newSchema) throws Exception {
+        validate(newSchema);
+
         Path schemaPath = toSchemaPath(newSchema.id());
         FileSystem fs = schemaPath.getFileSystem();
         Callable<Boolean> callable =
@@ -349,6 +352,25 @@ public class SchemaManager implements Serializable {
             return callable.call();
         }
         return lock.runWithLock(callable);
+    }
+
+    /**
+     * Validate {@link TableSchema} before committing it.
+     *
+     * <p>// TODO validate all items in {@link TableSchema} here.
+     *
+     * @param schema the table schema to be validated
+     */
+    private void validate(TableSchema schema) {
+        CoreOptions options = new CoreOptions(schema.options());
+
+        // Only changelog tables with primary keys support full compaction
+        if (options.changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION
+                && options.writeMode() == WriteMode.CHANGE_LOG
+                && schema.primaryKeys().isEmpty()) {
+            throw new UnsupportedOperationException(
+                    "Changelog table with full compaction must have primary keys");
+        }
     }
 
     /** Read schema for schema id. */

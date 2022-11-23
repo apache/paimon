@@ -544,6 +544,10 @@ public class CoreOptions implements Serializable {
         return options.getOptional(SEQUENCE_FIELD);
     }
 
+    public WriteMode writeMode() {
+        return options.get(WRITE_MODE);
+    }
+
     public boolean writeCompactionSkip() {
         return options.get(WRITE_COMPACTION_SKIP);
     }
