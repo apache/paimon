@@ -40,6 +40,13 @@ under the License.
         </dependency>
 
         <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-table-store-common</artifactId>
+            <version>${project.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
             <!-- Ensures that flink-table-store-codegen is built beforehand, in order to bundle the jar -->
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-table-store-codegen</artifactId>

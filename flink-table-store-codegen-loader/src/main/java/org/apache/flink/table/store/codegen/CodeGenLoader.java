@@ -20,6 +20,7 @@ package org.apache.flink.table.store.codegen;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ConfigurationUtils;
+import org.apache.flink.table.store.utils.LocalFileUtils;
 import org.apache.flink.util.IOUtils;
 
 import java.io.IOException;
@@ -70,7 +71,8 @@ public class CodeGenLoader {
             final ClassLoader flinkClassLoader = CodeGenLoader.class.getClassLoader();
             final Path tmpDirectory =
                     Paths.get(ConfigurationUtils.parseTempDirectories(new Configuration())[0]);
-            Files.createDirectories(tmpDirectory);
+            Files.createDirectories(
+                    LocalFileUtils.getTargetPathIfContainsSymbolicPath(tmpDirectory));
             Path delegateJar =
                     extractResource(
                             FLINK_TABLE_STORE_CODEGEN_FAT_JAR,
@@ -110,12 +112,14 @@ public class CodeGenLoader {
 
     // Singleton lazy initialization
 
-    private static class CodegenLoaderHolder {
-        private static final CodeGenLoader INSTANCE = new CodeGenLoader();
-    }
+    private static CodeGenLoader instance;
 
-    public static CodeGenLoader getInstance() {
-        return CodeGenLoader.CodegenLoaderHolder.INSTANCE;
+    public static synchronized CodeGenLoader getInstance() {
+        if (instance == null) {
+            // Avoid NoClassDefFoundError without cause by exception
+            instance = new CodeGenLoader();
+        }
+        return instance;
     }
 
     public <T> T discover(Class<T> clazz) {
