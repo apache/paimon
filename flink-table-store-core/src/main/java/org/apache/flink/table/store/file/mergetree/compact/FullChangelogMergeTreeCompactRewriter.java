@@ -46,8 +46,8 @@ public class FullChangelogMergeTreeCompactRewriter extends MergeTreeCompactRewri
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<RowData> keyComparator,
-            MergeFunction<KeyValue> mergeFunction) {
-        super(readerFactory, writerFactory, keyComparator, mergeFunction);
+            MergeFunctionFactory<KeyValue> mfFactory) {
+        super(readerFactory, writerFactory, keyComparator, mfFactory);
         this.maxLevel = maxLevel;
     }
 
@@ -78,7 +78,7 @@ public class FullChangelogMergeTreeCompactRewriter extends MergeTreeCompactRewri
                                 runReaders,
                                 keyComparator,
                                 new FullChangelogMergeFunctionWrapper(
-                                        mergeFunction.copy(), maxLevel));
+                                        mfFactory.create(), maxLevel));
                     });
         }
 

@@ -26,7 +26,7 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueFileStore;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
@@ -48,8 +48,6 @@ import org.apache.flink.table.store.table.source.MergeTreeSplitGenerator;
 import org.apache.flink.table.store.table.source.SplitGenerator;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
-import org.apache.flink.table.store.utils.RowDataUtils;
-import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.List;
@@ -75,29 +73,24 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         RowType rowType = tableSchema.logicalRowType();
         Configuration conf = Configuration.fromMap(tableSchema.options());
         CoreOptions.MergeEngine mergeEngine = conf.get(CoreOptions.MERGE_ENGINE);
-        List<LogicalType> fieldTypes = rowType.getChildren();
-        RowData.FieldGetter[] fieldGetters = new RowData.FieldGetter[fieldTypes.size()];
-        for (int i = 0; i < fieldTypes.size(); i++) {
-            fieldGetters[i] = RowDataUtils.createNullCheckingFieldGetter(fieldTypes.get(i), i);
-        }
-
-        MergeFunction<KeyValue> mergeFunction;
+        MergeFunctionFactory<KeyValue> mfFactory;
         switch (mergeEngine) {
             case DEDUPLICATE:
-                mergeFunction = new DeduplicateMergeFunction();
+                mfFactory = DeduplicateMergeFunction.factory();
                 break;
             case PARTIAL_UPDATE:
-                boolean ignoreDelete = conf.get(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE);
-                mergeFunction = new PartialUpdateMergeFunction(fieldGetters, ignoreDelete);
+                mfFactory =
+                        PartialUpdateMergeFunction.factory(
+                                conf.get(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE),
+                                rowType.getChildren());
                 break;
             case AGGREGATE:
-                List<String> fieldNames = tableSchema.fieldNames();
-                List<String> primaryKeys = tableSchema.primaryKeys();
-                mergeFunction =
-                        new AggregateMergeFunction(
-                                fieldGetters,
-                                new AggregateMergeFunction.RowAggregator(
-                                        conf, fieldNames, fieldTypes, primaryKeys));
+                mfFactory =
+                        AggregateMergeFunction.factory(
+                                conf,
+                                tableSchema.fieldNames(),
+                                rowType.getChildren(),
+                                tableSchema.primaryKeys());
                 break;
             default:
                 throw new UnsupportedOperationException("Unsupported merge engine: " + mergeEngine);
@@ -115,7 +108,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                         RowDataType.toRowType(false, extractor.keyFields(tableSchema)),
                         rowType,
                         extractor,
-                        mergeFunction);
+                        mfFactory);
     }
 
     private static RowType addKeyNamePrefix(RowType type) {

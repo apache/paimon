@@ -65,8 +65,10 @@ public class PartialUpdateITCase extends FileStoreTableITCase {
         batchSql("INSERT INTO T VALUES (1, 2, 4, 5, CAST(NULL AS STRING))");
         batchSql("INSERT INTO T VALUES (1, 2, 4, CAST(NULL AS INT), '6')");
 
-        List<Row> result = batchSql("SELECT * FROM T");
-        assertThat(result).containsExactlyInAnyOrder(Row.of(1, 2, 4, 5, "6"));
+        assertThat(batchSql("SELECT * FROM T")).containsExactlyInAnyOrder(Row.of(1, 2, 4, 5, "6"));
+
+        // projection
+        assertThat(batchSql("SELECT a FROM T")).containsExactlyInAnyOrder(Row.of(4));
     }
 
     @Test

@@ -93,7 +93,7 @@ public class FileStoreExpireTest {
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                         TestKeyValueGenerator.TestKeyFieldsExtractor.EXTRACTOR,
-                        new DeduplicateMergeFunction())
+                        DeduplicateMergeFunction.factory().create())
                 .changelogProducer(changelogProducer)
                 .build();
     }

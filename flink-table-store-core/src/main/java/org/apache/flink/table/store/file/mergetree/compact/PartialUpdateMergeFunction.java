@@ -21,9 +21,15 @@ package org.apache.flink.table.store.file.mergetree.compact;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.utils.Projection;
+import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
+
+import java.util.List;
+
+import static org.apache.flink.table.store.utils.RowDataUtils.createFieldGetters;
 
 /**
  * A {@link MergeFunction} where key is primary key (unique) and value is the partial record, update
@@ -31,16 +37,14 @@ import javax.annotation.Nullable;
  */
 public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
-    private static final long serialVersionUID = 1L;
-
     private final RowData.FieldGetter[] getters;
     private final boolean ignoreDelete;
 
-    private transient KeyValue latestKv;
-    private transient GenericRowData row;
-    private transient KeyValue reused;
+    private KeyValue latestKv;
+    private GenericRowData row;
+    private KeyValue reused;
 
-    public PartialUpdateMergeFunction(RowData.FieldGetter[] getters, boolean ignoreDelete) {
+    protected PartialUpdateMergeFunction(RowData.FieldGetter[] getters, boolean ignoreDelete) {
         this.getters = getters;
         this.ignoreDelete = ignoreDelete;
     }
@@ -94,9 +98,30 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         return reused.replace(latestKv.key(), latestKv.sequenceNumber(), RowKind.INSERT, row);
     }
 
-    @Override
-    public MergeFunction<KeyValue> copy() {
-        // RowData.FieldGetter is thread safe
-        return new PartialUpdateMergeFunction(getters, ignoreDelete);
+    public static MergeFunctionFactory<KeyValue> factory(
+            boolean ignoreDelete, List<LogicalType> tableTypes) {
+        return new Factory(ignoreDelete, tableTypes);
+    }
+
+    private static class Factory implements MergeFunctionFactory<KeyValue> {
+
+        private static final long serialVersionUID = 1L;
+
+        private final boolean ignoreDelete;
+        private final List<LogicalType> tableTypes;
+
+        private Factory(boolean ignoreDelete, List<LogicalType> tableTypes) {
+            this.ignoreDelete = ignoreDelete;
+            this.tableTypes = tableTypes;
+        }
+
+        @Override
+        public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
+            List<LogicalType> fieldTypes = tableTypes;
+            if (projection != null) {
+                fieldTypes = Projection.of(projection).project(tableTypes);
+            }
+            return new PartialUpdateMergeFunction(createFieldGetters(fieldTypes), ignoreDelete);
+        }
     }
 }

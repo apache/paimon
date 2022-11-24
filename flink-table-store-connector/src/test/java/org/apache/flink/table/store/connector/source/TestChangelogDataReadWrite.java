@@ -108,7 +108,7 @@ public class TestChangelogDataReadWrite {
                         KEY_TYPE,
                         VALUE_TYPE,
                         COMPARATOR,
-                        new DeduplicateMergeFunction(),
+                        DeduplicateMergeFunction.factory(),
                         avro,
                         pathFactory);
         return new KeyValueTableRead(read) {
@@ -159,7 +159,7 @@ public class TestChangelogDataReadWrite {
                                 KEY_TYPE,
                                 VALUE_TYPE,
                                 () -> COMPARATOR,
-                                new DeduplicateMergeFunction(),
+                                DeduplicateMergeFunction.factory(),
                                 pathFactory,
                                 snapshotManager,
                                 null, // not used, we only create an empty writer
