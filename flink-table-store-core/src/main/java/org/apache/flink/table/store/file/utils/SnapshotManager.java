@@ -90,6 +90,25 @@ public class SnapshotManager {
         }
     }
 
+    public @Nullable Long latestCompactedSnapshotId() {
+        Long latestId = latestSnapshotId();
+        Long earliestId = earliestSnapshotId();
+        if (latestId == null || earliestId == null) {
+            return null;
+        }
+
+        for (long snapshotId = latestId; snapshotId >= earliestId; snapshotId--) {
+            if (snapshotExists(snapshotId)) {
+                Snapshot snapshot = snapshot(snapshotId);
+                if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
+                    return snapshot.id();
+                }
+            }
+        }
+
+        return null;
+    }
+
     /**
      * Returns a snapshot earlier than the timestamp mills. A non-existent snapshot may be returned
      * if all snapshots are later than the timestamp mills.

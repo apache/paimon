@@ -169,6 +169,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether to skip compaction on write.");
 
+    public static final ConfigOption<Boolean> READ_COMPACTED =
+            ConfigOptions.key("read.compacted")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to read compacted snapshot only.");
+
     public static final ConfigOption<MemorySize> SOURCE_SPLIT_TARGET_SIZE =
             ConfigOptions.key("source.split.target-size")
                     .memoryType()
@@ -542,6 +548,10 @@ public class CoreOptions implements Serializable {
 
     public boolean writeCompactionSkip() {
         return options.get(WRITE_COMPACTION_SKIP);
+    }
+
+    public boolean readCompacted() {
+        return options.get(READ_COMPACTED);
     }
 
     /** Specifies the merge engine for table with primary key. */
