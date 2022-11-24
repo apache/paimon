@@ -78,7 +78,10 @@ public class FileStoreSource extends FlinkSource {
         Long snapshotId;
         Collection<FileStoreSourceSplit> splits;
         if (checkpoint == null) {
-            DataFilePlan plan = isContinuous ? SnapshotEnumerator.startup(scan) : scan.plan();
+            DataFilePlan plan =
+                    isContinuous
+                            ? SnapshotEnumerator.startup(scan)
+                            : scan.withReadCompacted(table.options().readCompacted()).plan();
             snapshotId = plan.snapshotId;
             splits = new FileStoreSourceSplitGenerator().createSplits(plan);
         } else {

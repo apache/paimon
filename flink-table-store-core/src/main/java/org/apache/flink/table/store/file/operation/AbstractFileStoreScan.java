@@ -75,6 +75,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private List<ManifestFileMeta> specifiedManifests = null;
     private boolean isIncremental = false;
     private Integer specifiedLevel = null;
+    private boolean readCompacted = false;
 
     public AbstractFileStoreScan(
             RowType partitionType,
@@ -176,12 +177,21 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
+    public FileStoreScan withReadCompacted(boolean readCompacted) {
+        this.readCompacted = readCompacted;
+        return this;
+    }
+
+    @Override
     public Plan plan() {
         List<ManifestFileMeta> manifests = specifiedManifests;
         Long snapshotId = specifiedSnapshotId;
         if (manifests == null) {
             if (snapshotId == null) {
-                snapshotId = snapshotManager.latestSnapshotId();
+                snapshotId =
+                        readCompacted
+                                ? snapshotManager.latestCompactedSnapshotId()
+                                : snapshotManager.latestSnapshotId();
             }
             if (snapshotId == null) {
                 manifests = Collections.emptyList();
