@@ -21,7 +21,6 @@ package org.apache.flink.table.store.table;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.CoreOptions.LogStartupMode;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -62,11 +61,10 @@ public class FileStoreTableFactory {
         dynamicOptions.toMap().forEach(newOptions::setString);
         newOptions.set(PATH, tablePath.toString());
 
-        // validate merged options
-        validateOptions(new CoreOptions(newOptions));
-
         // copy a new table store to contain dynamic options
         tableSchema = tableSchema.copy(newOptions.toMap());
+        // validate schema wit new options
+        CoreOptions.validateTableSchema(tableSchema);
 
         SchemaManager schemaManager = new SchemaManager(tablePath);
         if (newOptions.get(CoreOptions.WRITE_MODE) == WriteMode.APPEND_ONLY) {
@@ -76,19 +74,6 @@ public class FileStoreTableFactory {
                 return new ChangelogValueCountFileStoreTable(tablePath, schemaManager, tableSchema);
             } else {
                 return new ChangelogWithKeyFileStoreTable(tablePath, schemaManager, tableSchema);
-            }
-        }
-    }
-
-    private static void validateOptions(CoreOptions options) {
-        if (options.logStartupMode() == LogStartupMode.FROM_TIMESTAMP) {
-            if (options.logScanTimestampMills() == null) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "%s can not be null when you use %s for %s",
-                                CoreOptions.LOG_SCAN_TIMESTAMP_MILLS.key(),
-                                CoreOptions.LogStartupMode.FROM_TIMESTAMP,
-                                CoreOptions.LOG_SCAN.key()));
             }
         }
     }
