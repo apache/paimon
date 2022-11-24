@@ -62,7 +62,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
             boolean checkNumOfBuckets,
-            CoreOptions.ChangelogProducer changelogProducer) {
+            CoreOptions.ChangelogProducer changelogProducer,
+            boolean readCompacted) {
         super(
                 partitionType,
                 bucketKeyType,
@@ -73,7 +74,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 manifestListFactory,
                 numOfBuckets,
                 checkNumOfBuckets,
-                changelogProducer);
+                changelogProducer,
+                readCompacted);
         this.keyFieldsExtractor = keyFieldsExtractor;
         this.schemaKeyStatsConverters = new HashMap<>();
         this.keyType = keyType;
