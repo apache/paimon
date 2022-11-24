@@ -23,6 +23,8 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
+import org.apache.flink.table.store.utils.Projection;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.types.RowKind;
 
@@ -32,6 +34,7 @@ import java.io.Serializable;
 import java.util.List;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
+import static org.apache.flink.table.store.utils.RowDataUtils.createFieldGetters;
 import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -41,16 +44,14 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  */
 public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
-    private static final long serialVersionUID = 1L;
-
     private final RowData.FieldGetter[] getters;
     private final RowAggregator rowAggregator;
 
-    private transient KeyValue latestKv;
-    private transient GenericRowData row;
-    private transient KeyValue reused;
+    private KeyValue latestKv;
+    private GenericRowData row;
+    private KeyValue reused;
 
-    public AggregateMergeFunction(RowData.FieldGetter[] getters, RowAggregator rowAggregator) {
+    protected AggregateMergeFunction(RowData.FieldGetter[] getters, RowAggregator rowAggregator) {
         this.getters = getters;
         this.rowAggregator = rowAggregator;
     }
@@ -89,12 +90,6 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
         return reused.replace(latestKv.key(), latestKv.sequenceNumber(), RowKind.INSERT, row);
     }
 
-    @Override
-    public MergeFunction<KeyValue> copy() {
-        // RowData.FieldGetter is thread safe
-        return new AggregateMergeFunction(getters, rowAggregator);
-    }
-
     /** Provide an Aggregator for merge a new row data. */
     public static class RowAggregator implements Serializable {
         public static final String FIELDS = "fields";
@@ -127,6 +122,51 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
         public FieldAggregator getFieldAggregatorAtPos(int fieldPos) {
             return fieldAggregators[fieldPos];
+        }
+    }
+
+    public static MergeFunctionFactory<KeyValue> factory(
+            Configuration conf,
+            List<String> tableNames,
+            List<LogicalType> tableTypes,
+            List<String> primaryKeys) {
+        return new Factory(conf, tableNames, tableTypes, primaryKeys);
+    }
+
+    private static class Factory implements MergeFunctionFactory<KeyValue> {
+
+        private static final long serialVersionUID = 1L;
+
+        private final Configuration conf;
+        private final List<String> tableNames;
+        private final List<LogicalType> tableTypes;
+        private final List<String> primaryKeys;
+
+        private Factory(
+                Configuration conf,
+                List<String> tableNames,
+                List<LogicalType> tableTypes,
+                List<String> primaryKeys) {
+            this.conf = conf;
+            this.tableNames = tableNames;
+            this.tableTypes = tableTypes;
+            this.primaryKeys = primaryKeys;
+        }
+
+        @Override
+        public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
+            List<String> fieldNames = tableNames;
+            List<LogicalType> fieldTypes = tableTypes;
+            if (projection != null) {
+                Projection project = Projection.of(projection);
+                fieldNames = project.project(tableNames);
+                fieldTypes = project.project(tableTypes);
+            }
+
+            return new AggregateMergeFunction(
+                    createFieldGetters(fieldTypes),
+                    new AggregateMergeFunction.RowAggregator(
+                            conf, fieldNames, fieldTypes, primaryKeys));
         }
     }
 }

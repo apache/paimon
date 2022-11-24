@@ -104,7 +104,7 @@ public class TestFileStore extends KeyValueFileStore {
                 keyType,
                 valueType,
                 keyFieldsExtractor,
-                mergeFunction);
+                p -> mergeFunction);
         this.root = root;
         this.keySerializer = new RowDataSerializer(keyType);
         this.valueSerializer = new RowDataSerializer(valueType);

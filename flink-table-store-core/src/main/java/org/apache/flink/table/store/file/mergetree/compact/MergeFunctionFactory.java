@@ -18,24 +18,17 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.table.store.file.KeyValue;
-
 import javax.annotation.Nullable;
 
-/**
- * Merge function to merge multiple {@link KeyValue}s.
- *
- * @param <T> result type
- */
-public interface MergeFunction<T> {
+import java.io.Serializable;
 
-    /** Reset the merge function to its default state. */
-    void reset();
+/** Factory to create {@link MergeFunction}. */
+@FunctionalInterface
+public interface MergeFunctionFactory<T> extends Serializable {
 
-    /** Add the given {@link KeyValue} to the merge function. */
-    void add(KeyValue kv);
+    default MergeFunction<T> create() {
+        return create(null);
+    }
 
-    /** Get current merged value. Return null if this merged result should be skipped. */
-    @Nullable
-    T getResult();
+    MergeFunction<T> create(@Nullable int[][] projection);
 }
