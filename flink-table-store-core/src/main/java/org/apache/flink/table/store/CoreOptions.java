@@ -29,6 +29,7 @@ import org.apache.flink.configuration.description.Description;
 import org.apache.flink.configuration.description.InlineElement;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.WriteMode;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.util.Preconditions;
 
@@ -389,15 +390,6 @@ public class CoreOptions implements Serializable {
 
     public CoreOptions(Configuration options) {
         this.options = options;
-        // TODO validate all keys
-        Preconditions.checkArgument(
-                snapshotNumRetainMin() > 0,
-                SNAPSHOT_NUM_RETAINED_MIN.key() + " should be at least 1");
-        Preconditions.checkArgument(
-                snapshotNumRetainMin() <= snapshotNumRetainMax(),
-                SNAPSHOT_NUM_RETAINED_MIN.key()
-                        + " should not be larger than "
-                        + SNAPSHOT_NUM_RETAINED_MAX.key());
     }
 
     public int bucket() {
@@ -542,6 +534,10 @@ public class CoreOptions implements Serializable {
 
     public Optional<String> sequenceField() {
         return options.getOptional(SEQUENCE_FIELD);
+    }
+
+    public WriteMode writeMode() {
+        return options.get(WRITE_MODE);
     }
 
     public boolean writeCompactionSkip() {
@@ -692,6 +688,44 @@ public class CoreOptions implements Serializable {
         @Override
         public InlineElement getDescription() {
             return text(description);
+        }
+    }
+
+    /**
+     * Validate the {@link TableSchema} and {@link CoreOptions}.
+     *
+     * <p>TODO validate all items in schema and all keys in options.
+     *
+     * @param schema the schema to be validated
+     */
+    public static void validateTableSchema(TableSchema schema) {
+        CoreOptions options = new CoreOptions(schema.options());
+        if (options.logStartupMode() == LogStartupMode.FROM_TIMESTAMP) {
+            if (options.logScanTimestampMills() == null) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "%s can not be null when you use %s for %s",
+                                CoreOptions.LOG_SCAN_TIMESTAMP_MILLS.key(),
+                                CoreOptions.LogStartupMode.FROM_TIMESTAMP,
+                                CoreOptions.LOG_SCAN.key()));
+            }
+        }
+
+        Preconditions.checkArgument(
+                options.snapshotNumRetainMin() > 0,
+                SNAPSHOT_NUM_RETAINED_MIN.key() + " should be at least 1");
+        Preconditions.checkArgument(
+                options.snapshotNumRetainMin() <= options.snapshotNumRetainMax(),
+                SNAPSHOT_NUM_RETAINED_MIN.key()
+                        + " should not be larger than "
+                        + SNAPSHOT_NUM_RETAINED_MAX.key());
+
+        // Only changelog tables with primary keys support full compaction
+        if (options.changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION
+                && options.writeMode() == WriteMode.CHANGE_LOG
+                && schema.primaryKeys().isEmpty()) {
+            throw new UnsupportedOperationException(
+                    "Changelog table with full compaction must have primary keys");
         }
     }
 

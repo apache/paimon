@@ -238,4 +238,24 @@ public class SchemaManagerTest {
         assertThat(tableSchema.primaryKeys()).isEqualTo(primaryKeys);
         assertThat(tableSchema.options()).isEqualTo(options);
     }
+
+    @Test
+    public void testChangelogTableWithFullCompaction() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("key", "value");
+        options.put(
+                CoreOptions.CHANGELOG_PRODUCER.key(),
+                CoreOptions.ChangelogProducer.FULL_COMPACTION.toString());
+
+        final UpdateSchema schemaWithoutPrimaryKeys =
+                new UpdateSchema(
+                        rowType, Collections.EMPTY_LIST, Collections.EMPTY_LIST, options, "");
+        assertThatThrownBy(() -> manager.commitNewVersion(schemaWithoutPrimaryKeys))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Changelog table with full compaction must have primary keys");
+
+        final UpdateSchema schemaWithPrimaryKeys =
+                new UpdateSchema(rowType, partitionKeys, primaryKeys, options, "");
+        retryArtificialException(() -> manager.commitNewVersion(schemaWithPrimaryKeys));
+    }
 }
