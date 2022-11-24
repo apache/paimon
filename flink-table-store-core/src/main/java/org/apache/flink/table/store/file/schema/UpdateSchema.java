@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.table.descriptors.Schema.SCHEMA;
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
@@ -169,6 +170,25 @@ public class UpdateSchema {
         }
 
         return new CatalogTableImpl(schema, partitionKeys, newOptions, comment);
+    }
+
+    public UpdateSchema toLowerCase() {
+        RowType rowType =
+                new RowType(
+                        this.rowType.isNullable(),
+                        this.rowType.getFields().stream()
+                                .map(
+                                        f ->
+                                                new RowType.RowField(
+                                                        f.getName().toLowerCase(),
+                                                        f.getType(),
+                                                        f.getDescription().orElse("")))
+                                .collect(Collectors.toList()));
+        List<String> partitionKeys =
+                this.partitionKeys.stream().map(String::toLowerCase).collect(Collectors.toList());
+        List<String> primaryKeys =
+                this.primaryKeys.stream().map(String::toLowerCase).collect(Collectors.toList());
+        return new UpdateSchema(rowType, partitionKeys, primaryKeys, options, comment);
     }
 
     public static UpdateSchema fromCatalogTable(CatalogTable catalogTable) {

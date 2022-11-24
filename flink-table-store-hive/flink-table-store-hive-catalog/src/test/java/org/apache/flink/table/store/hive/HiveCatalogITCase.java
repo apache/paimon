@@ -22,6 +22,7 @@ import org.apache.flink.connectors.hive.FlinkEmbeddedHiveRunner;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
+import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.table.store.connector.FlinkCatalog;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
@@ -53,6 +54,7 @@ import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_IN_TEST;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_SUPPORT_CONCURRENCY;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_TXN_MANAGER;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
 /** IT cases for {@link HiveCatalog}. */
 @RunWith(FlinkEmbeddedHiveRunner.class)
@@ -315,6 +317,29 @@ public class HiveCatalogITCase {
         }
 
         assertThat(count.get()).isEqualTo(100);
+    }
+
+    @Test
+    public void testHiveTableLowerCase() throws Exception {
+        // create table
+        tEnv.executeSql("CREATE TABLE T ( A INT, b STRING ) WITH ( 'file.format' = 'avro' )")
+                .await();
+        tEnv.executeSql("CREATE TABLE S ( a INT, B STRING ) WITH ( 'file.format' = 'avro' )")
+                .await();
+
+        assertThat(hiveShell.executeQuery("SELECT * FROM t").size()).isEqualTo(0);
+
+        // Create table with duplicate fields
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql(
+                                                "CREATE TABLE F ( A INT, a STRING, B BIGINT, b STRING ) WITH ( 'file.format' = 'avro' )")
+                                        .await())
+                .hasCauseInstanceOf(ValidationException.class)
+                .hasRootCauseMessage("Field names must be unique. Found duplicates: [a, b]");
+
+        tEnv.executeSql("DROP TABLE T").await();
+        tEnv.executeSql("DROP TABLE s").await();
     }
 
     private List<Row> collect(String sql) throws Exception {

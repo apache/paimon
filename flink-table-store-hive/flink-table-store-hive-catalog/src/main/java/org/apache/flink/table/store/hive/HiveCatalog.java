@@ -154,7 +154,10 @@ public class HiveCatalog extends AbstractCatalog {
                     .filter(
                             tableName ->
                                     tableStoreTableExists(
-                                            new ObjectPath(databaseName, tableName), false))
+                                            new ObjectPath(
+                                                    databaseName.toLowerCase(),
+                                                    tableName.toLowerCase()),
+                                            false))
                     .collect(Collectors.toList());
         } catch (UnknownDBException e) {
             throw new DatabaseNotExistException(databaseName, e);
@@ -165,10 +168,11 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public TableSchema getTableSchema(ObjectPath tablePath) throws TableNotExistException {
-        if (!tableStoreTableExists(tablePath)) {
-            throw new TableNotExistException(tablePath);
+        ObjectPath lowerTablePath = toLowerCase(tablePath);
+        if (!tableStoreTableExists(lowerTablePath)) {
+            throw new TableNotExistException(lowerTablePath);
         }
-        Path tableLocation = getTableLocation(tablePath);
+        Path tableLocation = getTableLocation(lowerTablePath);
         return new SchemaManager(tableLocation)
                 .latest()
                 .orElseThrow(
@@ -177,40 +181,49 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public boolean tableExists(ObjectPath tablePath) {
-        return tableStoreTableExists(tablePath);
+        return tableStoreTableExists(toLowerCase(tablePath));
     }
 
     @Override
     public void dropTable(ObjectPath tablePath, boolean ignoreIfNotExists)
             throws TableNotExistException {
-        if (!tableStoreTableExists(tablePath)) {
+        ObjectPath lowerTablePath = toLowerCase(tablePath);
+
+        if (!tableStoreTableExists(lowerTablePath)) {
             if (ignoreIfNotExists) {
                 return;
             } else {
-                throw new TableNotExistException(tablePath);
+                throw new TableNotExistException(lowerTablePath);
             }
         }
 
         try {
             client.dropTable(
-                    tablePath.getDatabaseName(), tablePath.getObjectName(), true, false, true);
+                    lowerTablePath.getDatabaseName(),
+                    lowerTablePath.getObjectName(),
+                    true,
+                    false,
+                    true);
         } catch (TException e) {
-            throw new RuntimeException("Failed to drop table " + tablePath.getFullName(), e);
+            throw new RuntimeException("Failed to drop table " + lowerTablePath.getFullName(), e);
         }
     }
 
     @Override
     public void createTable(ObjectPath tablePath, UpdateSchema updateSchema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException {
-        String databaseName = tablePath.getDatabaseName();
+        ObjectPath lowerTablePath = toLowerCase(tablePath);
+        UpdateSchema lowerUpdateSchema = updateSchema.toLowerCase();
+
+        String databaseName = lowerTablePath.getDatabaseName();
         if (!databaseExists(databaseName)) {
             throw new DatabaseNotExistException(databaseName);
         }
-        if (tableExists(tablePath)) {
+        if (tableExists(lowerTablePath)) {
             if (ignoreIfExists) {
                 return;
             } else {
-                throw new TableAlreadyExistException(tablePath);
+                throw new TableAlreadyExistException(lowerTablePath);
             }
         }
 
@@ -218,20 +231,20 @@ public class HiveCatalog extends AbstractCatalog {
         // if changes on Hive fails there is no harm to perform the same changes to files again
         TableSchema schema;
         try {
-            schema = schemaManager(tablePath).commitNewVersion(updateSchema);
+            schema = schemaManager(lowerTablePath).commitNewVersion(lowerUpdateSchema);
         } catch (Exception e) {
             throw new RuntimeException(
                     "Failed to commit changes of table "
-                            + tablePath.getFullName()
+                            + lowerTablePath.getFullName()
                             + " to underlying files",
                     e);
         }
-        Table table = newHmsTable(tablePath);
-        updateHmsTable(table, tablePath, schema);
+        Table table = newHmsTable(lowerTablePath);
+        updateHmsTable(table, lowerTablePath, schema);
         try {
             client.createTable(table);
         } catch (TException e) {
-            throw new RuntimeException("Failed to create table " + tablePath.getFullName(), e);
+            throw new RuntimeException("Failed to create table " + lowerTablePath.getFullName(), e);
         }
     }
 
@@ -239,22 +252,28 @@ public class HiveCatalog extends AbstractCatalog {
     public void alterTable(
             ObjectPath tablePath, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException {
-        if (!tableStoreTableExists(tablePath)) {
+        ObjectPath lowerTablePath = toLowerCase(tablePath);
+        List<SchemaChange> lowerChanges =
+                changes.stream().map(SchemaChange::toLowerCase).collect(Collectors.toList());
+        if (!tableStoreTableExists(lowerTablePath)) {
             if (ignoreIfNotExists) {
                 return;
             } else {
-                throw new TableNotExistException(tablePath);
+                throw new TableNotExistException(lowerTablePath);
             }
         }
 
         try {
             // first commit changes to underlying files
-            TableSchema schema = schemaManager(tablePath).commitChanges(changes);
+            TableSchema schema = schemaManager(lowerTablePath).commitChanges(lowerChanges);
 
             // sync to hive hms
-            Table table = client.getTable(tablePath.getDatabaseName(), tablePath.getObjectName());
-            updateHmsTable(table, tablePath, schema);
-            client.alter_table(tablePath.getDatabaseName(), tablePath.getObjectName(), table);
+            Table table =
+                    client.getTable(
+                            lowerTablePath.getDatabaseName(), lowerTablePath.getObjectName());
+            updateHmsTable(table, lowerTablePath, schema);
+            client.alter_table(
+                    lowerTablePath.getDatabaseName(), lowerTablePath.getObjectName(), table);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -382,6 +401,11 @@ public class HiveCatalog extends AbstractCatalog {
         HiveCatalogLock lock =
                 new HiveCatalogLock(client, checkMaxSleep(hiveConf), acquireTimeout(hiveConf));
         return Lock.fromCatalog(lock, tablePath);
+    }
+
+    private ObjectPath toLowerCase(ObjectPath tablePath) {
+        return new ObjectPath(
+                tablePath.getDatabaseName().toLowerCase(), tablePath.getObjectName().toLowerCase());
     }
 
     static IMetaStoreClient createClient(HiveConf hiveConf) {

@@ -57,6 +57,8 @@ public interface SchemaChange {
         return new UpdateColumnComment(fieldNames, comment);
     }
 
+    SchemaChange toLowerCase();
+
     /** A SchemaChange to set a table option. */
     final class SetOption implements SchemaChange {
         private final String key;
@@ -73,6 +75,11 @@ public interface SchemaChange {
 
         public String value() {
             return value;
+        }
+
+        @Override
+        public SchemaChange toLowerCase() {
+            return this;
         }
 
         @Override
@@ -103,6 +110,11 @@ public interface SchemaChange {
 
         public String key() {
             return key;
+        }
+
+        @Override
+        public SchemaChange toLowerCase() {
+            return this;
         }
 
         @Override
@@ -156,6 +168,11 @@ public interface SchemaChange {
         }
 
         @Override
+        public SchemaChange toLowerCase() {
+            return new AddColumn(fieldName.toLowerCase(), logicalType, isNullable, description);
+        }
+
+        @Override
         public boolean equals(Object o) {
             if (this == o) {
                 return true;
@@ -194,6 +211,11 @@ public interface SchemaChange {
 
         public LogicalType newLogicalType() {
             return newLogicalType;
+        }
+
+        @Override
+        public SchemaChange toLowerCase() {
+            return new UpdateColumnType(fieldName.toLowerCase(), newLogicalType);
         }
 
         @Override
@@ -236,6 +258,13 @@ public interface SchemaChange {
         }
 
         @Override
+        public SchemaChange toLowerCase() {
+            return new UpdateColumnNullability(
+                    Arrays.stream(fieldNames).map(String::toLowerCase).toArray(String[]::new),
+                    newNullability);
+        }
+
+        @Override
         public boolean equals(Object o) {
             if (this == o) {
                 return true;
@@ -272,6 +301,13 @@ public interface SchemaChange {
 
         public String newDescription() {
             return newDescription;
+        }
+
+        @Override
+        public SchemaChange toLowerCase() {
+            return new UpdateColumnComment(
+                    Arrays.stream(fieldNames).map(String::toLowerCase).toArray(String[]::new),
+                    newDescription);
         }
 
         @Override
