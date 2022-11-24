@@ -56,7 +56,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
-            boolean checkNumOfBuckets) {
+            boolean checkNumOfBuckets,
+            boolean readCompacted) {
         super(
                 partitionType,
                 bucketKeyType,
@@ -67,7 +68,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 manifestListFactory,
                 numOfBuckets,
                 checkNumOfBuckets,
-                CoreOptions.ChangelogProducer.NONE);
+                CoreOptions.ChangelogProducer.NONE,
+                readCompacted);
         this.schemaRowStatsConverters = new HashMap<>();
         this.rowType = rowType;
     }

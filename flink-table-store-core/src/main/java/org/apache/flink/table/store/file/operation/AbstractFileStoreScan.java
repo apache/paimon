@@ -62,6 +62,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private final int numOfBuckets;
     private final boolean checkNumOfBuckets;
     private final CoreOptions.ChangelogProducer changelogProducer;
+    private final boolean readCompacted;
 
     private final Map<Long, TableSchema> tableSchemas;
     private final SchemaManager schemaManager;
@@ -75,7 +76,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private List<ManifestFileMeta> specifiedManifests = null;
     private boolean isIncremental = false;
     private Integer specifiedLevel = null;
-    private boolean readCompacted = false;
 
     public AbstractFileStoreScan(
             RowType partitionType,
@@ -87,7 +87,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
             boolean checkNumOfBuckets,
-            CoreOptions.ChangelogProducer changelogProducer) {
+            CoreOptions.ChangelogProducer changelogProducer,
+            boolean readCompacted) {
         this.partitionStatsConverter = new FieldStatsArraySerializer(partitionType);
         this.partitionConverter = new RowDataToObjectArrayConverter(partitionType);
         Preconditions.checkArgument(
@@ -101,6 +102,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         this.numOfBuckets = numOfBuckets;
         this.checkNumOfBuckets = checkNumOfBuckets;
         this.changelogProducer = changelogProducer;
+        this.readCompacted = readCompacted;
         this.tableSchemas = new HashMap<>();
     }
 
@@ -173,12 +175,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withLevel(int level) {
         this.specifiedLevel = level;
-        return this;
-    }
-
-    @Override
-    public FileStoreScan withReadCompacted(boolean readCompacted) {
-        this.readCompacted = readCompacted;
         return this;
     }
 

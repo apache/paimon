@@ -110,7 +110,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 manifestListFactory(),
                 options.bucket(),
                 checkNumOfBuckets,
-                options.changelogProducer());
+                options.changelogProducer(),
+                options.readCompacted());
     }
 
     @Override

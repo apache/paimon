@@ -103,11 +103,6 @@ public abstract class DataTableScan implements TableScan {
         return this;
     }
 
-    public DataTableScan withReadCompacted(boolean readCompacted) {
-        scan.withReadCompacted(readCompacted);
-        return this;
-    }
-
     @VisibleForTesting
     public DataTableScan withBucket(int bucket) {
         scan.withBucket(bucket);

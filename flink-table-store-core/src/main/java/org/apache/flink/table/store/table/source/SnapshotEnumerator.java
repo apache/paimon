@@ -122,10 +122,7 @@ public class SnapshotEnumerator implements Callable<SnapshotEnumerator.Enumerato
                 if (options.changelogProducer() == FULL_COMPACTION) {
                     // Read the results of the last full compaction.
                     // Only full compaction results will appear on the max level.
-                    plan =
-                            scan.withReadCompacted(options.readCompacted())
-                                    .withLevel(options.numLevels() - 1)
-                                    .plan();
+                    plan = scan.withLevel(options.numLevels() - 1).plan();
                 } else {
                     plan = scan.plan();
                 }

@@ -72,6 +72,7 @@ import java.util.stream.Collectors;
 import static org.apache.flink.table.store.CoreOptions.BUCKET;
 import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
 import static org.apache.flink.table.store.CoreOptions.COMPACTION_MAX_FILE_NUM;
+import static org.apache.flink.table.store.CoreOptions.READ_COMPACTED;
 import static org.apache.flink.table.store.CoreOptions.WRITE_COMPACTION_SKIP;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -322,9 +323,9 @@ public abstract class FileStoreTableTestBase {
     @Test
     public void testReadCompactedSnapshot() throws Exception {
         writeCompactData();
-        FileStoreTable table = createFileStoreTable();
+        FileStoreTable table = createFileStoreTable(conf -> conf.set(READ_COMPACTED, true));
 
-        DataTableScan.DataFilePlan plan = table.newScan().withReadCompacted(true).plan();
+        DataTableScan.DataFilePlan plan = table.newScan().plan();
         Snapshot compactedSnapshot = table.snapshotManager().snapshot(plan.snapshotId);
         Iterator<Snapshot> snapshotIterator = table.snapshotManager().snapshots();
         while (snapshotIterator.hasNext()) {
