@@ -53,8 +53,8 @@ public class SchemaEvolutionUtil {
      *   <li>data fields: 1->a, 3->c
      * </ul>
      *
-     * We can get the index mapping [0, -1, 1], in which 0 is the index of table field 1->c in data
-     * fields, 1 is the index of 6->b in data fields and 1 is the index of 3->a in data fields.
+     * <p>We can get the index mapping [0, -1, 1], in which 0 is the index of table field 1->c in
+     * data fields, 1 is the index of 6->b in data fields and 1 is the index of 3->a in data fields.
      *
      * <p>/// TODO should support nest index mapping when nest schema evolution is supported.
      *
@@ -105,14 +105,14 @@ public class SchemaEvolutionUtil {
      *   <li>data projection: [0, 2]
      * </ul>
      *
-     * We can first get fields list for table and data projections from their fields as follows
+     * <p>We can first get fields list for table and data projections from their fields as follows
      *
      * <ul>
      *   <li>table projection field list: [1->c, 6->b, 3->a]
      *   <li>data projection field list: [1->a, 3->c]
      * </ul>
      *
-     * Then create index mapping based on the fields list. /// TODO should support nest index
+     * <p>Then create index mapping based on the fields list. /// TODO should support nest index
      * mapping when nest schema evolution is supported.
      *
      * @param tableProjection the table projection
@@ -154,7 +154,7 @@ public class SchemaEvolutionUtil {
      *       where 0 is 1->kb, 1 is 5->ka, 2/3 are seq and kind, 4 is 2->aa
      * </ul>
      *
-     * First we will get max key id from table and data fields which is 6, then create table and
+     * <p>First we will get max key id from table and data fields which is 6, then create table and
      * data fields on it
      *
      * <ul>
@@ -162,7 +162,7 @@ public class SchemaEvolutionUtil {
      *   <li>Data fields: 1->kb, 5->ka, 7->seq, 8->kind, 11->aa, 13->f
      * </ul>
      *
-     * Finally we can create index mapping with table/data projections and fields.
+     * <p>Finally we can create index mapping with table/data projections and fields.
      *
      * <p>/// TODO should support nest index mapping when nest schema evolution is supported.
      *
@@ -202,17 +202,18 @@ public class SchemaEvolutionUtil {
      *   <li>data fields: 1->a, 2->b, 3->c, 4->d
      * </ul>
      *
-     * When we project 1->c, 6->b, 3->a from table fields, the table projection is [[0], [4], [1]],
-     * in which 0 is the index of field 1->c, 4 is the index of field 6->b, 1 is the index of field
-     * 3->a in table fields. We need to create data projection from [[0], [4], [1]] as follows:
+     * <p>When we project 1->c, 6->b, 3->a from table fields, the table projection is [[0], [4],
+     * [1]], in which 0 is the index of field 1->c, 4 is the index of field 6->b, 1 is the index of
+     * field 3->a in table fields. We need to create data projection from [[0], [4], [1]] as
+     * follows:
      *
      * <ul>
      *   <li>Get field id of each index in table projection from table fields
      *   <li>Get index of each field above from data fields
      * </ul>
      *
-     * The we can create table projection as follows: [[0], [-1], [2]], in which 0, -1 and 2 are the
-     * index of fields [1->c, 6->b, 3->a] in data fields. When we project column from underlying
+     * <p>The we can create table projection as follows: [[0], [-1], [2]], in which 0, -1 and 2 are
+     * the index of fields [1->c, 6->b, 3->a] in data fields. When we project column from underlying
      * data, we need to specify the field index and name. It is difficult to assign a proper field
      * id and name for 6->b in data projection and add it to data fields, and we can't use 6->b
      * directly because the field index of b in underlying is 2. We can remove the -1 field index in
