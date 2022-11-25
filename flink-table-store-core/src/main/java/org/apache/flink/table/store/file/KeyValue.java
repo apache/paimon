@@ -116,14 +116,14 @@ public class KeyValue {
      *   <li>Table2 key fields: 1->c, 3->d, 4->a, 5->b; value fields: 0->value_count
      * </ul>
      *
-     * We will use 5 as maxKeyId, and create fields for Table1/Table2 as follows
+     * <p>We will use 5 as maxKeyId, and create fields for Table1/Table2 as follows
      *
      * <ul>
      *   <li>Table1 fields: 1->a, 2->b, 3->c, 6->seq, 7->kind, 8->value_count
      *   <li>Table2 fields: 1->c, 3->d, 4->a, 5->b, 6->seq, 7->kind, 8->value_count
      * </ul>
      *
-     * Then we can compare these two table fields with the field id.
+     * <p>Then we can compare these two table fields with the field id.
      *
      * @param keyFields the key fields
      * @param valueFields the value fields
