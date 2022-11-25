@@ -107,9 +107,9 @@ public class KeyValue {
     }
 
     /**
-     * Create merge key and value fields. We need to add a const value to the id of value field to
-     * ensure that they are consistent when compared by field id. For example, there are two table
-     * with key value fields as follows
+     * Create key-value fields, we need to add a const value to the id of value field to ensure that
+     * they are consistent when compared by field id. For example, there are two table with key
+     * value fields as follows
      *
      * <ul>
      *   <li>Table1 key fields: 1->a, 2->b, 3->c; value fields: 0->value_count
