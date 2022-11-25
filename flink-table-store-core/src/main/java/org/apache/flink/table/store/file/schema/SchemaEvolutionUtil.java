@@ -98,7 +98,7 @@ public class SchemaEvolutionUtil {
      *   <li>data fields: 1->a, 2->b, 3->c, 4->d
      * </ul>
      *
-     * The table and data top projections are as follows
+     * <p>The table and data top projections are as follows
      *
      * <ul>
      *   <li>table projection: [0, 4, 1]
@@ -112,8 +112,9 @@ public class SchemaEvolutionUtil {
      *   <li>data projection field list: [1->a, 3->c]
      * </ul>
      *
-     * <p>Then create index mapping based on the fields list. /// TODO should support nest index
-     * mapping when nest schema evolution is supported.
+     * <p>Then create index mapping based on the fields list.
+     *
+     * <p>/// TODO should support nest index mapping when nest schema evolution is supported.
      *
      * @param tableProjection the table projection
      * @param tableFields the fields in table
@@ -310,7 +311,7 @@ public class SchemaEvolutionUtil {
                 }
             }
 
-            /// TODO Should do with column type schema evolution here
+            /// TODO Should deal with column type schema evolution here
             return new LeafPredicate(
                     leafPredicate.function(),
                     leafPredicate.type(),
