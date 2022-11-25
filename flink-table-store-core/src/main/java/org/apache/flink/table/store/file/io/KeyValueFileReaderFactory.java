@@ -161,20 +161,13 @@ public class KeyValueFileReaderFactory {
             int[][] keyProjection = projectKeys ? this.keyProjection : fullKeyProjection;
             RowType projectedKeyType = projectKeys ? this.projectedKeyType : keyType;
 
-            int[][] projection =
-                    KeyValue.project(keyProjection, valueProjection, keyType.getFieldCount());
             return new KeyValueFileReaderFactory(
                     schemaManager,
                     schemaId,
                     projectedKeyType,
                     projectedValueType,
                     BulkFormatMapping.newBuilder(
-                            fileFormat,
-                            extractor,
-                            keyProjection,
-                            valueProjection,
-                            projection,
-                            filters),
+                            fileFormat, extractor, keyProjection, valueProjection, filters),
                     pathFactory.createDataFilePathFactory(partition, bucket));
         }
 

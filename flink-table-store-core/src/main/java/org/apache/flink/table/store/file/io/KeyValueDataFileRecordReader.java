@@ -81,7 +81,6 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
         public KeyValue next() throws IOException {
             RecordAndPosition<RowData> result = iterator.next();
 
-            // TODO schema evolution
             if (result == null) {
                 return null;
             } else {

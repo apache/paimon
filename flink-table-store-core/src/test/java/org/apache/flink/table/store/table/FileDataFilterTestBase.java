@@ -18,8 +18,13 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
+import org.apache.flink.table.store.file.predicate.Equal;
+import org.apache.flink.table.store.file.predicate.IsNull;
+import org.apache.flink.table.store.file.predicate.LeafPredicate;
+import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.utils.RecordReader;
@@ -32,6 +37,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
 
@@ -215,6 +221,63 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     // filter with "a" = 1122 in scan and read
                     splits = table.newScan().withFilter(builder.equal(3, 1122)).plan().splits();
                     TableRead read2 = table.newRead().withFilter(builder.equal(3, 1122));
+                    assertThat(getResult(read2, splits, SCHEMA_1_ROW_TO_STRING))
+                            .hasSameElementsAs(
+                                    Arrays.asList(
+                                            "1|21|121|1121|S011|S21", "1|22|122|1122|S012|S22"));
+                },
+                getPrimaryKeyNames(),
+                tableConfig,
+                this::createFileStoreTable);
+    }
+
+    @Test
+    public void testReadFilterMultipleFields() throws Exception {
+        writeAndCheckFileResult(
+                schemas -> null,
+                (files, schemas) -> {
+                    List<Predicate> predicateList =
+                            Arrays.asList(
+                                    new LeafPredicate(
+                                            Equal.INSTANCE,
+                                            DataTypes.INT().getLogicalType(),
+                                            1,
+                                            "d",
+                                            Arrays.asList(21)),
+                                    new LeafPredicate(
+                                            IsNull.INSTANCE,
+                                            DataTypes.INT().getLogicalType(),
+                                            4,
+                                            "f",
+                                            Collections.emptyList()));
+                    FileStoreTable table = createFileStoreTable(schemas);
+                    List<Split> splits = table.newScan().plan().splits();
+
+                    // filter with "d" = 21 or "f" is null in schema1 that "f" is not exist in
+                    // schema0, read all data
+                    TableRead read1 =
+                            table.newRead().withFilter(PredicateBuilder.or(predicateList));
+                    System.out.println(getResult(read1, splits, SCHEMA_1_ROW_TO_STRING));
+                    assertThat(getResult(read1, splits, SCHEMA_1_ROW_TO_STRING))
+                            .hasSameElementsAs(
+                                    Arrays.asList(
+                                            "2|12|112|null|null|null",
+                                            "2|20|120|1120|S010|S20",
+                                            "2|15|115|null|null|null",
+                                            "2|16|116|null|null|null",
+                                            "2|18|118|1118|S008|S18",
+                                            "1|11|111|null|null|null",
+                                            "1|13|113|null|null|null",
+                                            "1|14|114|null|null|null",
+                                            "1|21|121|1121|S011|S21",
+                                            "1|22|122|1122|S012|S22",
+                                            "1|17|117|1117|S007|S17",
+                                            "1|19|119|1119|S009|S19"));
+
+                    splits = table.newScan().plan().splits();
+                    // filter with "d" = 21 or "f" is null, read snapshot which contains "d" = 21
+                    TableRead read2 =
+                            table.newRead().withFilter(PredicateBuilder.and(predicateList));
                     assertThat(getResult(read2, splits, SCHEMA_1_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Arrays.asList(

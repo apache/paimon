@@ -60,10 +60,9 @@ public class BulkFormatMapping {
             KeyValueFieldsExtractor extractor,
             int[][] keyProjection,
             int[][] valueProjection,
-            int[][] projection,
             @Nullable List<Predicate> filters) {
         return new BulkFormatMappingBuilder(
-                fileFormat, extractor, keyProjection, valueProjection, projection, filters);
+                fileFormat, extractor, keyProjection, valueProjection, filters);
     }
 
     /** Builder to build {@link BulkFormatMapping}. */
@@ -72,7 +71,6 @@ public class BulkFormatMapping {
         private final KeyValueFieldsExtractor extractor;
         private final int[][] keyProjection;
         private final int[][] valueProjection;
-        private final int[][] projection;
         @Nullable private final List<Predicate> filters;
 
         private BulkFormatMappingBuilder(
@@ -80,46 +78,67 @@ public class BulkFormatMapping {
                 KeyValueFieldsExtractor extractor,
                 int[][] keyProjection,
                 int[][] valueProjection,
-                int[][] projection,
                 @Nullable List<Predicate> filters) {
             this.fileFormat = fileFormat;
             this.extractor = extractor;
             this.keyProjection = keyProjection;
             this.valueProjection = valueProjection;
-            this.projection = projection;
             this.filters = filters;
         }
 
         public BulkFormatMapping build(TableSchema tableSchema, TableSchema dataSchema) {
             List<DataField> tableKeyFields = extractor.keyFields(tableSchema);
             List<DataField> tableValueFields = extractor.valueFields(tableSchema);
+            int[][] tableProjection =
+                    KeyValue.project(keyProjection, valueProjection, tableKeyFields.size());
 
             List<DataField> dataKeyFields = extractor.keyFields(dataSchema);
             List<DataField> dataValueFields = extractor.valueFields(dataSchema);
+
+            RowType keyType = RowDataType.toRowType(false, dataKeyFields);
+            RowType valueType = RowDataType.toRowType(false, dataValueFields);
+            RowType dataRecordType = KeyValue.schema(keyType, valueType);
+
             int[][] dataKeyProjection =
                     SchemaEvolutionUtil.createDataProjection(
                             tableKeyFields, dataKeyFields, keyProjection);
             int[][] dataValueProjection =
                     SchemaEvolutionUtil.createDataProjection(
                             tableValueFields, dataValueFields, valueProjection);
-
-            RowType keyType = RowDataType.toRowType(false, dataKeyFields);
-            RowType valueType = RowDataType.toRowType(false, dataValueFields);
-            RowType dataRecordType = KeyValue.schema(keyType, valueType);
             int[][] dataProjection =
-                    KeyValue.project(
-                            dataKeyProjection, dataValueProjection, keyType.getFieldCount());
+                    KeyValue.project(dataKeyProjection, dataValueProjection, dataKeyFields.size());
 
+            /**
+             * We need to create index mapping on projection instead of key and value separately
+             * here, for example
+             *
+             * <ul>
+             *   <li>the table key fields: 1->d, 3->a, 4->b, 5->c
+             *   <li>the data key fields: 1->a, 2->b, 3->c
+             * </ul>
+             *
+             * The value fields of table and data are 0->value_count, the key and value projections
+             * are as follows
+             *
+             * <ul>
+             *   <li>table key projection: [0, 1, 2, 3], value projection: [0], data projection: [0,
+             *       1, 2, 3, 4, 5, 6] which 4/5 is seq/kind and 6 is value
+             *   <li>data key projection: [0, 1, 2], value projection: [0], data projection: [0, 1,
+             *       2, 3, 4, 5] where 3/4 is seq/kind and 5 is value
+             * </ul>
+             *
+             * We will get value index mapping null fro above and we can't create projection index
+             * mapping based on key and value index mapping any more.
+             */
             int[] indexMapping =
                     SchemaEvolutionUtil.createIndexMapping(
-                            Projection.of(projection).toTopLevelIndexes(),
-                            keyProjection.length,
+                            Projection.of(tableProjection).toTopLevelIndexes(),
                             tableKeyFields,
                             tableValueFields,
                             Projection.of(dataProjection).toTopLevelIndexes(),
-                            dataKeyProjection.length,
                             dataKeyFields,
                             dataValueFields);
+
             List<Predicate> dataFilters =
                     tableSchema.id() == dataSchema.id()
                             ? filters
