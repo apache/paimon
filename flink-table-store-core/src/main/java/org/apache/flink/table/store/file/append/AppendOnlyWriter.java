@@ -94,8 +94,8 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     }
 
     @Override
-    public void fullCompaction() throws Exception {
-        flushWriter(true);
+    public void compact(boolean fullCompaction) throws Exception {
+        flushWriter(fullCompaction);
     }
 
     @Override

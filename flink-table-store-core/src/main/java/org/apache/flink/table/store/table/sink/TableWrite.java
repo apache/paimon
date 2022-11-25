@@ -39,7 +39,7 @@ public interface TableWrite extends AutoCloseable {
     /** Log record need to preserve original pk (which includes partition fields). */
     SinkRecord toLogRecord(SinkRecord record);
 
-    void compact(BinaryRowData partition, int bucket) throws Exception;
+    void compact(BinaryRowData partition, int bucket, boolean fullCompaction) throws Exception;
 
     List<FileCommittable> prepareCommit(boolean blocking, long commitIdentifier) throws Exception;
 

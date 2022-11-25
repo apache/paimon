@@ -34,10 +34,12 @@ public interface RecordWriter<T> {
     void write(T record) throws Exception;
 
     /**
-     * Compact all files related to the writer. Note that compaction process is only submitted and
-     * may not be completed when the method returns.
+     * Compact files related to the writer. Note that compaction process is only submitted and may
+     * not be completed when the method returns.
+     *
+     * @param fullCompaction whether to trigger full compaction or just normal compaction
      */
-    void fullCompaction() throws Exception;
+    void compact(boolean fullCompaction) throws Exception;
 
     /**
      * Prepare for a commit.

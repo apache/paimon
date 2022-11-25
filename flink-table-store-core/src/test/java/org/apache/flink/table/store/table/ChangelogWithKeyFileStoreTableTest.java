@@ -260,8 +260,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(2, 10, 210L));
         write.write(rowData(2, 20, 220L));
         write.write(rowDataWithKind(RowKind.DELETE, 2, 10, 210L));
-        write.compact(binaryRow(1), 0);
-        write.compact(binaryRow(2), 0);
+        write.compact(binaryRow(1), 0, true);
+        write.compact(binaryRow(2), 0, true);
         commit.commit(0, write.prepareCommit(true, 0));
 
         List<Split> splits = table.newScan().withIncremental(true).plan().splits();
@@ -281,8 +281,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         write.write(rowDataWithKind(RowKind.DELETE, 1, 40, 140L));
         write.write(rowData(2, 40, 241L));
-        write.compact(binaryRow(1), 0);
-        write.compact(binaryRow(2), 0);
+        write.compact(binaryRow(1), 0, true);
+        write.compact(binaryRow(2), 0, true);
         commit.commit(2, write.prepareCommit(true, 2));
 
         splits = table.newScan().withIncremental(true).plan().splits();
@@ -305,8 +305,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(2, 20, 221L));
         write.write(rowDataWithKind(RowKind.DELETE, 2, 20, 221L));
         write.write(rowData(2, 40, 242L));
-        write.compact(binaryRow(1), 0);
-        write.compact(binaryRow(2), 0);
+        write.compact(binaryRow(1), 0, true);
+        write.compact(binaryRow(2), 0, true);
         commit.commit(4, write.prepareCommit(true, 4));
 
         splits = table.newScan().withIncremental(true).plan().splits();

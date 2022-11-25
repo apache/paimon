@@ -60,9 +60,10 @@ public interface FileStoreWrite<T> {
      *
      * @param partition the partition to compact
      * @param bucket the bucket to compact
+     * @param fullCompaction whether to trigger full compaction or just normal compaction
      * @throws Exception the thrown exception when compacting the records
      */
-    void compact(BinaryRowData partition, int bucket) throws Exception;
+    void compact(BinaryRowData partition, int bucket, boolean fullCompaction) throws Exception;
 
     /**
      * Prepare commit in the write.

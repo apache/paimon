@@ -139,8 +139,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @Override
-    public void fullCompaction() throws Exception {
-        flushWriteBuffer(true);
+    public void compact(boolean fullCompaction) throws Exception {
+        flushWriteBuffer(fullCompaction);
     }
 
     @Override
