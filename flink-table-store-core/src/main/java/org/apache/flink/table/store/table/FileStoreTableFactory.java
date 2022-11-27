@@ -61,6 +61,8 @@ public class FileStoreTableFactory {
         dynamicOptions.toMap().forEach(newOptions::setString);
         newOptions.set(PATH, tablePath.toString());
 
+        // set dynamic options with default values
+        CoreOptions.setDefaultValues(newOptions);
         // copy a new table store to contain dynamic options
         tableSchema = tableSchema.copy(newOptions.toMap());
         // validate schema wit new options

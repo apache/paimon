@@ -193,6 +193,29 @@ public class ContinuousFileStoreITCase extends FileStoreTableITCase {
     }
 
     @Test
+    public void testConfigureStartupTimestamp() throws Exception {
+        // Configure 'log.scan.timestamp-millis' without 'log.scan'.
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM T1 /*+ OPTIONS('log.scan.timestamp-millis'='%s') */",
+                                0));
+        batchSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')");
+        batchSql("INSERT INTO T1 VALUES ('7', '8', '9'), ('10', '11', '12')");
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
+        iterator.close();
+
+        // Configure 'log.scan.timestamp-millis' with 'log.scan=latest'.
+        assertThatThrownBy(
+                        () ->
+                                streamSqlIter(
+                                        "SELECT * FROM T1 /*+ OPTIONS('log.scan'='latest', 'log.scan.timestamp-millis'='%s') */",
+                                        0))
+                .hasMessageContaining("Unable to create a source for reading table");
+    }
+
+    @Test
     public void testIgnoreOverwrite() throws TimeoutException {
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(streamSqlIter("SELECT * FROM T1"));
