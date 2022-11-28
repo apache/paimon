@@ -23,6 +23,7 @@ import org.apache.flink.table.store.file.catalog.CatalogLock;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.util.concurrent.Callable;
 
 /** An interface that allows file store to use global lock to some transaction-related things. */
@@ -31,19 +32,65 @@ public interface Lock extends AutoCloseable {
     /** Run with lock. */
     <T> T runWithLock(Callable<T> callable) throws Exception;
 
-    @Nullable
-    static Lock fromCatalog(CatalogLock.Factory lockFactory, ObjectPath tablePath) {
-        if (lockFactory == null) {
-            return null;
-        }
-
-        return fromCatalog(lockFactory.create(), tablePath);
+    /** A factory to create {@link Lock}. */
+    interface Factory extends Serializable {
+        Lock create();
     }
 
-    @Nullable
+    static Factory factory(@Nullable CatalogLock.Factory lockFactory, ObjectPath tablePath) {
+        return lockFactory == null
+                ? new EmptyFactory()
+                : new CatalogLockFactory(lockFactory, tablePath);
+    }
+
+    static Factory emptyFactory() {
+        return new EmptyFactory();
+    }
+
+    /** A {@link Factory} creating lock from catalog. */
+    class CatalogLockFactory implements Factory {
+
+        private static final long serialVersionUID = 1L;
+
+        private final CatalogLock.Factory lockFactory;
+        private final ObjectPath tablePath;
+
+        public CatalogLockFactory(CatalogLock.Factory lockFactory, ObjectPath tablePath) {
+            this.lockFactory = lockFactory;
+            this.tablePath = tablePath;
+        }
+
+        @Override
+        public Lock create() {
+            return fromCatalog(lockFactory.create(), tablePath);
+        }
+    }
+
+    /** A {@link Factory} creating empty lock. */
+    class EmptyFactory implements Factory {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public Lock create() {
+            return new EmptyLock();
+        }
+    }
+
+    /** An empty lock. */
+    class EmptyLock implements Lock {
+        @Override
+        public <T> T runWithLock(Callable<T> callable) throws Exception {
+            return callable.call();
+        }
+
+        @Override
+        public void close() {}
+    }
+
     static Lock fromCatalog(CatalogLock lock, ObjectPath tablePath) {
         if (lock == null) {
-            return null;
+            return new EmptyLock();
         }
         return new CatalogLockImpl(lock, tablePath);
     }

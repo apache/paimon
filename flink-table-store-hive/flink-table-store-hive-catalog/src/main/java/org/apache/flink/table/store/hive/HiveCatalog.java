@@ -376,7 +376,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     private Lock lock(ObjectPath tablePath) {
         if (!lockEnabled()) {
-            return null;
+            return new Lock.EmptyLock();
         }
 
         HiveCatalogLock lock =

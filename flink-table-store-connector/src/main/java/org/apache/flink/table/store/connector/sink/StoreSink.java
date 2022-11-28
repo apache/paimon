@@ -30,11 +30,9 @@ import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
-import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.utils.StreamExecutionEnvironmentUtils;
-import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.table.FileStoreTable;
@@ -56,29 +54,24 @@ public class StoreSink implements Serializable {
 
     private static final String GLOBAL_COMMITTER_NAME = "Global Committer";
 
-    private final ObjectIdentifier tableIdentifier;
     private final FileStoreTable table;
-
+    private final Lock.Factory lockFactory;
     private final boolean compactionTask;
     @Nullable private final Map<String, String> compactPartitionSpec;
-    @Nullable private final CatalogLock.Factory lockFactory;
     @Nullable private final Map<String, String> overwritePartition;
     @Nullable private final LogSinkFunction logSinkFunction;
 
     public StoreSink(
-            ObjectIdentifier tableIdentifier,
             FileStoreTable table,
+            Lock.Factory lockFactory,
             boolean compactionTask,
             @Nullable Map<String, String> compactPartitionSpec,
-            @Nullable CatalogLock.Factory lockFactory,
             @Nullable Map<String, String> overwritePartition,
             @Nullable LogSinkFunction logSinkFunction) {
-        this.tableIdentifier = tableIdentifier;
         this.table = table;
-
+        this.lockFactory = lockFactory;
         this.compactionTask = compactionTask;
         this.compactPartitionSpec = compactPartitionSpec;
-        this.lockFactory = lockFactory;
         this.overwritePartition = overwritePartition;
         this.logSinkFunction = logSinkFunction;
     }
@@ -103,12 +96,11 @@ public class StoreSink implements Serializable {
     }
 
     private StoreCommitter createCommitter(String user, boolean createEmptyCommit) {
-        Lock lock = Lock.fromCatalog(lockFactory, tableIdentifier.toObjectPath());
         return new StoreCommitter(
                 table.newCommit(user)
                         .withOverwritePartition(overwritePartition)
                         .withCreateEmptyCommit(createEmptyCommit)
-                        .withLock(lock));
+                        .withLock(lockFactory.create()));
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<RowData> input) {
