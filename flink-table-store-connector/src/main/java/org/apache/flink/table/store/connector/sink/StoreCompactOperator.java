@@ -99,7 +99,7 @@ public class StoreCompactOperator extends PrepareCommitOperator {
                         bucket);
             }
             try {
-                write.compact(partition, bucket);
+                write.compact(partition, bucket, true);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }

@@ -168,7 +168,7 @@ public class TestCommitThread extends Thread {
                 for (BinaryRowData partition : writtenPartitions) {
                     MergeTreeWriter writer =
                             writers.computeIfAbsent(partition, p -> createWriter(p, false));
-                    writer.fullCompaction();
+                    writer.compact(true);
                     RecordWriter.CommitIncrement inc = writer.prepareCommit(true);
                     committable.addFileCommittable(
                             new FileCommittable(

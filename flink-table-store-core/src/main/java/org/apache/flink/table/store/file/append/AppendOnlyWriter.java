@@ -94,18 +94,19 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     }
 
     @Override
-    public void fullCompaction() throws Exception {
-        flushWriter(true);
+    public void compact(boolean fullCompaction) throws Exception {
+        flushWriter(true, fullCompaction);
     }
 
     @Override
     public CommitIncrement prepareCommit(boolean blocking) throws Exception {
-        flushWriter(false);
+        flushWriter(false, false);
         trySyncLatestCompaction(blocking || forceCompact);
         return drainIncrement();
     }
 
-    private void flushWriter(boolean forcedFullCompaction) throws Exception {
+    private void flushWriter(boolean waitForLatestCompaction, boolean forcedFullCompaction)
+            throws Exception {
         List<DataFileMeta> flushedFiles = new ArrayList<>();
         if (writer != null) {
             writer.close();
@@ -119,7 +120,8 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
 
         // add new generated files
         flushedFiles.forEach(compactManager::addNewFile);
-        submitCompaction(forcedFullCompaction);
+        trySyncLatestCompaction(waitForLatestCompaction);
+        compactManager.triggerCompaction(forcedFullCompaction);
         newFiles.addAll(flushedFiles);
     }
 
@@ -143,12 +145,6 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     private RowDataRollingFileWriter createRollingRowWriter() {
         return new RowDataRollingFileWriter(
                 schemaId, fileFormat, targetFileSize, writeSchema, pathFactory, seqNumCounter);
-    }
-
-    private void submitCompaction(boolean forcedFullCompaction)
-            throws ExecutionException, InterruptedException {
-        trySyncLatestCompaction(forcedFullCompaction);
-        compactManager.triggerCompaction(forcedFullCompaction);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

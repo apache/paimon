@@ -130,7 +130,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                         : kv.sequenceNumber();
         boolean success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
         if (!success) {
-            flushWriteBuffer(false);
+            flushWriteBuffer(false, false);
             success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
             if (!success) {
                 throw new RuntimeException("Mem table is too small to hold a single element.");
@@ -139,8 +139,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @Override
-    public void fullCompaction() throws Exception {
-        flushWriteBuffer(true);
+    public void compact(boolean fullCompaction) throws Exception {
+        flushWriteBuffer(true, fullCompaction);
     }
 
     @Override
@@ -152,15 +152,15 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     public void flushMemory() throws Exception {
         boolean success = writeBuffer.flushMemory();
         if (!success) {
-            flushWriteBuffer(false);
+            flushWriteBuffer(false, false);
         }
     }
 
-    private void flushWriteBuffer(boolean forcedFullCompaction) throws Exception {
+    private void flushWriteBuffer(boolean waitForLatestCompaction, boolean forcedFullCompaction)
+            throws Exception {
         if (writeBuffer.size() > 0) {
             if (compactManager.shouldWaitCompaction()) {
-                // stop writing, wait for compaction finished
-                trySyncLatestCompaction(true);
+                waitForLatestCompaction = true;
             }
 
             final RollingFileWriter<KeyValue, DataFileMeta> changelogWriter =
@@ -194,12 +194,14 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
             writeBuffer.clear();
         }
-        submitCompaction(forcedFullCompaction);
+
+        trySyncLatestCompaction(waitForLatestCompaction);
+        compactManager.triggerCompaction(forcedFullCompaction);
     }
 
     @Override
     public CommitIncrement prepareCommit(boolean blocking) throws Exception {
-        flushWriteBuffer(false);
+        flushWriteBuffer(false, false);
         trySyncLatestCompaction(blocking || commitForceCompact);
         return drainIncrement();
     }
@@ -258,11 +260,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         }
         compactAfter.addAll(result.after());
         compactChangelog.addAll(result.changelog());
-    }
-
-    private void submitCompaction(boolean forcedFullCompaction) throws Exception {
-        trySyncLatestCompaction(forcedFullCompaction);
-        compactManager.triggerCompaction(forcedFullCompaction);
     }
 
     private void trySyncLatestCompaction(boolean blocking) throws Exception {

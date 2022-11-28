@@ -70,8 +70,9 @@ public class TableWriteImpl<T> implements TableWrite {
     }
 
     @Override
-    public void compact(BinaryRowData partition, int bucket) throws Exception {
-        write.compact(partition, bucket);
+    public void compact(BinaryRowData partition, int bucket, boolean fullCompaction)
+            throws Exception {
+        write.compact(partition, bucket, fullCompaction);
     }
 
     @Override
