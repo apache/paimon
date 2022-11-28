@@ -77,6 +77,7 @@ public interface Lock extends AutoCloseable {
         }
     }
 
+    /** An empty lock. */
     class EmptyLock implements Lock {
         @Override
         public <T> T runWithLock(Callable<T> callable) throws Exception {
