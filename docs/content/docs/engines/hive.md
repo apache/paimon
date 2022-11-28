@@ -45,11 +45,12 @@ Table Store currently supports MR and Tez execution engine for Hive.
 {{< stable >}}
 Download the jar file with corresponding version.
 
-| |Jar|
-|---|---|
-|Hive 2.3+|[flink-table-store-hive-catalog-{{< version >}}_2.3.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.3.jar)|
-|Hive 2.2|[flink-table-store-hive-catalog-{{< version >}}_2.2.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.2.jar)|
-|Hive 2.1|[flink-table-store-hive-catalog-{{< version >}}_2.1.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.1.jar)|
+|          | Jar                                                                                                                                                                                            |
+|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Hive 3.1 | [flink-table-store-hive-catalog-{{< version >}}_3.1.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_3.1.jar) |
+| Hive 2.3 | [flink-table-store-hive-catalog-{{< version >}}_2.3.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.3.jar) |
+| Hive 2.2 | [flink-table-store-hive-catalog-{{< version >}}_2.2.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.2.jar) |
+| Hive 2.1 | [flink-table-store-hive-catalog-{{< version >}}_2.1.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.1.jar) |
 
 {{< /stable >}}
 {{< unstable >}}
