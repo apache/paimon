@@ -132,7 +132,7 @@ public class FileStoreITCase extends AbstractTestBase {
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[] {1, 2});
 
         // write
-        new FlinkSinkBuilder(IDENTIFIER, table).withInput(buildTestSource(env, isBatch)).build();
+        new FlinkSinkBuilder(table).withInput(buildTestSource(env, isBatch)).build();
         env.execute();
 
         // read
@@ -152,7 +152,7 @@ public class FileStoreITCase extends AbstractTestBase {
         FileStoreTable table = buildFileStoreTable(new int[0], new int[] {2});
 
         // write
-        new FlinkSinkBuilder(IDENTIFIER, table).withInput(buildTestSource(env, isBatch)).build();
+        new FlinkSinkBuilder(table).withInput(buildTestSource(env, isBatch)).build();
         env.execute();
 
         // read
@@ -171,7 +171,7 @@ public class FileStoreITCase extends AbstractTestBase {
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[] {1, 2});
 
         // write
-        new FlinkSinkBuilder(IDENTIFIER, table).withInput(buildTestSource(env, isBatch)).build();
+        new FlinkSinkBuilder(table).withInput(buildTestSource(env, isBatch)).build();
         env.execute();
 
         // overwrite p2
@@ -182,7 +182,7 @@ public class FileStoreITCase extends AbstractTestBase {
                         InternalTypeInfo.of(TABLE_TYPE));
         Map<String, String> overwrite = new HashMap<>();
         overwrite.put("p", "p2");
-        new FlinkSinkBuilder(IDENTIFIER, table)
+        new FlinkSinkBuilder(table)
                 .withInput(partialData)
                 .withOverwritePartition(overwrite)
                 .build();
@@ -201,7 +201,7 @@ public class FileStoreITCase extends AbstractTestBase {
                         Collections.singletonList(
                                 wrap(GenericRowData.of(19, StringData.fromString("p2"), 6))),
                         InternalTypeInfo.of(TABLE_TYPE));
-        new FlinkSinkBuilder(IDENTIFIER, table)
+        new FlinkSinkBuilder(table)
                 .withInput(partialData)
                 .withOverwritePartition(new HashMap<>())
                 .build();
@@ -218,7 +218,7 @@ public class FileStoreITCase extends AbstractTestBase {
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[0]);
 
         // write
-        new FlinkSinkBuilder(IDENTIFIER, table).withInput(buildTestSource(env, isBatch)).build();
+        new FlinkSinkBuilder(table).withInput(buildTestSource(env, isBatch)).build();
         env.execute();
 
         // read
@@ -247,7 +247,7 @@ public class FileStoreITCase extends AbstractTestBase {
 
     private void testProjection(FileStoreTable table) throws Exception {
         // write
-        new FlinkSinkBuilder(IDENTIFIER, table).withInput(buildTestSource(env, isBatch)).build();
+        new FlinkSinkBuilder(table).withInput(buildTestSource(env, isBatch)).build();
         env.execute();
 
         // read
@@ -334,7 +334,7 @@ public class FileStoreITCase extends AbstractTestBase {
         }
         DataStreamSource<RowData> source =
                 env.addSource(new FiniteTestSource<>(src, true), InternalTypeInfo.of(TABLE_TYPE));
-        new FlinkSinkBuilder(IDENTIFIER, table).withInput(source).build();
+        new FlinkSinkBuilder(table).withInput(source).build();
         env.execute();
         assertThat(iterator.collect(expected.length)).containsExactlyInAnyOrder(expected);
     }

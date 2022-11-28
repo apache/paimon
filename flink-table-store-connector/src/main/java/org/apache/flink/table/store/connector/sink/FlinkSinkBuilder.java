@@ -23,10 +23,9 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
-import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.connector.FlinkConnectorOptions;
-import org.apache.flink.table.store.file.catalog.CatalogLock;
+import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.LogSinkFunction;
@@ -38,18 +37,16 @@ import java.util.Map;
 /** Sink builder to build a flink sink from input. */
 public class FlinkSinkBuilder {
 
-    private final ObjectIdentifier tableIdentifier;
     private final FileStoreTable table;
     private final Configuration conf;
 
     private DataStream<RowData> input;
-    @Nullable private CatalogLock.Factory lockFactory;
+    private Lock.Factory lockFactory = Lock.emptyFactory();
     @Nullable private Map<String, String> overwritePartition;
     @Nullable private LogSinkFunction logSinkFunction;
     @Nullable private Integer parallelism;
 
-    public FlinkSinkBuilder(ObjectIdentifier tableIdentifier, FileStoreTable table) {
-        this.tableIdentifier = tableIdentifier;
+    public FlinkSinkBuilder(FileStoreTable table) {
         this.table = table;
         this.conf = Configuration.fromMap(table.schema().options());
     }
@@ -59,7 +56,7 @@ public class FlinkSinkBuilder {
         return this;
     }
 
-    public FlinkSinkBuilder withLockFactory(CatalogLock.Factory lockFactory) {
+    public FlinkSinkBuilder withLockFactory(Lock.Factory lockFactory) {
         this.lockFactory = lockFactory;
         return this;
     }
@@ -100,11 +97,10 @@ public class FlinkSinkBuilder {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         StoreSink sink =
                 new StoreSink(
-                        tableIdentifier,
                         table,
+                        lockFactory,
                         conf.get(FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED),
                         getCompactPartSpec(),
-                        lockFactory,
                         overwritePartition,
                         logSinkFunction);
         return sink.sinkFrom(new DataStream<>(env, partitioned));
