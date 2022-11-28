@@ -33,6 +33,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -261,15 +262,21 @@ public class SchemaEvolutionUtil {
             return null;
         }
 
+        Map<String, DataField> nameToTableFields =
+                tableFields.stream().collect(Collectors.toMap(DataField::name, f -> f));
+        LinkedHashMap<Integer, DataField> idToDataFields = new LinkedHashMap<>();
+        dataFields.forEach(f -> idToDataFields.put(f.id(), f));
         List<Predicate> dataFilters = new ArrayList<>(filters.size());
         for (Predicate predicate : filters) {
-            dataFilters.add(createDataPredicate(tableFields, dataFields, predicate));
+            dataFilters.add(createDataPredicate(nameToTableFields, idToDataFields, predicate));
         }
         return dataFilters;
     }
 
     private static Predicate createDataPredicate(
-            List<DataField> tableFields, List<DataField> dataFields, Predicate predicate) {
+            Map<String, DataField> tableFields,
+            LinkedHashMap<Integer, DataField> dataFields,
+            Predicate predicate) {
         if (predicate instanceof CompoundPredicate) {
             CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
             List<Predicate> children = compoundPredicate.children();
@@ -281,16 +288,12 @@ public class SchemaEvolutionUtil {
             return new CompoundPredicate(compoundPredicate.function(), dataChildren);
         } else if (predicate instanceof LeafPredicate) {
             LeafPredicate leafPredicate = (LeafPredicate) predicate;
-            Map<Integer, DataField> idToDataFields =
-                    dataFields.stream().collect(Collectors.toMap(DataField::id, f -> f));
-            Map<String, DataField> nameToTableFields =
-                    tableFields.stream().collect(Collectors.toMap(DataField::name, f -> f));
 
             DataField tableField =
                     checkNotNull(
-                            nameToTableFields.get(leafPredicate.fieldName()),
+                            tableFields.get(leafPredicate.fieldName()),
                             String.format("Find no field %s", leafPredicate.fieldName()));
-            DataField dataField = idToDataFields.get(tableField.id());
+            DataField dataField = dataFields.get(tableField.id());
             if (dataField == null) {
                 // The table field is not exist in data fields, check the predicate function
                 if (leafPredicate.function() instanceof IsNull) {
@@ -315,7 +318,7 @@ public class SchemaEvolutionUtil {
             return new LeafPredicate(
                     leafPredicate.function(),
                     leafPredicate.type(),
-                    dataFields.indexOf(dataField),
+                    indexOf(dataField, dataFields),
                     dataField.name(),
                     leafPredicate.literals());
         } else {
@@ -323,5 +326,18 @@ public class SchemaEvolutionUtil {
                     String.format(
                             "Not support to create data predicate from %s", predicate.getClass()));
         }
+    }
+
+    private static int indexOf(DataField dataField, LinkedHashMap<Integer, DataField> dataFields) {
+        int index = 0;
+        for (Map.Entry<Integer, DataField> entry : dataFields.entrySet()) {
+            if (dataField.id() == entry.getKey()) {
+                return index;
+            }
+            index++;
+        }
+
+        throw new IllegalArgumentException(
+                String.format("Can't find data field %s", dataField.name()));
     }
 }

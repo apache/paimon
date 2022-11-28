@@ -23,7 +23,7 @@ import org.apache.flink.table.types.logical.LogicalType;
 
 import java.util.Optional;
 
-/** Return true for all values. */
+/** Return true for all values. TODO add leaf function without fields. */
 public class AlwaysTrue extends LeafUnaryFunction {
     public static final AlwaysTrue INSTANCE = new AlwaysTrue();
 

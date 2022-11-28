@@ -243,7 +243,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                                             DataTypes.INT().getLogicalType(),
                                             1,
                                             "d",
-                                            Arrays.asList(21)),
+                                            Collections.singletonList(21)),
                                     new LeafPredicate(
                                             IsNull.INSTANCE,
                                             DataTypes.INT().getLogicalType(),

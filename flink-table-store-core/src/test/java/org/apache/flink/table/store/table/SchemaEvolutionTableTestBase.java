@@ -23,6 +23,7 @@ import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.schema.AtomicDataType;
@@ -117,6 +118,7 @@ public abstract class SchemaEvolutionTableTestBase {
             Function<Map<Long, TableSchema>, FileStoreTable> createFileStoreTable)
             throws Exception {
         Map<Long, TableSchema> tableSchemas = new HashMap<>();
+        // Create schema with SCHEMA_0_FIELDS
         tableSchemas.put(
                 0L,
                 new TableSchema(
@@ -131,60 +133,30 @@ public abstract class SchemaEvolutionTableTestBase {
         TableWrite write = table.newWrite("user");
         TableCommit commit = table.newCommit("user");
 
-        write.write(
-                GenericRowData.of(
-                        StringData.fromString("S001"),
-                        1,
-                        11,
-                        StringData.fromString("S11"),
-                        111L,
-                        StringData.fromString("S111")));
-        write.write(
-                GenericRowData.of(
-                        StringData.fromString("S002"),
-                        2,
-                        12,
-                        StringData.fromString("S12"),
-                        112L,
-                        StringData.fromString("S112")));
-        write.write(
-                GenericRowData.of(
-                        StringData.fromString("S003"),
-                        1,
-                        13,
-                        StringData.fromString("S13"),
-                        113L,
-                        StringData.fromString("S113")));
+        write.write(rowData("S001", 1, 11, "S11", 111L, "S111"));
+        write.write(rowData("S002", 2, 12, "S12", 112L, "S112"));
+        write.write(rowData("S003", 1, 13, "S13", 113L, "S113"));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        write.write(
-                GenericRowData.of(
-                        StringData.fromString("S004"),
-                        1,
-                        14,
-                        StringData.fromString("S14"),
-                        114L,
-                        StringData.fromString("S114")));
-        write.write(
-                GenericRowData.of(
-                        StringData.fromString("S005"),
-                        2,
-                        15,
-                        StringData.fromString("S15"),
-                        115L,
-                        StringData.fromString("S115")));
-        write.write(
-                GenericRowData.of(
-                        StringData.fromString("S006"),
-                        2,
-                        16,
-                        StringData.fromString("S16"),
-                        116L,
-                        StringData.fromString("S116")));
+        write.write(rowData("S004", 1, 14, "S14", 114L, "S114"));
+        write.write(rowData("S005", 2, 15, "S15", 115L, "S115"));
+        write.write(rowData("S006", 2, 16, "S16", 116L, "S116"));
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
         R result = firstChecker.apply(tableSchemas);
 
+        /**
+         * The table fields are: 0->a, 1->pt, 2->b, 3->c, 4->kt, 5->d. We will alter the table as
+         * follows:
+         *
+         * <ul>
+         *   <li>1. delete fields "a", "c" and "d"
+         *   <li>2. rename "b" to "d"
+         *   <li>3. add new fields "a", "f", "b"
+         * </ul>
+         *
+         * <p>The result table fields will be: 1->pt, 2->d, 4->kt, 6->a, 7->f, 8->b.
+         */
         tableSchemas.put(
                 1L,
                 new TableSchema(
@@ -199,60 +171,30 @@ public abstract class SchemaEvolutionTableTestBase {
         write = table.newWrite("user");
         commit = table.newCommit("user");
 
-        write.write(
-                GenericRowData.of(
-                        1,
-                        17,
-                        117L,
-                        1117,
-                        StringData.fromString("S007"),
-                        StringData.fromString("S17")));
-        write.write(
-                GenericRowData.of(
-                        2,
-                        18,
-                        118L,
-                        1118,
-                        StringData.fromString("S008"),
-                        StringData.fromString("S18")));
-        write.write(
-                GenericRowData.of(
-                        1,
-                        19,
-                        119L,
-                        1119,
-                        StringData.fromString("S009"),
-                        StringData.fromString("S19")));
+        write.write(rowData(1, 17, 117L, 1117, "S007", "S17"));
+        write.write(rowData(2, 18, 118L, 1118, "S008", "S18"));
+        write.write(rowData(1, 19, 119L, 1119, "S009", "S19"));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        write.write(
-                GenericRowData.of(
-                        2,
-                        20,
-                        120L,
-                        1120,
-                        StringData.fromString("S010"),
-                        StringData.fromString("S20")));
-        write.write(
-                GenericRowData.of(
-                        1,
-                        21,
-                        121L,
-                        1121,
-                        StringData.fromString("S011"),
-                        StringData.fromString("S21")));
-        write.write(
-                GenericRowData.of(
-                        1,
-                        22,
-                        122L,
-                        1122,
-                        StringData.fromString("S012"),
-                        StringData.fromString("S22")));
+        write.write(rowData(2, 20, 120L, 1120, "S010", "S20"));
+        write.write(rowData(1, 21, 121L, 1121, "S011", "S21"));
+        write.write(rowData(1, 22, 122L, 1122, "S012", "S22"));
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
 
         secondChecker.accept(result, tableSchemas);
+    }
+
+    protected static RowData rowData(Object... values) {
+        List<Object> valueList = new ArrayList<>(values.length);
+        for (Object value : values) {
+            if (value instanceof String) {
+                valueList.add(StringData.fromString((String) value));
+            } else {
+                valueList.add(value);
+            }
+        }
+        return GenericRowData.of(valueList.toArray(new Object[0]));
     }
 
     /** {@link SchemaManager} subclass for testing. */

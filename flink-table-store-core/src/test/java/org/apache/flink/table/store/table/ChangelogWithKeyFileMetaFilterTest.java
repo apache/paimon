@@ -59,6 +59,12 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                     FileStoreTable table = createFileStoreTable(schemas);
                     DataTableScan.DataFilePlan plan = table.newScan().plan();
                     checkFilterRowCount(plan, 12L);
+
+                    /**
+                     * TODO ChangelogWithKeyFileStoreTable doesn't support value predicate and can't
+                     * get value stats. The test for filtering the primary key and partition already
+                     * exists.
+                     */
                 },
                 getPrimaryKeyNames(),
                 tableConfig,
@@ -90,6 +96,12 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                     Predicate predicate = builder.between(1, 14, 19);
                     DataTableScan.DataFilePlan plan = table.newScan().withFilter(predicate).plan();
                     checkFilterRowCount(plan, 12L);
+
+                    /**
+                     * TODO ChangelogWithKeyFileStoreTable doesn't support value predicate and can't
+                     * get value stats. The test for filtering the primary key and partition already
+                     * exists.
+                     */
                 },
                 getPrimaryKeyNames(),
                 tableConfig,
@@ -117,6 +129,12 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                     Predicate predicate = builder.greaterThan(3, 1120);
                     DataTableScan.DataFilePlan plan = table.newScan().withFilter(predicate).plan();
                     checkFilterRowCount(plan, 12L);
+
+                    /**
+                     * TODO ChangelogWithKeyFileStoreTable doesn't support value predicate and can't
+                     * get value stats. The test for filtering the primary key and partition already
+                     * exists.
+                     */
                 },
                 getPrimaryKeyNames(),
                 tableConfig,
