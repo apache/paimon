@@ -24,31 +24,30 @@ import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.table.sink.SinkRecordConverter;
+import org.apache.flink.table.store.table.sink.BucketComputer;
 
 /** A {@link StreamPartitioner} to partition records by bucket. */
 public class BucketStreamPartitioner extends StreamPartitioner<RowData> {
 
-    private final int numBucket;
-    private final TableSchema tableSchema;
+    private final TableSchema schema;
 
-    private transient SinkRecordConverter recordConverter;
+    private transient BucketComputer computer;
+    private transient int numberOfChannels;
 
-    public BucketStreamPartitioner(int numBucket, TableSchema tableSchema) {
-        this.numBucket = numBucket;
-        this.tableSchema = tableSchema;
+    public BucketStreamPartitioner(TableSchema schema) {
+        this.schema = schema;
     }
 
     @Override
     public void setup(int numberOfChannels) {
         super.setup(numberOfChannels);
-        this.recordConverter = new SinkRecordConverter(numBucket, tableSchema);
+        this.computer = new BucketComputer(schema);
+        this.numberOfChannels = numberOfChannels;
     }
 
     @Override
     public int selectChannel(SerializationDelegate<StreamRecord<RowData>> record) {
-        RowData row = record.getInstance().getValue();
-        return recordConverter.bucket(row) % numberOfChannels;
+        return computer.bucket(record.getInstance().getValue()) % numberOfChannels;
     }
 
     @Override

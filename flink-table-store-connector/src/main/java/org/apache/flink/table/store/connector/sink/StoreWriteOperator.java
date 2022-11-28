@@ -162,7 +162,7 @@ public class StoreWriteOperator extends PrepareCommitOperator {
 
         if (logSinkFunction != null) {
             // write to log store, need to preserve original pk (which includes partition fields)
-            SinkRecord logRecord = write.recordConverter().convertToLogSinkRecord(record);
+            SinkRecord logRecord = write.toLogRecord(record);
             logSinkFunction.invoke(logRecord, sinkContext);
         }
 

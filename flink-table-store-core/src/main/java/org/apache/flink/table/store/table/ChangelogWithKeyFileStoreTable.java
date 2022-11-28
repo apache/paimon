@@ -197,8 +197,6 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWrite newWrite(String commitUser) {
-        SinkRecordConverter recordConverter =
-                new SinkRecordConverter(store.options().bucket(), tableSchema);
         final SequenceGenerator sequenceGenerator =
                 store.options()
                         .sequenceField()
@@ -207,7 +205,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 store.newWrite(commitUser),
-                recordConverter,
+                new SinkRecordConverter(tableSchema),
                 record -> {
                     long sequenceNumber =
                             sequenceGenerator == null

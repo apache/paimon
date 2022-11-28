@@ -123,12 +123,10 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWrite newWrite(String commitUser) {
-        SinkRecordConverter recordConverter =
-                new SinkRecordConverter(store.options().bucket(), tableSchema);
         final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 store.newWrite(commitUser),
-                recordConverter,
+                new SinkRecordConverter(tableSchema),
                 record -> {
                     switch (record.row().getRowKind()) {
                         case INSERT:
