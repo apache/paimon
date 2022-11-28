@@ -23,11 +23,13 @@ import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
 
+import org.awaitility.Awaitility;
 import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -105,15 +107,25 @@ public class PartialUpdateITCase extends FileStoreTableITCase {
 
         batchSql("INSERT INTO ods_orders VALUES (1, 2, 3)");
         batchSql("INSERT INTO dim_persons VALUES (3, 'snow', 'jon', 23)");
-        Thread.sleep(1000);
-        assertThat(rowsToList(batchSql("SELECT * FROM dwd_orders")))
-                .containsExactly(Arrays.asList(1, 2, 3, "snow", "jon", 23));
+        Awaitility.await()
+                .pollInSameThread()
+                .atMost(5, TimeUnit.SECONDS)
+                .untilAsserted(
+                        () ->
+                                assertThat(rowsToList(batchSql("SELECT * FROM dwd_orders")))
+                                        .containsExactly(
+                                                Arrays.asList(1, 2, 3, "snow", "jon", 23)));
 
         batchSql("INSERT INTO ods_orders VALUES (1, 4, 3)");
         batchSql("INSERT INTO dim_persons VALUES (3, 'snow', 'targaryen', 23)");
-        Thread.sleep(1000);
-        assertThat(rowsToList(batchSql("SELECT * FROM dwd_orders")))
-                .containsExactly(Arrays.asList(1, 4, 3, "snow", "targaryen", 23));
+        Awaitility.await()
+                .pollInSameThread()
+                .atMost(5, TimeUnit.SECONDS)
+                .untilAsserted(
+                        () ->
+                                assertThat(rowsToList(batchSql("SELECT * FROM dwd_orders")))
+                                        .containsExactly(
+                                                Arrays.asList(1, 4, 3, "snow", "targaryen", 23)));
 
         iter.close();
     }
