@@ -34,17 +34,22 @@ import java.io.IOException;
 public class RowDataFileRecordReader implements RecordReader<RowData> {
 
     private final BulkFormat.Reader<RowData> reader;
+    @Nullable private final int[] indexMapping;
 
-    public RowDataFileRecordReader(Path path, BulkFormat<RowData, FileSourceSplit> readerFactory)
+    public RowDataFileRecordReader(
+            Path path,
+            BulkFormat<RowData, FileSourceSplit> readerFactory,
+            @Nullable int[] indexMapping)
             throws IOException {
         this.reader = FileUtils.createFormatReader(readerFactory, path);
+        this.indexMapping = indexMapping;
     }
 
     @Nullable
     @Override
     public RecordReader.RecordIterator<RowData> readBatch() throws IOException {
         BulkFormat.RecordIterator<RowData> iterator = reader.readBatch();
-        return iterator == null ? null : new RowDataFileRecordIterator(iterator);
+        return iterator == null ? null : new RowDataFileRecordIterator(iterator, indexMapping);
     }
 
     @Override
@@ -52,11 +57,13 @@ public class RowDataFileRecordReader implements RecordReader<RowData> {
         reader.close();
     }
 
-    private static class RowDataFileRecordIterator implements RecordReader.RecordIterator<RowData> {
+    private static class RowDataFileRecordIterator extends AbstractFileRecordIterator<RowData> {
 
         private final BulkFormat.RecordIterator<RowData> iterator;
 
-        private RowDataFileRecordIterator(BulkFormat.RecordIterator<RowData> iterator) {
+        private RowDataFileRecordIterator(
+                BulkFormat.RecordIterator<RowData> iterator, @Nullable int[] indexMapping) {
+            super(indexMapping);
             this.iterator = iterator;
         }
 
@@ -64,8 +71,7 @@ public class RowDataFileRecordReader implements RecordReader<RowData> {
         public RowData next() throws IOException {
             RecordAndPosition<RowData> result = iterator.next();
 
-            // TODO schema evolution
-            return result == null ? null : result.getRecord();
+            return result == null ? null : mappingRowData(result.getRecord());
         }
 
         @Override

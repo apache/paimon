@@ -21,6 +21,8 @@ package org.apache.flink.table.store.file;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
+import org.apache.flink.table.store.file.schema.AtomicDataType;
+import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.utils.RowDataUtils;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -32,11 +34,15 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.flink.util.Preconditions.checkState;
+
 /**
  * A key value, including user key, sequence number, value kind and value. This object can be
  * reused.
  */
 public class KeyValue {
+    private static final String SEQUENCE_NUMBER = "_SEQUENCE_NUMBER";
+    private static final String VALUE_KIND = "_VALUE_KIND";
 
     public static final long UNKNOWN_SEQUENCE = -1;
     public static final int UNKNOWN_LEVEL = -1;
@@ -94,10 +100,59 @@ public class KeyValue {
 
     public static RowType schema(RowType keyType, RowType valueType) {
         List<RowType.RowField> fields = new ArrayList<>(keyType.getFields());
-        fields.add(new RowType.RowField("_SEQUENCE_NUMBER", new BigIntType(false)));
-        fields.add(new RowType.RowField("_VALUE_KIND", new TinyIntType(false)));
+        fields.add(new RowType.RowField(SEQUENCE_NUMBER, new BigIntType(false)));
+        fields.add(new RowType.RowField(VALUE_KIND, new TinyIntType(false)));
         fields.addAll(valueType.getFields());
         return new RowType(fields);
+    }
+
+    /**
+     * Create key-value fields, we need to add a const value to the id of value field to ensure that
+     * they are consistent when compared by field id. For example, there are two table with key
+     * value fields as follows
+     *
+     * <ul>
+     *   <li>Table1 key fields: 1->a, 2->b, 3->c; value fields: 0->value_count
+     *   <li>Table2 key fields: 1->c, 3->d, 4->a, 5->b; value fields: 0->value_count
+     * </ul>
+     *
+     * <p>We will use 5 as maxKeyId, and create fields for Table1/Table2 as follows
+     *
+     * <ul>
+     *   <li>Table1 fields: 1->a, 2->b, 3->c, 6->seq, 7->kind, 8->value_count
+     *   <li>Table2 fields: 1->c, 3->d, 4->a, 5->b, 6->seq, 7->kind, 8->value_count
+     * </ul>
+     *
+     * <p>Then we can compare these two table fields with the field id.
+     *
+     * @param keyFields the key fields
+     * @param valueFields the value fields
+     * @param maxKeyId the max key id
+     * @return the table fields
+     */
+    public static List<DataField> createKeyValueFields(
+            List<DataField> keyFields, List<DataField> valueFields, final int maxKeyId) {
+        checkState(maxKeyId >= keyFields.stream().mapToInt(DataField::id).max().orElse(0));
+
+        List<DataField> fields = new ArrayList<>(keyFields.size() + valueFields.size() + 2);
+        fields.addAll(keyFields);
+        fields.add(
+                new DataField(
+                        maxKeyId + 1, SEQUENCE_NUMBER, new AtomicDataType(new BigIntType(false))));
+        fields.add(
+                new DataField(
+                        maxKeyId + 2, VALUE_KIND, new AtomicDataType(new TinyIntType(false))));
+        for (DataField valueField : valueFields) {
+            DataField newValueField =
+                    new DataField(
+                            valueField.id() + maxKeyId + 3,
+                            valueField.name(),
+                            valueField.type(),
+                            valueField.description());
+            fields.add(newValueField);
+        }
+
+        return fields;
     }
 
     public static int[][] project(

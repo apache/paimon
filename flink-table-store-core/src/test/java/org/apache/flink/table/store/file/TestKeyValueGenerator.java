@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file;
 
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
@@ -26,8 +27,10 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.generated.RecordComparator;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.file.schema.DataField;
-import org.apache.flink.table.store.file.schema.KeyFieldsExtractor;
+import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.table.SchemaEvolutionTableTestBase;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
@@ -40,6 +43,7 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -269,6 +273,21 @@ public class TestKeyValueGenerator {
         return map;
     }
 
+    public static SchemaManager createTestSchemaManager(Path path) {
+        TableSchema tableSchema =
+                new TableSchema(
+                        0,
+                        TableSchema.newFields(DEFAULT_ROW_TYPE),
+                        DEFAULT_ROW_TYPE.getFieldCount(),
+                        Collections.EMPTY_LIST,
+                        KEY_NAME_LIST,
+                        Collections.EMPTY_MAP,
+                        "");
+        Map<Long, TableSchema> schemas = new HashMap<>();
+        schemas.put(tableSchema.id(), tableSchema);
+        return new SchemaEvolutionTableTestBase.TestingSchemaManager(path, schemas);
+    }
+
     public void sort(List<KeyValue> kvs) {
         kvs.sort(
                 (a, b) -> {
@@ -329,11 +348,12 @@ public class TestKeyValueGenerator {
         MULTI_PARTITIONED
     }
 
-    /** {@link KeyFieldsExtractor} implementation for test. */
-    public static class TestKeyFieldsExtractor implements KeyFieldsExtractor {
+    /** {@link KeyValueFieldsExtractor} implementation for test. */
+    public static class TestKeyValueFieldsExtractor implements KeyValueFieldsExtractor {
         private static final long serialVersionUID = 1L;
 
-        public static final TestKeyFieldsExtractor EXTRACTOR = new TestKeyFieldsExtractor();
+        public static final TestKeyValueFieldsExtractor EXTRACTOR =
+                new TestKeyValueFieldsExtractor();
 
         @Override
         public List<DataField> keyFields(TableSchema schema) {
@@ -341,6 +361,11 @@ public class TestKeyValueGenerator {
                     .filter(f -> KEY_NAME_LIST.contains(f.name()))
                     .map(f -> new DataField(f.id(), "key_" + f.name(), f.type(), f.description()))
                     .collect(Collectors.toList());
+        }
+
+        @Override
+        public List<DataField> valueFields(TableSchema schema) {
+            return schema.fields();
         }
     }
 }

@@ -32,7 +32,7 @@ import org.apache.flink.table.store.file.mergetree.compact.aggregate.AggregateMe
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.DataField;
-import org.apache.flink.table.store.file.schema.KeyFieldsExtractor;
+import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -97,7 +97,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         }
 
         CoreOptions options = new CoreOptions(conf);
-        KeyFieldsExtractor extractor = ChangelogWithKeyKeyFieldsExtractor.EXTRACTOR;
+        KeyValueFieldsExtractor extractor = ChangelogWithKeyKeyValueFieldsExtractor.EXTRACTOR;
         this.store =
                 new KeyValueFileStore(
                         schemaManager,
@@ -224,17 +224,22 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         return store;
     }
 
-    static class ChangelogWithKeyKeyFieldsExtractor implements KeyFieldsExtractor {
+    static class ChangelogWithKeyKeyValueFieldsExtractor implements KeyValueFieldsExtractor {
         private static final long serialVersionUID = 1L;
 
-        static final ChangelogWithKeyKeyFieldsExtractor EXTRACTOR =
-                new ChangelogWithKeyKeyFieldsExtractor();
+        static final ChangelogWithKeyKeyValueFieldsExtractor EXTRACTOR =
+                new ChangelogWithKeyKeyValueFieldsExtractor();
 
-        private ChangelogWithKeyKeyFieldsExtractor() {}
+        private ChangelogWithKeyKeyValueFieldsExtractor() {}
 
         @Override
         public List<DataField> keyFields(TableSchema schema) {
             return addKeyNamePrefix(schema.trimmedPrimaryKeysFields());
+        }
+
+        @Override
+        public List<DataField> valueFields(TableSchema schema) {
+            return schema.fields();
         }
     }
 }

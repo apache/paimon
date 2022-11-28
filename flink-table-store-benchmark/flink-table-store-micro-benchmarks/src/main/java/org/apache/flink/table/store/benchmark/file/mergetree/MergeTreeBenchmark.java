@@ -42,7 +42,11 @@ import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
+import org.apache.flink.table.store.file.schema.AtomicDataType;
+import org.apache.flink.table.store.file.schema.DataField;
+import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
@@ -141,7 +145,20 @@ public class MergeTreeBenchmark {
                         keyType,
                         valueType,
                         flushingFormat,
-                        pathFactory);
+                        pathFactory,
+                        new KeyValueFieldsExtractor() {
+                            @Override
+                            public List<DataField> keyFields(TableSchema schema) {
+                                return Collections.singletonList(
+                                        new DataField(0, "k", new AtomicDataType(new IntType())));
+                            }
+
+                            @Override
+                            public List<DataField> valueFields(TableSchema schema) {
+                                return Collections.singletonList(
+                                        new DataField(0, "v", new AtomicDataType(new IntType())));
+                            }
+                        });
         readerFactory = readerBuilder.build(BinaryRowDataUtil.EMPTY_ROW, 0);
         compactReaderFactory = readerBuilder.build(BinaryRowDataUtil.EMPTY_ROW, 0);
         KeyValueFileWriterFactory.Builder writerBuilder =

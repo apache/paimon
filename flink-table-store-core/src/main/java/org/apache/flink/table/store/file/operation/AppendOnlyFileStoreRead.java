@@ -18,15 +18,16 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.connector.file.src.FileSourceSplit;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.file.io.RowDataFileRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.file.utils.BulkFormatMapping;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FileFormat;
@@ -38,7 +39,9 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.splitAnd;
 
@@ -50,6 +53,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
     private final RowType rowType;
     private final FileFormat fileFormat;
     private final FileStorePathFactory pathFactory;
+    private final Map<Long, BulkFormatMapping> bulkFormatMappings;
 
     private int[][] projection;
 
@@ -66,6 +70,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
         this.rowType = rowType;
         this.fileFormat = fileFormat;
         this.pathFactory = pathFactory;
+        this.bulkFormatMappings = new HashMap<>();
 
         this.projection = Projection.range(0, rowType.getFieldCount()).toNestedIndexes();
     }
@@ -83,16 +88,46 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
 
     @Override
     public RecordReader<RowData> createReader(DataSplit split) throws IOException {
-        BulkFormat<RowData, FileSourceSplit> readerFactory =
-                fileFormat.createReaderFactory(rowType, projection, filters);
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(split.partition(), split.bucket());
         List<ConcatRecordReader.ReaderSupplier<RowData>> suppliers = new ArrayList<>();
         for (DataFileMeta file : split.files()) {
+            BulkFormatMapping bulkFormatMapping =
+                    bulkFormatMappings.computeIfAbsent(
+                            file.schemaId(),
+                            key -> {
+                                TableSchema tableSchema = schemaManager.schema(this.schemaId);
+                                TableSchema dataSchema = schemaManager.schema(key);
+                                int[][] dataProjection =
+                                        SchemaEvolutionUtil.createDataProjection(
+                                                tableSchema.fields(),
+                                                dataSchema.fields(),
+                                                projection);
+                                RowType rowType = dataSchema.logicalRowType();
+                                int[] indexMapping =
+                                        SchemaEvolutionUtil.createIndexMapping(
+                                                Projection.of(projection).toTopLevelIndexes(),
+                                                tableSchema.fields(),
+                                                Projection.of(dataProjection).toTopLevelIndexes(),
+                                                dataSchema.fields());
+                                List<Predicate> dataFilters =
+                                        this.schemaId == key
+                                                ? filters
+                                                : SchemaEvolutionUtil.createDataFilters(
+                                                        tableSchema.fields(),
+                                                        dataSchema.fields(),
+                                                        filters);
+                                return new BulkFormatMapping(
+                                        indexMapping,
+                                        fileFormat.createReaderFactory(
+                                                rowType, dataProjection, dataFilters));
+                            });
             suppliers.add(
                     () ->
                             new RowDataFileRecordReader(
-                                    dataFilePathFactory.toPath(file.fileName()), readerFactory));
+                                    dataFilePathFactory.toPath(file.fileName()),
+                                    bulkFormatMapping.getReaderFactory(),
+                                    bulkFormatMapping.getIndexMapping()));
         }
 
         return ConcatRecordReader.create(suppliers);

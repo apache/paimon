@@ -39,24 +39,27 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
     private final BulkFormat.Reader<RowData> reader;
     private final KeyValueSerializer serializer;
     private final int level;
+    @Nullable private final int[] indexMapping;
 
     public KeyValueDataFileRecordReader(
             BulkFormat<RowData, FileSourceSplit> readerFactory,
             Path path,
             RowType keyType,
             RowType valueType,
-            int level)
+            int level,
+            @Nullable int[] indexMapping)
             throws IOException {
         this.reader = FileUtils.createFormatReader(readerFactory, path);
         this.serializer = new KeyValueSerializer(keyType, valueType);
         this.level = level;
+        this.indexMapping = indexMapping;
     }
 
     @Nullable
     @Override
     public RecordIterator<KeyValue> readBatch() throws IOException {
         BulkFormat.RecordIterator<RowData> iterator = reader.readBatch();
-        return iterator == null ? null : new KeyValueDataFileRecordIterator(iterator);
+        return iterator == null ? null : new KeyValueDataFileRecordIterator(iterator, indexMapping);
     }
 
     @Override
@@ -64,11 +67,13 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
         reader.close();
     }
 
-    private class KeyValueDataFileRecordIterator implements RecordReader.RecordIterator<KeyValue> {
+    private class KeyValueDataFileRecordIterator extends AbstractFileRecordIterator<KeyValue> {
 
         private final BulkFormat.RecordIterator<RowData> iterator;
 
-        private KeyValueDataFileRecordIterator(BulkFormat.RecordIterator<RowData> iterator) {
+        private KeyValueDataFileRecordIterator(
+                BulkFormat.RecordIterator<RowData> iterator, @Nullable int[] indexMapping) {
+            super(indexMapping);
             this.iterator = iterator;
         }
 
@@ -76,11 +81,10 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
         public KeyValue next() throws IOException {
             RecordAndPosition<RowData> result = iterator.next();
 
-            // TODO schema evolution
             if (result == null) {
                 return null;
             } else {
-                return serializer.fromRow(result.getRecord()).setLevel(level);
+                return serializer.fromRow(mappingRowData(result.getRecord())).setLevel(level);
             }
         }
 

@@ -40,12 +40,17 @@ import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunct
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
 import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
+import org.apache.flink.table.store.file.schema.AtomicDataType;
+import org.apache.flink.table.store.file.schema.DataField;
+import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.table.SchemaEvolutionTableTestBase;
 import org.apache.flink.table.store.utils.BinaryRowDataUtil;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -64,8 +69,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
@@ -102,6 +109,22 @@ public class MergeTreeTest {
         bucketDir.getFileSystem().mkdirs(bucketDir);
     }
 
+    private SchemaManager createTestingSchemaManager(Path path) {
+        TableSchema schema =
+                new TableSchema(
+                        0,
+                        new ArrayList<>(),
+                        -1,
+                        new ArrayList<>(),
+                        new ArrayList<>(),
+                        new HashMap<>(),
+                        "");
+        Map<Long, TableSchema> schemas = new HashMap<>();
+        schemas.put(schema.id(), schema);
+
+        return new SchemaEvolutionTableTestBase.TestingSchemaManager(path, schemas);
+    }
+
     private void recreateMergeTree(long targetFileSize) {
         Configuration configuration = new Configuration();
         configuration.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
@@ -110,10 +133,31 @@ public class MergeTreeTest {
         options = new CoreOptions(configuration);
         RowType keyType = new RowType(singletonList(new RowType.RowField("k", new IntType())));
         RowType valueType = new RowType(singletonList(new RowType.RowField("v", new IntType())));
+
         FileFormat flushingAvro = new FlushingFileFormat("avro");
         KeyValueFileReaderFactory.Builder readerFactoryBuilder =
                 KeyValueFileReaderFactory.builder(
-                        new SchemaManager(path), 0, keyType, valueType, flushingAvro, pathFactory);
+                        createTestingSchemaManager(path),
+                        0,
+                        keyType,
+                        valueType,
+                        flushingAvro,
+                        pathFactory,
+                        new KeyValueFieldsExtractor() {
+                            @Override
+                            public List<DataField> keyFields(TableSchema schema) {
+                                return Collections.singletonList(
+                                        new DataField(
+                                                0, "k", new AtomicDataType(new IntType(false))));
+                            }
+
+                            @Override
+                            public List<DataField> valueFields(TableSchema schema) {
+                                return Collections.singletonList(
+                                        new DataField(
+                                                0, "v", new AtomicDataType(new IntType(false))));
+                            }
+                        });
         readerFactory = readerFactoryBuilder.build(BinaryRowDataUtil.EMPTY_ROW, 0);
         compactReaderFactory = readerFactoryBuilder.build(BinaryRowDataUtil.EMPTY_ROW, 0);
         KeyValueFileWriterFactory.Builder writerFactoryBuilder =

@@ -18,13 +18,13 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.connector.file.src.FileSourceSplit;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.file.utils.BulkFormatMapping;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FileFormat;
@@ -35,7 +35,9 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Factory to create {@link RecordReader}s for reading {@link KeyValue} files. */
 public class KeyValueFileReaderFactory {
@@ -45,8 +47,8 @@ public class KeyValueFileReaderFactory {
     private final RowType keyType;
     private final RowType valueType;
 
-    // TODO introduce Map<SchemaId, readerFactory>
-    private final BulkFormat<RowData, FileSourceSplit> readerFactory;
+    private final BulkFormatMapping.BulkFormatMappingBuilder bulkFormatMappingBuilder;
+    private final Map<Long, BulkFormatMapping> bulkFormatMappings;
     private final DataFilePathFactory pathFactory;
 
     private KeyValueFileReaderFactory(
@@ -54,20 +56,34 @@ public class KeyValueFileReaderFactory {
             long schemaId,
             RowType keyType,
             RowType valueType,
-            BulkFormat<RowData, FileSourceSplit> readerFactory,
+            BulkFormatMapping.BulkFormatMappingBuilder bulkFormatMappingBuilder,
             DataFilePathFactory pathFactory) {
         this.schemaManager = schemaManager;
         this.schemaId = schemaId;
         this.keyType = keyType;
         this.valueType = valueType;
-        this.readerFactory = readerFactory;
+        this.bulkFormatMappingBuilder = bulkFormatMappingBuilder;
         this.pathFactory = pathFactory;
+        this.bulkFormatMappings = new HashMap<>();
     }
 
-    public RecordReader<KeyValue> createRecordReader(String fileName, int level)
+    public RecordReader<KeyValue> createRecordReader(long schemaId, String fileName, int level)
             throws IOException {
+        BulkFormatMapping bulkFormatMapping =
+                bulkFormatMappings.computeIfAbsent(
+                        schemaId,
+                        key -> {
+                            TableSchema tableSchema = schemaManager.schema(this.schemaId);
+                            TableSchema dataSchema = schemaManager.schema(key);
+                            return bulkFormatMappingBuilder.build(tableSchema, dataSchema);
+                        });
         return new KeyValueDataFileRecordReader(
-                readerFactory, pathFactory.toPath(fileName), keyType, valueType, level);
+                bulkFormatMapping.getReaderFactory(),
+                pathFactory.toPath(fileName),
+                keyType,
+                valueType,
+                level,
+                bulkFormatMapping.getIndexMapping());
     }
 
     public static Builder builder(
@@ -76,8 +92,10 @@ public class KeyValueFileReaderFactory {
             RowType keyType,
             RowType valueType,
             FileFormat fileFormat,
-            FileStorePathFactory pathFactory) {
-        return new Builder(schemaManager, schemaId, keyType, valueType, fileFormat, pathFactory);
+            FileStorePathFactory pathFactory,
+            KeyValueFieldsExtractor extractor) {
+        return new Builder(
+                schemaManager, schemaId, keyType, valueType, fileFormat, pathFactory, extractor);
     }
 
     /** Builder for {@link KeyValueFileReaderFactory}. */
@@ -89,6 +107,7 @@ public class KeyValueFileReaderFactory {
         private final RowType valueType;
         private final FileFormat fileFormat;
         private final FileStorePathFactory pathFactory;
+        private final KeyValueFieldsExtractor extractor;
 
         private final int[][] fullKeyProjection;
         private int[][] keyProjection;
@@ -102,13 +121,15 @@ public class KeyValueFileReaderFactory {
                 RowType keyType,
                 RowType valueType,
                 FileFormat fileFormat,
-                FileStorePathFactory pathFactory) {
+                FileStorePathFactory pathFactory,
+                KeyValueFieldsExtractor extractor) {
             this.schemaManager = schemaManager;
             this.schemaId = schemaId;
             this.keyType = keyType;
             this.valueType = valueType;
             this.fileFormat = fileFormat;
             this.pathFactory = pathFactory;
+            this.extractor = extractor;
 
             this.fullKeyProjection = Projection.range(0, keyType.getFieldCount()).toNestedIndexes();
             this.keyProjection = fullKeyProjection;
@@ -140,15 +161,13 @@ public class KeyValueFileReaderFactory {
             int[][] keyProjection = projectKeys ? this.keyProjection : fullKeyProjection;
             RowType projectedKeyType = projectKeys ? this.projectedKeyType : keyType;
 
-            RowType recordType = KeyValue.schema(keyType, valueType);
-            int[][] projection =
-                    KeyValue.project(keyProjection, valueProjection, keyType.getFieldCount());
             return new KeyValueFileReaderFactory(
                     schemaManager,
                     schemaId,
                     projectedKeyType,
                     projectedValueType,
-                    fileFormat.createReaderFactory(recordType, projection, filters),
+                    BulkFormatMapping.newBuilder(
+                            fileFormat, extractor, keyProjection, valueProjection, filters),
                     pathFactory.createDataFilePathFactory(partition, bucket));
         }
 
