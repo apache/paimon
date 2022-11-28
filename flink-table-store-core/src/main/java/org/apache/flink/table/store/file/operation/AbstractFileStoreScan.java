@@ -209,7 +209,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                     FileUtils.COMMON_IO_FORK_JOIN_POOL
                             .submit(
                                     () ->
-                                            readManifests.parallelStream()
+                                            readManifests
+                                                    .parallelStream()
                                                     .filter(this::filterManifestFileMeta)
                                                     .flatMap(m -> readManifestFileMeta(m).stream())
                                                     .filter(this::filterManifestEntry)
