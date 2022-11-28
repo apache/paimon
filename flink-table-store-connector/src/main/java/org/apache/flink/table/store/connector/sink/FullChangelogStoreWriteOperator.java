@@ -208,7 +208,7 @@ public class FullChangelogStoreWriteOperator extends StoreWriteOperator {
                     }
                     compactedBuckets.add(bucket);
                     try {
-                        write.compact(bucket.f0, bucket.f1);
+                        write.compact(bucket.f0, bucket.f1, true);
                     } catch (Exception e) {
                         throw new RuntimeException(e);
                     }
