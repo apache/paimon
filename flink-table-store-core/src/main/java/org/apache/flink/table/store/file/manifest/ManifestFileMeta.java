@@ -23,7 +23,6 @@ import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
-import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -177,43 +176,12 @@ public class ManifestFileMeta {
 
         Map<ManifestEntry.Identifier, ManifestEntry> map = new LinkedHashMap<>();
         for (ManifestFileMeta manifest : candidates) {
-            mergeEntries(manifestFile.read(manifest.fileName), map);
+            ManifestEntry.mergeEntries(manifestFile.read(manifest.fileName), map);
         }
         if (!map.isEmpty()) {
             List<ManifestFileMeta> merged = manifestFile.write(new ArrayList<>(map.values()));
             result.addAll(merged);
             newMetas.addAll(merged);
-        }
-    }
-
-    private static void mergeEntries(
-            List<ManifestEntry> entries, Map<ManifestEntry.Identifier, ManifestEntry> map) {
-        for (ManifestEntry entry : entries) {
-            ManifestEntry.Identifier identifier = entry.identifier();
-            switch (entry.kind()) {
-                case ADD:
-                    Preconditions.checkState(
-                            !map.containsKey(identifier),
-                            "Trying to add file %s which is already added. Manifest might be corrupted.",
-                            identifier);
-                    map.put(identifier, entry);
-                    break;
-                case DELETE:
-                    // each dataFile will only be added once and deleted once,
-                    // if we know that it is added before then both add and delete entry can be
-                    // removed because there won't be further operations on this file,
-                    // otherwise we have to keep the delete entry because the add entry must be
-                    // in the previous manifest files
-                    if (map.containsKey(identifier)) {
-                        map.remove(identifier);
-                    } else {
-                        map.put(identifier, entry);
-                    }
-                    break;
-                default:
-                    throw new UnsupportedOperationException(
-                            "Unknown value kind " + entry.kind().name());
-            }
         }
     }
 }
