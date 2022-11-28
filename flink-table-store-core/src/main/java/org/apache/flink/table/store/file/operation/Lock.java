@@ -73,22 +73,23 @@ public interface Lock extends AutoCloseable {
 
         @Override
         public Lock create() {
-            return new Lock() {
-                @Override
-                public <T> T runWithLock(Callable<T> callable) throws Exception {
-                    return callable.call();
-                }
-
-                @Override
-                public void close() {}
-            };
+            return new EmptyLock();
         }
     }
 
-    @Nullable
+    class EmptyLock implements Lock {
+        @Override
+        public <T> T runWithLock(Callable<T> callable) throws Exception {
+            return callable.call();
+        }
+
+        @Override
+        public void close() {}
+    }
+
     static Lock fromCatalog(CatalogLock lock, ObjectPath tablePath) {
         if (lock == null) {
-            return null;
+            return new EmptyLock();
         }
         return new CatalogLockImpl(lock, tablePath);
     }
