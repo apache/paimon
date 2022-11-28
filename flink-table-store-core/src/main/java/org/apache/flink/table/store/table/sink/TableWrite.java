@@ -28,15 +28,16 @@ import java.util.List;
  * An abstraction layer above {@link org.apache.flink.table.store.file.operation.FileStoreWrite} to
  * provide {@link RowData} writing.
  */
-public interface TableWrite {
+public interface TableWrite extends AutoCloseable {
 
     TableWrite withOverwrite(boolean overwrite);
 
     TableWrite withIOManager(IOManager ioManager);
 
-    SinkRecordConverter recordConverter();
-
     SinkRecord write(RowData rowData) throws Exception;
+
+    /** Log record need to preserve original pk (which includes partition fields). */
+    SinkRecord toLogRecord(SinkRecord record);
 
     void compact(BinaryRowData partition, int bucket) throws Exception;
 

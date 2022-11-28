@@ -24,11 +24,17 @@ import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
+
 /** A {@link java.util.function.Predicate} to filter {@link RowData}. */
 public class PredicateFilter implements java.util.function.Predicate<RowData> {
 
     private final RowDataToObjectArrayConverter arrayConverter;
     @Nullable private final Predicate predicate;
+
+    public PredicateFilter(RowType rowType, List<Predicate> predicates) {
+        this(rowType, predicates.isEmpty() ? null : PredicateBuilder.and(predicates));
+    }
 
     public PredicateFilter(RowType rowType, @Nullable Predicate predicate) {
         this.arrayConverter = new RowDataToObjectArrayConverter(rowType);

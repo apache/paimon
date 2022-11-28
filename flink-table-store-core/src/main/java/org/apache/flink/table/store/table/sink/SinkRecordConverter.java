@@ -24,51 +24,39 @@ import org.apache.flink.table.runtime.generated.Projection;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
 
 import java.util.Arrays;
-import java.util.stream.IntStream;
 
 /** Converter for converting {@link RowData} to {@link SinkRecord}. */
 public class SinkRecordConverter {
 
-    private final int numBucket;
-
-    private final Projection<RowData, BinaryRowData> allProjection;
+    private final BucketComputer bucketComputer;
 
     private final Projection<RowData, BinaryRowData> partProjection;
-
-    private final Projection<RowData, BinaryRowData> bucketProjection;
 
     private final Projection<RowData, BinaryRowData> pkProjection;
 
     @Nullable private final Projection<RowData, BinaryRowData> logPkProjection;
 
-    public SinkRecordConverter(int numBucket, TableSchema tableSchema) {
+    public SinkRecordConverter(TableSchema tableSchema) {
         this(
-                numBucket,
                 tableSchema.logicalRowType(),
                 tableSchema.projection(tableSchema.partitionKeys()),
-                tableSchema.projection(tableSchema.originalBucketKeys()),
                 tableSchema.projection(tableSchema.trimmedPrimaryKeys()),
-                tableSchema.projection(tableSchema.primaryKeys()));
+                tableSchema.projection(tableSchema.primaryKeys()),
+                new BucketComputer(tableSchema));
     }
 
     private SinkRecordConverter(
-            int numBucket,
             RowType inputType,
             int[] partitions,
-            int[] bucketKeys,
             int[] primaryKeys,
-            int[] logPrimaryKeys) {
-        this.numBucket = numBucket;
-        this.allProjection =
-                CodeGenUtils.newProjection(
-                        inputType, IntStream.range(0, inputType.getFieldCount()).toArray());
+            int[] logPrimaryKeys,
+            BucketComputer bucketComputer) {
+        this.bucketComputer = bucketComputer;
         this.partProjection = CodeGenUtils.newProjection(inputType, partitions);
-        this.bucketProjection = CodeGenUtils.newProjection(inputType, bucketKeys);
         this.pkProjection = CodeGenUtils.newProjection(inputType, primaryKeys);
         this.logPkProjection =
                 Arrays.equals(primaryKeys, logPrimaryKeys)
@@ -79,7 +67,7 @@ public class SinkRecordConverter {
     public SinkRecord convert(RowData row) {
         BinaryRowData partition = partProjection.apply(row);
         BinaryRowData primaryKey = primaryKey(row);
-        int bucket = bucket(row, bucketKey(row, primaryKey));
+        int bucket = bucketComputer.bucket(row, primaryKey);
         return new SinkRecord(partition, bucket, primaryKey, row);
     }
 
@@ -92,51 +80,15 @@ public class SinkRecordConverter {
     }
 
     public int bucket(RowData row) {
-        return bucket(row, bucketKey(row));
+        return bucketComputer.bucket(row);
     }
 
     private BinaryRowData primaryKey(RowData row) {
         return pkProjection.apply(row);
     }
 
-    private BinaryRowData bucketKey(RowData row) {
-        BinaryRowData bucketKey = bucketProjection.apply(row);
-        return bucketKey.getArity() == 0 ? pkProjection.apply(row) : bucketKey;
-    }
-
-    private BinaryRowData bucketKey(RowData row, BinaryRowData primaryKey) {
-        BinaryRowData bucketKey = bucketProjection.apply(row);
-        return bucketKey.getArity() == 0 ? primaryKey : bucketKey;
-    }
-
     private BinaryRowData logPrimaryKey(RowData row) {
         assert logPkProjection != null;
         return logPkProjection.apply(row);
-    }
-
-    private int bucket(RowData row, BinaryRowData bucketKey) {
-        int hash = bucketKey.getArity() == 0 ? hashRow(row) : hashcode(bucketKey);
-        return bucket(hash, numBucket);
-    }
-
-    private int hashRow(RowData row) {
-        if (row instanceof BinaryRowData) {
-            RowKind rowKind = row.getRowKind();
-            row.setRowKind(RowKind.INSERT);
-            int hash = hashcode((BinaryRowData) row);
-            row.setRowKind(rowKind);
-            return hash;
-        } else {
-            return hashcode(allProjection.apply(row));
-        }
-    }
-
-    public static int hashcode(BinaryRowData rowData) {
-        assert rowData.getRowKind() == RowKind.INSERT;
-        return rowData.hashCode();
-    }
-
-    public static int bucket(int hashcode, int numBucket) {
-        return Math.abs(hashcode % numBucket);
     }
 }

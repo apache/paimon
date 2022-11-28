@@ -25,7 +25,6 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.FlinkConnectorOptions;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
@@ -91,10 +90,7 @@ public class FlinkSinkBuilder {
     }
 
     public DataStreamSink<?> build() {
-        int numBucket = conf.get(CoreOptions.BUCKET);
-
-        BucketStreamPartitioner partitioner =
-                new BucketStreamPartitioner(numBucket, table.schema());
+        BucketStreamPartitioner partitioner = new BucketStreamPartitioner(table.schema());
         PartitionTransformation<RowData> partitioned =
                 new PartitionTransformation<>(input.getTransformation(), partitioner);
         if (parallelism != null) {

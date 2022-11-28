@@ -22,7 +22,7 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
-import org.apache.flink.table.store.table.sink.SinkRecordConverter;
+import org.apache.flink.table.store.table.sink.BucketComputer;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableSet;
@@ -72,7 +72,7 @@ public class BucketSelector implements Serializable {
     Set<Integer> createBucketSet(int numBucket) {
         ImmutableSet.Builder<Integer> builder = new ImmutableSet.Builder<>();
         for (int hash : hashCodes) {
-            builder.add(SinkRecordConverter.bucket(hash, numBucket));
+            builder.add(BucketComputer.bucket(hash, numBucket));
         }
         return builder.build();
     }
@@ -140,7 +140,7 @@ public class BucketSelector implements Serializable {
 
     private static int hash(List<Object> columns, RowDataSerializer serializer) {
         BinaryRowData binaryRow = serializer.toBinaryRow(GenericRowData.of(columns.toArray()));
-        return SinkRecordConverter.hashcode(binaryRow);
+        return BucketComputer.hashcode(binaryRow);
     }
 
     private static void assembleRows(

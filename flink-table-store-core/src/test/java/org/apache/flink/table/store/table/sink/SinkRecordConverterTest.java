@@ -33,6 +33,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.flink.table.store.CoreOptions.BUCKET;
 import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
@@ -85,6 +86,7 @@ public class SinkRecordConverterTest {
         List<DataField> fields = TableSchema.newFields(rowType);
         Map<String, String> options = new HashMap<>();
         options.put(BUCKET_KEY.key(), bk);
+        options.put(BUCKET.key(), "100");
         TableSchema schema =
                 new TableSchema(
                         0,
@@ -96,6 +98,6 @@ public class SinkRecordConverterTest {
                         "".equals(pk) ? Collections.emptyList() : Arrays.asList(pk.split(",")),
                         options,
                         "");
-        return new SinkRecordConverter(100, schema);
+        return new SinkRecordConverter(schema);
     }
 }
