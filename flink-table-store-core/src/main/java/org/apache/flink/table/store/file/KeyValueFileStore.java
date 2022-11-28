@@ -24,7 +24,7 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreRead;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreWrite;
-import org.apache.flink.table.store.file.schema.KeyFieldsExtractor;
+import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.KeyComparatorSupplier;
 import org.apache.flink.table.types.logical.RowType;
@@ -40,7 +40,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final RowType bucketKeyType;
     private final RowType keyType;
     private final RowType valueType;
-    private final KeyFieldsExtractor keyFieldsExtractor;
+    private final KeyValueFieldsExtractor keyValueFieldsExtractor;
     private final Supplier<Comparator<RowData>> keyComparatorSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
 
@@ -52,13 +52,13 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             RowType bucketKeyType,
             RowType keyType,
             RowType valueType,
-            KeyFieldsExtractor keyFieldsExtractor,
+            KeyValueFieldsExtractor keyValueFieldsExtractor,
             MergeFunctionFactory<KeyValue> mfFactory) {
         super(schemaManager, schemaId, options, partitionType);
         this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
         this.valueType = valueType;
-        this.keyFieldsExtractor = keyFieldsExtractor;
+        this.keyValueFieldsExtractor = keyValueFieldsExtractor;
         this.mfFactory = mfFactory;
         this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
     }
@@ -78,7 +78,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 newKeyComparator(),
                 mfFactory,
                 options.fileFormat(),
-                pathFactory());
+                pathFactory(),
+                keyValueFieldsExtractor);
     }
 
     @Override
@@ -94,7 +95,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 pathFactory(),
                 snapshotManager(),
                 newScan(true),
-                options);
+                options,
+                keyValueFieldsExtractor);
     }
 
     private KeyValueFileStoreScan newScan(boolean checkNumOfBuckets) {
@@ -105,7 +107,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 snapshotManager(),
                 schemaManager,
                 schemaId,
-                keyFieldsExtractor,
+                keyValueFieldsExtractor,
                 manifestFileFactory(),
                 manifestListFactory(),
                 options.bucket(),

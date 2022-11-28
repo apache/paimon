@@ -31,6 +31,7 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionWrapper;
 import org.apache.flink.table.store.file.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -82,11 +83,18 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             Comparator<RowData> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
             FileFormat fileFormat,
-            FileStorePathFactory pathFactory) {
+            FileStorePathFactory pathFactory,
+            KeyValueFieldsExtractor extractor) {
         this.tableSchema = schemaManager.schema(schemaId);
         this.readerFactoryBuilder =
                 KeyValueFileReaderFactory.builder(
-                        schemaManager, schemaId, keyType, valueType, fileFormat, pathFactory);
+                        schemaManager,
+                        schemaId,
+                        keyType,
+                        valueType,
+                        fileFormat,
+                        pathFactory,
+                        extractor);
         this.keyComparator = keyComparator;
         this.mfFactory = mfFactory;
         this.valueCountMode = tableSchema.trimmedPrimaryKeys().isEmpty();
@@ -153,7 +161,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                             // We need to check extraFiles to be compatible with Table Store 0.2.
                             // See comments on DataFileMeta#extraFiles.
                             String fileName = changelogFile(file).orElse(file.fileName());
-                            return readerFactory.createRecordReader(fileName, file.level());
+                            return readerFactory.createRecordReader(
+                                    file.schemaId(), fileName, file.level());
                         });
             }
             return ConcatRecordReader.create(suppliers);

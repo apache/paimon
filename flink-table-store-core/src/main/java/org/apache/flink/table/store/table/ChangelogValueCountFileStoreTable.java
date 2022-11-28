@@ -28,8 +28,9 @@ import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.schema.AtomicDataType;
 import org.apache.flink.table.store.file.schema.DataField;
-import org.apache.flink.table.store.file.schema.KeyFieldsExtractor;
+import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -45,10 +46,10 @@ import org.apache.flink.table.store.table.source.SplitGenerator;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.ValueCountRowDataRecordIterator;
 import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 
+import java.util.Collections;
 import java.util.List;
 
 /** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode without primary keys. */
@@ -61,10 +62,8 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     ChangelogValueCountFileStoreTable(
             Path path, SchemaManager schemaManager, TableSchema tableSchema) {
         super(path, tableSchema);
-        RowType countType =
-                RowType.of(
-                        new LogicalType[] {new BigIntType(false)}, new String[] {"_VALUE_COUNT"});
-        KeyFieldsExtractor extractor = ValueCountTableKeyFieldsExtractor.EXTRACTOR;
+        KeyValueFieldsExtractor extractor = ValueCountTableKeyValueFieldsExtractor.EXTRACTOR;
+        RowType countType = RowDataType.toRowType(false, extractor.valueFields(tableSchema));
         this.store =
                 new KeyValueFileStore(
                         schemaManager,
@@ -150,18 +149,26 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
         return store;
     }
 
-    /** {@link KeyFieldsExtractor} implementation for {@link ChangelogValueCountFileStoreTable}. */
-    static class ValueCountTableKeyFieldsExtractor implements KeyFieldsExtractor {
+    /**
+     * {@link KeyValueFieldsExtractor} implementation for {@link ChangelogValueCountFileStoreTable}.
+     */
+    static class ValueCountTableKeyValueFieldsExtractor implements KeyValueFieldsExtractor {
         private static final long serialVersionUID = 1L;
 
-        static final ValueCountTableKeyFieldsExtractor EXTRACTOR =
-                new ValueCountTableKeyFieldsExtractor();
+        static final ValueCountTableKeyValueFieldsExtractor EXTRACTOR =
+                new ValueCountTableKeyValueFieldsExtractor();
 
-        private ValueCountTableKeyFieldsExtractor() {}
+        private ValueCountTableKeyValueFieldsExtractor() {}
 
         @Override
         public List<DataField> keyFields(TableSchema schema) {
             return schema.fields();
+        }
+
+        @Override
+        public List<DataField> valueFields(TableSchema schema) {
+            return Collections.singletonList(
+                    new DataField(0, "_VALUE_COUNT", new AtomicDataType(new BigIntType(false))));
         }
     }
 }

@@ -33,7 +33,11 @@ import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunct
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreRead;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreWrite;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.schema.AtomicDataType;
+import org.apache.flink.table.store.file.schema.DataField;
+import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordWriter;
@@ -68,6 +72,20 @@ public class TestChangelogDataReadWrite {
             new RowType(singletonList(new RowType.RowField("v", new BigIntType())));
     private static final Comparator<RowData> COMPARATOR =
             Comparator.comparingLong(o -> o.getLong(0));
+    private static final KeyValueFieldsExtractor EXTRACTOR =
+            new KeyValueFieldsExtractor() {
+                @Override
+                public List<DataField> keyFields(TableSchema schema) {
+                    return Collections.singletonList(
+                            new DataField(0, "k", new AtomicDataType(new BigIntType(false))));
+                }
+
+                @Override
+                public List<DataField> valueFields(TableSchema schema) {
+                    return Collections.singletonList(
+                            new DataField(0, "v", new AtomicDataType(new BigIntType(false))));
+                }
+            };
 
     private final FileFormat avro;
     private final Path tablePath;
@@ -110,7 +128,8 @@ public class TestChangelogDataReadWrite {
                         COMPARATOR,
                         DeduplicateMergeFunction.factory(),
                         avro,
-                        pathFactory);
+                        pathFactory,
+                        EXTRACTOR);
         return new KeyValueTableRead(read) {
             @Override
             public TableRead withFilter(Predicate predicate) {
@@ -163,7 +182,8 @@ public class TestChangelogDataReadWrite {
                                 pathFactory,
                                 snapshotManager,
                                 null, // not used, we only create an empty writer
-                                options)
+                                options,
+                                EXTRACTOR)
                         .createEmptyWriter(partition, bucket, service);
         ((MemoryOwner) writer)
                 .setMemoryPool(

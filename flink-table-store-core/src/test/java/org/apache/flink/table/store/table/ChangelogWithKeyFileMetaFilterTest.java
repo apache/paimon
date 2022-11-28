@@ -46,7 +46,7 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
     @Test
     @Override
     public void testTableScan() throws Exception {
-        writeAndCheckFileMeta(
+        writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
                     DataTableScan.DataFilePlan plan = table.newScan().plan();
@@ -59,6 +59,12 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                     FileStoreTable table = createFileStoreTable(schemas);
                     DataTableScan.DataFilePlan plan = table.newScan().plan();
                     checkFilterRowCount(plan, 12L);
+
+                    /**
+                     * TODO ChangelogWithKeyFileStoreTable doesn't support value predicate and can't
+                     * get value stats. The test for filtering the primary key and partition already
+                     * exists.
+                     */
                 },
                 getPrimaryKeyNames(),
                 tableConfig,
@@ -68,7 +74,7 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
     @Test
     @Override
     public void testTableScanFilterExistFields() throws Exception {
-        writeAndCheckFileMeta(
+        writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
                     // results of field "b" in [14, 19] in SCHEMA_0_FIELDS, "b" is renamed to "d" in
@@ -90,6 +96,12 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                     Predicate predicate = builder.between(1, 14, 19);
                     DataTableScan.DataFilePlan plan = table.newScan().withFilter(predicate).plan();
                     checkFilterRowCount(plan, 12L);
+
+                    /**
+                     * TODO ChangelogWithKeyFileStoreTable doesn't support value predicate and can't
+                     * get value stats. The test for filtering the primary key and partition already
+                     * exists.
+                     */
                 },
                 getPrimaryKeyNames(),
                 tableConfig,
@@ -99,7 +111,7 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
     @Test
     @Override
     public void testTableScanFilterNewFields() throws Exception {
-        writeAndCheckFileMeta(
+        writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
                     DataTableScan.DataFilePlan plan = table.newScan().plan();
@@ -117,6 +129,12 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                     Predicate predicate = builder.greaterThan(3, 1120);
                     DataTableScan.DataFilePlan plan = table.newScan().withFilter(predicate).plan();
                     checkFilterRowCount(plan, 12L);
+
+                    /**
+                     * TODO ChangelogWithKeyFileStoreTable doesn't support value predicate and can't
+                     * get value stats. The test for filtering the primary key and partition already
+                     * exists.
+                     */
                 },
                 getPrimaryKeyNames(),
                 tableConfig,

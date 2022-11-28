@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
@@ -29,8 +30,9 @@ import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
+import org.apache.flink.table.store.file.schema.AtomicDataType;
 import org.apache.flink.table.store.file.schema.DataField;
-import org.apache.flink.table.store.file.schema.KeyFieldsExtractor;
+import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
@@ -112,7 +114,7 @@ public class KeyValueFileStoreReadTest {
                         partitionType,
                         keyType,
                         valueType,
-                        new KeyFieldsExtractor() {
+                        new KeyValueFieldsExtractor() {
                             private static final long serialVersionUID = 1L;
 
                             @Override
@@ -120,6 +122,16 @@ public class KeyValueFileStoreReadTest {
                                 return schema.fields().stream()
                                         .filter(f -> keyNames.contains(f.name()))
                                         .collect(Collectors.toList());
+                            }
+
+                            @Override
+                            public List<DataField> valueFields(TableSchema schema) {
+                                return Collections.singletonList(
+                                        new DataField(
+                                                0,
+                                                "count",
+                                                new AtomicDataType(
+                                                        DataTypes.BIGINT().getLogicalType())));
                             }
                         },
                         ValueCountMergeFunction.factory().create());
@@ -161,7 +173,7 @@ public class KeyValueFileStoreReadTest {
                         TestKeyValueGenerator.DEFAULT_PART_TYPE,
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
-                        TestKeyValueGenerator.TestKeyFieldsExtractor.EXTRACTOR,
+                        TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
                         DeduplicateMergeFunction.factory().create());
 
         RowDataSerializer projectedValueSerializer =
@@ -250,7 +262,7 @@ public class KeyValueFileStoreReadTest {
             RowType partitionType,
             RowType keyType,
             RowType valueType,
-            KeyFieldsExtractor extractor,
+            KeyValueFieldsExtractor extractor,
             MergeFunction<KeyValue> mergeFunction)
             throws Exception {
         SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
