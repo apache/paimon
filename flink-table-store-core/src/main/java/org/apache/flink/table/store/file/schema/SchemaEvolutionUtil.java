@@ -20,10 +20,7 @@ package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.predicate.AlwaysFalse;
-import org.apache.flink.table.store.file.predicate.AlwaysTrue;
 import org.apache.flink.table.store.file.predicate.CompoundPredicate;
-import org.apache.flink.table.store.file.predicate.IsNull;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.utils.ProjectedRowData;
@@ -36,6 +33,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
@@ -247,8 +245,7 @@ public class SchemaEvolutionUtil {
 
     /**
      * Create predicate list from data fields. We will visit all predicate in filters, reset it's
-     * field index, name and type, and use {@link AlwaysFalse} or {@link AlwaysTrue} if the field is
-     * not exist.
+     * field index, name and type, and ignore predicate if the field is not exist.
      *
      * @param tableFields the table fields
      * @param dataFields the underlying data fields
@@ -268,12 +265,13 @@ public class SchemaEvolutionUtil {
         dataFields.forEach(f -> idToDataFields.put(f.id(), f));
         List<Predicate> dataFilters = new ArrayList<>(filters.size());
         for (Predicate predicate : filters) {
-            dataFilters.add(createDataPredicate(nameToTableFields, idToDataFields, predicate));
+            createDataPredicate(nameToTableFields, idToDataFields, predicate)
+                    .ifPresent(dataFilters::add);
         }
         return dataFilters;
     }
 
-    private static Predicate createDataPredicate(
+    private static Optional<Predicate> createDataPredicate(
             Map<String, DataField> tableFields,
             LinkedHashMap<Integer, DataField> dataFields,
             Predicate predicate) {
@@ -282,45 +280,34 @@ public class SchemaEvolutionUtil {
             List<Predicate> children = compoundPredicate.children();
             List<Predicate> dataChildren = new ArrayList<>(children.size());
             for (Predicate child : children) {
-                Predicate dataPredicate = createDataPredicate(tableFields, dataFields, child);
-                dataChildren.add(dataPredicate);
+                Optional<Predicate> childPredicate =
+                        createDataPredicate(tableFields, dataFields, child);
+                if (childPredicate.isPresent()) {
+                    dataChildren.add(childPredicate.get());
+                } else {
+                    return Optional.empty();
+                }
             }
-            return new CompoundPredicate(compoundPredicate.function(), dataChildren);
+            return Optional.of(new CompoundPredicate(compoundPredicate.function(), dataChildren));
         } else if (predicate instanceof LeafPredicate) {
             LeafPredicate leafPredicate = (LeafPredicate) predicate;
-
             DataField tableField =
                     checkNotNull(
                             tableFields.get(leafPredicate.fieldName()),
                             String.format("Find no field %s", leafPredicate.fieldName()));
             DataField dataField = dataFields.get(tableField.id());
             if (dataField == null) {
-                // The table field is not exist in data fields, check the predicate function
-                if (leafPredicate.function() instanceof IsNull) {
-                    // Just get the first value
-                    return new LeafPredicate(
-                            AlwaysTrue.INSTANCE,
-                            leafPredicate.type(),
-                            0,
-                            null,
-                            leafPredicate.literals());
-                } else {
-                    return new LeafPredicate(
-                            AlwaysFalse.INSTANCE,
-                            leafPredicate.type(),
-                            0,
-                            null,
-                            leafPredicate.literals());
-                }
+                return Optional.empty();
             }
 
             /// TODO Should deal with column type schema evolution here
-            return new LeafPredicate(
-                    leafPredicate.function(),
-                    leafPredicate.type(),
-                    indexOf(dataField, dataFields),
-                    dataField.name(),
-                    leafPredicate.literals());
+            return Optional.of(
+                    new LeafPredicate(
+                            leafPredicate.function(),
+                            leafPredicate.type(),
+                            indexOf(dataField, dataFields),
+                            dataField.name(),
+                            leafPredicate.literals()));
         } else {
             throw new UnsupportedOperationException(
                     String.format(
