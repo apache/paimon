@@ -326,16 +326,7 @@ public class SparkReadITCase {
         assertThat(results.toString()).isEqualTo("[[1,1], [5,3]]");
         assertThatThrownBy(() -> table2.select("a", "c").collectAsList())
                 .isInstanceOf(AnalysisException.class)
-                .hasMessage(
-                        String.format(
-                                "cannot resolve '%s' given input columns: "
-                                        + "[tablestore.default.testRenameColumn.aa, "
-                                        + "tablestore.default.testRenameColumn.b, "
-                                        + "tablestore.default.testRenameColumn.c];\n"
-                                        + "'Project ['%s, c#32]\n"
-                                        + "+- SubqueryAlias tablestore.default.testRenameColumn\n"
-                                        + "   +- RelationV2[aa#30, b#31L, c#32] testRenameColumn\n",
-                                "a", "a"));
+                .hasMessageContaining("cannot resolve '%s' given input columns", "a");
     }
 
     @Test
