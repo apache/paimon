@@ -39,8 +39,6 @@ import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.utils.LogicalTypeCasts;
 import org.apache.flink.util.Preconditions;
 
-import org.apache.commons.lang3.StringUtils;
-
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -207,11 +205,7 @@ public class SchemaManager implements Serializable {
                     newOptions.remove(removeOption.key());
                 } else if (change instanceof AddColumn) {
                     AddColumn addColumn = (AddColumn) change;
-                    if (newFields.stream()
-                            .anyMatch(
-                                    f ->
-                                            StringUtils.equalsIgnoreCase(
-                                                    f.name(), addColumn.fieldName()))) {
+                    if (newFields.stream().anyMatch(f -> f.name().equals(addColumn.fieldName()))) {
                         throw new IllegalArgumentException(
                                 String.format(
                                         "The column [%s] exists in the table[%s].",
@@ -225,14 +219,13 @@ public class SchemaManager implements Serializable {
                                     id, addColumn.fieldName(), dataType, addColumn.description()));
                 } else if (change instanceof RenameColumn) {
                     RenameColumn rename = (RenameColumn) change;
+                    /// TODO support partition schema evolution
                     if (schema.partitionKeys().contains(rename.fieldName())) {
-                        throw new UnsupportedOperationException("Cannot rename partition key");
+                        throw new UnsupportedOperationException(
+                                String.format(
+                                        "Cannot rename partition key[%s]", rename.fieldName()));
                     }
-                    if (newFields.stream()
-                            .anyMatch(
-                                    f ->
-                                            StringUtils.equalsIgnoreCase(
-                                                    f.name(), rename.newName()))) {
+                    if (newFields.stream().anyMatch(f -> f.name().equals(rename.newName()))) {
                         throw new IllegalArgumentException(
                                 String.format(
                                         "The column [%s] exists in the table[%s].",
@@ -251,20 +244,24 @@ public class SchemaManager implements Serializable {
                                             field.description()));
                 } else if (change instanceof DropColumn) {
                     DropColumn drop = (DropColumn) change;
+                    /// TODO support partition and primary keys schema evolution
                     if (schema.partitionKeys().contains(drop.fieldName())) {
-                        throw new UnsupportedOperationException("Cannot drop partition key");
+                        throw new UnsupportedOperationException(
+                                String.format("Cannot drop partition key[%s]", drop.fieldName()));
                     }
                     if (schema.primaryKeys().contains(drop.fieldName())) {
-                        throw new UnsupportedOperationException("Cannot drop primary key");
+                        throw new UnsupportedOperationException(
+                                String.format("Cannot drop primary key[%s]", drop.fieldName()));
                     }
                     if (!newFields.removeIf(
-                            f ->
-                                    StringUtils.equalsIgnoreCase(
-                                            f.name(), ((DropColumn) change).fieldName()))) {
+                            f -> f.name().equals(((DropColumn) change).fieldName()))) {
                         throw new IllegalArgumentException(
                                 String.format(
                                         "The column [%s] doesn't exist in the table[%s].",
                                         drop.fieldName(), tableRoot));
+                    }
+                    if (newFields.isEmpty()) {
+                        throw new IllegalArgumentException("Cannot drop all fields in table");
                     }
                 } else if (change instanceof UpdateColumnType) {
                     UpdateColumnType update = (UpdateColumnType) change;

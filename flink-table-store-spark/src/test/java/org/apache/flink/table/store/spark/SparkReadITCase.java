@@ -156,6 +156,11 @@ public class SparkReadITCase {
         return new SimpleTableTestHelper(tablePath, rowType);
     }
 
+    private static SimpleTableTestHelper createTestHelperWithoutDDL(Path tablePath)
+            throws Exception {
+        return new SimpleTableTestHelper(tablePath);
+    }
+
     private static RowType rowType1() {
         return new RowType(
                 Arrays.asList(
@@ -287,7 +292,10 @@ public class SparkReadITCase {
     @Test
     public void testRenameColumn() throws Exception {
         Path tablePath = new Path(warehousePath, "default.db/testRenameColumn");
-        createTestHelper(tablePath);
+        SimpleTableTestHelper testHelper1 = createTestHelper(tablePath);
+        testHelper1.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
+        testHelper1.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
+        testHelper1.commit();
 
         List<Row> beforeRename =
                 spark.sql("SHOW CREATE TABLE tablestore.default.testRenameColumn").collectAsList();
@@ -298,9 +306,12 @@ public class SparkReadITCase {
                                 + "  `b` BIGINT,\n"
                                 + "  `c` STRING)\n"
                                 + "]]");
+        Dataset<Row> table1 = spark.table("tablestore.default.testRenameColumn");
+        List<Row> results = table1.select("a", "c").collectAsList();
+        assertThat(results.toString()).isEqualTo("[[1,1], [5,3]]");
 
+        // Rename "a" to "aa"
         spark.sql("ALTER TABLE tablestore.default.testRenameColumn RENAME COLUMN a to aa");
-
         List<Row> afterRename =
                 spark.sql("SHOW CREATE TABLE tablestore.default.testRenameColumn").collectAsList();
         assertThat(afterRename.toString())
@@ -310,6 +321,21 @@ public class SparkReadITCase {
                                 + "  `b` BIGINT,\n"
                                 + "  `c` STRING)\n"
                                 + "]]");
+        Dataset<Row> table2 = spark.table("tablestore.default.testRenameColumn");
+        results = table2.select("aa", "c").collectAsList();
+        assertThat(results.toString()).isEqualTo("[[1,1], [5,3]]");
+        assertThatThrownBy(() -> table2.select("a", "c").collectAsList())
+                .isInstanceOf(AnalysisException.class)
+                .hasMessage(
+                        String.format(
+                                "cannot resolve '%s' given input columns: "
+                                        + "[tablestore.default.testRenameColumn.aa, "
+                                        + "tablestore.default.testRenameColumn.b, "
+                                        + "tablestore.default.testRenameColumn.c];\n"
+                                        + "'Project ['%s, c#32]\n"
+                                        + "+- SubqueryAlias tablestore.default.testRenameColumn\n"
+                                        + "   +- RelationV2[aa#30, b#31L, c#32] testRenameColumn\n",
+                                "a", "a"));
     }
 
     @Test
@@ -339,18 +365,24 @@ public class SparkReadITCase {
                                 spark.sql(
                                         "ALTER TABLE tablestore.default.testRenamePartitionKey RENAME COLUMN a to aa"))
                 .isInstanceOf(RuntimeException.class)
-                .hasMessage("java.lang.UnsupportedOperationException: Cannot rename partition key");
+                .hasMessage(
+                        String.format(
+                                "java.lang.UnsupportedOperationException: Cannot rename partition key[%s]",
+                                "a"));
     }
 
     @Test
     public void testDropSingleColumn() throws Exception {
         Path tablePath = new Path(warehousePath, "default.db/testDropSingleColumn");
-        createTestHelper(tablePath);
+        SimpleTableTestHelper testHelper = createTestHelper(tablePath);
+        testHelper.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
+        testHelper.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
+        testHelper.commit();
 
-        List<Row> beforeRename =
+        List<Row> beforeDrop =
                 spark.sql("SHOW CREATE TABLE tablestore.default.testDropSingleColumn")
                         .collectAsList();
-        assertThat(beforeRename.toString())
+        assertThat(beforeDrop.toString())
                 .isEqualTo(
                         "[[CREATE TABLE testDropSingleColumn (\n"
                                 + "  `a` INT NOT NULL,\n"
@@ -360,15 +392,19 @@ public class SparkReadITCase {
 
         spark.sql("ALTER TABLE tablestore.default.testDropSingleColumn DROP COLUMN a");
 
-        List<Row> afterRename =
+        List<Row> afterDrop =
                 spark.sql("SHOW CREATE TABLE tablestore.default.testDropSingleColumn")
                         .collectAsList();
-        assertThat(afterRename.toString())
+        assertThat(afterDrop.toString())
                 .isEqualTo(
                         "[[CREATE TABLE testDropSingleColumn (\n"
                                 + "  `b` BIGINT,\n"
                                 + "  `c` STRING)\n"
                                 + "]]");
+
+        Dataset<Row> table = spark.table("tablestore.default.testDropSingleColumn");
+        List<Row> results = table.collectAsList();
+        assertThat(results.toString()).isEqualTo("[[2,1], [6,3]]");
     }
 
     @Test
@@ -421,7 +457,10 @@ public class SparkReadITCase {
                                 spark.sql(
                                         "ALTER TABLE tablestore.default.testDropPartitionKey DROP COLUMN a"))
                 .isInstanceOf(RuntimeException.class)
-                .hasMessage("java.lang.UnsupportedOperationException: Cannot drop partition key");
+                .hasMessage(
+                        String.format(
+                                "java.lang.UnsupportedOperationException: Cannot drop partition key[%s]",
+                                "a"));
     }
 
     @Test
@@ -451,7 +490,10 @@ public class SparkReadITCase {
                                 spark.sql(
                                         "ALTER TABLE tablestore.default.testDropPrimaryKey DROP COLUMN b"))
                 .isInstanceOf(RuntimeException.class)
-                .hasMessage("java.lang.UnsupportedOperationException: Cannot drop primary key");
+                .hasMessage(
+                        String.format(
+                                "java.lang.UnsupportedOperationException: Cannot drop primary key[%s]",
+                                "b"));
     }
 
     /**
@@ -658,6 +700,130 @@ public class SparkReadITCase {
         innerTest("MyTable4", false, false, true);
         innerTest("MyTable5", false, true, false);
         innerTest("MyTable6", false, true, true);
+    }
+
+    /**
+     * Test for schema evolution as followed:
+     *
+     * <ul>
+     *   <li>1. Create table with fields ["a", "b", "c"], insert 2 records
+     *   <li>2. Rename "a->aa", "c"->"a", "b"->"c", insert 2 records
+     *   <li>3. Drop fields "aa", "c", insert 2 records
+     *   <li>4. Add new fields "d", "c", "b", insert 2 records
+     * </ul>
+     *
+     * <p>Verify records in table above.
+     */
+    @Test
+    public void testSchemaEvolution() throws Exception {
+        // Create table with fields [a, b, c] and insert 2 records
+        Path tablePath = new Path(warehousePath, "default.db/testSchemaEvolution");
+        SimpleTableTestHelper testHelper1 = createTestHelper(tablePath);
+        testHelper1.write(GenericRowData.of(1, 2L, StringData.fromString("3")));
+        testHelper1.write(GenericRowData.of(4, 5L, StringData.fromString("6")));
+        testHelper1.commit();
+        assertThat(spark.table("tablestore.default.testSchemaEvolution").collectAsList().toString())
+                .isEqualTo("[[1,2,3], [4,5,6]]");
+        assertThat(
+                        spark.table("tablestore.default.testSchemaEvolution")
+                                .select("a", "b", "c")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[1,2,3], [4,5,6]]");
+        assertThat(
+                        spark.table("tablestore.default.testSchemaEvolution")
+                                .filter("a>1")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[4,5,6]]");
+
+        // Rename "a->aa", "c"->"a", "b"->"c" and the fields are [aa, c, a], insert 2 records
+        spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution RENAME COLUMN a to aa");
+        spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution RENAME COLUMN c to a");
+        spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution RENAME COLUMN b to c");
+        SimpleTableTestHelper testHelper2 = createTestHelperWithoutDDL(tablePath);
+        testHelper2.write(GenericRowData.of(7, 8L, StringData.fromString("9")));
+        testHelper2.write(GenericRowData.of(10, 11L, StringData.fromString("12")));
+        testHelper2.commit();
+        assertThat(spark.table("tablestore.default.testSchemaEvolution").collectAsList().toString())
+                .isEqualTo("[[1,2,3], [4,5,6], [7,8,9], [10,11,12]]");
+        assertThat(
+                        spark.table("tablestore.default.testSchemaEvolution")
+                                .select("aa", "a", "c")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[1,3,2], [4,6,5], [7,9,8], [10,12,11]]");
+        assertThat(
+                        spark.table("tablestore.default.testSchemaEvolution")
+                                .select("aa", "a", "c")
+                                .filter("aa>4")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[7,9,8], [10,12,11]]");
+
+        // Drop fields "aa", "c" and the fields are [a], insert 2 records
+        spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution DROP COLUMNS aa, c");
+        SimpleTableTestHelper testHelper3 = createTestHelperWithoutDDL(tablePath);
+        testHelper3.write(GenericRowData.of(StringData.fromString("13")));
+        testHelper3.write(GenericRowData.of(StringData.fromString("14")));
+        testHelper3.commit();
+        assertThat(spark.table("tablestore.default.testSchemaEvolution").collectAsList().toString())
+                .isEqualTo("[[3], [6], [9], [12], [13], [14]]");
+        assertThat(
+                        spark.table("tablestore.default.testSchemaEvolution")
+                                .select("a")
+                                .filter("a>10")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[12], [13], [14]]");
+
+        // Add new fields "d", "c", "b" and the fields are [a, d, c, b], insert 2 records
+        spark.sql(
+                "ALTER TABLE tablestore.default.testSchemaEvolution ADD COLUMNS (d INT, c INT, b INT)");
+        SimpleTableTestHelper testHelper4 = createTestHelperWithoutDDL(tablePath);
+        testHelper4.write(GenericRowData.of(StringData.fromString("15"), 16, 17, 18));
+        testHelper4.write(GenericRowData.of(StringData.fromString("19"), 20, 21, 22));
+        testHelper4.commit();
+        assertThat(spark.table("tablestore.default.testSchemaEvolution").collectAsList().toString())
+                .isEqualTo(
+                        "[[3,null,null,null], "
+                                + "[6,null,null,null], "
+                                + "[9,null,null,null], "
+                                + "[12,null,null,null], "
+                                + "[13,null,null,null], "
+                                + "[14,null,null,null], "
+                                + "[15,16,17,18], "
+                                + "[19,20,21,22]]");
+        assertThat(
+                        spark.table("tablestore.default.testSchemaEvolution")
+                                .filter("a>10")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo(
+                        "[[12,null,null,null], "
+                                + "[13,null,null,null], "
+                                + "[14,null,null,null], "
+                                + "[15,16,17,18], "
+                                + "[19,20,21,22]]");
+        assertThat(
+                        spark.table("tablestore.default.testSchemaEvolution")
+                                .select("a", "b", "c", "d")
+                                .filter("a>10")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo(
+                        "[[12,null,null,null], "
+                                + "[13,null,null,null], "
+                                + "[14,null,null,null], "
+                                + "[15,18,17,16], "
+                                + "[19,22,21,20]]");
+        assertThat(
+                        spark.table("tablestore.default.testSchemaEvolution")
+                                .select("a", "b", "c", "d")
+                                .filter("a>10 and b is not null")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[15,18,17,16], [19,22,21,20]]");
     }
 
     private void innerTest(String tableName, boolean hasPk, boolean partitioned, boolean appendOnly)
