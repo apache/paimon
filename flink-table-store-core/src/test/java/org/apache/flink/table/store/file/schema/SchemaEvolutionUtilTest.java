@@ -19,13 +19,9 @@
 package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.store.file.predicate.AlwaysFalse;
-import org.apache.flink.table.store.file.predicate.AlwaysTrue;
-import org.apache.flink.table.store.file.predicate.CompoundPredicate;
 import org.apache.flink.table.store.file.predicate.IsNotNull;
 import org.apache.flink.table.store.file.predicate.IsNull;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
-import org.apache.flink.table.store.file.predicate.Or;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.utils.Projection;
 
@@ -160,9 +156,8 @@ public class SchemaEvolutionUtilTest {
 
     @Test
     public void testCreateDataFilters() {
-        List<Predicate> children = new ArrayList<>();
-        CompoundPredicate predicate = new CompoundPredicate(Or.INSTANCE, children);
-        children.add(
+        List<Predicate> predicates = new ArrayList<>();
+        predicates.add(
                 new LeafPredicate(
                         IsNull.INSTANCE,
                         DataTypes.INT().getLogicalType(),
@@ -170,7 +165,7 @@ public class SchemaEvolutionUtilTest {
                         "c",
                         Collections.emptyList()));
         // Field 9->e is not exist in data
-        children.add(
+        predicates.add(
                 new LeafPredicate(
                         IsNotNull.INSTANCE,
                         DataTypes.INT().getLogicalType(),
@@ -178,7 +173,7 @@ public class SchemaEvolutionUtilTest {
                         "e",
                         Collections.emptyList()));
         // Field 7->a is not exist in data
-        children.add(
+        predicates.add(
                 new LeafPredicate(
                         IsNull.INSTANCE,
                         DataTypes.INT().getLogicalType(),
@@ -187,28 +182,13 @@ public class SchemaEvolutionUtilTest {
                         Collections.emptyList()));
 
         List<Predicate> filters =
-                SchemaEvolutionUtil.createDataFilters(
-                        tableFields2, dataFields, Collections.singletonList(predicate));
+                SchemaEvolutionUtil.createDataFilters(tableFields2, dataFields, predicates);
         assert filters != null;
         assertThat(filters.size()).isEqualTo(1);
 
-        CompoundPredicate dataFilter = (CompoundPredicate) filters.get(0);
-        assertThat(dataFilter.function()).isEqualTo(Or.INSTANCE);
-        assertThat(dataFilter.children().size()).isEqualTo(3);
-
-        LeafPredicate child1 = (LeafPredicate) dataFilter.children().get(0);
+        LeafPredicate child1 = (LeafPredicate) filters.get(0);
         assertThat(child1.function()).isEqualTo(IsNull.INSTANCE);
         assertThat(child1.fieldName()).isEqualTo("b");
         assertThat(child1.index()).isEqualTo(1);
-
-        LeafPredicate child2 = (LeafPredicate) dataFilter.children().get(1);
-        assertThat(child2.function()).isEqualTo(AlwaysFalse.INSTANCE);
-        assertThat(child2.fieldName()).isNull();
-        assertThat(child2.index()).isEqualTo(0);
-
-        LeafPredicate child3 = (LeafPredicate) dataFilter.children().get(2);
-        assertThat(child3.function()).isEqualTo(AlwaysTrue.INSTANCE);
-        assertThat(child3.fieldName()).isNull();
-        assertThat(child3.index()).isEqualTo(0);
     }
 }
