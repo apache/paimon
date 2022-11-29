@@ -19,21 +19,26 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.FileSystem;
+import org.apache.flink.core.plugin.PluginUtils;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 
 import org.apache.spark.sql.sources.DataSourceRegister;
 import org.apache.spark.sql.sources.v2.DataSourceOptions;
 import org.apache.spark.sql.sources.v2.ReadSupport;
+import org.apache.spark.sql.sources.v2.SessionConfigSupport;
 import org.apache.spark.sql.sources.v2.reader.DataSourceReader;
 import org.apache.spark.sql.types.StructType;
 
 /** The Spark source for table store. */
-public class SparkSource implements DataSourceRegister, ReadSupport {
+public class SparkSource implements DataSourceRegister, ReadSupport, SessionConfigSupport {
+
+    /** Not use 'table-store' here, the '-' is not allowed in SQL. */
+    private static final String SHORT_NAME = "tablestore";
 
     @Override
     public String shortName() {
-        // Not use 'table-store' here, the '-' is not allowed in SQL
-        return "tablestore";
+        return SHORT_NAME;
     }
 
     @Override
@@ -43,7 +48,15 @@ public class SparkSource implements DataSourceRegister, ReadSupport {
 
     @Override
     public DataSourceReader createReader(DataSourceOptions options) {
-        return new SparkDataSourceReader(
-                FileStoreTableFactory.create(Configuration.fromMap(options.asMap())));
+        Configuration configuration =
+                Configuration.fromMap(SparkCaseSensitiveConverter.convert(options));
+        FileSystem.initialize(
+                configuration, PluginUtils.createPluginManagerFromRootFolder(configuration));
+        return new SparkDataSourceReader(FileStoreTableFactory.create(configuration));
+    }
+
+    @Override
+    public String keyPrefix() {
+        return SHORT_NAME;
     }
 }
