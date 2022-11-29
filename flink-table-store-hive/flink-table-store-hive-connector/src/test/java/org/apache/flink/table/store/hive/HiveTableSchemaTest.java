@@ -69,7 +69,7 @@ public class HiveTableSchemaTest {
                                 TypeInfoFactory.getDecimalTypeInfo(5, 3).getTypeName())));
         properties.setProperty("location", tempDir.toString());
 
-        HiveSchema schema = HiveSchema.extract(properties);
+        HiveSchema schema = HiveSchema.extract(null, properties);
         assertThat(schema.fieldNames()).isEqualTo(Arrays.asList("a", "b", "c"));
         assertThat(schema.fieldTypes())
                 .isEqualTo(
@@ -90,7 +90,7 @@ public class HiveTableSchemaTest {
         properties.setProperty("columns.types", "");
         properties.setProperty("location", tempDir.toString());
 
-        HiveSchema schema = HiveSchema.extract(properties);
+        HiveSchema schema = HiveSchema.extract(null, properties);
         assertThat(schema.fieldNames()).isEqualTo(Arrays.asList("a", "b", "c"));
         assertThat(schema.fieldTypes())
                 .isEqualTo(
@@ -133,7 +133,8 @@ public class HiveTableSchemaTest {
                         "Hive DDL          : c decimal(6,3)",
                         "Table Store Schema: c decimal(5,3)");
         IllegalArgumentException exception =
-                assertThrows(IllegalArgumentException.class, () -> HiveSchema.extract(properties));
+                assertThrows(
+                        IllegalArgumentException.class, () -> HiveSchema.extract(null, properties));
         assertThat(exception).hasMessageContaining(expected);
     }
 
@@ -161,7 +162,8 @@ public class HiveTableSchemaTest {
                         "Hive DDL          : null",
                         "Table Store Schema: c decimal(5,3)");
         IllegalArgumentException exception =
-                assertThrows(IllegalArgumentException.class, () -> HiveSchema.extract(properties));
+                assertThrows(
+                        IllegalArgumentException.class, () -> HiveSchema.extract(null, properties));
         assertThat(exception).hasMessageContaining(expected);
     }
 
@@ -198,7 +200,8 @@ public class HiveTableSchemaTest {
                         "Hive DDL          : e string",
                         "Table Store Schema: null");
         IllegalArgumentException exception =
-                assertThrows(IllegalArgumentException.class, () -> HiveSchema.extract(properties));
+                assertThrows(
+                        IllegalArgumentException.class, () -> HiveSchema.extract(null, properties));
         assertThat(exception).hasMessageContaining(expected);
     }
 

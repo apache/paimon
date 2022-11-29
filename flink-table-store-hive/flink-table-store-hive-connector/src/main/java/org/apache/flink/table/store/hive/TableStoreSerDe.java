@@ -44,7 +44,7 @@ public class TableStoreSerDe extends AbstractSerDe {
     @Override
     public void initialize(@Nullable Configuration configuration, Properties properties)
             throws SerDeException {
-        HiveSchema schema = HiveSchema.extract(properties);
+        HiveSchema schema = HiveSchema.extract(configuration, properties);
         inspector =
                 new TableStoreRowDataObjectInspector(
                         schema.fieldNames(), schema.fieldTypes(), schema.fieldComments());
