@@ -38,12 +38,28 @@ import org.apache.spark.sql.sources.Or;
 import org.apache.spark.sql.sources.StringStartsWith;
 
 import java.util.Arrays;
+import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.convertJavaObject;
 
 /** Conversion from {@link Filter} to {@link Predicate}. */
 public class SparkFilterConverter {
+
+    public static final List<String> SUPPORT_FILTERS =
+            Arrays.asList(
+                    "EqualTo",
+                    "GreaterThan",
+                    "GreaterThanOrEqual",
+                    "LessThan",
+                    "LessThanOrEqual",
+                    "In",
+                    "IsNull",
+                    "IsNotNull",
+                    "And",
+                    "Or",
+                    "Not",
+                    "StringStartsWith");
 
     private final RowType rowType;
     private final PredicateBuilder builder;
@@ -109,14 +125,16 @@ public class SparkFilterConverter {
         }
 
         // TODO: In, NotIn, AlwaysTrue, AlwaysFalse, EqualNullSafe
-        throw new UnsupportedOperationException();
+        throw new UnsupportedOperationException(
+                filter + " is unsupported. Support Filters: " + SUPPORT_FILTERS);
     }
 
     private int fieldIndex(String field) {
         int index = rowType.getFieldIndex(field);
         // TODO: support nested field
         if (index == -1) {
-            throw new UnsupportedOperationException();
+            throw new UnsupportedOperationException(
+                    String.format("Nested field '%s' is unsupported.", field));
         }
         return index;
     }

@@ -108,11 +108,7 @@ public class SparkTable
                 continue;
             }
 
-            try {
-                predicates.add(converter.convert(filter));
-            } catch (UnsupportedOperationException e) {
-                throw new RuntimeException("Delete filter is unsupported: " + filter);
-            }
+            predicates.add(converter.convert(filter));
         }
 
         String commitUser = UUID.randomUUID().toString();
