@@ -31,7 +31,7 @@ import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.memory.MemoryOwner;
-import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.flink.table.store.file.operation.AbstractFileStoreWrite;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.FileStoreCommitImpl;
@@ -94,7 +94,7 @@ public class TestFileStore extends KeyValueFileStore {
             RowType keyType,
             RowType valueType,
             KeyValueFieldsExtractor keyValueFieldsExtractor,
-            MergeFunction<KeyValue> mergeFunction) {
+            MergeFunctionFactory<KeyValue> mfFactory) {
         super(
                 new SchemaManager(options.path()),
                 0L,
@@ -104,7 +104,7 @@ public class TestFileStore extends KeyValueFileStore {
                 keyType,
                 valueType,
                 keyValueFieldsExtractor,
-                p -> mergeFunction);
+                mfFactory);
         this.root = root;
         this.keySerializer = new RowDataSerializer(keyType);
         this.valueSerializer = new RowDataSerializer(valueType);
@@ -457,7 +457,7 @@ public class TestFileStore extends KeyValueFileStore {
         private final RowType keyType;
         private final RowType valueType;
         private final KeyValueFieldsExtractor keyValueFieldsExtractor;
-        private final MergeFunction<KeyValue> mergeFunction;
+        private final MergeFunctionFactory<KeyValue> mfFactory;
 
         private CoreOptions.ChangelogProducer changelogProducer;
 
@@ -469,7 +469,7 @@ public class TestFileStore extends KeyValueFileStore {
                 RowType keyType,
                 RowType valueType,
                 KeyValueFieldsExtractor keyValueFieldsExtractor,
-                MergeFunction<KeyValue> mergeFunction) {
+                MergeFunctionFactory<KeyValue> mfFactory) {
             this.format = format;
             this.root = root;
             this.numBuckets = numBuckets;
@@ -477,7 +477,7 @@ public class TestFileStore extends KeyValueFileStore {
             this.keyType = keyType;
             this.valueType = valueType;
             this.keyValueFieldsExtractor = keyValueFieldsExtractor;
-            this.mergeFunction = mergeFunction;
+            this.mfFactory = mfFactory;
 
             this.changelogProducer = CoreOptions.ChangelogProducer.NONE;
         }
@@ -512,7 +512,7 @@ public class TestFileStore extends KeyValueFileStore {
                     keyType,
                     valueType,
                     keyValueFieldsExtractor,
-                    mergeFunction);
+                    mfFactory);
         }
     }
 }

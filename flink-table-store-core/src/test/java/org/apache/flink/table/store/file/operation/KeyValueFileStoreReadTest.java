@@ -28,7 +28,7 @@ import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.schema.AtomicDataType;
 import org.apache.flink.table.store.file.schema.DataField;
@@ -134,7 +134,7 @@ public class KeyValueFileStoreReadTest {
                                                         DataTypes.BIGINT().getLogicalType())));
                             }
                         },
-                        ValueCountMergeFunction.factory().create());
+                        ValueCountMergeFunction.factory());
         List<KeyValue> readData =
                 writeThenRead(
                         data,
@@ -174,7 +174,7 @@ public class KeyValueFileStoreReadTest {
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                         TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
-                        DeduplicateMergeFunction.factory().create());
+                        DeduplicateMergeFunction.factory());
 
         RowDataSerializer projectedValueSerializer =
                 new RowDataSerializer(
@@ -263,10 +263,10 @@ public class KeyValueFileStoreReadTest {
             RowType keyType,
             RowType valueType,
             KeyValueFieldsExtractor extractor,
-            MergeFunction<KeyValue> mergeFunction)
+            MergeFunctionFactory<KeyValue> mfFactory)
             throws Exception {
         SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
-        boolean valueCountMode = mergeFunction instanceof ValueCountMergeFunction;
+        boolean valueCountMode = mfFactory.create() instanceof ValueCountMergeFunction;
         schemaManager.commitNewVersion(
                 new UpdateSchema(
                         valueCountMode ? keyType : valueType,
@@ -288,7 +288,7 @@ public class KeyValueFileStoreReadTest {
                         keyType,
                         valueType,
                         extractor,
-                        mergeFunction)
+                        mfFactory)
                 .build();
     }
 }
