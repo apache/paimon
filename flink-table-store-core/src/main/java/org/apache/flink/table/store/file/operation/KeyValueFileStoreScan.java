@@ -33,9 +33,9 @@ import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.RowType;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.pickTransformFieldMapping;
@@ -44,7 +44,7 @@ import static org.apache.flink.table.store.file.predicate.PredicateBuilder.split
 /** {@link FileStoreScan} for {@link org.apache.flink.table.store.file.KeyValueFileStore}. */
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
-    private final Map<Long, FieldStatsArraySerializer> schemaKeyStatsConverters;
+    private final ConcurrentMap<Long, FieldStatsArraySerializer> schemaKeyStatsConverters;
     private final KeyValueFieldsExtractor keyValueFieldsExtractor;
     private final RowType keyType;
 
@@ -77,7 +77,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 changelogProducer,
                 readCompacted);
         this.keyValueFieldsExtractor = keyValueFieldsExtractor;
-        this.schemaKeyStatsConverters = new HashMap<>();
+        this.schemaKeyStatsConverters = new ConcurrentHashMap<>();
         this.keyType = keyType;
     }
 
@@ -95,6 +95,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         return this;
     }
 
+    /** Note: Keep this thread-safe. */
     @Override
     protected boolean filterByStats(ManifestEntry entry) {
         return keyFilter == null
@@ -107,6 +108,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                                         entry.file().rowCount()));
     }
 
+    /** Note: Keep this thread-safe. */
     private FieldStatsArraySerializer getFieldStatsArraySerializer(long id) {
         return schemaKeyStatsConverters.computeIfAbsent(
                 id,
