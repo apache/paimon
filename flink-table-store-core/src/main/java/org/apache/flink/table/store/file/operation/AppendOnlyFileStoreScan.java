@@ -30,9 +30,9 @@ import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.RowType;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.pickTransformFieldMapping;
@@ -41,7 +41,7 @@ import static org.apache.flink.table.store.file.predicate.PredicateBuilder.split
 /** {@link FileStoreScan} for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
-    private final Map<Long, FieldStatsArraySerializer> schemaRowStatsConverters;
+    private final ConcurrentMap<Long, FieldStatsArraySerializer> schemaRowStatsConverters;
     private final RowType rowType;
 
     private Predicate filter;
@@ -70,7 +70,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 checkNumOfBuckets,
                 CoreOptions.ChangelogProducer.NONE,
                 readCompacted);
-        this.schemaRowStatsConverters = new HashMap<>();
+        this.schemaRowStatsConverters = new ConcurrentHashMap<>();
         this.rowType = rowType;
     }
 
@@ -88,6 +88,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
         return this;
     }
 
+    /** Note: Keep this thread-safe. */
     @Override
     protected boolean filterByStats(ManifestEntry entry) {
         return filter == null
@@ -100,6 +101,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                                         entry.file().rowCount()));
     }
 
+    /** Note: Keep this thread-safe. */
     private FieldStatsArraySerializer getFieldStatsArraySerializer(long schemaId) {
         return schemaRowStatsConverters.computeIfAbsent(
                 schemaId,
