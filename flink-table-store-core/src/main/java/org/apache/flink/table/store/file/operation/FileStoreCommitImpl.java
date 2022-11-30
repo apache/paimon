@@ -626,7 +626,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         Collection<ManifestEntry> mergedEntries;
         try {
             // merge manifest entries and also check if the files we want to delete are still there
-            mergedEntries = ManifestEntry.mergeManifestEntries(allEntries);
+            mergedEntries = ManifestEntry.mergeEntries(allEntries);
+            ManifestEntry.assertNoDelete(mergedEntries);
         } catch (Throwable e) {
             LOG.warn("File deletion conflicts detected! Give up committing.", e);
             throw createConflictException(

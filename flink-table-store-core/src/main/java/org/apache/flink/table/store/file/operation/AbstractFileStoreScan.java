@@ -221,7 +221,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         }
 
         List<ManifestEntry> files = new ArrayList<>();
-        for (ManifestEntry file : ManifestEntry.mergeManifestEntries(entries)) {
+        for (ManifestEntry file : ManifestEntry.mergeEntries(entries)) {
             if (checkNumOfBuckets && file.totalBuckets() != numOfBuckets) {
                 String partInfo =
                         partitionConverter.getArity() > 0
@@ -290,13 +290,13 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                     return manifestList.read(snapshot.changelogManifestList());
                 }
             case NONE:
-                if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
-                    return manifestList.read(snapshot.deltaManifestList());
+                if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
+                    throw new IllegalStateException(
+                            String.format(
+                                    "Incremental scan does not accept %s snapshot",
+                                    snapshot.commitKind()));
                 }
-                throw new IllegalStateException(
-                        String.format(
-                                "Incremental scan does not accept %s snapshot",
-                                snapshot.commitKind()));
+                return manifestList.read(snapshot.deltaManifestList());
             default:
                 throw new UnsupportedOperationException(
                         "Unknown changelog producer " + changelogProducer.name());

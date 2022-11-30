@@ -33,6 +33,7 @@ import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.SnapshotEnumerator;
 import org.apache.flink.table.store.table.source.Split;
@@ -47,7 +48,9 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -576,6 +579,35 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                 .isEqualTo(
                         Collections.singletonList(
                                 "2|10|300|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
+    public void testIncrementalScanOverwrite() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(1, 20, 200L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        DataTableScan scan = table.newScan().withIncremental(true);
+        List<DataSplit> splits0 = scan.plan().splits;
+        assertThat(splits0).hasSize(1);
+        assertThat(splits0.get(0).files()).hasSize(1);
+
+        write.write(rowData(1, 10, 1000L));
+        write.write(rowData(1, 20, 2000L));
+        Map<String, String> overwritePartition = new HashMap<>();
+        overwritePartition.put("pt", "1");
+        commit.withOverwritePartition(overwritePartition);
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        List<DataSplit> splits1 = scan.plan().splits;
+        assertThat(splits1).hasSize(1);
+        assertThat(splits1.get(0).files()).hasSize(1);
+        assertThat(splits1.get(0).files().get(0).fileName())
+                .isNotEqualTo(splits0.get(0).files().get(0).fileName());
     }
 
     @Override
