@@ -18,9 +18,19 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.operation.Lock;
+import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.predicate.PredicateFilter;
+import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.table.sink.BucketComputer;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.types.RowKind;
+
+import java.util.List;
 
 /** An interface for {@link Table} write support. */
 public interface SupportsWrite extends Table {
@@ -30,4 +40,25 @@ public interface SupportsWrite extends Table {
     TableWrite newWrite(String commitUser);
 
     TableCommit newCommit(String commitUser);
+
+    default void deleteWhere(String commitUser, List<Predicate> filters, Lock.Factory lockFactory) {
+        List<Split> splits = newScan().withFilter(filters).plan().splits();
+        try (RecordReader<RowData> reader = newRead().withFilter(filters).createReader(splits);
+                TableWrite write = newWrite(commitUser);
+                TableCommit commit = newCommit(commitUser).withLock(lockFactory.create())) {
+            RecordReaderIterator<RowData> iterator = new RecordReaderIterator<>(reader);
+            PredicateFilter filter = new PredicateFilter(rowType(), filters);
+            while (iterator.hasNext()) {
+                RowData row = iterator.next();
+                if (filter.test(row)) {
+                    row.setRowKind(RowKind.DELETE);
+                    write.write(row);
+                }
+            }
+
+            commit.commit(0, write.prepareCommit(true, 0));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 }

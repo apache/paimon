@@ -18,28 +18,44 @@
 
 package org.apache.flink.table.store.spark;
 
+import org.apache.flink.table.store.file.operation.Lock;
+import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.table.SupportsPartition;
 import org.apache.flink.table.store.table.Table;
 
+import org.apache.spark.sql.connector.catalog.SupportsDelete;
 import org.apache.spark.sql.connector.catalog.SupportsRead;
+import org.apache.spark.sql.connector.catalog.SupportsWrite;
 import org.apache.spark.sql.connector.catalog.TableCapability;
 import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.IdentityTransform;
 import org.apache.spark.sql.connector.expressions.Transform;
 import org.apache.spark.sql.connector.read.ScanBuilder;
+import org.apache.spark.sql.connector.write.LogicalWriteInfo;
+import org.apache.spark.sql.connector.write.WriteBuilder;
+import org.apache.spark.sql.sources.Filter;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /** A spark {@link org.apache.spark.sql.connector.catalog.Table} for table store. */
-public class SparkTable implements org.apache.spark.sql.connector.catalog.Table, SupportsRead {
+public class SparkTable
+        implements org.apache.spark.sql.connector.catalog.Table,
+                SupportsRead,
+                SupportsWrite,
+                SupportsDelete {
 
     private final Table table;
+    private final Lock.Factory lockFactory;
 
-    public SparkTable(Table table) {
+    public SparkTable(Table table, Lock.Factory lockFactory) {
         this.table = table;
+        this.lockFactory = lockFactory;
     }
 
     @Override
@@ -62,6 +78,7 @@ public class SparkTable implements org.apache.spark.sql.connector.catalog.Table,
     public Set<TableCapability> capabilities() {
         Set<TableCapability> capabilities = new HashSet<>();
         capabilities.add(TableCapability.BATCH_READ);
+        capabilities.add(TableCapability.V1_BATCH_WRITE);
         return capabilities;
     }
 
@@ -75,5 +92,27 @@ public class SparkTable implements org.apache.spark.sql.connector.catalog.Table,
                             .toArray(Transform[]::new);
         }
         return new Transform[0];
+    }
+
+    @Override
+    public WriteBuilder newWriteBuilder(LogicalWriteInfo info) {
+        return new SparkWriteBuilder(table, info.queryId(), lockFactory);
+    }
+
+    @Override
+    public void deleteWhere(Filter[] filters) {
+        SparkFilterConverter converter = new SparkFilterConverter(table.rowType());
+        List<Predicate> predicates = new ArrayList<>();
+        for (Filter filter : filters) {
+            if ("AlwaysTrue()".equals(filter.toString())) {
+                continue;
+            }
+
+            predicates.add(converter.convert(filter));
+        }
+
+        String commitUser = UUID.randomUUID().toString();
+        ((org.apache.flink.table.store.table.SupportsWrite) table)
+                .deleteWhere(commitUser, predicates, lockFactory);
     }
 }
