@@ -32,7 +32,7 @@ import static org.apache.flink.table.store.file.utils.SerializationUtils.seriali
 /** A serializable {@link FileCommittable}. */
 public class SerializableCommittable implements Serializable {
 
-    private static final ThreadLocal<FileCommittableSerializer> CACHE = new ThreadLocal<>();
+    private static final ThreadLocal<FileCommittableSerializer> CACHE = ThreadLocal.withInitial(FileCommittableSerializer::new);
 
     private transient FileCommittable committable;
 
@@ -42,7 +42,7 @@ public class SerializableCommittable implements Serializable {
 
     private void writeObject(ObjectOutputStream out) throws IOException {
         out.defaultWriteObject();
-        FileCommittableSerializer serializer = serializer();
+        FileCommittableSerializer serializer = CACHE.get();
         out.writeInt(serializer.getVersion());
         serializeBytes(new DataOutputViewStreamWrapper(out), serializer.serialize(committable));
     }
@@ -51,21 +51,12 @@ public class SerializableCommittable implements Serializable {
         in.defaultReadObject();
         int version = in.readInt();
         byte[] bytes = deserializedBytes(new DataInputViewStreamWrapper(in));
-        committable = serializer().deserialize(version, bytes);
+        committable = CACHE.get().deserialize(version, bytes);
     }
 
     public static SerializableCommittable wrap(FileCommittable committable) {
         SerializableCommittable ret = new SerializableCommittable();
         ret.committable = committable;
         return ret;
-    }
-
-    private static FileCommittableSerializer serializer() {
-        FileCommittableSerializer serializer = CACHE.get();
-        if (serializer == null) {
-            serializer = new FileCommittableSerializer();
-            CACHE.set(serializer);
-        }
-        return serializer;
     }
 }

@@ -133,7 +133,7 @@ public class SparkRowData implements RowData {
 
     @Override
     public <T> RawValueData<T> getRawValue(int i) {
-        throw new UnsupportedOperationException();
+        throw new UnsupportedOperationException("Raw value is not supported in Spark, please use SQL types.");
     }
 
     @Override
