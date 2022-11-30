@@ -70,7 +70,7 @@ public class SparkRowData implements RowData {
             return;
         }
 
-        throw new UnsupportedOperationException("Can not set row kind for this row.");
+        throw new UnsupportedOperationException("Can not set row kind for this row except INSERT.");
     }
 
     @Override
