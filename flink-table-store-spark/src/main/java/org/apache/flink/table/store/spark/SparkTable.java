@@ -37,7 +37,6 @@ import org.apache.spark.sql.sources.Filter;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 
-import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -97,20 +96,7 @@ public class SparkTable
 
     @Override
     public WriteBuilder newWriteBuilder(LogicalWriteInfo info) {
-        try {
-            // V1Write is introduced in Spark 3.2
-            // Use reflection to support Spark 3.0 and 3.1
-            return (WriteBuilder)
-                    Class.forName("org.apache.flink.table.store.spark.SparkWriteBuilder")
-                            .getConstructors()[0]
-                            .newInstance(table, info.queryId(), lockFactory);
-        } catch (ClassNotFoundException
-                | IllegalAccessException
-                | InvocationTargetException
-                | InstantiationException e) {
-            throw new UnsupportedOperationException(
-                    "Please use Spark version 3.2 or above to support write.", e);
-        }
+        return new SparkWriteBuilder(table, info.queryId(), lockFactory);
     }
 
     @Override
