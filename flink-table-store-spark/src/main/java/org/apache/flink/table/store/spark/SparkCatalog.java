@@ -24,6 +24,7 @@ import org.apache.flink.core.plugin.PluginUtils;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
+import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.types.logical.RowType;
@@ -201,7 +202,9 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
     @Override
     public SparkTable loadTable(Identifier ident) throws NoSuchTableException {
         try {
-            return new SparkTable(catalog.getTable(objectPath(ident)));
+            ObjectPath path = objectPath(ident);
+            return new SparkTable(
+                    catalog.getTable(path), Lock.factory(catalog.lockFactory().orElse(null), path));
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
         }
