@@ -31,8 +31,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
-import static org.apache.flink.util.Preconditions.checkArgument;
+import java.util.stream.Collectors;
 
 /** Scan operation which produces a plan. */
 public interface FileStoreScan {
@@ -67,12 +66,16 @@ public interface FileStoreScan {
         /** Result {@link ManifestEntry} files. */
         List<ManifestEntry> files();
 
+        /** Result {@link ManifestEntry} files with specific file kind. */
+        default List<ManifestEntry> files(FileKind kind) {
+            return files().stream().filter(e -> e.kind() == kind).collect(Collectors.toList());
+        }
+
         /** Return a map group by partition and bucket. */
-        default Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupByPartFiles() {
-            List<ManifestEntry> files = files();
+        default Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupByPartFiles(
+                List<ManifestEntry> files) {
             Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupBy = new HashMap<>();
             for (ManifestEntry entry : files) {
-                checkArgument(entry.kind() == FileKind.ADD);
                 groupBy.computeIfAbsent(entry.partition(), k -> new HashMap<>())
                         .computeIfAbsent(entry.bucket(), k -> new ArrayList<>())
                         .add(entry.file());

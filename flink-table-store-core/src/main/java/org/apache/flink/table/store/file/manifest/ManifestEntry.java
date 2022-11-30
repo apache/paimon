@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.flink.table.store.file.utils.SerializationUtils.newBytesType;
@@ -114,33 +115,50 @@ public class ManifestEntry {
         return String.format("{%s, %s, %d, %d, %s}", kind, partition, bucket, totalBuckets, file);
     }
 
-    public static Collection<ManifestEntry> mergeManifestEntries(List<ManifestEntry> entries) {
+    public static Collection<ManifestEntry> mergeEntries(List<ManifestEntry> entries) {
         LinkedHashMap<Identifier, ManifestEntry> map = new LinkedHashMap<>();
+        mergeEntries(entries, map);
+        return map.values();
+    }
+
+    public static void mergeEntries(
+            List<ManifestEntry> entries, Map<Identifier, ManifestEntry> map) {
         for (ManifestEntry entry : entries) {
             ManifestEntry.Identifier identifier = entry.identifier();
             switch (entry.kind()) {
                 case ADD:
                     Preconditions.checkState(
                             !map.containsKey(identifier),
-                            "Trying to add file %s which is already added. "
-                                    + "Manifest might be corrupted.",
+                            "Trying to add file %s which is already added. Manifest might be corrupted.",
                             identifier);
                     map.put(identifier, entry);
                     break;
                 case DELETE:
-                    Preconditions.checkState(
-                            map.containsKey(identifier),
-                            "Trying to delete file %s which is not previously added. "
-                                    + "Manifest might be corrupted.",
-                            identifier);
-                    map.remove(identifier);
+                    // each dataFile will only be added once and deleted once,
+                    // if we know that it is added before then both add and delete entry can be
+                    // removed because there won't be further operations on this file,
+                    // otherwise we have to keep the delete entry because the add entry must be
+                    // in the previous manifest files
+                    if (map.containsKey(identifier)) {
+                        map.remove(identifier);
+                    } else {
+                        map.put(identifier, entry);
+                    }
                     break;
                 default:
                     throw new UnsupportedOperationException(
                             "Unknown value kind " + entry.kind().name());
             }
         }
-        return map.values();
+    }
+
+    public static void assertNoDelete(Collection<ManifestEntry> entries) {
+        for (ManifestEntry entry : entries) {
+            Preconditions.checkState(
+                    entry.kind() != FileKind.DELETE,
+                    "Trying to delete file %s which is not previously added. Manifest might be corrupted.",
+                    entry.file().fileName());
+        }
     }
 
     /**

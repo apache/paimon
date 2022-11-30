@@ -22,6 +22,7 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.manifest.FileKind;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
@@ -112,7 +113,8 @@ public abstract class DataTableScan implements TableScan {
     @Override
     public DataFilePlan plan() {
         FileStoreScan.Plan plan = scan.plan();
-        return new DataFilePlan(plan.snapshotId(), generateSplits(plan.groupByPartFiles()));
+        return new DataFilePlan(
+                plan.snapshotId(), generateSplits(plan.groupByPartFiles(plan.files(FileKind.ADD))));
     }
 
     private List<DataSplit> generateSplits(
