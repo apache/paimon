@@ -43,9 +43,9 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -64,7 +64,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private final CoreOptions.ChangelogProducer changelogProducer;
     private final boolean readCompacted;
 
-    private final Map<Long, TableSchema> tableSchemas;
+    private final ConcurrentMap<Long, TableSchema> tableSchemas;
     private final SchemaManager schemaManager;
     private final long schemaId;
 
@@ -103,7 +103,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         this.checkNumOfBuckets = checkNumOfBuckets;
         this.changelogProducer = changelogProducer;
         this.readCompacted = readCompacted;
-        this.tableSchemas = new HashMap<>();
+        this.tableSchemas = new ConcurrentHashMap<>();
     }
 
     @Override
@@ -263,49 +263,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         };
     }
 
-    protected TableSchema scanTableSchema() {
-        return scanTableSchema(this.schemaId);
-    }
-
-    protected TableSchema scanTableSchema(long id) {
-        return tableSchemas.computeIfAbsent(id, key -> schemaManager.schema(id));
-    }
-
-    private boolean filterManifestFileMeta(ManifestFileMeta manifest) {
-        return partitionFilter == null
-                || partitionFilter.test(
-                        manifest.numAddedFiles() + manifest.numDeletedFiles(),
-                        manifest.partitionStats().fields(partitionStatsConverter));
-    }
-
-    private boolean filterManifestEntry(ManifestEntry entry) {
-        return filterByPartition(entry) && filterByStats(entry);
-    }
-
-    private boolean filterByPartition(ManifestEntry entry) {
-        return (partitionFilter == null
-                || partitionFilter.test(partitionConverter.convert(entry.partition())));
-    }
-
-    private boolean filterByBucket(ManifestEntry entry) {
-        return (specifiedBucket == null || entry.bucket() == specifiedBucket);
-    }
-
-    private boolean filterByBucketSelector(ManifestEntry entry) {
-        return (bucketSelector == null
-                || bucketSelector.select(entry.bucket(), entry.totalBuckets()));
-    }
-
-    private boolean filterByLevel(ManifestEntry entry) {
-        return (specifiedLevel == null || entry.file().level() == specifiedLevel);
-    }
-
-    protected abstract boolean filterByStats(ManifestEntry entry);
-
-    private List<ManifestEntry> readManifestFileMeta(ManifestFileMeta manifest) {
-        return manifestFileFactory.create().read(manifest.fileName());
-    }
-
     private List<ManifestFileMeta> readIncremental(Snapshot snapshot) {
         switch (changelogProducer) {
             case INPUT:
@@ -345,4 +302,66 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         "Unknown changelog producer " + changelogProducer.name());
         }
     }
+
+    // ------------------------------------------------------------------------
+    // Start Thread Safe Methods: The following methods need to be thread safe because they will be
+    // called by multiple threads
+    // ------------------------------------------------------------------------
+
+    /** Note: Keep this thread-safe. */
+    protected TableSchema scanTableSchema() {
+        return scanTableSchema(this.schemaId);
+    }
+
+    /** Note: Keep this thread-safe. */
+    protected TableSchema scanTableSchema(long id) {
+        return tableSchemas.computeIfAbsent(id, key -> schemaManager.schema(id));
+    }
+
+    /** Note: Keep this thread-safe. */
+    private boolean filterManifestFileMeta(ManifestFileMeta manifest) {
+        return partitionFilter == null
+                || partitionFilter.test(
+                        manifest.numAddedFiles() + manifest.numDeletedFiles(),
+                        manifest.partitionStats().fields(partitionStatsConverter));
+    }
+
+    /** Note: Keep this thread-safe. */
+    private boolean filterManifestEntry(ManifestEntry entry) {
+        return filterByPartition(entry) && filterByStats(entry);
+    }
+
+    /** Note: Keep this thread-safe. */
+    private boolean filterByPartition(ManifestEntry entry) {
+        return (partitionFilter == null
+                || partitionFilter.test(partitionConverter.convert(entry.partition())));
+    }
+
+    /** Note: Keep this thread-safe. */
+    private boolean filterByBucket(ManifestEntry entry) {
+        return (specifiedBucket == null || entry.bucket() == specifiedBucket);
+    }
+
+    /** Note: Keep this thread-safe. */
+    private boolean filterByBucketSelector(ManifestEntry entry) {
+        return (bucketSelector == null
+                || bucketSelector.select(entry.bucket(), entry.totalBuckets()));
+    }
+
+    /** Note: Keep this thread-safe. */
+    private boolean filterByLevel(ManifestEntry entry) {
+        return (specifiedLevel == null || entry.file().level() == specifiedLevel);
+    }
+
+    /** Note: Keep this thread-safe. */
+    protected abstract boolean filterByStats(ManifestEntry entry);
+
+    /** Note: Keep this thread-safe. */
+    private List<ManifestEntry> readManifestFileMeta(ManifestFileMeta manifest) {
+        return manifestFileFactory.create().read(manifest.fileName());
+    }
+
+    // ------------------------------------------------------------------------
+    // End Thread Safe Methods
+    // ------------------------------------------------------------------------
 }
