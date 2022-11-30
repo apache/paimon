@@ -32,7 +32,8 @@ import static org.apache.flink.table.store.file.utils.SerializationUtils.seriali
 /** A serializable {@link FileCommittable}. */
 public class SerializableCommittable implements Serializable {
 
-    private static final ThreadLocal<FileCommittableSerializer> CACHE = ThreadLocal.withInitial(FileCommittableSerializer::new);
+    private static final ThreadLocal<FileCommittableSerializer> CACHE =
+            ThreadLocal.withInitial(FileCommittableSerializer::new);
 
     private transient FileCommittable committable;
 

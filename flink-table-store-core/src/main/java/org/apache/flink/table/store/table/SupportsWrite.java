@@ -41,11 +41,11 @@ public interface SupportsWrite extends Table {
 
     TableCommit newCommit(String commitUser);
 
-    default void deleteWhere(String commitUser, List<Predicate> filters, Lock lock) {
+    default void deleteWhere(String commitUser, List<Predicate> filters, Lock.Factory lockFactory) {
         List<Split> splits = newScan().withFilter(filters).plan().splits();
         try (RecordReader<RowData> reader = newRead().withFilter(filters).createReader(splits);
                 TableWrite write = newWrite(commitUser);
-                TableCommit commit = newCommit(commitUser)) {
+                TableCommit commit = newCommit(commitUser).withLock(lockFactory.create())) {
             RecordReaderIterator<RowData> iterator = new RecordReaderIterator<>(reader);
             PredicateFilter filter = new PredicateFilter(rowType(), filters);
             while (iterator.hasNext()) {
@@ -56,11 +56,7 @@ public interface SupportsWrite extends Table {
                 }
             }
 
-            lock.runWithLock(
-                    () -> {
-                        commit.commit(0, write.prepareCommit(true, 0));
-                        return null;
-                    });
+            commit.commit(0, write.prepareCommit(true, 0));
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

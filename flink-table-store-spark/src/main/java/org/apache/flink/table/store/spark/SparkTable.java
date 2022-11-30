@@ -130,11 +130,7 @@ public class SparkTable
         }
 
         String commitUser = UUID.randomUUID().toString();
-        try (Lock lock = lockFactory.create()) {
-            ((org.apache.flink.table.store.table.SupportsWrite) table)
-                    .deleteWhere(commitUser, predicates, lock);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        ((org.apache.flink.table.store.table.SupportsWrite) table)
+                .deleteWhere(commitUser, predicates, lockFactory);
     }
 }

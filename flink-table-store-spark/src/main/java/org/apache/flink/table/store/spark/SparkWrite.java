@@ -68,18 +68,13 @@ public class SparkWrite implements V1Write {
                             .mapValues(new WriteRecords(table, queryId, identifier))
                             .values()
                             .reduce(new ListConcat<>());
-            TableCommit tableCommit = ((SupportsWrite) table).newCommit(queryId);
-            try (Lock lock = lockFactory.create()) {
-                lock.runWithLock(
-                        () -> {
-                            tableCommit.commit(
-                                    identifier,
-                                    committables.stream()
-                                            .map(SerializableCommittable::delegate)
-                                            .collect(Collectors.toList()));
-                            return null;
-                        });
-
+            try (TableCommit tableCommit =
+                    ((SupportsWrite) table).newCommit(queryId).withLock(lockFactory.create())) {
+                tableCommit.commit(
+                        identifier,
+                        committables.stream()
+                                .map(SerializableCommittable::delegate)
+                                .collect(Collectors.toList()));
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -128,15 +123,15 @@ public class SparkWrite implements V1Write {
 
         @Override
         public List<SerializableCommittable> call(Iterable<Row> iterables) throws Exception {
-            TableWrite write = ((SupportsWrite) table).newWrite(queryId);
-            for (Row row : iterables) {
-                write.write(new SparkRowData(type, row));
+            try (TableWrite write = ((SupportsWrite) table).newWrite(queryId)) {
+                for (Row row : iterables) {
+                    write.write(new SparkRowData(type, row));
+                }
+                List<FileCommittable> committables = write.prepareCommit(true, commitIdentifier);
+                return committables.stream()
+                        .map(SerializableCommittable::wrap)
+                        .collect(Collectors.toList());
             }
-            List<FileCommittable> committables = write.prepareCommit(true, commitIdentifier);
-            write.close();
-            return committables.stream()
-                    .map(SerializableCommittable::wrap)
-                    .collect(Collectors.toList());
         }
     }
 
