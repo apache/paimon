@@ -29,7 +29,6 @@ import org.apache.flink.table.store.table.source.DataTableScan;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.Collection;
 
 /** Bounded {@link FlinkSource} for reading records. It does not monitor new snapshots. */
@@ -66,13 +65,9 @@ public class StaticFileStoreSource extends FlinkSource {
         Long snapshotId;
         Collection<FileStoreSourceSplit> splits;
         if (checkpoint == null) {
-            snapshotId = snapshotManager.latestSnapshotId();
-            if (snapshotId == null) {
-                splits = new ArrayList<>();
-            } else {
-                DataTableScan.DataFilePlan plan = scan.withSnapshot(snapshotId).plan();
-                splits = new FileStoreSourceSplitGenerator().createSplits(plan);
-            }
+            DataTableScan.DataFilePlan plan = scan.plan();
+            snapshotId = plan.snapshotId;
+            splits = new FileStoreSourceSplitGenerator().createSplits(plan);
         } else {
             // restore from checkpoint
             snapshotId = checkpoint.currentSnapshotId();
