@@ -26,7 +26,6 @@ import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreRead;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
@@ -49,28 +48,40 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
-    private final AppendOnlyFileStore store;
+    private transient AppendOnlyFileStore lazyStore;
 
-    AppendOnlyFileStoreTable(Path path, SchemaManager schemaManager, TableSchema tableSchema) {
+    AppendOnlyFileStoreTable(Path path, TableSchema tableSchema) {
         super(path, tableSchema);
-        this.store =
-                new AppendOnlyFileStore(
-                        schemaManager,
-                        tableSchema.id(),
-                        new CoreOptions(tableSchema.options()),
-                        tableSchema.logicalPartitionType(),
-                        tableSchema.logicalBucketKeyType(),
-                        tableSchema.logicalRowType());
+    }
+
+    @Override
+    protected FileStoreTable copy(TableSchema newTableSchema) {
+        return new AppendOnlyFileStoreTable(path, newTableSchema);
+    }
+
+    @Override
+    public AppendOnlyFileStore store() {
+        if (lazyStore == null) {
+            lazyStore =
+                    new AppendOnlyFileStore(
+                            schemaManager(),
+                            tableSchema.id(),
+                            new CoreOptions(tableSchema.options()),
+                            tableSchema.logicalPartitionType(),
+                            tableSchema.logicalBucketKeyType(),
+                            tableSchema.logicalRowType());
+        }
+        return lazyStore;
     }
 
     @Override
     public DataTableScan newScan() {
-        AppendOnlyFileStoreScan scan = store.newScan();
-        return new DataTableScan(scan, tableSchema, store.pathFactory(), options()) {
+        AppendOnlyFileStoreScan scan = store().newScan();
+        return new DataTableScan(scan, tableSchema, store().pathFactory(), options()) {
             @Override
             protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
                 return new AppendOnlySplitGenerator(
-                        store.options().splitTargetSize(), store.options().splitOpenFileCost());
+                        store().options().splitTargetSize(), store().options().splitOpenFileCost());
             }
 
             @Override
@@ -82,7 +93,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableRead newRead() {
-        AppendOnlyFileStoreRead read = store.newRead();
+        AppendOnlyFileStoreRead read = store().newRead();
         return new TableRead() {
             @Override
             public TableRead withFilter(Predicate predicate) {
@@ -106,7 +117,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public TableWrite newWrite(String commitUser) {
         return new TableWriteImpl<>(
-                store.newWrite(commitUser),
+                store().newWrite(commitUser),
                 new SinkRecordConverter(tableSchema),
                 record -> {
                     Preconditions.checkState(
@@ -115,10 +126,5 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                             record.row().getRowKind());
                     return record.row();
                 });
-    }
-
-    @Override
-    public AppendOnlyFileStore store() {
-        return store;
     }
 }

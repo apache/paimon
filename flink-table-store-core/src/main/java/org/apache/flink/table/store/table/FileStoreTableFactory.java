@@ -56,27 +56,18 @@ public class FileStoreTableFactory {
 
     public static FileStoreTable create(
             Path tablePath, TableSchema tableSchema, Configuration dynamicOptions) {
-        // merge dynamic options into schema.options
-        Configuration newOptions = Configuration.fromMap(tableSchema.options());
-        dynamicOptions.toMap().forEach(newOptions::setString);
-        newOptions.set(PATH, tablePath.toString());
-
-        // set dynamic options with default values
-        CoreOptions.setDefaultValues(newOptions);
-        // copy a new table store to contain dynamic options
-        tableSchema = tableSchema.copy(newOptions.toMap());
-        // validate schema wit new options
-        CoreOptions.validateTableSchema(tableSchema);
-
-        SchemaManager schemaManager = new SchemaManager(tablePath);
-        if (newOptions.get(CoreOptions.WRITE_MODE) == WriteMode.APPEND_ONLY) {
-            return new AppendOnlyFileStoreTable(tablePath, schemaManager, tableSchema);
+        FileStoreTable table;
+        if (Configuration.fromMap(tableSchema.options()).get(CoreOptions.WRITE_MODE)
+                == WriteMode.APPEND_ONLY) {
+            table = new AppendOnlyFileStoreTable(tablePath, tableSchema);
         } else {
             if (tableSchema.primaryKeys().isEmpty()) {
-                return new ChangelogValueCountFileStoreTable(tablePath, schemaManager, tableSchema);
+                table = new ChangelogValueCountFileStoreTable(tablePath, tableSchema);
             } else {
-                return new ChangelogWithKeyFileStoreTable(tablePath, schemaManager, tableSchema);
+                table = new ChangelogWithKeyFileStoreTable(tablePath, tableSchema);
             }
         }
+
+        return table.copy(dynamicOptions.toMap());
     }
 }

@@ -144,8 +144,12 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
     @Override
     protected FileStoreTable createFileStoreTable(Map<Long, TableSchema> tableSchemas) {
         SchemaManager schemaManager = new TestingSchemaManager(tablePath, tableSchemas);
-        return new ChangelogWithKeyFileStoreTable(
-                tablePath, schemaManager, schemaManager.latest().get());
+        return new ChangelogWithKeyFileStoreTable(tablePath, schemaManager.latest().get()) {
+            @Override
+            protected SchemaManager schemaManager() {
+                return schemaManager;
+            }
+        };
     }
 
     @Override

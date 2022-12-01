@@ -213,6 +213,6 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
                                 Collections.emptyList(),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogValueCountFileStoreTable(tablePath, schemaManager, tableSchema);
+        return new ChangelogValueCountFileStoreTable(tablePath, tableSchema);
     }
 }

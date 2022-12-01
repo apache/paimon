@@ -60,7 +60,7 @@ public class MetadataCatalogTable implements CatalogTable {
 
     @Override
     public CatalogTable copy(Map<String, String> map) {
-        return copy();
+        return new MetadataCatalogTable(table.copy(map));
     }
 
     @Override
@@ -75,7 +75,7 @@ public class MetadataCatalogTable implements CatalogTable {
 
     @Override
     public CatalogTable copy() {
-        return new MetadataCatalogTable(table);
+        return copy(Collections.emptyMap());
     }
 
     @Override
