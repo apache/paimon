@@ -702,6 +702,17 @@ public class CoreOptions implements Serializable {
     }
 
     /**
+     * Set the default values of the {@link CoreOptions} via the given {@link Configuration}.
+     *
+     * @param options the options to set default values
+     */
+    public static void setDefaultValues(Configuration options) {
+        if (options.contains(LOG_SCAN_TIMESTAMP_MILLS) && !options.contains(LOG_SCAN)) {
+            options.set(LOG_SCAN, LogStartupMode.FROM_TIMESTAMP);
+        }
+    }
+
+    /**
      * Validate the {@link TableSchema} and {@link CoreOptions}.
      *
      * <p>TODO validate all items in schema and all keys in options.
@@ -711,14 +722,21 @@ public class CoreOptions implements Serializable {
     public static void validateTableSchema(TableSchema schema) {
         CoreOptions options = new CoreOptions(schema.options());
         if (options.logStartupMode() == LogStartupMode.FROM_TIMESTAMP) {
-            if (options.logScanTimestampMills() == null) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "%s can not be null when you use %s for %s",
-                                CoreOptions.LOG_SCAN_TIMESTAMP_MILLS.key(),
-                                CoreOptions.LogStartupMode.FROM_TIMESTAMP,
-                                CoreOptions.LOG_SCAN.key()));
-            }
+            Preconditions.checkArgument(
+                    options.logScanTimestampMills() != null,
+                    String.format(
+                            "%s can not be null when you use %s for %s",
+                            LOG_SCAN_TIMESTAMP_MILLS.key(),
+                            LogStartupMode.FROM_TIMESTAMP,
+                            LOG_SCAN.key()));
+        } else {
+            Preconditions.checkArgument(
+                    options.logScanTimestampMills() == null,
+                    String.format(
+                            "%s should be %s when you set %s",
+                            LOG_SCAN.key(),
+                            LogStartupMode.FROM_TIMESTAMP,
+                            LOG_SCAN_TIMESTAMP_MILLS.key()));
         }
 
         Preconditions.checkArgument(
@@ -731,7 +749,7 @@ public class CoreOptions implements Serializable {
                         + SNAPSHOT_NUM_RETAINED_MAX.key());
 
         // Only changelog tables with primary keys support full compaction
-        if (options.changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION
+        if (options.changelogProducer() == ChangelogProducer.FULL_COMPACTION
                 && options.writeMode() == WriteMode.CHANGE_LOG
                 && schema.primaryKeys().isEmpty()) {
             throw new UnsupportedOperationException(
