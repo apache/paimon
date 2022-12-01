@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
@@ -68,7 +67,6 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 manifestListFactory,
                 numOfBuckets,
                 checkNumOfBuckets,
-                CoreOptions.ChangelogProducer.NONE,
                 readCompacted);
         this.schemaRowStatsConverters = new ConcurrentHashMap<>();
         this.rowType = rowType;

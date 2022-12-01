@@ -24,6 +24,7 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
+import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -115,7 +116,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().withIncremental(true).plan().splits();
+        List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
@@ -133,7 +134,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().withIncremental(true).plan().splits();
+        List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
         TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("+101|11", "+102|12"));
@@ -149,7 +150,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
 
         Predicate predicate = builder.equal(2, 101L);
         List<Split> splits =
-                table.newScan().withIncremental(true).withFilter(predicate).plan().splits();
+                table.newScan().withKind(ScanKind.DELTA).withFilter(predicate).plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(

@@ -16,34 +16,21 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.connector.source;
+package org.apache.flink.table.store.table.source.snapshot;
 
-import javax.annotation.Nullable;
+import org.apache.flink.table.store.table.source.DataTableScan;
 
-import java.util.Collection;
+import java.util.concurrent.Callable;
 
 /**
- * A checkpoint of the current state of the containing the currently pending splits that are not yet
- * assigned.
+ * Enumerate incremental changes from newly created snapshots.
+ *
+ * <p>The first call to this enumerator will produce a {@link DataTableScan.DataFilePlan} containing
+ * the base files for the following incremental changes (or just return null if there are no base
+ * files).
+ *
+ * <p>Following calls to this enumerator will produce {@link DataTableScan.DataFilePlan}s containing
+ * incremental changed files. If there is currently no newer snapshots, null will be returned
+ * instead.
  */
-public class PendingSplitsCheckpoint {
-
-    /** The splits in the checkpoint. */
-    private final Collection<FileStoreSourceSplit> splits;
-
-    private final @Nullable Long currentSnapshotId;
-
-    public PendingSplitsCheckpoint(
-            Collection<FileStoreSourceSplit> splits, @Nullable Long currentSnapshotId) {
-        this.splits = splits;
-        this.currentSnapshotId = currentSnapshotId;
-    }
-
-    public Collection<FileStoreSourceSplit> splits() {
-        return splits;
-    }
-
-    public @Nullable Long currentSnapshotId() {
-        return currentSnapshotId;
-    }
-}
+public interface SnapshotEnumerator extends Callable<DataTableScan.DataFilePlan> {}

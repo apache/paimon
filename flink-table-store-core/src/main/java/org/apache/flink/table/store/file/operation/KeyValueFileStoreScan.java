@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
@@ -62,7 +61,6 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
             boolean checkNumOfBuckets,
-            CoreOptions.ChangelogProducer changelogProducer,
             boolean readCompacted) {
         super(
                 partitionType,
@@ -74,7 +72,6 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 manifestListFactory,
                 numOfBuckets,
                 checkNumOfBuckets,
-                changelogProducer,
                 readCompacted);
         this.keyValueFieldsExtractor = keyValueFieldsExtractor;
         this.schemaKeyStatsConverters = new ConcurrentHashMap<>();

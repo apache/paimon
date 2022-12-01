@@ -20,7 +20,6 @@ package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
@@ -61,7 +60,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private final ManifestList manifestList;
     private final int numOfBuckets;
     private final boolean checkNumOfBuckets;
-    private final CoreOptions.ChangelogProducer changelogProducer;
     private final boolean readCompacted;
 
     private final ConcurrentMap<Long, TableSchema> tableSchemas;
@@ -74,7 +72,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private Long specifiedSnapshotId = null;
     private Integer specifiedBucket = null;
     private List<ManifestFileMeta> specifiedManifests = null;
-    private boolean isIncremental = false;
+    private ScanKind scanKind = ScanKind.ALL;
     private Integer specifiedLevel = null;
 
     public AbstractFileStoreScan(
@@ -87,7 +85,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
             boolean checkNumOfBuckets,
-            CoreOptions.ChangelogProducer changelogProducer,
             boolean readCompacted) {
         this.partitionStatsConverter = new FieldStatsArraySerializer(partitionType);
         this.partitionConverter = new RowDataToObjectArrayConverter(partitionType);
@@ -101,7 +98,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         this.manifestList = manifestListFactory.create();
         this.numOfBuckets = numOfBuckets;
         this.checkNumOfBuckets = checkNumOfBuckets;
-        this.changelogProducer = changelogProducer;
         this.readCompacted = readCompacted;
         this.tableSchemas = new ConcurrentHashMap<>();
     }
@@ -167,8 +163,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
-    public FileStoreScan withIncremental(boolean isIncremental) {
-        this.isIncremental = isIncremental;
+    public FileStoreScan withKind(ScanKind scanKind) {
+        this.scanKind = scanKind;
         return this;
     }
 
@@ -193,10 +189,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 manifests = Collections.emptyList();
             } else {
                 Snapshot snapshot = snapshotManager.snapshot(snapshotId);
-                manifests =
-                        isIncremental
-                                ? readIncremental(snapshot)
-                                : snapshot.readAllDataManifests(manifestList);
+                manifests = readManiests(snapshot);
             }
         }
 
@@ -263,9 +256,13 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         };
     }
 
-    private List<ManifestFileMeta> readIncremental(Snapshot snapshot) {
-        switch (changelogProducer) {
-            case INPUT:
+    private List<ManifestFileMeta> readManiests(Snapshot snapshot) {
+        switch (scanKind) {
+            case ALL:
+                return snapshot.readAllDataManifests(manifestList);
+            case DELTA:
+                return manifestList.read(snapshot.deltaManifestList());
+            case CHANGELOG:
                 if (snapshot.version() >= 2) {
                     if (snapshot.changelogManifestList() == null) {
                         return Collections.emptyList();
@@ -283,23 +280,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         String.format(
                                 "Incremental scan does not accept %s snapshot",
                                 snapshot.commitKind()));
-            case FULL_COMPACTION:
-                if (snapshot.changelogManifestList() == null) {
-                    return Collections.emptyList();
-                } else {
-                    return manifestList.read(snapshot.changelogManifestList());
-                }
-            case NONE:
-                if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
-                    throw new IllegalStateException(
-                            String.format(
-                                    "Incremental scan does not accept %s snapshot",
-                                    snapshot.commitKind()));
-                }
-                return manifestList.read(snapshot.deltaManifestList());
             default:
-                throw new UnsupportedOperationException(
-                        "Unknown changelog producer " + changelogProducer.name());
+                throw new UnsupportedOperationException("Unknown scan kind " + scanKind.name());
         }
     }
 

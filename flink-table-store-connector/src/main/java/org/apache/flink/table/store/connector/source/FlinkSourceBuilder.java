@@ -117,9 +117,13 @@ public class FlinkSourceBuilder {
         return conf.get(CONTINUOUS_DISCOVERY_INTERVAL).toMillis();
     }
 
-    private FileStoreSource buildFileSource(boolean isContinuous) {
-        return new FileStoreSource(
-                table, isContinuous, discoveryIntervalMills(), projectedFields, predicate, limit);
+    private StaticFileStoreSource buildStaticFileSource() {
+        return new StaticFileStoreSource(table, projectedFields, predicate, limit);
+    }
+
+    private ContinuousFileStoreSource buildContinuousFileSource() {
+        return new ContinuousFileStoreSource(
+                table, discoveryIntervalMills(), projectedFields, predicate, limit);
     }
 
     private Source<RowData, ?, ?> buildSource() {
@@ -144,20 +148,20 @@ public class FlinkSourceBuilder {
 
             LogStartupMode startupMode = conf.get(LOG_SCAN);
             if (logSourceProvider == null) {
-                return buildFileSource(true);
+                return buildContinuousFileSource();
             } else {
                 if (startupMode != LogStartupMode.FULL) {
                     return logSourceProvider.createSource(null);
                 }
                 return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
-                                buildFileSource(false))
+                                buildStaticFileSource())
                         .addSource(
                                 new LogHybridSourceFactory(logSourceProvider),
                                 Boundedness.CONTINUOUS_UNBOUNDED)
                         .build();
             }
         } else {
-            return buildFileSource(false);
+            return buildStaticFileSource();
         }
     }
 

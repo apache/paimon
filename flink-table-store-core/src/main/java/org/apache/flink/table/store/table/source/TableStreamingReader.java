@@ -19,11 +19,14 @@
 package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateFilter;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.source.snapshot.DeltaSnapshotEnumerator;
+import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
 import org.apache.flink.table.store.utils.TypeUtils;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
@@ -82,31 +85,19 @@ public class TableStreamingReader {
     }
 
     @Nullable
-    public Iterator<RowData> nextBatch() throws IOException {
+    public Iterator<RowData> nextBatch() throws Exception {
         if (enumerator == null) {
             DataTableScan scan = table.newScan();
             if (predicate != null) {
                 scan.withFilter(predicate);
             }
-            DataTableScan.DataFilePlan plan = scan.plan();
-            if (plan.snapshotId == null) {
-                return null;
-            }
-            long snapshotId = plan.snapshotId;
             enumerator =
-                    new SnapshotEnumerator(
-                            table.location(),
-                            scan.withIncremental(true),
-                            table.options().changelogProducer(),
-                            snapshotId);
-            return read(plan);
-        } else {
-            SnapshotEnumerator.EnumeratorResult result = enumerator.call();
-            if (result == null) {
-                return null;
-            }
-            return read(result.plan);
+                    new DeltaSnapshotEnumerator(
+                            table.location(), scan, CoreOptions.LogStartupMode.FULL, null, null);
         }
+
+        DataTableScan.DataFilePlan plan = enumerator.call();
+        return plan == null ? null : read(plan);
     }
 
     private Iterator<RowData> read(DataTableScan.DataFilePlan plan) throws IOException {
