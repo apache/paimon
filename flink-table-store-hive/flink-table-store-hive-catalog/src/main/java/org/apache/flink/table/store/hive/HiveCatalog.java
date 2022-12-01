@@ -58,6 +58,7 @@ import static org.apache.flink.table.store.CatalogOptions.LOCK_ENABLED;
 import static org.apache.flink.table.store.CatalogOptions.TABLE_TYPE;
 import static org.apache.flink.table.store.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.flink.table.store.hive.HiveCatalogLock.checkMaxSleep;
+import static org.apache.flink.util.Preconditions.checkState;
 
 /** A catalog implementation for Hive. */
 public class HiveCatalog extends AbstractCatalog {
@@ -213,6 +214,7 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
 
+        checkFieldNamesUpperCase(updateSchema.rowType().getFieldNames());
         // first commit changes to underlying files
         // if changes on Hive fails there is no harm to perform the same changes to files again
         TableSchema schema;
@@ -267,6 +269,26 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     protected String warehouse() {
         return hiveConf.get(HiveConf.ConfVars.METASTOREWAREHOUSE.varname);
+    }
+
+    private void checkObjectPathUpperCase(ObjectPath objectPath) {
+        checkState(
+                objectPath.getDatabaseName().equals(objectPath.getDatabaseName().toLowerCase()),
+                String.format(
+                        "Database name[%s] cannot contain upper case",
+                        objectPath.getDatabaseName()));
+        checkState(
+                objectPath.getObjectName().equals(objectPath.getObjectName().toLowerCase()),
+                String.format(
+                        "Table name[%s] cannot contain upper case", objectPath.getObjectName()));
+    }
+
+    private void checkFieldNamesUpperCase(List<String> fieldNames) {
+        for (String fieldName : fieldNames) {
+            checkState(
+                    fieldName.equals(fieldName.toLowerCase()),
+                    String.format("Field name[%s] cannot contain upper case", fieldName));
+        }
     }
 
     private Database convertToDatabase(String name) {
@@ -370,6 +392,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private SchemaManager schemaManager(ObjectPath tablePath) {
+        checkObjectPathUpperCase(tablePath);
         return new SchemaManager(getTableLocation(tablePath)).withLock(lock(tablePath));
     }
 
