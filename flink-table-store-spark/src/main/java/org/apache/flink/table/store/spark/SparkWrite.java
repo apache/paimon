@@ -20,7 +20,6 @@ package org.apache.flink.table.store.spark;
 
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.table.SupportsWrite;
-import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.sink.BucketComputer;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.SerializableCommittable;
@@ -41,14 +40,11 @@ import java.util.stream.Collectors;
 /** Spark {@link V1Write}, it is required to use v1 write for grouping by bucket. */
 public class SparkWrite implements V1Write {
 
-    private final Table table;
+    private final SupportsWrite table;
     private final String queryId;
     private final Lock.Factory lockFactory;
 
-    public SparkWrite(Table table, String queryId, Lock.Factory lockFactory) {
-        if (!(table instanceof SupportsWrite)) {
-            throw new UnsupportedOperationException("Unsupported table: " + table.getClass());
-        }
+    public SparkWrite(SupportsWrite table, String queryId, Lock.Factory lockFactory) {
         this.table = table;
         this.queryId = queryId;
         this.lockFactory = lockFactory;
@@ -69,7 +65,7 @@ public class SparkWrite implements V1Write {
                             .values()
                             .reduce(new ListConcat<>());
             try (TableCommit tableCommit =
-                    ((SupportsWrite) table).newCommit(queryId).withLock(lockFactory.create())) {
+                    table.newCommit(queryId).withLock(lockFactory.create())) {
                 tableCommit.commit(
                         identifier,
                         committables.stream()
@@ -83,19 +79,19 @@ public class SparkWrite implements V1Write {
 
     private static class ComputeBucket implements Function<Row, Integer> {
 
-        private final Table table;
+        private final SupportsWrite table;
         private final RowType type;
 
         private transient BucketComputer lazyComputer;
 
-        private ComputeBucket(Table table) {
+        private ComputeBucket(SupportsWrite table) {
             this.table = table;
             this.type = table.rowType();
         }
 
         private BucketComputer computer() {
             if (lazyComputer == null) {
-                lazyComputer = ((SupportsWrite) table).bucketComputer();
+                lazyComputer = table.bucketComputer();
             }
             return lazyComputer;
         }
@@ -109,12 +105,12 @@ public class SparkWrite implements V1Write {
     private static class WriteRecords
             implements Function<Iterable<Row>, List<SerializableCommittable>> {
 
-        private final Table table;
+        private final SupportsWrite table;
         private final RowType type;
         private final String queryId;
         private final long commitIdentifier;
 
-        private WriteRecords(Table table, String queryId, long commitIdentifier) {
+        private WriteRecords(SupportsWrite table, String queryId, long commitIdentifier) {
             this.table = table;
             this.type = table.rowType();
             this.queryId = queryId;
@@ -123,7 +119,7 @@ public class SparkWrite implements V1Write {
 
         @Override
         public List<SerializableCommittable> call(Iterable<Row> iterables) throws Exception {
-            try (TableWrite write = ((SupportsWrite) table).newWrite(queryId)) {
+            try (TableWrite write = table.newWrite(queryId)) {
                 for (Row row : iterables) {
                     write.write(new SparkRowData(type, row));
                 }
