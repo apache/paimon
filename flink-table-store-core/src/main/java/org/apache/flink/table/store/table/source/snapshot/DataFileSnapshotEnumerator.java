@@ -30,6 +30,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+
 import java.util.Collections;
 
 /** Abstract class for all {@link SnapshotEnumerator}s which enumerate record related data files. */
