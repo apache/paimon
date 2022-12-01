@@ -30,6 +30,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+import java.util.Collections;
 
 /** Abstract class for all {@link SnapshotEnumerator}s which enumerate record related data files. */
 public abstract class DataFileSnapshotEnumerator implements SnapshotEnumerator {
@@ -73,7 +74,7 @@ public abstract class DataFileSnapshotEnumerator implements SnapshotEnumerator {
             return null;
         }
 
-        DataTableScan.DataFilePlan plan = null;
+        DataTableScan.DataFilePlan plan;
         switch (startupMode) {
             case FULL:
                 plan = scan.withKind(ScanKind.ALL).withSnapshot(startingSnapshotId).plan();
@@ -87,8 +88,10 @@ public abstract class DataFileSnapshotEnumerator implements SnapshotEnumerator {
                                 CoreOptions.LogStartupMode.FROM_TIMESTAMP,
                                 CoreOptions.LOG_SCAN.key()));
                 startingSnapshotId = snapshotManager.earlierThanTimeMills(startupMillis);
+                plan = new DataTableScan.DataFilePlan(startingSnapshotId, Collections.emptyList());
                 break;
             case LATEST:
+                plan = new DataTableScan.DataFilePlan(startingSnapshotId, Collections.emptyList());
                 break;
             default:
                 throw new UnsupportedOperationException(

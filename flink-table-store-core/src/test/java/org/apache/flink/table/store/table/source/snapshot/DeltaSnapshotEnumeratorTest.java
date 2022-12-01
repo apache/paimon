@@ -124,7 +124,7 @@ public class DeltaSnapshotEnumeratorTest extends DataFileSnapshotEnumeratorTestB
         write.write(rowData(1, 40, 400L));
         commit.commit(2, write.prepareCommit(true, 2));
 
-        // first call with snapshot, should return null
+        // first call with snapshot, should return empty plan
         SnapshotEnumerator enumerator =
                 new DeltaSnapshotEnumerator(
                         tablePath,
@@ -132,10 +132,13 @@ public class DeltaSnapshotEnumeratorTest extends DataFileSnapshotEnumeratorTestB
                         CoreOptions.LogStartupMode.FROM_TIMESTAMP,
                         startMillis,
                         null);
-        assertThat(enumerator.call()).isNull();
+
+        DataTableScan.DataFilePlan plan = enumerator.call();
+        assertThat(plan.snapshotId).isEqualTo(1);
+        assertThat(plan.splits()).isEmpty();
 
         // first incremental call, should return incremental records from 2nd commit
-        DataTableScan.DataFilePlan plan = enumerator.call();
+        plan = enumerator.call();
         assertThat(plan.snapshotId).isEqualTo(2);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|30|300", "-D 1|40|400"));
@@ -183,7 +186,11 @@ public class DeltaSnapshotEnumeratorTest extends DataFileSnapshotEnumeratorTestB
         SnapshotEnumerator enumerator =
                 new DeltaSnapshotEnumerator(
                         tablePath, table.newScan(), CoreOptions.LogStartupMode.LATEST, null, null);
-        assertThat(enumerator.call()).isNull();
+
+        DataTableScan.DataFilePlan plan = enumerator.call();
+        assertThat(plan.snapshotId).isEqualTo(2);
+        assertThat(plan.splits()).isEmpty();
+
         assertThat(enumerator.call()).isNull();
 
         write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 101L));
@@ -192,7 +199,7 @@ public class DeltaSnapshotEnumeratorTest extends DataFileSnapshotEnumeratorTestB
         write.write(rowData(1, 40, 400L));
         commit.commit(2, write.prepareCommit(true, 2));
 
-        DataTableScan.DataFilePlan plan = enumerator.call();
+        plan = enumerator.call();
         assertThat(plan.snapshotId).isEqualTo(3);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|102", "+I 1|20|201", "+I 1|40|400"));

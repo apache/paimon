@@ -148,8 +148,10 @@ public class FullCompactionChangelogSnapshotEnumeratorTest
                         startMillis,
                         null);
 
-        // first call, should be null
-        assertThat(enumerator.call()).isNull();
+        // first call, should return empty plan
+        DataTableScan.DataFilePlan plan = enumerator.call();
+        assertThat(plan.snapshotId).isEqualTo(3);
+        assertThat(plan.splits()).isEmpty();
 
         // first incremental call, no new compact snapshot, should be null
         assertThat(enumerator.call()).isNull();
@@ -160,7 +162,7 @@ public class FullCompactionChangelogSnapshotEnumeratorTest
         write.compact(binaryRow(1), 0, true);
         commit.commit(3, write.prepareCommit(true, 3));
 
-        DataTableScan.DataFilePlan plan = enumerator.call();
+        plan = enumerator.call();
         assertThat(plan.snapshotId).isEqualTo(6);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(
@@ -201,8 +203,10 @@ public class FullCompactionChangelogSnapshotEnumeratorTest
                         null,
                         null);
 
-        // first call, should be null
-        assertThat(enumerator.call()).isNull();
+        // first call, should be empty plan
+        DataTableScan.DataFilePlan plan = enumerator.call();
+        assertThat(plan.snapshotId).isEqualTo(3);
+        assertThat(plan.splits()).isEmpty();
 
         write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 101L));
         write.write(rowData(1, 20, 201L));
@@ -219,7 +223,7 @@ public class FullCompactionChangelogSnapshotEnumeratorTest
         write.compact(binaryRow(1), 0, true);
         commit.commit(3, write.prepareCommit(true, 3));
 
-        DataTableScan.DataFilePlan plan = enumerator.call();
+        plan = enumerator.call();
         assertThat(plan.snapshotId).isEqualTo(6);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(
