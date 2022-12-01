@@ -23,7 +23,7 @@ import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.Table;
-import org.apache.flink.table.store.table.metadata.MetadataTableLoader;
+import org.apache.flink.table.store.table.system.SystemTableLoader;
 
 import org.apache.commons.lang3.StringUtils;
 
@@ -34,11 +34,11 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public Path getTableLocation(ObjectPath tablePath) {
-        if (tablePath.getObjectName().contains(METADATA_TABLE_SPLITTER)) {
+        if (tablePath.getObjectName().contains(SYSTEM_TABLE_SPLITTER)) {
             throw new IllegalArgumentException(
                     String.format(
                             "Table name[%s] cannot contain '%s' separator",
-                            tablePath.getObjectName(), METADATA_TABLE_SPLITTER));
+                            tablePath.getObjectName(), SYSTEM_TABLE_SPLITTER));
         }
         return new Path(databasePath(tablePath.getDatabaseName()), tablePath.getObjectName());
     }
@@ -46,21 +46,21 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public Table getTable(ObjectPath tablePath) throws TableNotExistException {
         String inputTableName = tablePath.getObjectName();
-        if (inputTableName.contains(METADATA_TABLE_SPLITTER)) {
-            String[] splits = StringUtils.split(inputTableName, METADATA_TABLE_SPLITTER);
+        if (inputTableName.contains(SYSTEM_TABLE_SPLITTER)) {
+            String[] splits = StringUtils.split(inputTableName, SYSTEM_TABLE_SPLITTER);
             if (splits.length != 2) {
                 throw new IllegalArgumentException(
-                        "Metadata table can only contain one '$' separator, but this is: "
+                        "System table can only contain one '$' separator, but this is: "
                                 + inputTableName);
             }
             String table = splits[0];
-            String metadata = splits[1];
+            String type = splits[1];
             ObjectPath originTablePath = new ObjectPath(tablePath.getDatabaseName(), table);
             if (!tableExists(originTablePath)) {
                 throw new TableNotExistException(tablePath);
             }
             Path location = getTableLocation(originTablePath);
-            return MetadataTableLoader.load(metadata, location);
+            return SystemTableLoader.load(type, location);
         } else {
             TableSchema tableSchema = getTableSchema(tablePath);
             return FileStoreTableFactory.create(getTableLocation(tablePath), tableSchema);

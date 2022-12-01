@@ -78,7 +78,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testMetadataTable() {
+    public void testSnapshotsTable() {
         List<Row> rows =
                 spark.table("tablestore.default.`t1$snapshots`")
                         .select("snapshot_id", "schema_id", "commit_user", "commit_kind")

@@ -16,29 +16,32 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.table.metadata;
+package org.apache.flink.table.store.table.system;
 
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.Table;
 
-import static org.apache.flink.table.store.table.metadata.OptionsTable.OPTIONS;
-import static org.apache.flink.table.store.table.metadata.SchemasTable.SCHEMAS;
-import static org.apache.flink.table.store.table.metadata.SnapshotsTable.SNAPSHOTS;
+import static org.apache.flink.table.store.table.system.AuditLogTable.AUDIT_LOG;
+import static org.apache.flink.table.store.table.system.OptionsTable.OPTIONS;
+import static org.apache.flink.table.store.table.system.SchemasTable.SCHEMAS;
+import static org.apache.flink.table.store.table.system.SnapshotsTable.SNAPSHOTS;
 
-/** Loader to load metadata {@link Table}s. */
-public class MetadataTableLoader {
+/** Loader to load system {@link Table}s. */
+public class SystemTableLoader {
 
-    public static Table load(String metadata, Path location) {
-        switch (metadata.toLowerCase()) {
+    public static Table load(String type, Path location) {
+        switch (type.toLowerCase()) {
             case SNAPSHOTS:
                 return new SnapshotsTable(location);
             case OPTIONS:
                 return new OptionsTable(location);
             case SCHEMAS:
                 return new SchemasTable(location);
+            case AUDIT_LOG:
+                return new AuditLogTable(FileStoreTableFactory.create(location));
             default:
-                throw new UnsupportedOperationException(
-                        "Unsupported metadata table type: " + metadata);
+                throw new UnsupportedOperationException("Unsupported system table type: " + type);
         }
     }
 }

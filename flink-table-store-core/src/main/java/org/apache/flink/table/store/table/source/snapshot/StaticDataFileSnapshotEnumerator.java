@@ -21,7 +21,7 @@ package org.apache.flink.table.store.table.source.snapshot;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
 
 import javax.annotation.Nullable;
@@ -59,8 +59,7 @@ public class StaticDataFileSnapshotEnumerator implements SnapshotEnumerator {
     //  static create methods
     // ------------------------------------------------------------------------
 
-    public static StaticDataFileSnapshotEnumerator create(
-            FileStoreTable table, DataTableScan scan) {
+    public static StaticDataFileSnapshotEnumerator create(DataTable table, DataTableScan scan) {
         CoreOptions.StartupMode startupMode = table.options().startupMode();
         StartingScanner startingScanner;
         if (startupMode == CoreOptions.StartupMode.FULL

@@ -18,8 +18,10 @@
 
 package org.apache.flink.table.store.connector;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogTable;
@@ -34,30 +36,59 @@ import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 import org.junit.Before;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.List;
+
+import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
 
 /** ITCase for catalog. */
 public abstract class CatalogITCaseBase extends AbstractTestBase {
 
     protected TableEnvironment tEnv;
+    protected TableEnvironment sEnv;
 
     @Before
     public void before() throws IOException {
         tEnv =
                 TableEnvironmentTestUtils.create(
                         EnvironmentSettings.newInstance().inBatchMode().build());
+        String catalog = "TABLE_STORE";
         tEnv.executeSql(
                 String.format(
-                        "CREATE CATALOG TABLE_STORE WITH ("
-                                + "'type'='table-store', 'warehouse'='%s')",
-                        TEMPORARY_FOLDER.newFolder().toURI()));
-        tEnv.useCatalog("TABLE_STORE");
+                        "CREATE CATALOG %s WITH (" + "'type'='table-store', 'warehouse'='%s')",
+                        catalog, TEMPORARY_FOLDER.newFolder().toURI()));
+        tEnv.useCatalog(catalog);
+
+        sEnv =
+                TableEnvironmentTestUtils.create(
+                        EnvironmentSettings.newInstance().inStreamingMode().build());
+        sEnv.getConfig().getConfiguration().set(CHECKPOINTING_INTERVAL, Duration.ofMillis(100));
+        sEnv.registerCatalog(catalog, tEnv.getCatalog(catalog).get());
+        sEnv.useCatalog(catalog);
+
+        prepareConfiguration(tEnv);
+        prepareConfiguration(sEnv);
+    }
+
+    private void prepareConfiguration(TableEnvironment env) {
+        Configuration config = env.getConfig().getConfiguration();
+        config.set(
+                ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM,
+                defaultParallelism());
+    }
+
+    protected int defaultParallelism() {
+        return 2;
     }
 
     protected List<Row> sql(String query, Object... args) throws Exception {
         try (CloseableIterator<Row> iter = tEnv.executeSql(String.format(query, args)).collect()) {
             return ImmutableList.copyOf(iter);
         }
+    }
+
+    protected CloseableIterator<Row> streamSqlIter(String query, Object... args) {
+        return sEnv.executeSql(String.format(query, args)).collect();
     }
 
     protected CatalogTable table(String tableName) throws TableNotExistException {

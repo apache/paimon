@@ -18,12 +18,8 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.sink.BucketComputer;
-import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.List;
@@ -33,11 +29,7 @@ import java.util.Map;
  * An abstraction layer above {@link org.apache.flink.table.store.file.FileStore} to provide reading
  * and writing of {@link org.apache.flink.table.data.RowData}.
  */
-public interface FileStoreTable extends Table, SupportsPartition, SupportsWrite {
-
-    CoreOptions options();
-
-    Path location();
+public interface FileStoreTable extends DataTable, SupportsPartition, SupportsWrite {
 
     @Override
     default String name() {
@@ -56,13 +48,8 @@ public interface FileStoreTable extends Table, SupportsPartition, SupportsWrite 
 
     TableSchema schema();
 
-    SnapshotManager snapshotManager();
-
     @Override
     FileStoreTable copy(Map<String, String> dynamicOptions);
-
-    @Override
-    DataTableScan newScan();
 
     @Override
     default BucketComputer bucketComputer() {

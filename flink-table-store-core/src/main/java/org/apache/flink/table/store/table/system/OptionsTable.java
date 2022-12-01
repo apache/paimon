@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.table.metadata;
+package org.apache.flink.table.store.table.system;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
@@ -42,7 +42,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Objects;
 
-import static org.apache.flink.table.store.file.catalog.Catalog.METADATA_TABLE_SPLITTER;
+import static org.apache.flink.table.store.file.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 import static org.apache.flink.table.store.file.utils.SerializationUtils.newStringType;
 
 /** A {@link Table} for showing options of table. */
@@ -66,7 +66,7 @@ public class OptionsTable implements Table {
 
     @Override
     public String name() {
-        return location.getName() + METADATA_TABLE_SPLITTER + OPTIONS;
+        return location.getName() + SYSTEM_TABLE_SPLITTER + OPTIONS;
     }
 
     @Override

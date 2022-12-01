@@ -22,7 +22,7 @@ import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
 
@@ -36,18 +36,15 @@ public class ContinuousFileStoreSource extends FlinkSource {
 
     private static final long serialVersionUID = 1L;
 
-    private final FileStoreTable table;
-    private final long discoveryInterval;
+    private final DataTable table;
 
     public ContinuousFileStoreSource(
-            FileStoreTable table,
-            long discoveryInterval,
+            DataTable table,
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
             @Nullable Long limit) {
         super(table, projectedFields, predicate, limit);
         this.table = table;
-        this.discoveryInterval = discoveryInterval;
     }
 
     @Override
@@ -75,7 +72,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 context,
                 splits,
                 nextSnapshotId,
-                discoveryInterval,
+                table.options().continuousDiscoveryInterval().toMillis(),
                 ContinuousDataFileSnapshotEnumerator.create(table, scan, nextSnapshotId));
     }
 }

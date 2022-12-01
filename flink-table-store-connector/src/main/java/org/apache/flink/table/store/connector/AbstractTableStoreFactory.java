@@ -34,7 +34,7 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
 import org.apache.flink.table.store.CoreOptions.LogConsistency;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
-import org.apache.flink.table.store.connector.source.MetadataTableSource;
+import org.apache.flink.table.store.connector.source.SystemTableSource;
 import org.apache.flink.table.store.connector.source.TableStoreSource;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
@@ -64,14 +64,16 @@ public abstract class AbstractTableStoreFactory
     @Override
     public DynamicTableSource createDynamicTableSource(Context context) {
         CatalogTable origin = context.getCatalogTable().getOrigin();
-        if (origin instanceof MetadataCatalogTable) {
-            return new MetadataTableSource(((MetadataCatalogTable) origin).table());
+        boolean isStreamingMode =
+                context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
+                        == RuntimeExecutionMode.STREAMING;
+        if (origin instanceof SystemCatalogTable) {
+            return new SystemTableSource(((SystemCatalogTable) origin).table(), isStreamingMode);
         }
         return new TableStoreSource(
                 context.getObjectIdentifier(),
                 buildFileStoreTable(context),
-                context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
-                        == RuntimeExecutionMode.STREAMING,
+                isStreamingMode,
                 context,
                 createOptionalLogStoreFactory(context).orElse(null));
     }

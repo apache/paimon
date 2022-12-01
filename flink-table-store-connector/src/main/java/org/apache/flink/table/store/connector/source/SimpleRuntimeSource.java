@@ -27,12 +27,14 @@ import org.apache.flink.table.store.table.source.TableScan;
 
 import javax.annotation.Nullable;
 
-/** A {@link FlinkSource} for metadata table. */
-public class MetadataSource extends FlinkSource {
+import java.util.Collection;
+
+/** A {@link FlinkSource} for system table. */
+public class SimpleRuntimeSource extends FlinkSource {
 
     private static final long serialVersionUID = 1L;
 
-    public MetadataSource(
+    public SimpleRuntimeSource(
             Table table,
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
@@ -54,7 +56,11 @@ public class MetadataSource extends FlinkSource {
             scan.withFilter(predicate);
         }
 
-        return new StaticFileStoreSplitEnumerator(
-                context, null, new FileStoreSourceSplitGenerator().createSplits(scan.plan()));
+        Collection<FileStoreSourceSplit> splits =
+                checkpoint == null
+                        ? new FileStoreSourceSplitGenerator().createSplits(scan.plan())
+                        : checkpoint.splits();
+
+        return new StaticFileStoreSplitEnumerator(context, null, splits);
     }
 }
