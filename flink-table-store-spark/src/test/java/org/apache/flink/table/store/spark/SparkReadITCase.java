@@ -95,10 +95,11 @@ public class SparkReadITCase extends SparkReadTestBase {
         spark.sql("ALTER TABLE default.schemasTable ADD COLUMN c STRING");
         List<Row> schemas =
                 spark.table("tablestore.default.`schemasTable$schemas`").collectAsList();
-        assertThat(schemas.toString())
+        List<?> fieldsList = schemas.stream().map(row -> row.get(1)).collect(Collectors.toList());
+        assertThat(fieldsList.toString())
                 .isEqualTo(
-                        "[[0,WrappedArray([0,a,BIGINT NOT NULL,null], [1,b,STRING,null]),WrappedArray(),WrappedArray(a),Map(comment -> table comment, provider -> tablestore, owner -> bytedance),table comment], "
-                                + "[1,WrappedArray([0,a,BIGINT NOT NULL,null], [1,b,STRING,null], [2,c,STRING,null]),WrappedArray(),WrappedArray(a),Map(comment -> table comment, provider -> tablestore, owner -> bytedance),table comment]]");
+                        "[WrappedArray([0,a,BIGINT NOT NULL,null], [1,b,STRING,null]), "
+                                + "WrappedArray([0,a,BIGINT NOT NULL,null], [1,b,STRING,null], [2,c,STRING,null])]");
     }
 
     @Test
