@@ -56,6 +56,7 @@ import java.util.Optional;
 
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.flink.table.store.CoreOptions.PATH;
+import static org.apache.flink.table.store.file.catalog.Catalog.METADATA_TABLE_SPLITTER;
 
 /** Catalog for table store. */
 public class FlinkCatalog extends AbstractCatalog {
@@ -189,6 +190,12 @@ public class FlinkCatalog extends AbstractCatalog {
         if (!(table instanceof CatalogTable)) {
             throw new UnsupportedOperationException(
                     "Only support CatalogTable, but is: " + table.getClass());
+        }
+        if (tablePath.getObjectName().contains(METADATA_TABLE_SPLITTER)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Table name[%s] cannot contain '%s' separator",
+                            tablePath.getObjectName(), METADATA_TABLE_SPLITTER));
         }
         CatalogTable catalogTable = (CatalogTable) table;
         Map<String, String> options = table.getOptions();
