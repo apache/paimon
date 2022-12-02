@@ -219,12 +219,7 @@ public class SchemaManager implements Serializable {
                                     id, addColumn.fieldName(), dataType, addColumn.description()));
                 } else if (change instanceof RenameColumn) {
                     RenameColumn rename = (RenameColumn) change;
-                    /// TODO support partition schema evolution
-                    if (schema.partitionKeys().contains(rename.fieldName())) {
-                        throw new UnsupportedOperationException(
-                                String.format(
-                                        "Cannot rename partition key[%s]", rename.fieldName()));
-                    }
+                    validateNotPrimaryAndPartitionKey(schema, rename.fieldName());
                     if (newFields.stream().anyMatch(f -> f.name().equals(rename.newName()))) {
                         throw new IllegalArgumentException(
                                 String.format(
@@ -244,15 +239,7 @@ public class SchemaManager implements Serializable {
                                             field.description()));
                 } else if (change instanceof DropColumn) {
                     DropColumn drop = (DropColumn) change;
-                    /// TODO support partition and primary keys schema evolution
-                    if (schema.partitionKeys().contains(drop.fieldName())) {
-                        throw new UnsupportedOperationException(
-                                String.format("Cannot drop partition key[%s]", drop.fieldName()));
-                    }
-                    if (schema.primaryKeys().contains(drop.fieldName())) {
-                        throw new UnsupportedOperationException(
-                                String.format("Cannot drop primary key[%s]", drop.fieldName()));
-                    }
+                    validateNotPrimaryAndPartitionKey(schema, drop.fieldName());
                     if (!newFields.removeIf(
                             f -> f.name().equals(((DropColumn) change).fieldName()))) {
                         throw new IllegalArgumentException(
@@ -339,6 +326,18 @@ public class SchemaManager implements Serializable {
             if (success) {
                 return newSchema;
             }
+        }
+    }
+
+    private void validateNotPrimaryAndPartitionKey(TableSchema schema, String fieldName) {
+        /// TODO support partition and primary keys schema evolution
+        if (schema.partitionKeys().contains(fieldName)) {
+            throw new UnsupportedOperationException(
+                    String.format("Cannot drop/rename partition key[%s]", fieldName));
+        }
+        if (schema.primaryKeys().contains(fieldName)) {
+            throw new UnsupportedOperationException(
+                    String.format("Cannot drop/rename primary key[%s]", fieldName));
         }
     }
 
