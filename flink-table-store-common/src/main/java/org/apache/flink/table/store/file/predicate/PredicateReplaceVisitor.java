@@ -18,31 +18,24 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.table.store.format.FieldStats;
-
-import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
-/** Predicate which returns Boolean and provides testing by stats. */
-public interface Predicate extends Serializable {
+/** A {@link PredicateVisitor} to replace {@link Predicate}. */
+public interface PredicateReplaceVisitor extends PredicateVisitor<Optional<Predicate>> {
 
-    /**
-     * Test based on the specific input column values.
-     *
-     * @return return true when hit, false when not hit.
-     */
-    boolean test(Object[] values);
-
-    /**
-     * Test based on the statistical information to determine whether a hit is possible.
-     *
-     * @return return true is likely to hit (there may also be false positives), return false is
-     *     absolutely not possible to hit.
-     */
-    boolean test(long rowCount, FieldStats[] fieldStats);
-
-    /** @return the negation predicate of this predicate if possible. */
-    Optional<Predicate> negate();
-
-    <T> T visit(PredicateVisitor<T> visitor);
+    @Override
+    default Optional<Predicate> visit(CompoundPredicate predicate) {
+        List<Predicate> converted = new ArrayList<>();
+        for (Predicate child : predicate.children()) {
+            Optional<Predicate> optional = child.visit(this);
+            if (optional.isPresent()) {
+                converted.add(optional.get());
+            } else {
+                return Optional.empty();
+            }
+        }
+        return Optional.of(new CompoundPredicate(predicate.function(), converted));
+    }
 }

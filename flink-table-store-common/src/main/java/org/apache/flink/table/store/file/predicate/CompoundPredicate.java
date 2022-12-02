@@ -63,6 +63,11 @@ public class CompoundPredicate implements Predicate {
     }
 
     @Override
+    public <T> T visit(PredicateVisitor<T> visitor) {
+        return visitor.visit(this);
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (!(o instanceof CompoundPredicate)) {
             return false;

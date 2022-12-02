@@ -20,9 +20,9 @@ package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.predicate.CompoundPredicate;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.predicate.PredicateReplaceVisitor;
 import org.apache.flink.table.store.utils.ProjectedRowData;
 
 import javax.annotation.Nullable;
@@ -264,55 +264,32 @@ public class SchemaEvolutionUtil {
         LinkedHashMap<Integer, DataField> idToDataFields = new LinkedHashMap<>();
         dataFields.forEach(f -> idToDataFields.put(f.id(), f));
         List<Predicate> dataFilters = new ArrayList<>(filters.size());
+
+        PredicateReplaceVisitor visitor =
+                predicate -> {
+                    DataField tableField =
+                            checkNotNull(
+                                    nameToTableFields.get(predicate.fieldName()),
+                                    String.format("Find no field %s", predicate.fieldName()));
+                    DataField dataField = idToDataFields.get(tableField.id());
+                    if (dataField == null) {
+                        return Optional.empty();
+                    }
+
+                    /// TODO Should deal with column type schema evolution here
+                    return Optional.of(
+                            new LeafPredicate(
+                                    predicate.function(),
+                                    predicate.type(),
+                                    indexOf(dataField, idToDataFields),
+                                    dataField.name(),
+                                    predicate.literals()));
+                };
+
         for (Predicate predicate : filters) {
-            createDataPredicate(nameToTableFields, idToDataFields, predicate)
-                    .ifPresent(dataFilters::add);
+            predicate.visit(visitor).ifPresent(dataFilters::add);
         }
         return dataFilters;
-    }
-
-    private static Optional<Predicate> createDataPredicate(
-            Map<String, DataField> tableFields,
-            LinkedHashMap<Integer, DataField> dataFields,
-            Predicate predicate) {
-        if (predicate instanceof CompoundPredicate) {
-            CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
-            List<Predicate> children = compoundPredicate.children();
-            List<Predicate> dataChildren = new ArrayList<>(children.size());
-            for (Predicate child : children) {
-                Optional<Predicate> childPredicate =
-                        createDataPredicate(tableFields, dataFields, child);
-                if (childPredicate.isPresent()) {
-                    dataChildren.add(childPredicate.get());
-                } else {
-                    return Optional.empty();
-                }
-            }
-            return Optional.of(new CompoundPredicate(compoundPredicate.function(), dataChildren));
-        } else if (predicate instanceof LeafPredicate) {
-            LeafPredicate leafPredicate = (LeafPredicate) predicate;
-            DataField tableField =
-                    checkNotNull(
-                            tableFields.get(leafPredicate.fieldName()),
-                            String.format("Find no field %s", leafPredicate.fieldName()));
-            DataField dataField = dataFields.get(tableField.id());
-            if (dataField == null) {
-                return Optional.empty();
-            }
-
-            /// TODO Should deal with column type schema evolution here
-            return Optional.of(
-                    new LeafPredicate(
-                            leafPredicate.function(),
-                            leafPredicate.type(),
-                            indexOf(dataField, dataFields),
-                            dataField.name(),
-                            leafPredicate.literals()));
-        } else {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "Not support to create data predicate from %s", predicate.getClass()));
-        }
     }
 
     private static int indexOf(DataField dataField, LinkedHashMap<Integer, DataField> dataFields) {
