@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.store.file.utils.ProjectKeyRecordReader;
+import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.table.store.file.utils.ReusingTestData;
 import org.apache.flink.table.store.utils.ProjectedRowData;
 import org.apache.flink.types.RowKind;
@@ -77,10 +77,16 @@ public class ValueCountRowDataRecordIteratorTest extends RowDataRecordIteratorTe
                 input,
                 kvIterator ->
                         new ValueCountRowDataRecordIterator(
-                                new ProjectKeyRecordReader.ProjectedIterator(
+                                RecordReaderUtils.transform(
                                         kvIterator,
-                                        ProjectedRowData.from(
-                                                new int[][] {new int[] {0}, new int[] {0}}))),
+                                        kv ->
+                                                kv.replaceKey(
+                                                        ProjectedRowData.from(
+                                                                        new int[][] {
+                                                                            new int[] {0},
+                                                                            new int[] {0}
+                                                                        })
+                                                                .replaceRow(kv.key())))),
                 (rowData, idx) -> {
                     assertThat(rowData.getArity()).isEqualTo(2);
                     assertThat(rowData.getInt(0)).isEqualTo(expectedValues.get(idx));
