@@ -133,8 +133,9 @@ public class FullCompactionChangelogSnapshotEnumeratorTest
         commit.commit(1, write.prepareCommit(true, 1));
 
         // log current time millis, we'll start from here
+        Thread.sleep(50);
         long startMillis = System.currentTimeMillis();
-        Thread.sleep(100);
+        Thread.sleep(50);
 
         write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 101L));
         write.write(rowData(1, 20, 201L));

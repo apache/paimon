@@ -114,8 +114,9 @@ public class InputChangelogSnapshotEnumeratorTest extends DataFileSnapshotEnumer
         commit.commit(0, write.prepareCommit(true, 0));
 
         // log current time millis, we'll start from here
+        Thread.sleep(50);
         long startMillis = System.currentTimeMillis();
-        Thread.sleep(100);
+        Thread.sleep(50);
 
         write.write(rowData(1, 10, 101L));
         write.write(rowData(1, 30, 300L));
