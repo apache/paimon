@@ -62,11 +62,14 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
         Configuration newOptions = Configuration.fromMap(options);
 
+        // merge dynamic options into schema.options
+        dynamicOptions.forEach(newOptions::setString);
+
         // set path always
         newOptions.set(PATH, path.toString());
 
-        // merge dynamic options into schema.options
-        dynamicOptions.forEach(newOptions::setString);
+        // set dynamic options with default values
+        CoreOptions.setDefaultValues(newOptions);
 
         // copy a new table store to contain dynamic options
         TableSchema newTableSchema = tableSchema.copy(newOptions.toMap());
