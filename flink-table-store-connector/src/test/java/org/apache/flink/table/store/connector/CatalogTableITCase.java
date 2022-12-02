@@ -70,4 +70,69 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 "Table name[%s] cannot contain '%s' separator",
                                 "T$aa$bb", METADATA_TABLE_SPLITTER));
     }
+
+    @Test
+    public void testSchemasTable() throws Exception {
+        sql(
+                "CREATE TABLE T(a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED) with ('a.aa.aaa'='val1', 'b.bb.bbb'='val2')");
+        sql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");
+
+        assertThat(sql("SHOW CREATE TABLE T$schemas").toString())
+                .isEqualTo(
+                        "[+I[CREATE TABLE `TABLE_STORE`.`default`.`T$schemas` (\n"
+                                + "  `schema_id` BIGINT NOT NULL,\n"
+                                + "  `fields` ARRAY<ROW<`id` INT NOT NULL, `name` VARCHAR(2147483647) NOT NULL, `type` VARCHAR(2147483647) NOT NULL, `description` VARCHAR(2147483647)>>,\n"
+                                + "  `partition_keys` ARRAY<VARCHAR(2147483647) NOT NULL>,\n"
+                                + "  `primary_keys` ARRAY<VARCHAR(2147483647) NOT NULL>,\n"
+                                + "  `options` MAP<VARCHAR(2147483647) NOT NULL, VARCHAR(2147483647) NOT NULL>,\n"
+                                + "  `comment` VARCHAR(2147483647)\n"
+                                + ") ]]");
+
+        List<Row> result = sql("SELECT * FROM T$schemas order by schema_id");
+
+        assertThat(result.toString())
+                .isEqualTo(
+                        "[+I[0, [+I[0, a, INT NOT NULL, null], +I[1, b, INT, null], +I[2, c, STRING, null]], [], [a], {a.aa.aaa=val1, b.bb.bbb=val2}, ], "
+                                + "+I[1, [+I[0, a, INT NOT NULL, null], +I[1, b, INT, null], +I[2, c, STRING, null]], [], [a], {a.aa.aaa=val1, snapshot.time-retained=5 h, b.bb.bbb=val2}, ]]");
+    }
+
+    @Test
+    public void testSnapshotsSchemasTable() throws Exception {
+        sql("CREATE TABLE T (a INT, b INT)");
+        sql("INSERT INTO T VALUES (1, 2)");
+        sql("INSERT INTO T VALUES (3, 4)");
+        sql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");
+        sql("INSERT INTO T VALUES (5, 6)");
+        sql("INSERT INTO T VALUES (7, 8)");
+
+        List<Row> result =
+                sql(
+                        "SELECT s.snapshot_id, s.schema_id, t.fields FROM T$snapshots s JOIN T$schemas t ON s.schema_id=t.schema_id");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(
+                                1L,
+                                0L,
+                                new Row[] {
+                                        Row.of(0, "a", "INT", null), Row.of(1, "b", "INT", null)
+                                }),
+                        Row.of(
+                                2L,
+                                0L,
+                                new Row[] {
+                                        Row.of(0, "a", "INT", null), Row.of(1, "b", "INT", null)
+                                }),
+                        Row.of(
+                                3L,
+                                1L,
+                                new Row[] {
+                                        Row.of(0, "a", "INT", null), Row.of(1, "b", "INT", null)
+                                }),
+                        Row.of(
+                                4L,
+                                1L,
+                                new Row[] {
+                                        Row.of(0, "a", "INT", null), Row.of(1, "b", "INT", null)
+                                }));
+    }
 }

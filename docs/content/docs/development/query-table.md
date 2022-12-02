@@ -110,6 +110,32 @@ SELECT * FROM MyTable$snapshots;
 By querying one table's snapshots table, you can know the commit and expiration
 information about that table and time travel through the data.
 
+## Schemas Table
+
+You can query the historical schemas of the table through Flink SQL.
+
+```sql
+SELECT * FROM MyTable$schemas;
+
++--------------+------------+-----------------+-------------------+--------------+---------------------------+
+| schema_id |                  fields                | partition_keys | primary_keys |  options  | commonts  |
++--------------+------------+-----------------+-------------------+--------------+---------------------------+
+|   1       | [{"id":0,"name":"a","type":"BIGINT"... |     ["k1"]     |  ["k1", "k2] |    {}     | my table  |
+|   2       | [{"id":1,"name":"b","type":"STRING"... |     ["k1"]     |  ["k1", "k2] | {'a'='b'} | my table  |
++--------------+------------+-----------------+-------------------+--------------+---------------------------+
+2 ros in set
+```
+
+You can join the snapshots table and schemas table to get the fields of given snapshots.
+
+```sql
+
+SELECT s.snapshot_id, t.schema_id, t.fields 
+    FROM MyTable$snapshots s JOIN MyTable$schemas t 
+    ON s.schema_id=t.schema_id where s.snapshot_id=100;
+
+```
+
 ## Options Table
 
 You can query the table's option information which is specified from the DDL

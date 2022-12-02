@@ -84,6 +84,13 @@ public class SparkReadITCase extends SparkReadTestBase {
                         .select("snapshot_id", "schema_id", "commit_user", "commit_kind")
                         .collectAsList();
         assertThat(rows.toString()).isEqualTo("[[1,0,user,APPEND]]");
+
+        spark.sql("ALTER TABLE tablestore.default.t1 ADD COLUMN d STRING");
+        List<Row> schemas = spark.table("tablestore.default.`t1$schemas`").collectAsList();
+        assertThat(schemas.toString())
+                .isEqualTo(
+                        "[[0,WrappedArray([0,a,INT NOT NULL,null], [1,b,BIGINT,null], [2,c,VARCHAR(1),null]),WrappedArray(),WrappedArray(),Map(file.format -> avro),], "
+                                + "[1,WrappedArray([0,a,INT NOT NULL,null], [1,b,BIGINT,null], [2,c,VARCHAR(1),null], [3,d,STRING,null]),WrappedArray(),WrappedArray(),Map(file.format -> avro),]]");
     }
 
     @Test

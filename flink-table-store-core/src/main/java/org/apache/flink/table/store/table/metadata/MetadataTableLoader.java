@@ -22,6 +22,7 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.table.Table;
 
 import static org.apache.flink.table.store.table.metadata.OptionsTable.OPTIONS;
+import static org.apache.flink.table.store.table.metadata.SchemasTable.SCHEMAS;
 import static org.apache.flink.table.store.table.metadata.SnapshotsTable.SNAPSHOTS;
 
 /** Loader to load metadata {@link Table}s. */
@@ -33,6 +34,8 @@ public class MetadataTableLoader {
                 return new SnapshotsTable(location);
             case OPTIONS:
                 return new OptionsTable(location);
+            case SCHEMAS:
+                return new SchemasTable(location);
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported metadata table type: " + metadata);
