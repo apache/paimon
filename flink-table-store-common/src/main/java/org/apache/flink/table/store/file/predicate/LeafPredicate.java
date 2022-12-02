@@ -104,6 +104,11 @@ public class LeafPredicate implements Predicate {
     }
 
     @Override
+    public <T> T visit(PredicateVisitor<T> visitor) {
+        return visitor.visit(this);
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (this == o) {
             return true;
