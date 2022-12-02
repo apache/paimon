@@ -46,6 +46,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -171,6 +172,103 @@ public class SchemaEvolutionTest {
                         String.format(
                                 "Column type %s[%s] cannot be converted to %s without loosing information.",
                                 "f0", new BigIntType(), new IntType()));
+    }
+
+    @Test
+    public void testRenameField() throws Exception {
+        UpdateSchema updateSchema =
+                new UpdateSchema(
+                        RowType.of(new IntType(), new BigIntType()),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        schemaManager.commitNewVersion(updateSchema);
+        assertThat(schemaManager.latest().get().fieldNames()).containsExactly("f0", "f1");
+
+        // Rename "f0" to "f01", "f1" to "f0", "f01" to "f1"
+        schemaManager.commitChanges(
+                Collections.singletonList(SchemaChange.renameColumn("f0", "f01")));
+        schemaManager.commitChanges(
+                Collections.singletonList(SchemaChange.renameColumn("f1", "f0")));
+        assertThat(schemaManager.latest().get().fieldNames()).containsExactly("f01", "f0");
+        schemaManager.commitChanges(
+                Collections.singletonList(SchemaChange.renameColumn("f01", "f1")));
+        assertThat(schemaManager.latest().get().fieldNames()).containsExactly("f1", "f0");
+
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.renameColumn("f0", "f1"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        String.format("The column [%s] exists in the table[%s].", "f1", tablePath));
+    }
+
+    @Test
+    public void testDropField() throws Exception {
+        UpdateSchema updateSchema =
+                new UpdateSchema(
+                        RowType.of(
+                                new IntType(), new BigIntType(), new IntType(), new BigIntType()),
+                        Collections.singletonList("f0"),
+                        Arrays.asList("f0", "f2"),
+                        new HashMap<>(),
+                        "");
+        schemaManager.commitNewVersion(updateSchema);
+        assertThat(schemaManager.latest().get().fieldNames())
+                .containsExactly("f0", "f1", "f2", "f3");
+
+        schemaManager.commitChanges(Collections.singletonList(SchemaChange.dropColumn("f1")));
+        assertThat(schemaManager.latest().get().fieldNames()).containsExactly("f0", "f2", "f3");
+
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(SchemaChange.dropColumn("f0"))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(String.format("Cannot drop/rename partition key[%s]", "f0"));
+
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(SchemaChange.dropColumn("f2"))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(String.format("Cannot drop/rename primary key[%s]", "f2"));
+    }
+
+    @Test
+    public void testDropAllFields() throws Exception {
+        UpdateSchema updateSchema =
+                new UpdateSchema(
+                        RowType.of(new IntType(), new BigIntType()),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        schemaManager.commitNewVersion(updateSchema);
+        assertThat(schemaManager.latest().get().fieldNames()).containsExactly("f0", "f1");
+
+        schemaManager.commitChanges(Collections.singletonList(SchemaChange.dropColumn("f0")));
+        assertThat(schemaManager.latest().get().fieldNames()).containsExactly("f1");
+
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(SchemaChange.dropColumn("f100"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        String.format(
+                                "The column [%s] doesn't exist in the table[%s].",
+                                "f100", tablePath));
+
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(SchemaChange.dropColumn("f1"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Cannot drop all fields in table");
     }
 
     private List<Row> readRecords(FileStoreTable table, Predicate filter) throws IOException {

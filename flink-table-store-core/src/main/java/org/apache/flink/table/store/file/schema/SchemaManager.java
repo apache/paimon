@@ -24,7 +24,9 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.schema.SchemaChange.AddColumn;
+import org.apache.flink.table.store.file.schema.SchemaChange.DropColumn;
 import org.apache.flink.table.store.file.schema.SchemaChange.RemoveOption;
+import org.apache.flink.table.store.file.schema.SchemaChange.RenameColumn;
 import org.apache.flink.table.store.file.schema.SchemaChange.SetOption;
 import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnComment;
 import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnNullability;
@@ -36,8 +38,6 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.utils.LogicalTypeCasts;
 import org.apache.flink.util.Preconditions;
-
-import org.apache.commons.lang3.StringUtils;
 
 import javax.annotation.Nullable;
 
@@ -205,11 +205,7 @@ public class SchemaManager implements Serializable {
                     newOptions.remove(removeOption.key());
                 } else if (change instanceof AddColumn) {
                     AddColumn addColumn = (AddColumn) change;
-                    if (newFields.stream()
-                            .anyMatch(
-                                    f ->
-                                            StringUtils.equalsIgnoreCase(
-                                                    f.name(), addColumn.fieldName()))) {
+                    if (newFields.stream().anyMatch(f -> f.name().equals(addColumn.fieldName()))) {
                         throw new IllegalArgumentException(
                                 String.format(
                                         "The column [%s] exists in the table[%s].",
@@ -221,6 +217,39 @@ public class SchemaManager implements Serializable {
                     newFields.add(
                             new DataField(
                                     id, addColumn.fieldName(), dataType, addColumn.description()));
+                } else if (change instanceof RenameColumn) {
+                    RenameColumn rename = (RenameColumn) change;
+                    validateNotPrimaryAndPartitionKey(schema, rename.fieldName());
+                    if (newFields.stream().anyMatch(f -> f.name().equals(rename.newName()))) {
+                        throw new IllegalArgumentException(
+                                String.format(
+                                        "The column [%s] exists in the table[%s].",
+                                        rename.newName(), tableRoot));
+                    }
+
+                    updateNestedColumn(
+                            newFields,
+                            new String[] {rename.fieldName()},
+                            0,
+                            (field) ->
+                                    new DataField(
+                                            field.id(),
+                                            rename.newName(),
+                                            field.type(),
+                                            field.description()));
+                } else if (change instanceof DropColumn) {
+                    DropColumn drop = (DropColumn) change;
+                    validateNotPrimaryAndPartitionKey(schema, drop.fieldName());
+                    if (!newFields.removeIf(
+                            f -> f.name().equals(((DropColumn) change).fieldName()))) {
+                        throw new IllegalArgumentException(
+                                String.format(
+                                        "The column [%s] doesn't exist in the table[%s].",
+                                        drop.fieldName(), tableRoot));
+                    }
+                    if (newFields.isEmpty()) {
+                        throw new IllegalArgumentException("Cannot drop all fields in table");
+                    }
                 } else if (change instanceof UpdateColumnType) {
                     UpdateColumnType update = (UpdateColumnType) change;
                     updateColumn(
@@ -297,6 +326,18 @@ public class SchemaManager implements Serializable {
             if (success) {
                 return newSchema;
             }
+        }
+    }
+
+    private void validateNotPrimaryAndPartitionKey(TableSchema schema, String fieldName) {
+        /// TODO support partition and primary keys schema evolution
+        if (schema.partitionKeys().contains(fieldName)) {
+            throw new UnsupportedOperationException(
+                    String.format("Cannot drop/rename partition key[%s]", fieldName));
+        }
+        if (schema.primaryKeys().contains(fieldName)) {
+            throw new UnsupportedOperationException(
+                    String.format("Cannot drop/rename primary key[%s]", fieldName));
         }
     }
 
