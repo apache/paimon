@@ -34,6 +34,12 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public Path getTableLocation(ObjectPath tablePath) {
+        if (tablePath.getObjectName().contains(METADATA_TABLE_SPLITTER)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Table name[%s] cannot contain '%s' separator",
+                            tablePath.getObjectName(), METADATA_TABLE_SPLITTER));
+        }
         return new Path(databasePath(tablePath.getDatabaseName()), tablePath.getObjectName());
     }
 
