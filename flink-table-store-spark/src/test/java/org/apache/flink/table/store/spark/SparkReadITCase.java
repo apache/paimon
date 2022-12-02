@@ -85,12 +85,20 @@ public class SparkReadITCase extends SparkReadTestBase {
                         .collectAsList();
         assertThat(rows.toString()).isEqualTo("[[1,0,user,APPEND]]");
 
-        spark.sql("ALTER TABLE tablestore.default.t1 ADD COLUMN d STRING");
-        List<Row> schemas = spark.table("tablestore.default.`t1$schemas`").collectAsList();
+        spark.sql("USE tablestore");
+        spark.sql(
+                "CREATE TABLE default.schemasTable (\n"
+                        + "a BIGINT,\n"
+                        + "b STRING) USING tablestore\n"
+                        + "COMMENT 'table comment'\n"
+                        + "TBLPROPERTIES ('primary-key' = 'a')");
+        spark.sql("ALTER TABLE default.schemasTable ADD COLUMN c STRING");
+        List<Row> schemas =
+                spark.table("tablestore.default.`schemasTable$schemas`").collectAsList();
         assertThat(schemas.toString())
                 .isEqualTo(
-                        "[[0,WrappedArray([0,a,INT NOT NULL,null], [1,b,BIGINT,null], [2,c,VARCHAR(1),null]),WrappedArray(),WrappedArray(),Map(file.format -> avro),], "
-                                + "[1,WrappedArray([0,a,INT NOT NULL,null], [1,b,BIGINT,null], [2,c,VARCHAR(1),null], [3,d,STRING,null]),WrappedArray(),WrappedArray(),Map(file.format -> avro),]]");
+                        "[[0,WrappedArray([0,a,BIGINT NOT NULL,null], [1,b,STRING,null]),WrappedArray(),WrappedArray(a),Map(comment -> table comment, provider -> tablestore, owner -> bytedance),table comment], "
+                                + "[1,WrappedArray([0,a,BIGINT NOT NULL,null], [1,b,STRING,null], [2,c,STRING,null]),WrappedArray(),WrappedArray(a),Map(comment -> table comment, provider -> tablestore, owner -> bytedance),table comment]]");
     }
 
     @Test
