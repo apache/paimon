@@ -330,7 +330,7 @@ Output:
 {{< hint info >}}
 __Note:__
 - Partial update is only supported for table with primary key.
-- Partial update is not supported for streaming consuming.
+- Partial update is only supported for streaming consuming when using [full-compaction changelog producer]({{< ref "docs/development/streaming-query" >}}#full-compaction-changelog-producer).
 - It is best not to have NULL values in the fields, NULL will not overwrite data.
 {{< /hint >}}
 
@@ -372,7 +372,7 @@ These functions support different data types.
 {{< hint info >}}
 __Note:__
 - Pre-aggregate is only supported for table with primary key.
-- Pre-aggregate is not supported for streaming consuming.
+- Pre-aggregate is only supported for streaming consuming when using [full-compaction changelog producer]({{< ref "docs/development/streaming-query" >}}#full-compaction-changelog-producer).
 - Pre-aggregate currently only support INSERT changes. 
 {{< /hint >}}
 
