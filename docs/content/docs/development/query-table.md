@@ -123,7 +123,7 @@ SELECT * FROM MyTable$schemas;
 |   1       | [{"id":0,"name":"a","type":"BIGINT"... |     ["k1"]     |  ["k1", "k2] |    {}     | my table  |
 |   2       | [{"id":1,"name":"b","type":"STRING"... |     ["k1"]     |  ["k1", "k2] | {'a'='b'} | my table  |
 +-----------+----------------------------------------+----------------+--------------+-----------+-----------+
-2 ros in set
+2 rows in set
 ```
 
 You can join the snapshots table and schemas table to get the fields of given snapshots.
