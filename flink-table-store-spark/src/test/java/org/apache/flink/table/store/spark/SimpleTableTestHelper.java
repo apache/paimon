@@ -38,10 +38,17 @@ import java.util.Map;
 /** A simple table test helper to write and commit. */
 public class SimpleTableTestHelper {
 
-    private final TableWrite writer;
-    private final TableCommit commit;
+    private TableWrite writer;
+    private TableCommit commit;
 
     private long commitIdentifier;
+
+    public SimpleTableTestHelper(Path path) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        // orc is shaded, can not find shaded classes in ide
+        options.put(CoreOptions.FILE_FORMAT.key(), "avro");
+        createTable(path, options);
+    }
 
     public SimpleTableTestHelper(Path path, RowType rowType) throws Exception {
         this(path, rowType, Collections.emptyList(), Collections.emptyList());
@@ -56,6 +63,10 @@ public class SimpleTableTestHelper {
         new SchemaManager(path)
                 .commitNewVersion(
                         new UpdateSchema(rowType, partitionKeys, primaryKeys, options, ""));
+        createTable(path, options);
+    }
+
+    private void createTable(Path path, Map<String, String> options) {
         Configuration conf = Configuration.fromMap(options);
         conf.setString("path", path.toString());
         FileStoreTable table = FileStoreTableFactory.create(conf);

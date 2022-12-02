@@ -41,7 +41,9 @@ import org.apache.spark.sql.connector.catalog.Table;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.connector.catalog.TableChange;
 import org.apache.spark.sql.connector.catalog.TableChange.AddColumn;
+import org.apache.spark.sql.connector.catalog.TableChange.DeleteColumn;
 import org.apache.spark.sql.connector.catalog.TableChange.RemoveProperty;
+import org.apache.spark.sql.connector.catalog.TableChange.RenameColumn;
 import org.apache.spark.sql.connector.catalog.TableChange.SetProperty;
 import org.apache.spark.sql.connector.catalog.TableChange.UpdateColumnComment;
 import org.apache.spark.sql.connector.catalog.TableChange.UpdateColumnNullability;
@@ -269,6 +271,14 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
                     toFlinkType(add.dataType()),
                     add.isNullable(),
                     add.comment());
+        } else if (change instanceof RenameColumn) {
+            RenameColumn rename = (RenameColumn) change;
+            validateAlterNestedField(rename.fieldNames());
+            return SchemaChange.renameColumn(rename.fieldNames()[0], rename.newName());
+        } else if (change instanceof DeleteColumn) {
+            DeleteColumn delete = (DeleteColumn) change;
+            validateAlterNestedField(delete.fieldNames());
+            return SchemaChange.dropColumn(delete.fieldNames()[0]);
         } else if (change instanceof UpdateColumnType) {
             UpdateColumnType update = (UpdateColumnType) change;
             validateAlterNestedField(update.fieldNames());
