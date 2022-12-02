@@ -146,7 +146,7 @@ public class HiveCatalogITCase {
         tEnv.executeSql("USE test_db2").await();
         tEnv.executeSql("CREATE TABLE t ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
                 .await();
-        tEnv.executeSql("INSERT INTO T VALUES (1, 'Hi'), (2, 'Hello')").await();
+        tEnv.executeSql("INSERT INTO t VALUES (1, 'Hi'), (2, 'Hello')").await();
         Path tablePath = new Path(path, "test_db2.db/t");
         Assert.assertTrue(tablePath.getFileSystem().exists(tablePath));
         try {
