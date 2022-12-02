@@ -53,16 +53,16 @@ public class FullCompactionChangelogSnapshotEnumerator extends DataFileSnapshotE
     }
 
     @Override
-    protected boolean shouldSkipSnapshot(Snapshot snapshot) {
+    protected boolean shouldReadSnapshot(Snapshot snapshot) {
         if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
-            return false;
+            return true;
         }
 
         LOG.debug(
                 "Next snapshot id {} is not COMPACT, but is {}, check next one.",
                 snapshot.id(),
                 snapshot.commitKind());
-        return true;
+        return false;
     }
 
     @Override

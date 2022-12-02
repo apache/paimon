@@ -21,15 +21,10 @@ package org.apache.flink.table.store.connector.source;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
-import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
-import org.apache.flink.table.store.table.source.snapshot.DeltaSnapshotEnumerator;
-import org.apache.flink.table.store.table.source.snapshot.FullCompactionChangelogSnapshotEnumerator;
-import org.apache.flink.table.store.table.source.snapshot.InputChangelogSnapshotEnumerator;
-import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
+import org.apache.flink.table.store.table.source.snapshot.DataFileSnapshotEnumerator;
 
 import javax.annotation.Nullable;
 
@@ -69,12 +64,9 @@ public class ContinuousFileStoreSource extends FlinkSource {
             scan.withFilter(predicate);
         }
 
-        Long nextSnapshotId;
-        Collection<FileStoreSourceSplit> splits;
-        if (checkpoint == null) {
-            nextSnapshotId = null;
-            splits = new ArrayList<>();
-        } else {
+        Long nextSnapshotId = null;
+        Collection<FileStoreSourceSplit> splits = new ArrayList<>();
+        if (checkpoint != null) {
             nextSnapshotId = checkpoint.currentSnapshotId();
             splits = checkpoint.splits();
         }
@@ -84,32 +76,6 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 splits,
                 nextSnapshotId,
                 discoveryInterval,
-                createSnapshotEnumerator(scan, nextSnapshotId));
-    }
-
-    private SnapshotEnumerator createSnapshotEnumerator(DataTableScan scan, Long nextSnapshotId) {
-        Path location = table.location();
-        CoreOptions.LogStartupMode startupMode = table.options().logStartupMode();
-        Long startupMillis = table.options().logScanTimestampMills();
-
-        switch (table.options().changelogProducer()) {
-            case NONE:
-                return new DeltaSnapshotEnumerator(
-                        location, scan, startupMode, startupMillis, nextSnapshotId);
-            case INPUT:
-                return new InputChangelogSnapshotEnumerator(
-                        location, scan, startupMode, startupMillis, nextSnapshotId);
-            case FULL_COMPACTION:
-                return new FullCompactionChangelogSnapshotEnumerator(
-                        location,
-                        scan,
-                        table.options().numLevels() - 1,
-                        startupMode,
-                        startupMillis,
-                        nextSnapshotId);
-            default:
-                throw new UnsupportedOperationException(
-                        "Unknown changelog producer " + table.options().changelogProducer().name());
-        }
+                DataFileSnapshotEnumerator.create(table, scan, nextSnapshotId));
     }
 }

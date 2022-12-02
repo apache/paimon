@@ -378,7 +378,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         FunctionWithException<Integer, Void, Exception> assertNextSnapshot =
                 i -> {
-                    TableScan.Plan plan = enumerator.call();
+                    TableScan.Plan plan = enumerator.enumerate();
                     assertThat(plan).isNotNull();
 
                     List<Split> splits = plan.splits();
@@ -402,7 +402,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         }
 
         // no more changelog
-        assertThat(enumerator.call()).isNull();
+        assertThat(enumerator.enumerate()).isNull();
 
         // write another commit
         TableWrite write = table.newWrite(commitUser);
@@ -417,7 +417,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertNextSnapshot.apply(2);
 
         // no more changelog
-        assertThat(enumerator.call()).isNull();
+        assertThat(enumerator.enumerate()).isNull();
     }
 
     private void writeData() throws Exception {

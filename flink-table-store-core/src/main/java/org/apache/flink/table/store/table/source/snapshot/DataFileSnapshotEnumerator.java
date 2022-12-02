@@ -23,6 +23,7 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.util.Preconditions;
 
@@ -60,15 +61,15 @@ public abstract class DataFileSnapshotEnumerator implements SnapshotEnumerator {
     }
 
     @Override
-    public DataTableScan.DataFilePlan call() {
+    public DataTableScan.DataFilePlan enumerate() {
         if (nextSnapshotId == null) {
-            return firstCall();
+            return tryFirstEnumerate();
         } else {
-            return nextCall();
+            return nextEnumerate();
         }
     }
 
-    private DataTableScan.DataFilePlan firstCall() {
+    private DataTableScan.DataFilePlan tryFirstEnumerate() {
         Long startingSnapshotId = snapshotManager.latestSnapshotId();
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
@@ -103,7 +104,7 @@ public abstract class DataFileSnapshotEnumerator implements SnapshotEnumerator {
         return plan;
     }
 
-    private DataTableScan.DataFilePlan nextCall() {
+    private DataTableScan.DataFilePlan nextEnumerate() {
         while (true) {
             if (!snapshotManager.snapshotExists(nextSnapshotId)) {
                 LOG.debug(
@@ -114,19 +115,45 @@ public abstract class DataFileSnapshotEnumerator implements SnapshotEnumerator {
 
             Snapshot snapshot = snapshotManager.snapshot(nextSnapshotId);
 
-            if (shouldSkipSnapshot(snapshot)) {
+            if (shouldReadSnapshot(snapshot)) {
+                LOG.debug("Find snapshot id {}.", nextSnapshotId);
+                DataTableScan.DataFilePlan plan = getPlan(scan.withSnapshot(nextSnapshotId));
                 nextSnapshotId++;
-                continue;
+                return plan;
+            } else {
+                nextSnapshotId++;
             }
-
-            LOG.debug("Find snapshot id {}.", nextSnapshotId);
-            DataTableScan.DataFilePlan plan = getPlan(scan.withSnapshot(nextSnapshotId));
-            nextSnapshotId++;
-            return plan;
         }
     }
 
-    protected abstract boolean shouldSkipSnapshot(Snapshot snapshot);
+    protected abstract boolean shouldReadSnapshot(Snapshot snapshot);
 
     protected abstract DataTableScan.DataFilePlan getPlan(DataTableScan scan);
+
+    public static DataFileSnapshotEnumerator create(
+            FileStoreTable table, DataTableScan scan, Long nextSnapshotId) {
+        Path location = table.location();
+        CoreOptions.LogStartupMode startupMode = table.options().logStartupMode();
+        Long startupMillis = table.options().logScanTimestampMills();
+
+        switch (table.options().changelogProducer()) {
+            case NONE:
+                return new DeltaSnapshotEnumerator(
+                        location, scan, startupMode, startupMillis, nextSnapshotId);
+            case INPUT:
+                return new InputChangelogSnapshotEnumerator(
+                        location, scan, startupMode, startupMillis, nextSnapshotId);
+            case FULL_COMPACTION:
+                return new FullCompactionChangelogSnapshotEnumerator(
+                        location,
+                        scan,
+                        table.options().numLevels() - 1,
+                        startupMode,
+                        startupMillis,
+                        nextSnapshotId);
+            default:
+                throw new UnsupportedOperationException(
+                        "Unknown changelog producer " + table.options().changelogProducer().name());
+        }
+    }
 }

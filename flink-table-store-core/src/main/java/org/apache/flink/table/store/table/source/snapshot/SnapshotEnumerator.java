@@ -20,17 +20,20 @@ package org.apache.flink.table.store.table.source.snapshot;
 
 import org.apache.flink.table.store.table.source.DataTableScan;
 
-import java.util.concurrent.Callable;
+import javax.annotation.Nullable;
 
-/**
- * Enumerate incremental changes from newly created snapshots.
- *
- * <p>The first call to this enumerator will produce a {@link DataTableScan.DataFilePlan} containing
- * the base files for the following incremental changes (or just return null if there are no base
- * files).
- *
- * <p>Following calls to this enumerator will produce {@link DataTableScan.DataFilePlan}s containing
- * incremental changed files. If there is currently no newer snapshots, null will be returned
- * instead.
- */
-public interface SnapshotEnumerator extends Callable<DataTableScan.DataFilePlan> {}
+/** Enumerate incremental changes from newly created snapshots. */
+public interface SnapshotEnumerator {
+
+    /**
+     * The first call to this method will produce a {@link DataTableScan.DataFilePlan} containing
+     * the base files for the following incremental changes (or just return null if there are no
+     * base files).
+     *
+     * <p>Following calls to this method will produce {@link DataTableScan.DataFilePlan}s containing
+     * incremental changed files. If there is currently no newer snapshots, null will be returned
+     * instead.
+     */
+    @Nullable
+    DataTableScan.DataFilePlan enumerate();
+}

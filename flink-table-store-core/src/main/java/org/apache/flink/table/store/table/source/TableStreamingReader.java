@@ -50,14 +50,14 @@ public class TableStreamingReader {
     private final int[] projection;
     @Nullable private final Predicate predicate;
     @Nullable private final PredicateFilter recordFilter;
-
-    private SnapshotEnumerator enumerator;
+    private final SnapshotEnumerator enumerator;
 
     public TableStreamingReader(
             FileStoreTable table, int[] projection, @Nullable Predicate predicate) {
         this.table = table;
         this.projection = projection;
         this.predicate = predicate;
+
         if (predicate != null) {
             List<String> fieldNames = table.schema().fieldNames();
             List<String> primaryKeys = table.schema().primaryKeys();
@@ -82,21 +82,19 @@ public class TableStreamingReader {
         } else {
             recordFilter = null;
         }
+
+        DataTableScan scan = table.newScan();
+        if (predicate != null) {
+            scan.withFilter(predicate);
+        }
+        enumerator =
+                new DeltaSnapshotEnumerator(
+                        table.location(), scan, CoreOptions.LogStartupMode.FULL, null, null);
     }
 
     @Nullable
     public Iterator<RowData> nextBatch() throws Exception {
-        if (enumerator == null) {
-            DataTableScan scan = table.newScan();
-            if (predicate != null) {
-                scan.withFilter(predicate);
-            }
-            enumerator =
-                    new DeltaSnapshotEnumerator(
-                            table.location(), scan, CoreOptions.LogStartupMode.FULL, null, null);
-        }
-
-        DataTableScan.DataFilePlan plan = enumerator.call();
+        DataTableScan.DataFilePlan plan = enumerator.enumerate();
         return plan == null ? null : read(plan);
     }
 

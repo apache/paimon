@@ -57,11 +57,7 @@ public class PendingSplitsCheckpointSerializer
         }
 
         Long currentSnapshotId = pendingSplitsCheckpoint.currentSnapshotId();
-        if (currentSnapshotId == null) {
-            view.writeLong(INVALID_SNAPSHOT);
-        } else {
-            view.writeLong(currentSnapshotId);
-        }
+        view.writeLong(currentSnapshotId == null ? INVALID_SNAPSHOT : currentSnapshotId);
 
         return out.toByteArray();
     }
@@ -80,10 +76,7 @@ public class PendingSplitsCheckpointSerializer
         }
 
         long currentSnapshotId = view.readLong();
-        if (currentSnapshotId == INVALID_SNAPSHOT) {
-            return new PendingSplitsCheckpoint(splits, null);
-        } else {
-            return new PendingSplitsCheckpoint(splits, currentSnapshotId);
-        }
+        return new PendingSplitsCheckpoint(
+                splits, currentSnapshotId == INVALID_SNAPSHOT ? null : currentSnapshotId);
     }
 }

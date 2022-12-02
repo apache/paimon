@@ -93,7 +93,8 @@ public class ContinuousFileSplitEnumerator
 
     @Override
     public void start() {
-        context.callAsync(snapshotEnumerator, this::processDiscoveredSplits, 0, discoveryInterval);
+        context.callAsync(
+                snapshotEnumerator::enumerate, this::processDiscoveredSplits, 0, discoveryInterval);
     }
 
     @Override

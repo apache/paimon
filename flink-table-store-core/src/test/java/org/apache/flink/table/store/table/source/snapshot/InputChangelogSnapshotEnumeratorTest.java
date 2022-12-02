@@ -47,7 +47,7 @@ public class InputChangelogSnapshotEnumeratorTest extends DataFileSnapshotEnumer
                         tablePath, table.newScan(), CoreOptions.LogStartupMode.FULL, null, null);
 
         // first call without any snapshot, should return null
-        assertThat(enumerator.call()).isNull();
+        assertThat(enumerator.enumerate()).isNull();
 
         // write base data
         write.write(rowData(1, 10, 100L));
@@ -61,13 +61,13 @@ public class InputChangelogSnapshotEnumeratorTest extends DataFileSnapshotEnumer
         commit.commit(1, write.prepareCommit(true, 1));
 
         // first call with snapshot, should return complete records from 2nd commit
-        DataTableScan.DataFilePlan plan = enumerator.call();
+        DataTableScan.DataFilePlan plan = enumerator.enumerate();
         assertThat(plan.snapshotId).isEqualTo(2);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|20|200", "+I 1|30|300"));
 
         // incremental call without new snapshots, should return null
-        assertThat(enumerator.call()).isNull();
+        assertThat(enumerator.enumerate()).isNull();
 
         // write incremental data
         write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 101L));
@@ -82,20 +82,23 @@ public class InputChangelogSnapshotEnumeratorTest extends DataFileSnapshotEnumer
         commit.commit(3, write.prepareCommit(true, 3));
 
         // first incremental call, should return incremental records from 3rd commit
-        plan = enumerator.call();
+        plan = enumerator.enumerate();
         assertThat(plan.snapshotId).isEqualTo(3);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(
                         Arrays.asList("-D 1|10|101", "+I 1|10|102", "+I 1|20|201", "+I 1|40|400"));
 
         // second incremental call, should return incremental records from 4th commit
-        plan = enumerator.call();
+        plan = enumerator.enumerate();
         assertThat(plan.snapshotId).isEqualTo(4);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|103", "-D 1|40|400", "+I 1|50|500"));
 
         // no more new snapshots, should return null
-        assertThat(enumerator.call()).isNull();
+        assertThat(enumerator.enumerate()).isNull();
+
+        write.close();
+        commit.close();
     }
 
     @Test
@@ -134,25 +137,25 @@ public class InputChangelogSnapshotEnumeratorTest extends DataFileSnapshotEnumer
                         startMillis,
                         null);
 
-        DataTableScan.DataFilePlan plan = enumerator.call();
+        DataTableScan.DataFilePlan plan = enumerator.enumerate();
         assertThat(plan.snapshotId).isEqualTo(1);
         assertThat(plan.splits()).isEmpty();
 
         // first incremental call, should return incremental records from 2nd commit
-        plan = enumerator.call();
+        plan = enumerator.enumerate();
         assertThat(plan.snapshotId).isEqualTo(2);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|30|300", "-D 1|40|400"));
 
         // second incremental call, should return incremental records from 3rd commit
-        plan = enumerator.call();
+        plan = enumerator.enumerate();
         assertThat(plan.snapshotId).isEqualTo(3);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(
                         Arrays.asList("-D 1|10|101", "+I 1|10|102", "+I 1|20|201", "+I 1|40|400"));
 
         // no new snapshots
-        assertThat(enumerator.call()).isNull();
+        assertThat(enumerator.enumerate()).isNull();
 
         // more incremental records
         write.write(rowData(1, 10, 103L));
@@ -160,12 +163,15 @@ public class InputChangelogSnapshotEnumeratorTest extends DataFileSnapshotEnumer
         write.write(rowData(1, 50, 500L));
         commit.commit(3, write.prepareCommit(true, 3));
 
-        plan = enumerator.call();
+        plan = enumerator.enumerate();
         assertThat(plan.snapshotId).isEqualTo(4);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|103", "-D 1|40|400", "+I 1|50|500"));
 
-        assertThat(enumerator.call()).isNull();
+        assertThat(enumerator.enumerate()).isNull();
+
+        write.close();
+        commit.close();
     }
 
     @Test
@@ -189,11 +195,11 @@ public class InputChangelogSnapshotEnumeratorTest extends DataFileSnapshotEnumer
                 new InputChangelogSnapshotEnumerator(
                         tablePath, table.newScan(), CoreOptions.LogStartupMode.LATEST, null, null);
 
-        DataTableScan.DataFilePlan plan = enumerator.call();
+        DataTableScan.DataFilePlan plan = enumerator.enumerate();
         assertThat(plan.snapshotId).isEqualTo(2);
         assertThat(plan.splits()).isEmpty();
 
-        assertThat(enumerator.call()).isNull();
+        assertThat(enumerator.enumerate()).isNull();
 
         write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 101L));
         write.write(rowData(1, 20, 201L));
@@ -201,23 +207,26 @@ public class InputChangelogSnapshotEnumeratorTest extends DataFileSnapshotEnumer
         write.write(rowData(1, 40, 400L));
         commit.commit(2, write.prepareCommit(true, 2));
 
-        plan = enumerator.call();
+        plan = enumerator.enumerate();
         assertThat(plan.snapshotId).isEqualTo(3);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(
                         Arrays.asList("-D 1|10|101", "+I 1|10|102", "+I 1|20|201", "+I 1|40|400"));
-        assertThat(enumerator.call()).isNull();
+        assertThat(enumerator.enumerate()).isNull();
 
         write.write(rowData(1, 10, 103L));
         write.write(rowDataWithKind(RowKind.DELETE, 1, 40, 400L));
         write.write(rowData(1, 50, 500L));
         commit.commit(3, write.prepareCommit(true, 3));
 
-        plan = enumerator.call();
+        plan = enumerator.enumerate();
         assertThat(plan.snapshotId).isEqualTo(4);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|103", "-D 1|40|400", "+I 1|50|500"));
-        assertThat(enumerator.call()).isNull();
+        assertThat(enumerator.enumerate()).isNull();
+
+        write.close();
+        commit.close();
     }
 
     @Override
