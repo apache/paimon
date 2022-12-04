@@ -75,7 +75,9 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
     @Override
     public ChangelogMode getChangelogMode(ChangelogMode requestedMode) {
         if (table instanceof AppendOnlyFileStoreTable) {
-            return ChangelogMode.insertOnly();
+            // Don't check this, for example, only inserts are available from the database, but the
+            // plan phase contains all changelogs
+            return requestedMode;
         } else if (table instanceof ChangelogValueCountFileStoreTable) {
             // no primary key, sink all changelogs
             return requestedMode;
