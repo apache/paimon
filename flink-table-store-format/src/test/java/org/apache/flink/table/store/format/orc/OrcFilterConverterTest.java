@@ -74,7 +74,7 @@ public class OrcFilterConverterTest {
     }
 
     private void test(Predicate predicate, OrcFilters.Predicate orcPredicate) {
-        assertThat(OrcFilterConverter.toOrcPredicate(predicate))
+        assertThat(predicate.visit(OrcPredicateFunctionVisitor.visitor()).get())
                 .hasToString(orcPredicate.toString());
     }
 }
