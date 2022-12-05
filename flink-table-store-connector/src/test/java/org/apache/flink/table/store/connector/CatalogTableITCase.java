@@ -81,10 +81,10 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 .isEqualTo(
                         "[+I[CREATE TABLE `TABLE_STORE`.`default`.`T$schemas` (\n"
                                 + "  `schema_id` BIGINT NOT NULL,\n"
-                                + "  `fields` ARRAY<ROW<`id` INT NOT NULL, `name` VARCHAR(2147483647) NOT NULL, `type` VARCHAR(2147483647) NOT NULL, `description` VARCHAR(2147483647)>>,\n"
-                                + "  `partition_keys` ARRAY<VARCHAR(2147483647) NOT NULL>,\n"
-                                + "  `primary_keys` ARRAY<VARCHAR(2147483647) NOT NULL>,\n"
-                                + "  `options` MAP<VARCHAR(2147483647) NOT NULL, VARCHAR(2147483647) NOT NULL>,\n"
+                                + "  `fields` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `partition_keys` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `primary_keys` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `options` VARCHAR(2147483647) NOT NULL,\n"
                                 + "  `comment` VARCHAR(2147483647)\n"
                                 + ") ]]");
 
@@ -92,8 +92,14 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         assertThat(result.toString())
                 .isEqualTo(
-                        "[+I[0, [+I[0, a, INT NOT NULL, null], +I[1, b, INT, null], +I[2, c, STRING, null]], [], [a], {a.aa.aaa=val1, b.bb.bbb=val2}, ], "
-                                + "+I[1, [+I[0, a, INT NOT NULL, null], +I[1, b, INT, null], +I[2, c, STRING, null]], [], [a], {a.aa.aaa=val1, snapshot.time-retained=5 h, b.bb.bbb=val2}, ]]");
+                        "[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},"
+                                + "{\"id\":2,\"name\":\"c\",\"type\":\"VARCHAR(2147483647)\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"b.bb.bbb\":\"val2\"}, ], "
+                                + "+I[1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},"
+                                + "{\"id\":2,\"name\":\"c\",\"type\":\"VARCHAR(2147483647)\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\"}, ]]");
     }
 
     @Test
@@ -108,31 +114,11 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         List<Row> result =
                 sql(
                         "SELECT s.snapshot_id, s.schema_id, t.fields FROM T$snapshots s JOIN T$schemas t ON s.schema_id=t.schema_id");
-        assertThat(result)
-                .containsExactlyInAnyOrder(
-                        Row.of(
-                                1L,
-                                0L,
-                                new Row[] {
-                                        Row.of(0, "a", "INT", null), Row.of(1, "b", "INT", null)
-                                }),
-                        Row.of(
-                                2L,
-                                0L,
-                                new Row[] {
-                                        Row.of(0, "a", "INT", null), Row.of(1, "b", "INT", null)
-                                }),
-                        Row.of(
-                                3L,
-                                1L,
-                                new Row[] {
-                                        Row.of(0, "a", "INT", null), Row.of(1, "b", "INT", null)
-                                }),
-                        Row.of(
-                                4L,
-                                1L,
-                                new Row[] {
-                                        Row.of(0, "a", "INT", null), Row.of(1, "b", "INT", null)
-                                }));
+        assertThat(result.toString())
+                .isEqualTo(
+                        "[+I[1, 0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"}]], "
+                                + "+I[2, 0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"}]], "
+                                + "+I[3, 1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"}]], "
+                                + "+I[4, 1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"}]]]");
     }
 }

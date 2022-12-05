@@ -19,8 +19,6 @@
 package org.apache.flink.table.store.table.metadata;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericArrayData;
-import org.apache.flink.table.data.GenericMapData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
@@ -28,6 +26,7 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.IteratorRecordReader;
+import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.SerializationUtils;
 import org.apache.flink.table.store.table.Table;
@@ -35,23 +34,18 @@ import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.store.utils.ProjectedRowData;
-import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.MapType;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.flink.table.store.file.catalog.Catalog.METADATA_TABLE_SPLITTER;
@@ -67,37 +61,13 @@ public class SchemasTable implements Table {
             new RowType(
                     Arrays.asList(
                             new RowType.RowField("schema_id", new BigIntType(false)),
+                            new RowType.RowField("fields", SerializationUtils.newStringType(false)),
                             new RowType.RowField(
-                                    "fields",
-                                    new ArrayType(
-                                            new RowType(
-                                                    Arrays.asList(
-                                                            new RowType.RowField(
-                                                                    "id", new IntType(false)),
-                                                            new RowType.RowField(
-                                                                    "name",
-                                                                    SerializationUtils
-                                                                            .newStringType(false)),
-                                                            new RowType.RowField(
-                                                                    "type",
-                                                                    SerializationUtils
-                                                                            .newStringType(false)),
-                                                            new RowType.RowField(
-                                                                    "description",
-                                                                    SerializationUtils
-                                                                            .newStringType(
-                                                                                    true)))))),
+                                    "partition_keys", SerializationUtils.newStringType(false)),
                             new RowType.RowField(
-                                    "partition_keys",
-                                    new ArrayType(SerializationUtils.newStringType(false))),
+                                    "primary_keys", SerializationUtils.newStringType(false)),
                             new RowType.RowField(
-                                    "primary_keys",
-                                    new ArrayType(SerializationUtils.newStringType(false))),
-                            new RowType.RowField(
-                                    "options",
-                                    new MapType(
-                                            SerializationUtils.newStringType(false),
-                                            SerializationUtils.newStringType(false))),
+                                    "options", SerializationUtils.newStringType(false)),
                             new RowType.RowField(
                                     "comment", SerializationUtils.newStringType(true))));
 
@@ -207,52 +177,24 @@ public class SchemasTable implements Table {
         }
 
         private RowData toRow(TableSchema schema) {
-            List<GenericMapData> fields = new ArrayList<>(schema.fields().size());
-            schema.fields()
-                    .forEach(
-                            f -> {
-                                Map<StringData, StringData> field = new LinkedHashMap<>(4);
-                                field.put(
-                                        StringData.fromString("id"),
-                                        StringData.fromString(String.valueOf(f.id())));
-                                field.put(
-                                        StringData.fromString("name"),
-                                        StringData.fromString(f.name()));
-                                field.put(
-                                        StringData.fromString("type"),
-                                        StringData.fromString(f.type().logicalType().toString()));
-                                field.put(
-                                        StringData.fromString("description"),
-                                        StringData.fromString(f.description()));
-                                fields.add(new GenericMapData(field));
-                            });
-            Map<StringData, StringData> options = new HashMap<>(schema.options().size());
-            schema.options()
-                    .forEach(
-                            (k, v) ->
-                                    options.put(
-                                            StringData.fromString(k), StringData.fromString(v)));
             return GenericRowData.of(
                     schema.id(),
-                    new GenericArrayData(
-                            schema.fields().stream()
-                                    .map(
-                                            f ->
-                                                    GenericRowData.of(
-                                                            f.id(),
-                                                            StringData.fromString(f.name()),
-                                                            StringData.fromString(
-                                                                    f.type()
-                                                                            .logicalType()
-                                                                            .toString()),
-                                                            StringData.fromString(f.description())))
-                                    .toArray()),
-                    new GenericArrayData(
-                            schema.partitionKeys().stream().map(StringData::fromString).toArray()),
-                    new GenericArrayData(
-                            schema.primaryKeys().stream().map(StringData::fromString).toArray()),
-                    new GenericMapData(options),
+                    toJson(schema.fields()),
+                    toJson(schema.partitionKeys()),
+                    toJson(schema.primaryKeys()),
+                    toJson(schema.options()),
                     StringData.fromString(schema.comment()));
+        }
+
+        private StringData toJson(Object obj) {
+            ObjectMapper objectMapper = new ObjectMapper();
+            try {
+                // Trim all spaces
+                JsonNode node = objectMapper.readTree(JsonSerdeUtil.toJson(obj));
+                return StringData.fromString(node.toString());
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 }
