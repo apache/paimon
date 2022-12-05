@@ -30,9 +30,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
 
-import static org.apache.flink.table.store.connector.source.PendingSplitsCheckpoint.INVALID_SNAPSHOT;
-
-/** A SplitEnumerator implementation for bounded / batch {@link FileStoreSource} input. */
+/** A {@link SplitEnumerator} implementation for {@link StaticFileStoreSource} input. */
 public class StaticFileStoreSplitEnumerator
         implements SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> {
 
@@ -84,7 +82,7 @@ public class StaticFileStoreSplitEnumerator
     @Override
     public PendingSplitsCheckpoint snapshotState(long checkpointId) {
         return new PendingSplitsCheckpoint(
-                new ArrayList<>(splits), snapshot == null ? INVALID_SNAPSHOT : snapshot.id());
+                new ArrayList<>(splits), snapshot == null ? null : snapshot.id());
     }
 
     @Override

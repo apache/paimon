@@ -37,7 +37,7 @@ public class PendingSplitsCheckpointSerializerTest {
     @Test
     public void serializeEmptyCheckpoint() throws Exception {
         final PendingSplitsCheckpoint checkpoint =
-                new PendingSplitsCheckpoint(Collections.emptyList(), 5);
+                new PendingSplitsCheckpoint(Collections.emptyList(), 5L);
 
         final PendingSplitsCheckpoint deSerialized = serializeAndDeserialize(checkpoint);
 
@@ -48,7 +48,7 @@ public class PendingSplitsCheckpointSerializerTest {
     public void serializeSomeSplits() throws Exception {
         final PendingSplitsCheckpoint checkpoint =
                 new PendingSplitsCheckpoint(
-                        Arrays.asList(testSplit1(), testSplit2(), testSplit3()), 3);
+                        Arrays.asList(testSplit1(), testSplit2(), testSplit3()), 3L);
 
         final PendingSplitsCheckpoint deSerialized = serializeAndDeserialize(checkpoint);
 
@@ -59,7 +59,7 @@ public class PendingSplitsCheckpointSerializerTest {
     public void serializeSplitsAndContinuous() throws Exception {
         final PendingSplitsCheckpoint checkpoint =
                 new PendingSplitsCheckpoint(
-                        Arrays.asList(testSplit1(), testSplit2(), testSplit3()), 20);
+                        Arrays.asList(testSplit1(), testSplit2(), testSplit3()), 20L);
 
         final PendingSplitsCheckpoint deSerialized = serializeAndDeserialize(checkpoint);
 
@@ -69,7 +69,7 @@ public class PendingSplitsCheckpointSerializerTest {
     @Test
     public void repeatedSerialization() throws Exception {
         final PendingSplitsCheckpoint checkpoint =
-                new PendingSplitsCheckpoint(Arrays.asList(testSplit3(), testSplit1()), 5);
+                new PendingSplitsCheckpoint(Arrays.asList(testSplit3(), testSplit1()), 5L);
 
         serializeAndDeserialize(checkpoint);
         serializeAndDeserialize(checkpoint);

@@ -21,6 +21,7 @@ package org.apache.flink.table.store.table;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
+import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.predicate.Equal;
 import org.apache.flink.table.store.file.predicate.IsNull;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
@@ -340,7 +341,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits = table.newScan().withIncremental(true).plan().splits();
+                    List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
                     TableRead read = table.newRead();
 
                     assertThat(getResult(read, splits, STREAMING_SCHEMA_0_ROW_TO_STRING))
@@ -353,7 +354,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                 },
                 (files, schemas) -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits = table.newScan().withIncremental(true).plan().splits();
+                    List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
 
                     TableRead read = table.newRead();
                     assertThat(getResult(read, splits, STREAMING_SCHEMA_1_ROW_TO_STRING))
@@ -373,7 +374,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits = table.newScan().withIncremental(true).plan().splits();
+                    List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
                     // project "c", "b", "pt" in schema0
                     TableRead read = table.newRead().withProjection(PROJECTION);
 
@@ -384,7 +385,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                 },
                 (files, schemas) -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits = table.newScan().withIncremental(true).plan().splits();
+                    List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
 
                     // project "a", "kt", "d" in schema1
                     TableRead read = table.newRead().withProjection(PROJECTION);
@@ -404,7 +405,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     PredicateBuilder builder =
                             new PredicateBuilder(RowDataType.toRowType(false, SCHEMA_0_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits = table.newScan().withIncremental(true).plan().splits();
+                    List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
                     // filter with "b" = 15 in schema0
                     TableRead read = table.newRead().withFilter(builder.equal(2, 15));
 
@@ -418,7 +419,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     PredicateBuilder builder =
                             new PredicateBuilder(RowDataType.toRowType(false, SCHEMA_1_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits = table.newScan().withIncremental(true).plan().splits();
+                    List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
 
                     // filter with "d" = 15 in schema1 which should be mapped to "b" = 15 in schema0
                     TableRead read1 = table.newRead().withFilter(builder.equal(1, 15));

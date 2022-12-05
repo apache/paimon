@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.api.connector.source.Boundedness;
-import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.store.file.Snapshot;
@@ -27,42 +26,30 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
-import org.apache.flink.table.store.table.source.DataTableScan.DataFilePlan;
-import org.apache.flink.table.store.table.source.SnapshotEnumerator;
 
 import javax.annotation.Nullable;
 
 import java.util.Collection;
 
-import static org.apache.flink.table.store.connector.source.PendingSplitsCheckpoint.INVALID_SNAPSHOT;
-
-/** {@link Source} of file store. */
-public class FileStoreSource extends FlinkSource {
+/** Bounded {@link FlinkSource} for reading records. It does not monitor new snapshots. */
+public class StaticFileStoreSource extends FlinkSource {
 
     private static final long serialVersionUID = 1L;
 
     private final FileStoreTable table;
 
-    private final boolean isContinuous;
-
-    private final long discoveryInterval;
-
-    public FileStoreSource(
+    public StaticFileStoreSource(
             FileStoreTable table,
-            boolean isContinuous,
-            long discoveryInterval,
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
             @Nullable Long limit) {
         super(table, projectedFields, predicate, limit);
         this.table = table;
-        this.isContinuous = isContinuous;
-        this.discoveryInterval = discoveryInterval;
     }
 
     @Override
     public Boundedness getBoundedness() {
-        return isContinuous ? Boundedness.CONTINUOUS_UNBOUNDED : Boundedness.BOUNDED;
+        return Boundedness.BOUNDED;
     }
 
     @Override
@@ -78,32 +65,16 @@ public class FileStoreSource extends FlinkSource {
         Long snapshotId;
         Collection<FileStoreSourceSplit> splits;
         if (checkpoint == null) {
-            DataFilePlan plan = isContinuous ? SnapshotEnumerator.startup(scan) : scan.plan();
+            DataTableScan.DataFilePlan plan = scan.plan();
             snapshotId = plan.snapshotId;
             splits = new FileStoreSourceSplitGenerator().createSplits(plan);
         } else {
             // restore from checkpoint
             snapshotId = checkpoint.currentSnapshotId();
-            if (snapshotId == INVALID_SNAPSHOT) {
-                snapshotId = null;
-            }
             splits = checkpoint.splits();
         }
 
-        // create enumerator from snapshotId and splits
-        if (isContinuous) {
-            long currentSnapshot = snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId;
-            return new ContinuousFileSplitEnumerator(
-                    context,
-                    table.location(),
-                    scan.withIncremental(true), // the subsequent planning is all incremental
-                    table.options().changelogProducer(),
-                    splits,
-                    currentSnapshot,
-                    discoveryInterval);
-        } else {
-            Snapshot snapshot = snapshotId == null ? null : snapshotManager.snapshot(snapshotId);
-            return new StaticFileStoreSplitEnumerator(context, snapshot, splits);
-        }
+        Snapshot snapshot = snapshotId == null ? null : snapshotManager.snapshot(snapshotId);
+        return new StaticFileStoreSplitEnumerator(context, snapshot, splits);
     }
 }

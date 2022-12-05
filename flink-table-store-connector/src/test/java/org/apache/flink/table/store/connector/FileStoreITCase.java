@@ -35,8 +35,9 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.sink.FlinkSinkBuilder;
 import org.apache.flink.table.store.connector.sink.StoreSink;
-import org.apache.flink.table.store.connector.source.FileStoreSource;
+import org.apache.flink.table.store.connector.source.ContinuousFileStoreSource;
 import org.apache.flink.table.store.connector.source.FlinkSourceBuilder;
+import org.apache.flink.table.store.connector.source.StaticFileStoreSource;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
@@ -77,7 +78,10 @@ import static org.apache.flink.table.store.CoreOptions.PATH;
 import static org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** ITCase for {@link FileStoreSource} and {@link StoreSink}. */
+/**
+ * ITCase for {@link StaticFileStoreSource}, {@link ContinuousFileStoreSource} and {@link
+ * StoreSink}.
+ */
 @RunWith(Parameterized.class)
 public class FileStoreITCase extends AbstractTestBase {
 

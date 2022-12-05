@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.connector.source;
 
+import javax.annotation.Nullable;
+
 import java.util.Collection;
 
 /**
@@ -26,15 +28,13 @@ import java.util.Collection;
  */
 public class PendingSplitsCheckpoint {
 
-    public static final long INVALID_SNAPSHOT = -1L;
-
     /** The splits in the checkpoint. */
     private final Collection<FileStoreSourceSplit> splits;
 
-    private final long currentSnapshotId;
+    private final @Nullable Long currentSnapshotId;
 
     public PendingSplitsCheckpoint(
-            Collection<FileStoreSourceSplit> splits, long currentSnapshotId) {
+            Collection<FileStoreSourceSplit> splits, @Nullable Long currentSnapshotId) {
         this.splits = splits;
         this.currentSnapshotId = currentSnapshotId;
     }
@@ -43,7 +43,7 @@ public class PendingSplitsCheckpoint {
         return splits;
     }
 
-    public long currentSnapshotId() {
+    public @Nullable Long currentSnapshotId() {
         return currentSnapshotId;
     }
 }
