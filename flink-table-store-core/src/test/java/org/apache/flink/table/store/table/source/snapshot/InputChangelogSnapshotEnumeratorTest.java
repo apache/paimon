@@ -44,7 +44,7 @@ public class InputChangelogSnapshotEnumeratorTest extends DataFileSnapshotEnumer
         TableCommit commit = table.newCommit(commitUser);
         SnapshotEnumerator enumerator =
                 new InputChangelogSnapshotEnumerator(
-                        tablePath, table.newScan(), CoreOptions.LogStartupMode.FULL, null, null);
+                        tablePath, table.newScan(), CoreOptions.StartupMode.FULL, null, null);
 
         // first call without any snapshot, should return null
         assertThat(enumerator.enumerate()).isNull();
@@ -134,7 +134,7 @@ public class InputChangelogSnapshotEnumeratorTest extends DataFileSnapshotEnumer
                 new InputChangelogSnapshotEnumerator(
                         tablePath,
                         table.newScan(),
-                        CoreOptions.LogStartupMode.FROM_TIMESTAMP,
+                        CoreOptions.StartupMode.FROM_TIMESTAMP,
                         startMillis,
                         null);
 
@@ -194,7 +194,7 @@ public class InputChangelogSnapshotEnumeratorTest extends DataFileSnapshotEnumer
 
         SnapshotEnumerator enumerator =
                 new InputChangelogSnapshotEnumerator(
-                        tablePath, table.newScan(), CoreOptions.LogStartupMode.LATEST, null, null);
+                        tablePath, table.newScan(), CoreOptions.StartupMode.LATEST, null, null);
 
         DataTableScan.DataFilePlan plan = enumerator.enumerate();
         assertThat(plan.snapshotId).isEqualTo(2);

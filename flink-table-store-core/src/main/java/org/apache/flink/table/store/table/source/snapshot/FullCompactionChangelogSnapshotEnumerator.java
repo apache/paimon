@@ -46,7 +46,7 @@ public class FullCompactionChangelogSnapshotEnumerator extends DataFileSnapshotE
             Path tablePath,
             DataTableScan scan,
             int maxLevel,
-            CoreOptions.LogStartupMode startupMode,
+            CoreOptions.StartupMode startupMode,
             @Nullable Long startupMillis,
             @Nullable Long nextSnapshotId) {
         super(tablePath, scan.withLevel(maxLevel), startupMode, startupMillis, nextSnapshotId);

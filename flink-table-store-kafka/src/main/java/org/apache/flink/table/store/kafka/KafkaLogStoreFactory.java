@@ -58,9 +58,9 @@ import static org.apache.flink.table.factories.FactoryUtil.createTableFactoryHel
 import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.flink.table.store.CoreOptions.LOG_RETENTION;
-import static org.apache.flink.table.store.CoreOptions.LOG_SCAN;
-import static org.apache.flink.table.store.CoreOptions.LOG_SCAN_TIMESTAMP_MILLS;
 import static org.apache.flink.table.store.CoreOptions.LogConsistency;
+import static org.apache.flink.table.store.CoreOptions.STARTUP_MODE;
+import static org.apache.flink.table.store.CoreOptions.STARTUP_TIMESTAMP_MILLIS;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.TOPIC;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ISOLATION_LEVEL_CONFIG;
@@ -198,8 +198,8 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                 valueDeserializer,
                 projectFields,
                 helper.getOptions().get(LOG_CONSISTENCY),
-                helper.getOptions().get(LOG_SCAN),
-                helper.getOptions().get(LOG_SCAN_TIMESTAMP_MILLS));
+                helper.getOptions().get(STARTUP_MODE),
+                helper.getOptions().get(STARTUP_TIMESTAMP_MILLIS));
     }
 
     @Override

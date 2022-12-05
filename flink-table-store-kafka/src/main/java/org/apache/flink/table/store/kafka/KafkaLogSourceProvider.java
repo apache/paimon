@@ -25,7 +25,7 @@ import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsIni
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions.LogConsistency;
-import org.apache.flink.table.store.CoreOptions.LogStartupMode;
+import org.apache.flink.table.store.CoreOptions.StartupMode;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.types.DataType;
 
@@ -61,7 +61,7 @@ public class KafkaLogSourceProvider implements LogSourceProvider {
 
     private final LogConsistency consistency;
 
-    private final LogStartupMode scanMode;
+    private final StartupMode scanMode;
 
     @Nullable private final Long timestampMills;
 
@@ -74,7 +74,7 @@ public class KafkaLogSourceProvider implements LogSourceProvider {
             DeserializationSchema<RowData> valueDeserializer,
             @Nullable int[][] projectFields,
             LogConsistency consistency,
-            LogStartupMode scanMode,
+            StartupMode scanMode,
             @Nullable Long timestampMills) {
         this.topic = topic;
         this.properties = properties;
