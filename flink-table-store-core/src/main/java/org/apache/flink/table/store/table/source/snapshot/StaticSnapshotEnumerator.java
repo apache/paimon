@@ -44,6 +44,7 @@ public class StaticSnapshotEnumerator extends DataFileSnapshotEnumerator {
 
     @Override
     protected DataTableScan.DataFilePlan nextEnumerate() {
-        throw new IllegalStateException("Unsupported operation in static snapshot enumerator.");
+        throw new UnsupportedOperationException(
+                "Unsupported operation in static snapshot enumerator.");
     }
 }
