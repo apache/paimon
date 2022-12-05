@@ -30,10 +30,10 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 /**
- * A {@link DataFileSnapshotEnumerator} which scans incremental changes in {@link
+ * A {@link ContinuousSnapshotEnumerator} which scans incremental changes in {@link
  * Snapshot#deltaManifestList()} for each newly created snapshots.
  */
-public class DeltaSnapshotEnumerator extends DataFileSnapshotEnumerator {
+public class DeltaSnapshotEnumerator extends ContinuousSnapshotEnumerator {
 
     private static final Logger LOG = LoggerFactory.getLogger(DeltaSnapshotEnumerator.class);
 

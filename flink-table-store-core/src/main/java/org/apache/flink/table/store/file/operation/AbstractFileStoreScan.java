@@ -49,6 +49,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.util.Preconditions.checkState;
+
 /** Default implementation of {@link FileStoreScan}. */
 public abstract class AbstractFileStoreScan implements FileStoreScan {
 
@@ -60,7 +62,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private final ManifestList manifestList;
     private final int numOfBuckets;
     private final boolean checkNumOfBuckets;
-    private final boolean readCompacted;
 
     private final ConcurrentMap<Long, TableSchema> tableSchemas;
     private final SchemaManager schemaManager;
@@ -84,8 +85,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
-            boolean checkNumOfBuckets,
-            boolean readCompacted) {
+            boolean checkNumOfBuckets) {
         this.partitionStatsConverter = new FieldStatsArraySerializer(partitionType);
         this.partitionConverter = new RowDataToObjectArrayConverter(partitionType);
         Preconditions.checkArgument(
@@ -98,7 +98,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         this.manifestList = manifestListFactory.create();
         this.numOfBuckets = numOfBuckets;
         this.checkNumOfBuckets = checkNumOfBuckets;
-        this.readCompacted = readCompacted;
         this.tableSchemas = new ConcurrentHashMap<>();
     }
 
@@ -176,25 +175,15 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public Plan plan() {
-        List<ManifestFileMeta> manifests = specifiedManifests;
-        Long snapshotId = specifiedSnapshotId;
-        if (manifests == null) {
-            if (snapshotId == null) {
-                snapshotId =
-                        readCompacted
-                                ? snapshotManager.latestCompactedSnapshotId()
-                                : snapshotManager.latestSnapshotId();
-            }
-            if (snapshotId == null) {
-                manifests = Collections.emptyList();
-            } else {
-                Snapshot snapshot = snapshotManager.snapshot(snapshotId);
-                manifests = readManiests(snapshot);
-            }
+        final Long readSnapshot = specifiedSnapshotId;
+        final List<ManifestFileMeta> readManifests;
+        if (specifiedManifests == null) {
+            checkState(readSnapshot == null, "Manifests and snapshotId cannot both be null");
+            Snapshot snapshot = snapshotManager.snapshot(readSnapshot);
+            readManifests = readManifests(snapshot);
+        } else {
+            readManifests = specifiedManifests;
         }
-
-        final Long readSnapshot = snapshotId;
-        final List<ManifestFileMeta> readManifests = manifests;
 
         List<ManifestEntry> entries;
         try {
@@ -256,7 +245,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         };
     }
 
-    private List<ManifestFileMeta> readManiests(Snapshot snapshot) {
+    private List<ManifestFileMeta> readManifests(Snapshot snapshot) {
         switch (scanKind) {
             case ALL:
                 return snapshot.readAllDataManifests(manifestList);

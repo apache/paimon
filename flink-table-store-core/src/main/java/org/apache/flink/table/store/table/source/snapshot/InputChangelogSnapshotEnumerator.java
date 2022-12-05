@@ -30,13 +30,13 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 /**
- * A {@link DataFileSnapshotEnumerator} which scans incremental changes in {@link
+ * A {@link ContinuousSnapshotEnumerator} which scans incremental changes in {@link
  * Snapshot#changelogManifestList()} for each newly created snapshots.
  *
  * <p>This enumerator looks for changelog files produced directly from input. Can only be used when
  * {@link CoreOptions#CHANGELOG_PRODUCER} is set to {@link CoreOptions.ChangelogProducer#INPUT}.
  */
-public class InputChangelogSnapshotEnumerator extends DataFileSnapshotEnumerator {
+public class InputChangelogSnapshotEnumerator extends ContinuousSnapshotEnumerator {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(InputChangelogSnapshotEnumerator.class);
