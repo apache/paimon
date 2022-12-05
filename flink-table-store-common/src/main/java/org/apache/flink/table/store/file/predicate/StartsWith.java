@@ -22,6 +22,7 @@ import org.apache.flink.table.data.binary.BinaryStringData;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.types.logical.LogicalType;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -53,5 +54,10 @@ public class StartsWith extends NullFalseLeafBinaryFunction {
     @Override
     public Optional<LeafFunction> negate() {
         return Optional.empty();
+    }
+
+    @Override
+    public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
+        return visitor.visitStartsWith(fieldRef, literals.get(0));
     }
 }

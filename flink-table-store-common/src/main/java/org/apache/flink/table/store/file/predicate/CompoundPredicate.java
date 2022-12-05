@@ -86,6 +86,8 @@ public class CompoundPredicate implements Predicate {
 
         public abstract Optional<Predicate> negate(List<Predicate> children);
 
+        public abstract <T> T visit(FunctionVisitor<T> visitor, List<T> children);
+
         @Override
         public int hashCode() {
             return this.getClass().getName().hashCode();

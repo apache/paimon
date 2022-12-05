@@ -47,4 +47,7 @@ public abstract class LeafFunction implements Serializable {
         }
         return o != null && getClass() == o.getClass();
     }
+
+    public abstract <T> T visit(
+            FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals);
 }
