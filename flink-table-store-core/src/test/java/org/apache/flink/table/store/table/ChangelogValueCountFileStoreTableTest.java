@@ -23,6 +23,7 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
+import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -103,7 +104,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().withIncremental(true).plan().splits();
+        List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
@@ -123,7 +124,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().withIncremental(true).plan().splits();
+        List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
         TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("-100|10", "+101|11"));
@@ -139,7 +140,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
 
         Predicate predicate = builder.equal(2, 201L);
         List<Split> splits =
-                table.newScan().withIncremental(true).withFilter(predicate).plan().splits();
+                table.newScan().withKind(ScanKind.DELTA).withFilter(predicate).plan().splits();
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
@@ -190,7 +191,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         write.close();
 
         // check that no data file is produced
-        List<Split> splits = table.newScan().withIncremental(true).plan().splits();
+        List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
         assertThat(splits).isEmpty();
         // check that no changelog file is produced
         Path bucketPath = DataFilePathFactory.bucketPath(table.location(), "1", 0);

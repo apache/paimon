@@ -46,7 +46,7 @@ public interface FileStoreScan {
 
     FileStoreScan withManifestList(List<ManifestFileMeta> manifests);
 
-    FileStoreScan withIncremental(boolean isIncremental);
+    FileStoreScan withKind(ScanKind scanKind);
 
     FileStoreScan withLevel(int level);
 

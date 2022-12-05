@@ -156,7 +156,7 @@ public class FileStoreLookupFunction extends TableFunction<RowData> {
 
     /** Used by code generation. */
     @SuppressWarnings("unused")
-    public void eval(Object... values) throws IOException {
+    public void eval(Object... values) throws Exception {
         checkRefresh();
         List<RowData> results = lookupTable.get(GenericRowData.of(values));
         for (RowData matchedRow : results) {
@@ -164,7 +164,7 @@ public class FileStoreLookupFunction extends TableFunction<RowData> {
         }
     }
 
-    private void checkRefresh() throws IOException {
+    private void checkRefresh() throws Exception {
         if (nextLoadTime > System.currentTimeMillis()) {
             return;
         }
@@ -179,7 +179,7 @@ public class FileStoreLookupFunction extends TableFunction<RowData> {
         nextLoadTime = System.currentTimeMillis() + refreshInterval.toMillis();
     }
 
-    private void refresh() throws IOException {
+    private void refresh() throws Exception {
         while (true) {
             Iterator<RowData> batch = streamingReader.nextBatch();
             if (batch == null) {

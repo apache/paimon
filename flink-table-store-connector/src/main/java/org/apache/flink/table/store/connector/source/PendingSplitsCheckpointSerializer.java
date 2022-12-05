@@ -31,6 +31,8 @@ import java.util.List;
 public class PendingSplitsCheckpointSerializer
         implements SimpleVersionedSerializer<PendingSplitsCheckpoint> {
 
+    private static final long INVALID_SNAPSHOT = -1;
+
     private final FileStoreSourceSplitSerializer splitSerializer;
 
     public PendingSplitsCheckpointSerializer(FileStoreSourceSplitSerializer splitSerializer) {
@@ -46,19 +48,24 @@ public class PendingSplitsCheckpointSerializer
     public byte[] serialize(PendingSplitsCheckpoint pendingSplitsCheckpoint) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
+
         view.writeInt(pendingSplitsCheckpoint.splits().size());
         for (FileStoreSourceSplit split : pendingSplitsCheckpoint.splits()) {
             byte[] bytes = splitSerializer.serialize(split);
             view.writeInt(bytes.length);
             view.write(bytes);
         }
-        view.writeLong(pendingSplitsCheckpoint.currentSnapshotId());
+
+        Long currentSnapshotId = pendingSplitsCheckpoint.currentSnapshotId();
+        view.writeLong(currentSnapshotId == null ? INVALID_SNAPSHOT : currentSnapshotId);
+
         return out.toByteArray();
     }
 
     @Override
     public PendingSplitsCheckpoint deserialize(int version, byte[] serialized) throws IOException {
         DataInputDeserializer view = new DataInputDeserializer(serialized);
+
         int splitNumber = view.readInt();
         List<FileStoreSourceSplit> splits = new ArrayList<>(splitNumber);
         for (int i = 0; i < splitNumber; i++) {
@@ -67,7 +74,9 @@ public class PendingSplitsCheckpointSerializer
             view.readFully(bytes);
             splits.add(splitSerializer.deserialize(version, bytes));
         }
+
         long currentSnapshotId = view.readLong();
-        return new PendingSplitsCheckpoint(splits, currentSnapshotId);
+        return new PendingSplitsCheckpoint(
+                splits, currentSnapshotId == INVALID_SNAPSHOT ? null : currentSnapshotId);
     }
 }

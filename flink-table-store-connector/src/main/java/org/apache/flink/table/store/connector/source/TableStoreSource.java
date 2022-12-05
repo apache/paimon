@@ -53,10 +53,11 @@ import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.flink.table.store.CoreOptions.LOG_SCAN_REMOVE_NORMALIZE;
 
 /**
- * Table source to create {@link FileStoreSource} under batch mode or change-tracking is disabled.
- * For streaming mode with change-tracking enabled and FULL scan mode, it will create a {@link
- * org.apache.flink.connector.base.source.hybrid.HybridSource} of {@link FileStoreSource} and kafka
- * log source created by {@link LogSourceProvider}.
+ * Table source to create {@link StaticFileStoreSource} or {@link ContinuousFileStoreSource} under
+ * batch mode or change-tracking is disabled. For streaming mode with change-tracking enabled and
+ * FULL scan mode, it will create a {@link
+ * org.apache.flink.connector.base.source.hybrid.HybridSource} of {@link StaticFileStoreSource} and
+ * kafka log source created by {@link LogSourceProvider}.
  */
 public class TableStoreSource extends FlinkTableSource
         implements LookupTableSource, SupportsWatermarkPushDown {

@@ -38,6 +38,7 @@ import org.apache.flink.table.store.file.operation.FileStoreCommitImpl;
 import org.apache.flink.table.store.file.operation.FileStoreExpireImpl;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
+import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -270,7 +271,15 @@ public class TestFileStore extends KeyValueFileStore {
                 snapshotId <= endInclusive;
                 snapshotId++) {
             List<ManifestEntry> entries =
-                    newScan().withIncremental(true).withSnapshot(snapshotId).plan().files();
+                    newScan()
+                            .withKind(
+                                    options.changelogProducer()
+                                                    == CoreOptions.ChangelogProducer.NONE
+                                            ? ScanKind.DELTA
+                                            : ScanKind.CHANGELOG)
+                            .withSnapshot(snapshotId)
+                            .plan()
+                            .files();
             result.addAll(readKvsFromManifestEntries(entries, true));
         }
         return result;

@@ -21,12 +21,9 @@ package org.apache.flink.table.store.connector.source;
 import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
-import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
-import org.apache.flink.table.store.table.source.SnapshotEnumerator;
-import org.apache.flink.table.store.table.source.SnapshotEnumerator.EnumeratorResult;
+import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,7 +41,6 @@ import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 
-import static org.apache.flink.table.store.connector.source.PendingSplitsCheckpoint.INVALID_SNAPSHOT;
 import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -58,6 +54,8 @@ public class ContinuousFileSplitEnumerator
 
     private final Map<Integer, Queue<FileStoreSourceSplit>> bucketSplits;
 
+    private Long nextSnapshotId;
+
     private final long discoveryInterval;
 
     private final Set<Integer> readersAwaitingSplit;
@@ -66,26 +64,21 @@ public class ContinuousFileSplitEnumerator
 
     private final SnapshotEnumerator snapshotEnumerator;
 
-    private Long currentSnapshotId;
-
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
-            Path location,
-            DataTableScan scan,
-            CoreOptions.ChangelogProducer changelogProducer,
             Collection<FileStoreSourceSplit> remainSplits,
-            long currentSnapshotId,
-            long discoveryInterval) {
+            Long nextSnapshotId,
+            long discoveryInterval,
+            SnapshotEnumerator snapshotEnumerator) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.bucketSplits = new HashMap<>();
         addSplits(remainSplits);
-        this.currentSnapshotId = currentSnapshotId;
+        this.nextSnapshotId = nextSnapshotId;
         this.discoveryInterval = discoveryInterval;
         this.readersAwaitingSplit = new HashSet<>();
         this.splitGenerator = new FileStoreSourceSplitGenerator();
-        this.snapshotEnumerator =
-                new SnapshotEnumerator(location, scan, changelogProducer, currentSnapshotId);
+        this.snapshotEnumerator = snapshotEnumerator;
     }
 
     private void addSplits(Collection<FileStoreSourceSplit> splits) {
@@ -101,10 +94,7 @@ public class ContinuousFileSplitEnumerator
     @Override
     public void start() {
         context.callAsync(
-                snapshotEnumerator,
-                this::processDiscoveredSplits,
-                discoveryInterval,
-                discoveryInterval);
+                snapshotEnumerator::enumerate, this::processDiscoveredSplits, 0, discoveryInterval);
     }
 
     @Override
@@ -139,8 +129,7 @@ public class ContinuousFileSplitEnumerator
         List<FileStoreSourceSplit> splits = new ArrayList<>();
         bucketSplits.values().forEach(splits::addAll);
         final PendingSplitsCheckpoint checkpoint =
-                new PendingSplitsCheckpoint(
-                        splits, currentSnapshotId == null ? INVALID_SNAPSHOT : currentSnapshotId);
+                new PendingSplitsCheckpoint(splits, nextSnapshotId);
 
         LOG.debug("Source Checkpoint is {}", checkpoint);
         return checkpoint;
@@ -148,7 +137,8 @@ public class ContinuousFileSplitEnumerator
 
     // ------------------------------------------------------------------------
 
-    private void processDiscoveredSplits(@Nullable EnumeratorResult result, Throwable error) {
+    private void processDiscoveredSplits(
+            @Nullable DataTableScan.DataFilePlan result, Throwable error) {
         if (error != null) {
             LOG.error("Failed to enumerate files", error);
             return;
@@ -158,8 +148,8 @@ public class ContinuousFileSplitEnumerator
             return;
         }
 
-        currentSnapshotId = result.snapshotId;
-        addSplits(splitGenerator.createSplits(result.plan));
+        nextSnapshotId = result.snapshotId + 1;
+        addSplits(splitGenerator.createSplits(result));
         assignSplits();
     }
 

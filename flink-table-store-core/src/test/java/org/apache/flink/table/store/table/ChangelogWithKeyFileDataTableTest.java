@@ -20,6 +20,7 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
+import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -140,7 +141,7 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                     PredicateBuilder builder =
                             new PredicateBuilder(RowDataType.toRowType(false, SCHEMA_0_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits = table.newScan().withIncremental(true).plan().splits();
+                    List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
                     // filter with "b" = 15 in schema0
                     TableRead read = table.newRead().withFilter(builder.equal(2, 15));
 
@@ -157,7 +158,7 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                     PredicateBuilder builder =
                             new PredicateBuilder(RowDataType.toRowType(false, SCHEMA_1_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits = table.newScan().withIncremental(true).plan().splits();
+                    List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
 
                     // filter with "d" = 15 in schema1 which should be mapped to "b" = 15 in schema0
                     /// TODO: changelog with key only supports to filter on key
@@ -191,7 +192,7 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                     PredicateBuilder builder =
                             new PredicateBuilder(RowDataType.toRowType(false, SCHEMA_0_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits = table.newScan().withIncremental(true).plan().splits();
+                    List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
                     // filter with "kt" = 116 in schema0
                     TableRead read = table.newRead().withFilter(builder.equal(4, 116));
 
@@ -205,7 +206,7 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                     PredicateBuilder builder =
                             new PredicateBuilder(RowDataType.toRowType(false, SCHEMA_1_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits = table.newScan().withIncremental(true).plan().splits();
+                    List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
 
                     // filter with "kt" = 120 in schema1
                     TableRead read = table.newRead().withFilter(builder.equal(1, 120));
