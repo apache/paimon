@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.file.utils;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -53,6 +55,7 @@ public class RecordReaderUtils {
     public static <L, R> RecordReader<R> transform(
             RecordReader<L> fromReader, Function<L, R> function) {
         return new RecordReader<R>() {
+            @Nullable
             @Override
             public RecordIterator<R> readBatch() throws IOException {
                 RecordIterator<L> iterator = fromReader.readBatch();
@@ -75,6 +78,7 @@ public class RecordReaderUtils {
     public static <L, R> RecordReader.RecordIterator<R> transform(
             RecordReader.RecordIterator<L> fromIterator, Function<L, R> function) {
         return new RecordReader.RecordIterator<R>() {
+            @Nullable
             @Override
             public R next() throws IOException {
                 L next = fromIterator.next();
