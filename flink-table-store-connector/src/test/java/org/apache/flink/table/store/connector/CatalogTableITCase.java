@@ -23,6 +23,7 @@ import org.apache.flink.types.Row;
 import org.junit.Test;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.catalog.Catalog.METADATA_TABLE_SPLITTER;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -113,12 +114,13 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         List<Row> result =
                 sql(
-                        "SELECT s.snapshot_id, s.schema_id, t.fields FROM T$snapshots s JOIN T$schemas t ON s.schema_id=t.schema_id");
-        assertThat(result.toString())
-                .isEqualTo(
-                        "[+I[1, 0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"}]], "
-                                + "+I[2, 0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"}]], "
-                                + "+I[3, 1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"}]], "
-                                + "+I[4, 1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"}]]]");
+                        "SELECT s.snapshot_id, s.schema_id, t.fields FROM "
+                                + "T$snapshots s JOIN T$schemas t ON s.schema_id=t.schema_id");
+        assertThat(result.stream().map(Row::toString).collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "+I[1, 0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"}]]",
+                        "+I[2, 0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"}]]",
+                        "+I[3, 1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"}]]",
+                        "+I[4, 1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"}]]");
     }
 }
