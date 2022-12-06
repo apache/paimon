@@ -38,14 +38,12 @@ import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.flink.table.store.file.catalog.Catalog.METADATA_TABLE_SPLITTER;
@@ -95,6 +93,11 @@ public class SchemasTable implements Table {
     @Override
     public TableRead newRead() {
         return new SchemasRead();
+    }
+
+    @Override
+    public Table copy(Map<String, String> dynamicOptions) {
+        return new SchemasTable(location);
     }
 
     private class SchemasScan implements TableScan {
@@ -187,14 +190,7 @@ public class SchemasTable implements Table {
         }
 
         private StringData toJson(Object obj) {
-            ObjectMapper objectMapper = new ObjectMapper();
-            try {
-                // Trim all spaces
-                JsonNode node = objectMapper.readTree(JsonSerdeUtil.toJson(obj));
-                return StringData.fromString(node.toString());
-            } catch (JsonProcessingException e) {
-                throw new RuntimeException(e);
-            }
+            return StringData.fromString(JsonSerdeUtil.toFlatJson(obj));
         }
     }
 }
