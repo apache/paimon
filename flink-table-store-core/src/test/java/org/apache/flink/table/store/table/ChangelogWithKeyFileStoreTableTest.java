@@ -374,7 +374,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         SnapshotEnumerator enumerator =
                 new InputChangelogSnapshotEnumerator(
-                        tablePath, table.newScan(), CoreOptions.LogStartupMode.FULL, null, 1L);
+                        tablePath, table.newScan(), CoreOptions.StartupMode.FULL, null, 1L);
 
         FunctionWithException<Integer, Void, Exception> assertNextSnapshot =
                 i -> {

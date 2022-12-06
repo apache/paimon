@@ -89,7 +89,7 @@ public class TableStreamingReader {
         }
         enumerator =
                 new DeltaSnapshotEnumerator(
-                        table.location(), scan, CoreOptions.LogStartupMode.FULL, null, null);
+                        table.location(), scan, CoreOptions.StartupMode.FULL, null, null);
     }
 
     @Nullable

@@ -44,7 +44,7 @@ public class InputChangelogSnapshotEnumerator extends DataFileSnapshotEnumerator
     public InputChangelogSnapshotEnumerator(
             Path tablePath,
             DataTableScan scan,
-            CoreOptions.LogStartupMode startupMode,
+            CoreOptions.StartupMode startupMode,
             @Nullable Long startupMillis,
             Long nextSnapshotId) {
         super(tablePath, scan, startupMode, startupMillis, nextSnapshotId);

@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.table.store.CoreOptions.LogStartupMode;
+import org.apache.flink.table.store.CoreOptions.StartupMode;
 
 import org.junit.Test;
 
@@ -29,7 +29,7 @@ import java.util.Collections;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
-import static org.apache.flink.table.store.CoreOptions.LOG_SCAN;
+import static org.apache.flink.table.store.CoreOptions.SCAN_MODE;
 import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.rates;
 import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.ratesWithTimestamp;
 
@@ -146,7 +146,7 @@ public class ComputedColumnAndWatermarkTableITCase extends ReadWriteTableTestBas
                         null,
                         false,
                         Collections.singletonMap(
-                                LOG_SCAN.key(), LogStartupMode.LATEST.name().toLowerCase()),
+                                SCAN_MODE.key(), StartupMode.LATEST.name().toLowerCase()),
                         "rate_by_to_currency IS NULL",
                         Arrays.asList(
                                 "corrected_rate_by_to_currency",
@@ -190,7 +190,7 @@ public class ComputedColumnAndWatermarkTableITCase extends ReadWriteTableTestBas
                         WatermarkSpec.of("ts", "ts - INTERVAL '3' YEAR"),
                         false,
                         Collections.singletonMap(
-                                LOG_SCAN.key(), LogStartupMode.LATEST.name().toLowerCase()),
+                                SCAN_MODE.key(), StartupMode.LATEST.name().toLowerCase()),
                         lateEventFilter,
                         Collections.emptyList(), // projection
                         Collections.singletonList(
@@ -213,7 +213,7 @@ public class ComputedColumnAndWatermarkTableITCase extends ReadWriteTableTestBas
                         WatermarkSpec.of("ts1", "ts1 - INTERVAL '3' YEAR"),
                         false,
                         Collections.singletonMap(
-                                LOG_SCAN.key(), LogStartupMode.LATEST.name().toLowerCase()),
+                                SCAN_MODE.key(), StartupMode.LATEST.name().toLowerCase()),
                         lateEventFilter.replaceAll("ts", "ts1"),
                         Arrays.asList("currency", "rate", "ts1"),
                         Collections.singletonList(
@@ -237,7 +237,7 @@ public class ComputedColumnAndWatermarkTableITCase extends ReadWriteTableTestBas
                         WatermarkSpec.of("ts", "ts - INTERVAL '3' YEAR"),
                         false,
                         Collections.singletonMap(
-                                LOG_SCAN.key(), LogStartupMode.LATEST.name().toLowerCase()),
+                                SCAN_MODE.key(), StartupMode.LATEST.name().toLowerCase()),
                         lateEventFilter,
                         Arrays.asList(
                                 "currency",
