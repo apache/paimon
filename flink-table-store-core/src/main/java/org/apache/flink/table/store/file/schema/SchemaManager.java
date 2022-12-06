@@ -255,6 +255,12 @@ public class SchemaManager implements Serializable {
                     }
                 } else if (change instanceof UpdateColumnType) {
                     UpdateColumnType update = (UpdateColumnType) change;
+                    if (schema.partitionKeys().contains(update.fieldName())) {
+                        throw new IllegalArgumentException(
+                                String.format(
+                                        "Cannot update partition column [%s] type in the table[%s].",
+                                        update.fieldName(), tableRoot));
+                    }
                     updateColumn(
                             newFields,
                             update.fieldName(),

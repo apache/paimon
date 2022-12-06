@@ -22,6 +22,8 @@ import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.schema.DataField;
+import org.apache.flink.table.store.file.schema.DataValueConverter;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -103,13 +105,21 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 schemaId,
                 id -> {
                     TableSchema tableSchema = scanTableSchema();
+                    List<DataField> tableFields = tableSchema.fields();
                     TableSchema schema = scanTableSchema(id);
-                    return new FieldStatsArraySerializer(
-                            schema.logicalRowType(),
+                    List<DataField> dataFields = schema.fields();
+                    int[] indexMapping =
                             tableSchema.id() == id
                                     ? null
                                     : SchemaEvolutionUtil.createIndexMapping(
-                                            tableSchema.fields(), schema.fields()));
+                                            tableFields, dataFields);
+                    DataValueConverter[] converterMapping =
+                            tableSchema.id() == id
+                                    ? null
+                                    : SchemaEvolutionUtil.createConvertMapping(
+                                            tableFields, dataFields, indexMapping);
+                    return new FieldStatsArraySerializer(
+                            schema.logicalRowType(), indexMapping, converterMapping);
                 });
     }
 }

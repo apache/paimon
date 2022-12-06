@@ -315,17 +315,4 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                 table.newScan().withFilter(builder.equal(index, value)).plan();
         checkFilterRowCount(plan, expectedRowCount);
     }
-
-    protected static void checkFilterRowCount(
-            DataTableScan.DataFilePlan plan, long expectedRowCount) {
-        List<DataFileMeta> fileMetaList =
-                plan.splits.stream().flatMap(s -> s.files().stream()).collect(Collectors.toList());
-        checkFilterRowCount(fileMetaList, expectedRowCount);
-    }
-
-    protected static void checkFilterRowCount(
-            List<DataFileMeta> fileMetaList, long expectedRowCount) {
-        assertThat(fileMetaList.stream().mapToLong(DataFileMeta::rowCount).sum())
-                .isEqualTo(expectedRowCount);
-    }
 }

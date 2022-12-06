@@ -37,6 +37,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.util.Preconditions.checkState;
 
 /** Utils for schema evolution. */
 public class SchemaEvolutionUtil {
@@ -303,5 +304,51 @@ public class SchemaEvolutionUtil {
 
         throw new IllegalArgumentException(
                 String.format("Can't find data field %s", dataField.name()));
+    }
+
+    /**
+     * Create converter mapping from table fields to underlying data fields. For example, the table
+     * and data fields are as follows
+     *
+     * <ul>
+     *   <li>table fields: 1->c INT, 6->b STRING, 3->a BIGINT
+     *   <li>data fields: 1->a BIGINT, 3->c DOUBLE
+     * </ul>
+     *
+     * <p>We can get the column types (1->a BIGINT), (3->c DOUBLE) from data fields for (1->c INT)
+     * and (3->a BIGINT) in table fields through index mapping [0, -1, 1], then compare the data
+     * type and create converter mapping.
+     *
+     * <p>/// TODO should support nest index mapping when nest schema evolution is supported.
+     *
+     * @param tableFields the fields of table
+     * @param dataFields the fields of underlying data
+     * @param indexMapping the index mapping from table fields to data fields
+     * @return the index mapping
+     */
+    public static DataValueConverter[] createConvertMapping(
+            List<DataField> tableFields, List<DataField> dataFields, int[] indexMapping) {
+        DataValueConverter[] converterMapping = new DataValueConverter[tableFields.size()];
+        for (int i = 0; i < tableFields.size(); i++) {
+            int dataIndex = indexMapping == null ? i : indexMapping[i];
+            if (dataIndex < 0) {
+                converterMapping[i] = null;
+            } else {
+                DataField tableField = tableFields.get(i);
+                DataField dataField = dataFields.get(dataIndex);
+                checkState(
+                        tableField.type() instanceof AtomicDataType
+                                && dataField.type() instanceof AtomicDataType);
+                if (dataField.type().equals(tableField.type())) {
+                    converterMapping[i] = null;
+                } else {
+                    converterMapping[i] =
+                            new DataValueConverter(
+                                    dataField.type().logicalType(),
+                                    tableField.type().logicalType());
+                }
+            }
+        }
+        return converterMapping;
     }
 }

@@ -23,6 +23,7 @@ import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.DataField;
+import org.apache.flink.table.store.file.schema.DataValueConverter;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
@@ -110,14 +111,23 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 key -> {
                     final TableSchema tableSchema = scanTableSchema();
                     final TableSchema schema = scanTableSchema(key);
+                    final List<DataField> tableKeyFields =
+                            keyValueFieldsExtractor.keyFields(tableSchema);
                     final List<DataField> keyFields = keyValueFieldsExtractor.keyFields(schema);
-                    return new FieldStatsArraySerializer(
-                            RowDataType.toRowType(false, keyFields),
+                    final int[] indexMapping =
                             tableSchema.id() == key
                                     ? null
                                     : SchemaEvolutionUtil.createIndexMapping(
-                                            keyValueFieldsExtractor.keyFields(tableSchema),
-                                            keyFields));
+                                            tableKeyFields, keyFields);
+                    final DataValueConverter[] converterMapping =
+                            tableSchema.id() == key
+                                    ? null
+                                    : SchemaEvolutionUtil.createConvertMapping(
+                                            tableKeyFields, keyFields, indexMapping);
+                    return new FieldStatsArraySerializer(
+                            RowDataType.toRowType(false, keyFields),
+                            indexMapping,
+                            converterMapping);
                 });
     }
 }

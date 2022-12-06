@@ -22,6 +22,7 @@ import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.schema.AtomicDataType;
 import org.apache.flink.table.store.file.schema.DataField;
+import org.apache.flink.table.store.file.schema.DataValueConverter;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.format.FieldStats;
@@ -93,11 +94,14 @@ public class FieldStatsArraySerializerTest {
                         Collections.EMPTY_MAP,
                         "");
 
+        int[] indexMapping =
+                SchemaEvolutionUtil.createIndexMapping(tableSchema.fields(), dataSchema.fields());
+        DataValueConverter[] converterMapping =
+                SchemaEvolutionUtil.createConvertMapping(
+                        tableSchema.fields(), dataSchema.fields(), indexMapping);
         FieldStatsArraySerializer fieldStatsArraySerializer =
                 new FieldStatsArraySerializer(
-                        tableSchema.logicalRowType(),
-                        SchemaEvolutionUtil.createIndexMapping(
-                                tableSchema.fields(), dataSchema.fields()));
+                        tableSchema.logicalRowType(), indexMapping, converterMapping);
         BinaryRowData minRowData = row(1, 2, 3, 4);
         BinaryRowData maxRowData = row(100, 99, 98, 97);
         long[] nullCounts = new long[] {1, 0, 10, 100};
