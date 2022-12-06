@@ -48,7 +48,7 @@ public class FullCompactionChangelogSnapshotEnumeratorTest
                         tablePath,
                         table.newScan(),
                         table.options().numLevels() - 1,
-                        CoreOptions.LogStartupMode.FULL,
+                        CoreOptions.StartupMode.FULL,
                         null,
                         null);
 
@@ -148,7 +148,7 @@ public class FullCompactionChangelogSnapshotEnumeratorTest
                         tablePath,
                         table.newScan(),
                         table.options().numLevels() - 1,
-                        CoreOptions.LogStartupMode.FROM_TIMESTAMP,
+                        CoreOptions.StartupMode.FROM_TIMESTAMP,
                         startMillis,
                         null);
 
@@ -206,7 +206,7 @@ public class FullCompactionChangelogSnapshotEnumeratorTest
                         tablePath,
                         table.newScan(),
                         table.options().numLevels() - 1,
-                        CoreOptions.LogStartupMode.LATEST,
+                        CoreOptions.StartupMode.LATEST,
                         null,
                         null);
 

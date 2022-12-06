@@ -41,7 +41,7 @@ public abstract class DataFileSnapshotEnumerator implements SnapshotEnumerator {
 
     private final SnapshotManager snapshotManager;
     private final DataTableScan scan;
-    private final CoreOptions.LogStartupMode startupMode;
+    private final CoreOptions.StartupMode startupMode;
     private @Nullable final Long startupMillis;
 
     private @Nullable Long nextSnapshotId;
@@ -49,7 +49,7 @@ public abstract class DataFileSnapshotEnumerator implements SnapshotEnumerator {
     public DataFileSnapshotEnumerator(
             Path tablePath,
             DataTableScan scan,
-            CoreOptions.LogStartupMode startupMode,
+            CoreOptions.StartupMode startupMode,
             @Nullable Long startupMillis,
             @Nullable Long nextSnapshotId) {
         this.snapshotManager = new SnapshotManager(tablePath);
@@ -86,9 +86,9 @@ public abstract class DataFileSnapshotEnumerator implements SnapshotEnumerator {
                         startupMillis,
                         String.format(
                                 "%s can not be null when you use %s for %s",
-                                CoreOptions.LOG_SCAN_TIMESTAMP_MILLS.key(),
-                                CoreOptions.LogStartupMode.FROM_TIMESTAMP,
-                                CoreOptions.LOG_SCAN.key()));
+                                CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
+                                CoreOptions.StartupMode.FROM_TIMESTAMP,
+                                CoreOptions.SCAN_MODE.key()));
                 startingSnapshotId = snapshotManager.earlierThanTimeMills(startupMillis);
                 plan = new DataTableScan.DataFilePlan(startingSnapshotId, Collections.emptyList());
                 break;
@@ -133,7 +133,7 @@ public abstract class DataFileSnapshotEnumerator implements SnapshotEnumerator {
     public static DataFileSnapshotEnumerator create(
             FileStoreTable table, DataTableScan scan, Long nextSnapshotId) {
         Path location = table.location();
-        CoreOptions.LogStartupMode startupMode = table.options().logStartupMode();
+        CoreOptions.StartupMode startupMode = table.options().startupMode();
         Long startupMillis = table.options().logScanTimestampMills();
 
         switch (table.options().changelogProducer()) {

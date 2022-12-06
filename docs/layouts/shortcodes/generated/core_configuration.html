@@ -123,22 +123,10 @@
             <td>It means how long changes log will be kept. The default value is from the log system cluster.</td>
         </tr>
         <tr>
-            <td><h5>log.scan</h5></td>
-            <td style="word-wrap: break-word;">full</td>
-            <td><p>Enum</p></td>
-            <td>Specify the startup mode for log consumer.<br /><br />Possible values:<ul><li>"full": Perform a snapshot on the table upon first startup, and continue to read the latest changes.</li><li>"latest": Start from the latest.</li><li>"from-timestamp": Start from user-supplied timestamp.</li></ul></td>
-        </tr>
-        <tr>
             <td><h5>log.scan.remove-normalize</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to force the removal of the normalize node when streaming read. Note: This is dangerous and is likely to cause data errors if downstream is used to calculate aggregation and the input is not complete changelog.</td>
-        </tr>
-        <tr>
-            <td><h5>log.scan.timestamp-millis</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Long</td>
-            <td>Optional timestamp used in case of "from-timestamp" scan mode</td>
         </tr>
         <tr>
             <td><h5>manifest.format</h5></td>
@@ -205,6 +193,18 @@
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to read compacted snapshot only.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.mode</h5></td>
+            <td style="word-wrap: break-word;">deafult</td>
+            <td><p>Enum</p></td>
+            <td>Specify the scanning behavior of the source.<br /><br />Possible values:<ul><li>"deafult": Determines actual startup mode according to other table properties. If "scan.timestamp-millis" is set the actual startup mode will be "from-timestamp". Otherwise the actual startup mode will be "full".</li><li>"full": For streaming sources, produces a snapshot on the table upon first startup, and continue to read the latest changes. For batch sources, just produce a snapshot but does not read new changes.</li><li>"latest": For streaming sources, continuously reads latest changes without producing a snapshot at the beginning. For batch sources, behaves the same as the "full" startup mode.</li><li>"from-timestamp": For streaming sources, continuously reads changes starting from timestamp specified by "scan.timestamp-millis", without producing a snapshot at the beginning. For batch sources, produces a snapshot at timestamp specified by "scan.timestamp-millis" but does not read new changes.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>scan.timestamp-millis</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>Optional timestamp used in case of "from-timestamp" scan mode.</td>
         </tr>
         <tr>
             <td><h5>sequence.field</h5></td>

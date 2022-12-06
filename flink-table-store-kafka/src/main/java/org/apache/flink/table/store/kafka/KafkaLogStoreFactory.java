@@ -31,6 +31,7 @@ import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.utils.DataTypeUtils;
@@ -58,9 +59,8 @@ import static org.apache.flink.table.factories.FactoryUtil.createTableFactoryHel
 import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.flink.table.store.CoreOptions.LOG_RETENTION;
-import static org.apache.flink.table.store.CoreOptions.LOG_SCAN;
-import static org.apache.flink.table.store.CoreOptions.LOG_SCAN_TIMESTAMP_MILLS;
 import static org.apache.flink.table.store.CoreOptions.LogConsistency;
+import static org.apache.flink.table.store.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.TOPIC;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ISOLATION_LEVEL_CONFIG;
@@ -198,8 +198,9 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                 valueDeserializer,
                 projectFields,
                 helper.getOptions().get(LOG_CONSISTENCY),
-                helper.getOptions().get(LOG_SCAN),
-                helper.getOptions().get(LOG_SCAN_TIMESTAMP_MILLS));
+                // TODO visit all options through CoreOptions
+                CoreOptions.startupMode(helper.getOptions()),
+                helper.getOptions().get(SCAN_TIMESTAMP_MILLIS));
     }
 
     @Override

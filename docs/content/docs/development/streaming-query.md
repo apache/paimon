@@ -42,10 +42,10 @@ SELECT * FROM MyTable;
 
 -- Streaming mode, streaming reading, read latest incremental
 SET 'execution.runtime-mode' = 'streaming';
-SELECT * FROM MyTable /*+ OPTIONS ('log.scan'='latest') */;
+SELECT * FROM MyTable /*+ OPTIONS ('scan.mode'='latest') */;
 ```
 
-Different `log.scan` mode will result in different consuming behavior under streaming mode.
+Different `scan.mode` will result in different consuming behavior under streaming mode.
 <table class="table table-bordered">
     <thead>
     <tr>
@@ -56,14 +56,36 @@ Different `log.scan` mode will result in different consuming behavior under stre
     </thead>
     <tbody>
     <tr>
-      <td><h5>FULL</h5></td>
+      <td><h5>default</h5></td>
       <td>Yes</td>
-      <td>FULL scan mode performs a hybrid reading with a snapshot scan and the streaming incremental scan.</td>
+      <td>
+      Determines actual startup mode according to other table properties.
+      If "scan.timestamp-millis" is set the actual startup mode will be "from-timestamp".
+      Otherwise the actual startup mode will be "full".
+      </td>
     </tr>
     <tr>
-      <td><h5>LATEST</h5></td>
+      <td><h5>full</h5></td>
       <td>No</td>
-      <td>LATEST scan mode only reads incremental data from the latest offset.</td>
+      <td>
+      Produces a snapshot on the table upon first startup,
+      and continue to read the latest changes.
+      </td>
+    </tr>
+    <tr>
+      <td><h5>latest</h5></td>
+      <td>No</td>
+      <td>
+      Continuously reads latest changes without producing a snapshot at the beginning.
+      </td>
+    </tr>
+    <tr>
+      <td><h5>from-timestamp</h5></td>
+      <td>No</td>
+      <td>
+      Continuously reads changes starting from timestamp specified by "scan.timestamp-millis",
+      without producing a snapshot at the beginning.
+      </td>
     </tr>
     </tbody>
 </table>

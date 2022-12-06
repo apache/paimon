@@ -29,8 +29,9 @@ import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-import org.apache.flink.table.store.CoreOptions.LogStartupMode;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.MergeEngine;
+import org.apache.flink.table.store.CoreOptions.StartupMode;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.table.FileStoreTable;
@@ -46,7 +47,6 @@ import java.util.Optional;
 import static org.apache.flink.table.store.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.flink.table.store.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.flink.table.store.CoreOptions.ChangelogProducer.FULL_COMPACTION;
-import static org.apache.flink.table.store.CoreOptions.LOG_SCAN;
 import static org.apache.flink.table.store.CoreOptions.MERGE_ENGINE;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED;
 
@@ -146,11 +146,12 @@ public class FlinkSourceBuilder {
                                 + "You can use full compaction changelog producer to support streaming reading.");
             }
 
-            LogStartupMode startupMode = conf.get(LOG_SCAN);
+            // TODO visit all options through CoreOptions
+            StartupMode startupMode = CoreOptions.startupMode(conf);
             if (logSourceProvider == null) {
                 return buildContinuousFileSource();
             } else {
-                if (startupMode != LogStartupMode.FULL) {
+                if (startupMode != StartupMode.FULL) {
                     return logSourceProvider.createSource(null);
                 }
                 return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(

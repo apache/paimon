@@ -40,7 +40,7 @@ public class DeltaSnapshotEnumerator extends DataFileSnapshotEnumerator {
     public DeltaSnapshotEnumerator(
             Path tablePath,
             DataTableScan scan,
-            CoreOptions.LogStartupMode startupMode,
+            CoreOptions.StartupMode startupMode,
             @Nullable Long startupMillis,
             @Nullable Long nextSnapshotId) {
         super(tablePath, scan, startupMode, startupMillis, nextSnapshotId);
