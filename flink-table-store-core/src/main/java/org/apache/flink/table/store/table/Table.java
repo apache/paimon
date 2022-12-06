@@ -23,6 +23,7 @@ import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.io.Serializable;
+import java.util.Map;
 
 /** A table provides basic abstraction for table type and table scan and table read. */
 public interface Table extends Serializable {
@@ -34,4 +35,6 @@ public interface Table extends Serializable {
     TableScan newScan();
 
     TableRead newRead();
+
+    Table copy(Map<String, String> dynamicOptions);
 }

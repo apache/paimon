@@ -47,6 +47,7 @@ import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.flink.table.store.file.catalog.Catalog.METADATA_TABLE_SPLITTER;
@@ -94,6 +95,11 @@ public class SnapshotsTable implements Table {
     @Override
     public TableRead newRead() {
         return new SnapshotsRead();
+    }
+
+    @Override
+    public Table copy(Map<String, String> dynamicOptions) {
+        return new SnapshotsTable(location);
     }
 
     private class SnapshotsScan implements TableScan {

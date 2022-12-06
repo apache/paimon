@@ -18,19 +18,26 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.FileStore;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.sink.TableCommit;
+
+import java.util.Map;
+import java.util.Objects;
+
+import static org.apache.flink.table.store.CoreOptions.PATH;
 
 /** Abstract {@link FileStoreTable}. */
 public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
-    private final Path path;
+    protected final Path path;
     protected final TableSchema tableSchema;
 
     public AbstractFileStoreTable(Path path, TableSchema tableSchema) {
@@ -39,6 +46,43 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     protected abstract FileStore<?> store();
+
+    protected abstract FileStoreTable copy(TableSchema newTableSchema);
+
+    @Override
+    public FileStoreTable copy(Map<String, String> dynamicOptions) {
+        // check option is not immutable
+        Map<String, String> options = tableSchema.options();
+        dynamicOptions.forEach(
+                (k, v) -> {
+                    if (!Objects.equals(v, options.get(k))) {
+                        SchemaManager.checkAlterTableOption(k);
+                    }
+                });
+
+        Configuration newOptions = Configuration.fromMap(options);
+
+        // merge dynamic options into schema.options
+        dynamicOptions.forEach(newOptions::setString);
+
+        // set path always
+        newOptions.set(PATH, path.toString());
+
+        // set dynamic options with default values
+        CoreOptions.setDefaultValues(newOptions);
+
+        // copy a new table store to contain dynamic options
+        TableSchema newTableSchema = tableSchema.copy(newOptions.toMap());
+
+        // validate schema wit new options
+        CoreOptions.validateTableSchema(newTableSchema);
+
+        return copy(newTableSchema);
+    }
+
+    protected SchemaManager schemaManager() {
+        return new SchemaManager(path);
+    }
 
     @Override
     public CoreOptions options() {

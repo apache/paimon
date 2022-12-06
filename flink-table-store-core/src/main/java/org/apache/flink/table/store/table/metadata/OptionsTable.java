@@ -84,6 +84,11 @@ public class OptionsTable implements Table {
         return new OptionsRead();
     }
 
+    @Override
+    public Table copy(Map<String, String> dynamicOptions) {
+        return new OptionsTable(location);
+    }
+
     private class OptionsScan implements TableScan {
 
         @Override

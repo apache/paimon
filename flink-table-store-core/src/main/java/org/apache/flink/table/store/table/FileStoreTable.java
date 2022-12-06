@@ -27,6 +27,7 @@ import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * An abstraction layer above {@link org.apache.flink.table.store.file.FileStore} to provide reading
@@ -56,6 +57,9 @@ public interface FileStoreTable extends Table, SupportsPartition, SupportsWrite 
     TableSchema schema();
 
     SnapshotManager snapshotManager();
+
+    @Override
+    FileStoreTable copy(Map<String, String> dynamicOptions);
 
     @Override
     DataTableScan newScan();
