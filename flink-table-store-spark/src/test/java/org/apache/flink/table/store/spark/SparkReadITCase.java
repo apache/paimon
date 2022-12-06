@@ -84,6 +84,25 @@ public class SparkReadITCase extends SparkReadTestBase {
                         .select("snapshot_id", "schema_id", "commit_user", "commit_kind")
                         .collectAsList();
         assertThat(rows.toString()).isEqualTo("[[1,0,user,APPEND]]");
+
+        spark.sql("USE tablestore");
+        spark.sql(
+                "CREATE TABLE default.schemasTable (\n"
+                        + "a BIGINT,\n"
+                        + "b STRING) USING tablestore\n"
+                        + "COMMENT 'table comment'\n"
+                        + "TBLPROPERTIES ('primary-key' = 'a')");
+        spark.sql("ALTER TABLE default.schemasTable ADD COLUMN c STRING");
+        List<Row> schemas =
+                spark.table("tablestore.default.`schemasTable$schemas`").collectAsList();
+        List<?> fieldsList = schemas.stream().map(row -> row.get(1)).collect(Collectors.toList());
+        assertThat(fieldsList.toString())
+                .isEqualTo(
+                        "[[{\"id\":0,\"name\":\"a\",\"type\":\"BIGINT NOT NULL\"},"
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"VARCHAR(2147483647)\"}], "
+                                + "[{\"id\":0,\"name\":\"a\",\"type\":\"BIGINT NOT NULL\"},"
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"VARCHAR(2147483647)\"},"
+                                + "{\"id\":2,\"name\":\"c\",\"type\":\"VARCHAR(2147483647)\"}]]");
     }
 
     @Test
