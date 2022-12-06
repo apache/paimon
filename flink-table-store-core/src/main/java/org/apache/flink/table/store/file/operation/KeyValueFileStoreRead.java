@@ -35,10 +35,11 @@ import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.file.utils.ProjectKeyRecordReader;
 import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.table.source.DataSplit;
+import org.apache.flink.table.store.utils.ProjectedRowData;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
@@ -198,9 +199,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                     new DropDeleteReader(ConcatRecordReader.create(sectionReaders));
 
             // Project results from SortMergeReader using ProjectKeyRecordReader.
-            return keyProjectedFields == null
-                    ? reader
-                    : new ProjectKeyRecordReader(reader, keyProjectedFields);
+            return keyProjectedFields == null ? reader : projectKey(reader, keyProjectedFields);
         }
     }
 
@@ -211,5 +210,12 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             }
         }
         return Optional.empty();
+    }
+
+    private RecordReader<KeyValue> projectKey(
+            RecordReader<KeyValue> reader, int[][] keyProjectedFields) {
+        ProjectedRowData projectedRow = ProjectedRowData.from(keyProjectedFields);
+        return RecordReaderUtils.transform(
+                reader, kv -> kv.replaceKey(projectedRow.replaceRow(kv.key())));
     }
 }
