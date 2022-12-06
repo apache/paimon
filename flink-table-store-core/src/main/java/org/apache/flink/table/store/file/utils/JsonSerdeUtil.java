@@ -69,6 +69,14 @@ public class JsonSerdeUtil {
         }
     }
 
+    public static <T> String toFlatJson(T t) {
+        try {
+            return OBJECT_MAPPER_INSTANCE.writer().writeValueAsString(t);
+        } catch (JsonProcessingException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     private static Module createTableStoreJacksonModule() {
         SimpleModule module = new SimpleModule("Table store");
         registerJsonObjects(module, TableSchema.class, SchemaSerializer.INSTANCE);
