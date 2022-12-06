@@ -23,6 +23,7 @@ import org.apache.flink.types.Row;
 import org.junit.Test;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.catalog.Catalog.METADATA_TABLE_SPLITTER;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -69,5 +70,57 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         String.format(
                                 "Table name[%s] cannot contain '%s' separator",
                                 "T$aa$bb", METADATA_TABLE_SPLITTER));
+    }
+
+    @Test
+    public void testSchemasTable() throws Exception {
+        sql(
+                "CREATE TABLE T(a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED) with ('a.aa.aaa'='val1', 'b.bb.bbb'='val2')");
+        sql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");
+
+        assertThat(sql("SHOW CREATE TABLE T$schemas").toString())
+                .isEqualTo(
+                        "[+I[CREATE TABLE `TABLE_STORE`.`default`.`T$schemas` (\n"
+                                + "  `schema_id` BIGINT NOT NULL,\n"
+                                + "  `fields` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `partition_keys` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `primary_keys` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `options` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `comment` VARCHAR(2147483647)\n"
+                                + ") ]]");
+
+        List<Row> result = sql("SELECT * FROM T$schemas order by schema_id");
+
+        assertThat(result.toString())
+                .isEqualTo(
+                        "[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},"
+                                + "{\"id\":2,\"name\":\"c\",\"type\":\"VARCHAR(2147483647)\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"b.bb.bbb\":\"val2\"}, ], "
+                                + "+I[1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},"
+                                + "{\"id\":2,\"name\":\"c\",\"type\":\"VARCHAR(2147483647)\"}], [], [\"a\"], "
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\"}, ]]");
+    }
+
+    @Test
+    public void testSnapshotsSchemasTable() throws Exception {
+        sql("CREATE TABLE T (a INT, b INT)");
+        sql("INSERT INTO T VALUES (1, 2)");
+        sql("INSERT INTO T VALUES (3, 4)");
+        sql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");
+        sql("INSERT INTO T VALUES (5, 6)");
+        sql("INSERT INTO T VALUES (7, 8)");
+
+        List<Row> result =
+                sql(
+                        "SELECT s.snapshot_id, s.schema_id, t.fields FROM "
+                                + "T$snapshots s JOIN T$schemas t ON s.schema_id=t.schema_id");
+        assertThat(result.stream().map(Row::toString).collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "+I[1, 0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"}]]",
+                        "+I[2, 0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"}]]",
+                        "+I[3, 1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"}]]",
+                        "+I[4, 1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"}]]");
     }
 }
