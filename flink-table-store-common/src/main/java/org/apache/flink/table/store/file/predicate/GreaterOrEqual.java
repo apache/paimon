@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.predicate;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.types.logical.LogicalType;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.apache.flink.table.store.file.predicate.CompareUtils.compareLiteral;
@@ -45,5 +46,10 @@ public class GreaterOrEqual extends NullFalseLeafBinaryFunction {
     @Override
     public Optional<LeafFunction> negate() {
         return Optional.of(LessThan.INSTANCE);
+    }
+
+    @Override
+    public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
+        return visitor.visitGreaterOrEqual(fieldRef, literals.get(0));
     }
 }

@@ -66,4 +66,9 @@ public class And extends CompoundPredicate.Function {
         }
         return Optional.of(new CompoundPredicate(Or.INSTANCE, negatedChildren));
     }
+
+    @Override
+    public <T> T visit(FunctionVisitor<T> visitor, List<T> children) {
+        return visitor.visitAnd(children);
+    }
 }
