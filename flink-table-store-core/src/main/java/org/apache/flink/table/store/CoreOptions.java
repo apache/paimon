@@ -327,20 +327,20 @@ public class CoreOptions implements Serializable {
                             "The field that generates the sequence number for primary key table,"
                                     + " the sequence number determines which data is the most recent.");
 
-    public static final ConfigOption<StartupMode> STARTUP_MODE =
-            ConfigOptions.key("startup.mode")
+    public static final ConfigOption<StartupMode> SCAN_MODE =
+            ConfigOptions.key("scan.mode")
                     .enumType(StartupMode.class)
                     .defaultValue(StartupMode.DEFAULT)
                     .withDeprecatedKeys("log.scan")
-                    .withDescription("Specify the startup mode for log consumer.");
+                    .withDescription("Specify the scanning behavior of the source.");
 
-    public static final ConfigOption<Long> STARTUP_TIMESTAMP_MILLIS =
-            ConfigOptions.key("startup.timestamp-millis")
+    public static final ConfigOption<Long> SCAN_TIMESTAMP_MILLIS =
+            ConfigOptions.key("scan.timestamp-millis")
                     .longType()
                     .noDefaultValue()
                     .withDeprecatedKeys("log.scan.timestamp-millis")
                     .withDescription(
-                            "Optional timestamp used in case of \"from-timestamp\" scan mode");
+                            "Optional timestamp used in case of \"from-timestamp\" scan mode.");
 
     public static final ConfigOption<Duration> LOG_RETENTION =
             ConfigOptions.key("log.retention")
@@ -529,9 +529,9 @@ public class CoreOptions implements Serializable {
     }
 
     public StartupMode startupMode() {
-        StartupMode mode = options.get(STARTUP_MODE);
+        StartupMode mode = options.get(SCAN_MODE);
         if (mode == StartupMode.DEFAULT) {
-            if (options.contains(STARTUP_TIMESTAMP_MILLIS)) {
+            if (options.contains(SCAN_TIMESTAMP_MILLIS)) {
                 return StartupMode.FROM_TIMESTAMP;
             } else {
                 return StartupMode.FULL;
@@ -542,7 +542,7 @@ public class CoreOptions implements Serializable {
     }
 
     public Long logScanTimestampMills() {
-        return options.get(STARTUP_TIMESTAMP_MILLIS);
+        return options.get(SCAN_TIMESTAMP_MILLIS);
     }
 
     public Duration changelogProducerFullCompactionTriggerInterval() {
@@ -596,9 +596,9 @@ public class CoreOptions implements Serializable {
     public enum StartupMode implements DescribedEnum {
         DEFAULT(
                 "deafult",
-                "Determine actual startup mode according to other table properties. "
-                        + "If startup.timestamp-millis is set the actual startup mode will be from-timestamp. "
-                        + "Otherwise the actual startup mode will be full."),
+                "Determines actual startup mode according to other table properties. "
+                        + "If \"scan.timestamp-millis\" is set the actual startup mode will be \"from-timestamp\". "
+                        + "Otherwise the actual startup mode will be \"full\"."),
 
         FULL(
                 "full",
@@ -610,13 +610,15 @@ public class CoreOptions implements Serializable {
                 "latest",
                 "For streaming sources, continuously reads latest changes "
                         + "without producing a snapshot at the beginning. "
-                        + "For batch sources, behaves the same as the full startup mode."),
+                        + "For batch sources, behaves the same as the \"full\" startup mode."),
 
         FROM_TIMESTAMP(
                 "from-timestamp",
-                "For streaming sources, continuously reads changes from user-supplied timestamp, "
+                "For streaming sources, continuously reads changes "
+                        + "starting from timestamp specified by \"scan.timestamp-millis\", "
                         + "without producing a snapshot at the beginning. "
-                        + "For batch sources, produces a snapshot at user-supplied timestamp.");
+                        + "For batch sources, produces a snapshot at timestamp specified by \"scan.timestamp-millis\" "
+                        + "but does not read new changes.");
 
         private final String value;
         private final String description;
@@ -733,8 +735,8 @@ public class CoreOptions implements Serializable {
      * @param options the options to set default values
      */
     public static void setDefaultValues(Configuration options) {
-        if (options.contains(STARTUP_TIMESTAMP_MILLIS) && !options.contains(STARTUP_MODE)) {
-            options.set(STARTUP_MODE, StartupMode.FROM_TIMESTAMP);
+        if (options.contains(SCAN_TIMESTAMP_MILLIS) && !options.contains(SCAN_MODE)) {
+            options.set(SCAN_MODE, StartupMode.FROM_TIMESTAMP);
         }
     }
 
@@ -752,17 +754,17 @@ public class CoreOptions implements Serializable {
                     options.logScanTimestampMills() != null,
                     String.format(
                             "%s can not be null when you use %s for %s",
-                            STARTUP_TIMESTAMP_MILLIS.key(),
+                            SCAN_TIMESTAMP_MILLIS.key(),
                             StartupMode.FROM_TIMESTAMP,
-                            STARTUP_MODE.key()));
+                            SCAN_MODE.key()));
         } else {
             Preconditions.checkArgument(
                     options.logScanTimestampMills() == null,
                     String.format(
                             "%s should be %s when you set %s",
-                            STARTUP_MODE.key(),
+                            SCAN_MODE.key(),
                             StartupMode.FROM_TIMESTAMP,
-                            STARTUP_TIMESTAMP_MILLIS.key()));
+                            SCAN_TIMESTAMP_MILLIS.key()));
         }
 
         Preconditions.checkArgument(

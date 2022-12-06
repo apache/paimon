@@ -86,9 +86,9 @@ public abstract class DataFileSnapshotEnumerator implements SnapshotEnumerator {
                         startupMillis,
                         String.format(
                                 "%s can not be null when you use %s for %s",
-                                CoreOptions.STARTUP_TIMESTAMP_MILLIS.key(),
+                                CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
                                 CoreOptions.StartupMode.FROM_TIMESTAMP,
-                                CoreOptions.STARTUP_MODE.key()));
+                                CoreOptions.SCAN_MODE.key()));
                 startingSnapshotId = snapshotManager.earlierThanTimeMills(startupMillis);
                 plan = new DataTableScan.DataFilePlan(startingSnapshotId, Collections.emptyList());
                 break;

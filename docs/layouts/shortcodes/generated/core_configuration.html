@@ -195,6 +195,18 @@
             <td>Whether to read compacted snapshot only.</td>
         </tr>
         <tr>
+            <td><h5>scan.mode</h5></td>
+            <td style="word-wrap: break-word;">deafult</td>
+            <td><p>Enum</p></td>
+            <td>Specify the scanning behavior of the source.<br /><br />Possible values:<ul><li>"deafult": Determines actual startup mode according to other table properties. If "scan.timestamp-millis" is set the actual startup mode will be "from-timestamp". Otherwise the actual startup mode will be "full".</li><li>"full": For streaming sources, produces a snapshot on the table upon first startup, and continue to read the latest changes. For batch sources, just produce a snapshot but does not read new changes.</li><li>"latest": For streaming sources, continuously reads latest changes without producing a snapshot at the beginning. For batch sources, behaves the same as the "full" startup mode.</li><li>"from-timestamp": For streaming sources, continuously reads changes starting from timestamp specified by "scan.timestamp-millis", without producing a snapshot at the beginning. For batch sources, produces a snapshot at timestamp specified by "scan.timestamp-millis" but does not read new changes.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>scan.timestamp-millis</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>Optional timestamp used in case of "from-timestamp" scan mode.</td>
+        </tr>
+        <tr>
             <td><h5>sequence.field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -229,18 +241,6 @@
             <td style="word-wrap: break-word;">128 mb</td>
             <td>MemorySize</td>
             <td>Target size of a source split when scanning a bucket.</td>
-        </tr>
-        <tr>
-            <td><h5>startup.mode</h5></td>
-            <td style="word-wrap: break-word;">deafult</td>
-            <td><p>Enum</p></td>
-            <td>Specify the startup mode for log consumer.<br /><br />Possible values:<ul><li>"deafult": Determine actual startup mode according to other table properties. If startup.timestamp-millis is set the actual startup mode will be from-timestamp. Otherwise the actual startup mode will be full.</li><li>"full": For streaming sources, produces a snapshot on the table upon first startup, and continue to read the latest changes. For batch sources, just produce a snapshot but does not read new changes.</li><li>"latest": For streaming sources, continuously reads latest changes without producing a snapshot at the beginning. For batch sources, behaves the same as the full startup mode.</li><li>"from-timestamp": For streaming sources, continuously reads changes from user-supplied timestamp, without producing a snapshot at the beginning. For batch sources, produces a snapshot at user-supplied timestamp.</li></ul></td>
-        </tr>
-        <tr>
-            <td><h5>startup.timestamp-millis</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Long</td>
-            <td>Optional timestamp used in case of "from-timestamp" scan mode</td>
         </tr>
         <tr>
             <td><h5>target-file-size</h5></td>

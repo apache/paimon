@@ -49,8 +49,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.CoreOptions.STARTUP_MODE;
-import static org.apache.flink.table.store.CoreOptions.STARTUP_TIMESTAMP_MILLIS;
+import static org.apache.flink.table.store.CoreOptions.SCAN_MODE;
+import static org.apache.flink.table.store.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.ROOT_PATH;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.relativeTablePath;
@@ -232,7 +232,7 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
             List<Row> expected)
             throws Exception {
         Map<String, String> hints = new HashMap<>();
-        hints.put(STARTUP_MODE.key(), StartupMode.LATEST.name().toLowerCase());
+        hints.put(SCAN_MODE.key(), StartupMode.LATEST.name().toLowerCase());
         collectAndCheckUnderSameEnv(
                         true,
                         true,
@@ -258,8 +258,8 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
             List<Row> expected)
             throws Exception {
         Map<String, String> hints = new HashMap<>();
-        hints.put(STARTUP_MODE.key(), "from-timestamp");
-        hints.put(STARTUP_TIMESTAMP_MILLIS.key(), String.valueOf(timestamp));
+        hints.put(SCAN_MODE.key(), "from-timestamp");
+        hints.put(SCAN_TIMESTAMP_MILLIS.key(), String.valueOf(timestamp));
         collectAndCheckUnderSameEnv(
                         true,
                         true,

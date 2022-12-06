@@ -30,11 +30,23 @@ public class CoreOptionsTest {
     @Test
     public void testDefaultStartupMode() {
         Configuration conf = new Configuration();
-        assertThat(conf.get(CoreOptions.STARTUP_MODE)).isEqualTo(CoreOptions.StartupMode.DEFAULT);
+        assertThat(conf.get(CoreOptions.SCAN_MODE)).isEqualTo(CoreOptions.StartupMode.DEFAULT);
         assertThat(new CoreOptions(conf).startupMode()).isEqualTo(CoreOptions.StartupMode.FULL);
 
         conf = new Configuration();
-        conf.set(CoreOptions.STARTUP_TIMESTAMP_MILLIS, System.currentTimeMillis());
+        conf.set(CoreOptions.SCAN_TIMESTAMP_MILLIS, System.currentTimeMillis());
+        assertThat(new CoreOptions(conf).startupMode())
+                .isEqualTo(CoreOptions.StartupMode.FROM_TIMESTAMP);
+    }
+
+    @Test
+    public void testStartupModeCompatibility() {
+        Configuration conf = new Configuration();
+        conf.setString("log.scan", "latest");
+        assertThat(new CoreOptions(conf).startupMode()).isEqualTo(CoreOptions.StartupMode.LATEST);
+
+        conf = new Configuration();
+        conf.setString("log.scan.timestamp-millis", String.valueOf(System.currentTimeMillis()));
         assertThat(new CoreOptions(conf).startupMode())
                 .isEqualTo(CoreOptions.StartupMode.FROM_TIMESTAMP);
     }
