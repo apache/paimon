@@ -25,6 +25,7 @@ import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.DescribedEnum;
 import org.apache.flink.configuration.MemorySize;
+import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.configuration.description.Description;
 import org.apache.flink.configuration.description.InlineElement;
 import org.apache.flink.core.fs.Path;
@@ -529,9 +530,13 @@ public class CoreOptions implements Serializable {
     }
 
     public StartupMode startupMode() {
+        return startupMode(options);
+    }
+
+    public static StartupMode startupMode(ReadableConfig options) {
         StartupMode mode = options.get(SCAN_MODE);
         if (mode == StartupMode.DEFAULT) {
-            if (options.contains(SCAN_TIMESTAMP_MILLIS)) {
+            if (options.getOptional(SCAN_TIMESTAMP_MILLIS).isPresent()) {
                 return StartupMode.FROM_TIMESTAMP;
             } else {
                 return StartupMode.FULL;

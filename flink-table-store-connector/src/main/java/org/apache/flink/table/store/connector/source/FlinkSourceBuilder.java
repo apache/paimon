@@ -29,6 +29,7 @@ import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.MergeEngine;
 import org.apache.flink.table.store.CoreOptions.StartupMode;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -47,7 +48,6 @@ import static org.apache.flink.table.store.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.flink.table.store.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.flink.table.store.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 import static org.apache.flink.table.store.CoreOptions.MERGE_ENGINE;
-import static org.apache.flink.table.store.CoreOptions.SCAN_MODE;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED;
 
 /** Source builder to build a Flink {@link Source}. */
@@ -146,7 +146,8 @@ public class FlinkSourceBuilder {
                                 + "You can use full compaction changelog producer to support streaming reading.");
             }
 
-            StartupMode startupMode = conf.get(SCAN_MODE);
+            // TODO visit all options through CoreOptions
+            StartupMode startupMode = CoreOptions.startupMode(conf);
             if (logSourceProvider == null) {
                 return buildContinuousFileSource();
             } else {
