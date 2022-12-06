@@ -18,8 +18,11 @@
 
 package org.apache.flink.table.store.file.utils;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /** Utils for {@link RecordReader}. */
 public class RecordReaderUtils {
@@ -43,5 +46,52 @@ public class RecordReaderUtils {
         } finally {
             reader.close();
         }
+    }
+
+    /**
+     * Returns a {@link RecordReader} that applies {@code function} to each element of {@code
+     * fromReader}.
+     */
+    public static <L, R> RecordReader<R> transform(
+            RecordReader<L> fromReader, Function<L, R> function) {
+        return new RecordReader<R>() {
+            @Nullable
+            @Override
+            public RecordIterator<R> readBatch() throws IOException {
+                RecordIterator<L> iterator = fromReader.readBatch();
+                if (iterator == null) {
+                    return null;
+                }
+                return transform(iterator, function);
+            }
+
+            @Override
+            public void close() throws IOException {
+                fromReader.close();
+            }
+        };
+    }
+
+    /**
+     * Returns an iterator that applies {@code function} to each element of {@code fromIterator}.
+     */
+    public static <L, R> RecordReader.RecordIterator<R> transform(
+            RecordReader.RecordIterator<L> fromIterator, Function<L, R> function) {
+        return new RecordReader.RecordIterator<R>() {
+            @Nullable
+            @Override
+            public R next() throws IOException {
+                L next = fromIterator.next();
+                if (next == null) {
+                    return null;
+                }
+                return function.apply(next);
+            }
+
+            @Override
+            public void releaseBatch() {
+                fromIterator.releaseBatch();
+            }
+        };
     }
 }
