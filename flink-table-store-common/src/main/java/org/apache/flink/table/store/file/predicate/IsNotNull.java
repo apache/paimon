@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.predicate;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.types.logical.LogicalType;
 
+import java.util.List;
 import java.util.Optional;
 
 /** A {@link NullFalseLeafBinaryFunction} to eval is not null. */
@@ -43,5 +44,10 @@ public class IsNotNull extends LeafUnaryFunction {
     @Override
     public Optional<LeafFunction> negate() {
         return Optional.of(IsNull.INSTANCE);
+    }
+
+    @Override
+    public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
+        return visitor.visitIsNotNull(fieldRef);
     }
 }

@@ -74,6 +74,10 @@ public class LeafPredicate implements Predicate {
         return fieldName;
     }
 
+    public FieldRef fieldRef() {
+        return new FieldRef(fieldIndex, fieldName, type);
+    }
+
     public List<Object> literals() {
         return literals;
     }

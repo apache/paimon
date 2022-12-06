@@ -68,4 +68,9 @@ public class NotIn extends LeafFunction {
     public Optional<LeafFunction> negate() {
         return Optional.of(In.INSTANCE);
     }
+
+    @Override
+    public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
+        return visitor.visitNotIn(fieldRef, literals);
+    }
 }
