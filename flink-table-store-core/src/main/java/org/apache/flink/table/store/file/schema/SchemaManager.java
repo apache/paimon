@@ -413,7 +413,7 @@ public class SchemaManager implements Serializable {
         return new Path(tableRoot + "/schema/" + SCHEMA_PREFIX + id);
     }
 
-    private void checkAlterTableOption(String key) {
+    public static void checkAlterTableOption(String key) {
         if (CoreOptions.getImmutableOptionKeys().contains(key)) {
             throw new UnsupportedOperationException(
                     String.format("Change '%s' is not supported yet.", key));

@@ -34,7 +34,6 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.RowDataType;
-import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
@@ -64,51 +63,62 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
-    private final KeyValueFileStore store;
+    private transient KeyValueFileStore lazyStore;
 
-    ChangelogWithKeyFileStoreTable(
-            Path path, SchemaManager schemaManager, TableSchema tableSchema) {
+    ChangelogWithKeyFileStoreTable(Path path, TableSchema tableSchema) {
         super(path, tableSchema);
+    }
 
-        RowType rowType = tableSchema.logicalRowType();
-        Configuration conf = Configuration.fromMap(tableSchema.options());
-        CoreOptions.MergeEngine mergeEngine = conf.get(CoreOptions.MERGE_ENGINE);
-        MergeFunctionFactory<KeyValue> mfFactory;
-        switch (mergeEngine) {
-            case DEDUPLICATE:
-                mfFactory = DeduplicateMergeFunction.factory();
-                break;
-            case PARTIAL_UPDATE:
-                mfFactory =
-                        PartialUpdateMergeFunction.factory(
-                                conf.get(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE),
-                                rowType.getChildren());
-                break;
-            case AGGREGATE:
-                mfFactory =
-                        AggregateMergeFunction.factory(
-                                conf,
-                                tableSchema.fieldNames(),
-                                rowType.getChildren(),
-                                tableSchema.primaryKeys());
-                break;
-            default:
-                throw new UnsupportedOperationException("Unsupported merge engine: " + mergeEngine);
+    @Override
+    protected FileStoreTable copy(TableSchema newTableSchema) {
+        return new ChangelogWithKeyFileStoreTable(path, newTableSchema);
+    }
+
+    @Override
+    public KeyValueFileStore store() {
+        if (lazyStore == null) {
+            RowType rowType = tableSchema.logicalRowType();
+            Configuration conf = Configuration.fromMap(tableSchema.options());
+            CoreOptions.MergeEngine mergeEngine = conf.get(CoreOptions.MERGE_ENGINE);
+            MergeFunctionFactory<KeyValue> mfFactory;
+            switch (mergeEngine) {
+                case DEDUPLICATE:
+                    mfFactory = DeduplicateMergeFunction.factory();
+                    break;
+                case PARTIAL_UPDATE:
+                    mfFactory =
+                            PartialUpdateMergeFunction.factory(
+                                    conf.get(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE),
+                                    rowType.getChildren());
+                    break;
+                case AGGREGATE:
+                    mfFactory =
+                            AggregateMergeFunction.factory(
+                                    conf,
+                                    tableSchema.fieldNames(),
+                                    rowType.getChildren(),
+                                    tableSchema.primaryKeys());
+                    break;
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unsupported merge engine: " + mergeEngine);
+            }
+
+            CoreOptions options = new CoreOptions(conf);
+            KeyValueFieldsExtractor extractor = ChangelogWithKeyKeyValueFieldsExtractor.EXTRACTOR;
+            lazyStore =
+                    new KeyValueFileStore(
+                            schemaManager(),
+                            tableSchema.id(),
+                            options,
+                            tableSchema.logicalPartitionType(),
+                            addKeyNamePrefix(tableSchema.logicalBucketKeyType()),
+                            RowDataType.toRowType(false, extractor.keyFields(tableSchema)),
+                            rowType,
+                            extractor,
+                            mfFactory);
         }
-
-        CoreOptions options = new CoreOptions(conf);
-        KeyValueFieldsExtractor extractor = ChangelogWithKeyKeyValueFieldsExtractor.EXTRACTOR;
-        this.store =
-                new KeyValueFileStore(
-                        schemaManager,
-                        tableSchema.id(),
-                        options,
-                        tableSchema.logicalPartitionType(),
-                        addKeyNamePrefix(tableSchema.logicalBucketKeyType()),
-                        RowDataType.toRowType(false, extractor.keyFields(tableSchema)),
-                        rowType,
-                        extractor,
-                        mfFactory);
+        return lazyStore;
     }
 
     private static RowType addKeyNamePrefix(RowType type) {
@@ -138,14 +148,14 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public DataTableScan newScan() {
-        KeyValueFileStoreScan scan = store.newScan();
-        return new DataTableScan(scan, tableSchema, store.pathFactory(), options()) {
+        KeyValueFileStoreScan scan = store().newScan();
+        return new DataTableScan(scan, tableSchema, store().pathFactory(), options()) {
             @Override
             protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
                 return new MergeTreeSplitGenerator(
-                        store.newKeyComparator(),
-                        store.options().splitTargetSize(),
-                        store.options().splitOpenFileCost());
+                        store().newKeyComparator(),
+                        store().options().splitTargetSize(),
+                        store().options().splitOpenFileCost());
             }
 
             @Override
@@ -173,7 +183,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableRead newRead() {
-        return new KeyValueTableRead(store.newRead()) {
+        return new KeyValueTableRead(store().newRead()) {
 
             @Override
             public TableRead withFilter(Predicate predicate) {
@@ -198,13 +208,13 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public TableWrite newWrite(String commitUser) {
         final SequenceGenerator sequenceGenerator =
-                store.options()
+                store().options()
                         .sequenceField()
                         .map(field -> new SequenceGenerator(field, schema().logicalRowType()))
                         .orElse(null);
         final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
-                store.newWrite(commitUser),
+                store().newWrite(commitUser),
                 new SinkRecordConverter(tableSchema),
                 record -> {
                     long sequenceNumber =
@@ -217,11 +227,6 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                             record.row().getRowKind(),
                             record.row());
                 });
-    }
-
-    @Override
-    public KeyValueFileStore store() {
-        return store;
     }
 
     static class ChangelogWithKeyKeyValueFieldsExtractor implements KeyValueFieldsExtractor {

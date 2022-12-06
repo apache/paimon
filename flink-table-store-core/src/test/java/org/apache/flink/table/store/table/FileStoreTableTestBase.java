@@ -379,8 +379,14 @@ public abstract class FileStoreTableTestBase {
             int bucket,
             Function<RowData, String> rowDataToString)
             throws Exception {
+        return getResult(read, getSplitsFor(splits, partition, bucket), rowDataToString);
+    }
+
+    protected List<String> getResult(
+            TableRead read, List<Split> splits, Function<RowData, String> rowDataToString)
+            throws Exception {
         List<ReaderSupplier<RowData>> readers = new ArrayList<>();
-        for (Split split : getSplitsFor(splits, partition, bucket)) {
+        for (Split split : splits) {
             readers.add(() -> read.createReader(split));
         }
         RecordReader<RowData> recordReader = ConcatRecordReader.create(readers);

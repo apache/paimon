@@ -32,7 +32,6 @@ import org.apache.flink.table.store.file.schema.AtomicDataType;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.RowDataType;
-import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
@@ -57,36 +56,47 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
-    private final KeyValueFileStore store;
+    private transient KeyValueFileStore lazyStore;
 
-    ChangelogValueCountFileStoreTable(
-            Path path, SchemaManager schemaManager, TableSchema tableSchema) {
+    ChangelogValueCountFileStoreTable(Path path, TableSchema tableSchema) {
         super(path, tableSchema);
-        KeyValueFieldsExtractor extractor = ValueCountTableKeyValueFieldsExtractor.EXTRACTOR;
-        RowType countType = RowDataType.toRowType(false, extractor.valueFields(tableSchema));
-        this.store =
-                new KeyValueFileStore(
-                        schemaManager,
-                        tableSchema.id(),
-                        new CoreOptions(tableSchema.options()),
-                        tableSchema.logicalPartitionType(),
-                        tableSchema.logicalBucketKeyType(),
-                        RowDataType.toRowType(false, extractor.keyFields(tableSchema)),
-                        countType,
-                        extractor,
-                        ValueCountMergeFunction.factory());
+    }
+
+    @Override
+    protected FileStoreTable copy(TableSchema newTableSchema) {
+        return new ChangelogValueCountFileStoreTable(path, newTableSchema);
+    }
+
+    @Override
+    public KeyValueFileStore store() {
+        if (lazyStore == null) {
+            KeyValueFieldsExtractor extractor = ValueCountTableKeyValueFieldsExtractor.EXTRACTOR;
+            RowType countType = RowDataType.toRowType(false, extractor.valueFields(tableSchema));
+            lazyStore =
+                    new KeyValueFileStore(
+                            schemaManager(),
+                            tableSchema.id(),
+                            new CoreOptions(tableSchema.options()),
+                            tableSchema.logicalPartitionType(),
+                            tableSchema.logicalBucketKeyType(),
+                            RowDataType.toRowType(false, extractor.keyFields(tableSchema)),
+                            countType,
+                            extractor,
+                            ValueCountMergeFunction.factory());
+        }
+        return lazyStore;
     }
 
     @Override
     public DataTableScan newScan() {
-        KeyValueFileStoreScan scan = store.newScan();
-        return new DataTableScan(scan, tableSchema, store.pathFactory(), options()) {
+        KeyValueFileStoreScan scan = store().newScan();
+        return new DataTableScan(scan, tableSchema, store().pathFactory(), options()) {
             @Override
             protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
                 return new MergeTreeSplitGenerator(
-                        store.newKeyComparator(),
-                        store.options().splitTargetSize(),
-                        store.options().splitOpenFileCost());
+                        store().newKeyComparator(),
+                        store().options().splitTargetSize(),
+                        store().options().splitOpenFileCost());
             }
 
             @Override
@@ -98,7 +108,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableRead newRead() {
-        return new KeyValueTableRead(store.newRead()) {
+        return new KeyValueTableRead(store().newRead()) {
 
             @Override
             public TableRead withFilter(Predicate predicate) {
@@ -124,7 +134,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     public TableWrite newWrite(String commitUser) {
         final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
-                store.newWrite(commitUser),
+                store().newWrite(commitUser),
                 new SinkRecordConverter(tableSchema),
                 record -> {
                     switch (record.row().getRowKind()) {
@@ -142,11 +152,6 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                     }
                     return kv;
                 });
-    }
-
-    @Override
-    public KeyValueFileStore store() {
-        return store;
     }
 
     /**

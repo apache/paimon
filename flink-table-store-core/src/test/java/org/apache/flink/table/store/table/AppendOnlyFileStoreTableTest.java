@@ -247,15 +247,15 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         conf.set(CoreOptions.PATH, tablePath.toString());
         conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
         configure.accept(conf);
-        SchemaManager schemaManager = new SchemaManager(tablePath);
         TableSchema tableSchema =
-                schemaManager.commitNewVersion(
-                        new UpdateSchema(
-                                ROW_TYPE,
-                                Collections.singletonList("pt"),
-                                Collections.emptyList(),
-                                conf.toMap(),
-                                ""));
-        return new AppendOnlyFileStoreTable(tablePath, schemaManager, tableSchema);
+                new SchemaManager(tablePath)
+                        .commitNewVersion(
+                                new UpdateSchema(
+                                        ROW_TYPE,
+                                        Collections.singletonList("pt"),
+                                        Collections.emptyList(),
+                                        conf.toMap(),
+                                        ""));
+        return new AppendOnlyFileStoreTable(tablePath, tableSchema);
     }
 }
