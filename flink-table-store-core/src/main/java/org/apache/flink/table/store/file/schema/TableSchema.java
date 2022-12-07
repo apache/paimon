@@ -53,6 +53,15 @@ public class TableSchema implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    /** System field names. */
+    public static final String KEY_FIELD_PREFIX = "_KEY_";
+
+    public static final String VALUE_COUNT = "_VALUE_COUNT";
+    public static final String SEQUENCE_NUMBER = "_SEQUENCE_NUMBER";
+    public static final String VALUE_KIND = "_VALUE_KIND";
+    public static final List<String> SYSTEM_FIELD_NAMES =
+            Arrays.asList(VALUE_COUNT, SEQUENCE_NUMBER, VALUE_KIND);
+
     private final long id;
 
     private final List<DataField> fields;

@@ -36,6 +36,7 @@ import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.FloatType;
 import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.utils.TypeConversions;
 import org.apache.flink.types.Row;
@@ -53,6 +54,8 @@ import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
 
+import static org.apache.flink.table.store.file.schema.TableSchema.KEY_FIELD_PREFIX;
+import static org.apache.flink.table.store.file.schema.TableSchema.SYSTEM_FIELD_NAMES;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -269,6 +272,61 @@ public class SchemaEvolutionTest {
                                         Collections.singletonList(SchemaChange.dropColumn("f1"))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Cannot drop all fields in table");
+    }
+
+    @Test
+    public void testCreateAlterSystemField() throws Exception {
+        UpdateSchema updateSchema1 =
+                new UpdateSchema(
+                        RowType.of(
+                                new LogicalType[] {new IntType(), new BigIntType()},
+                                new String[] {"f0", "_VALUE_COUNT"}),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        assertThatThrownBy(() -> schemaManager.commitNewVersion(updateSchema1))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage(
+                        String.format(
+                                "Field name[%s] in schema cannot be exist in [%s]",
+                                "_VALUE_COUNT", SYSTEM_FIELD_NAMES.toString()));
+
+        UpdateSchema updateSchema2 =
+                new UpdateSchema(
+                        RowType.of(
+                                new LogicalType[] {new IntType(), new BigIntType()},
+                                new String[] {"f0", "_KEY_f1"}),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        assertThatThrownBy(() -> schemaManager.commitNewVersion(updateSchema2))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage(
+                        String.format(
+                                "Field name[%s] in schema cannot start with [%s]",
+                                "_KEY_f1", KEY_FIELD_PREFIX));
+
+        UpdateSchema updateSchema =
+                new UpdateSchema(
+                        RowType.of(new IntType(), new BigIntType()),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        schemaManager.commitNewVersion(updateSchema);
+
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.renameColumn("f0", "_VALUE_KIND"))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage(
+                        String.format(
+                                "Field name[%s] in schema cannot be exist in [%s]",
+                                "_VALUE_KIND", SYSTEM_FIELD_NAMES.toString()));
     }
 
     private List<Row> readRecords(FileStoreTable table, Predicate filter) throws IOException {
