@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.table.source.snapshot;
 
-import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -27,33 +25,13 @@ import org.apache.flink.table.store.table.source.DataTableScan;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
-/**
- * A {@link DataFileSnapshotEnumerator} which scans incremental changes in {@link
- * Snapshot#changelogManifestList()} for each newly created snapshots.
- *
- * <p>This enumerator looks for changelog files produced from full compaction. Can only be used when
- * {@link CoreOptions#CHANGELOG_PRODUCER} is set to {@link
- * CoreOptions.ChangelogProducer#FULL_COMPACTION}.
- */
-public class FullCompactionChangelogSnapshotEnumerator extends DataFileSnapshotEnumerator {
+public class CompactionChangelogFollowUpScanner implements FollowUpScanner {
 
     private static final Logger LOG =
-            LoggerFactory.getLogger(FullCompactionChangelogSnapshotEnumerator.class);
-
-    public FullCompactionChangelogSnapshotEnumerator(
-            Path tablePath,
-            DataTableScan scan,
-            int maxLevel,
-            CoreOptions.StartupMode startupMode,
-            @Nullable Long startupMillis,
-            @Nullable Long nextSnapshotId) {
-        super(tablePath, scan.withLevel(maxLevel), startupMode, startupMillis, nextSnapshotId);
-    }
+            LoggerFactory.getLogger(CompactionChangelogFollowUpScanner.class);
 
     @Override
-    protected boolean shouldReadSnapshot(Snapshot snapshot) {
+    public boolean shouldScanSnapshot(Snapshot snapshot) {
         if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
             return true;
         }
@@ -66,7 +44,7 @@ public class FullCompactionChangelogSnapshotEnumerator extends DataFileSnapshotE
     }
 
     @Override
-    protected DataTableScan.DataFilePlan getPlan(DataTableScan scan) {
-        return scan.withKind(ScanKind.CHANGELOG).plan();
+    public DataTableScan.DataFilePlan getPlan(long snapshotId, DataTableScan scan) {
+        return scan.withKind(ScanKind.CHANGELOG).withSnapshot(snapshotId).plan();
     }
 }

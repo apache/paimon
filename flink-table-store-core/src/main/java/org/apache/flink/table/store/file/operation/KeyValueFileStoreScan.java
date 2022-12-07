@@ -60,8 +60,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
-            boolean checkNumOfBuckets,
-            boolean readCompacted) {
+            boolean checkNumOfBuckets) {
         super(
                 partitionType,
                 bucketKeyType,
@@ -71,8 +70,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 manifestFileFactory,
                 manifestListFactory,
                 numOfBuckets,
-                checkNumOfBuckets,
-                readCompacted);
+                checkNumOfBuckets);
         this.keyValueFieldsExtractor = keyValueFieldsExtractor;
         this.schemaKeyStatsConverters = new ConcurrentHashMap<>();
         this.keyType = keyType;

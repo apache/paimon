@@ -24,7 +24,7 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
-import org.apache.flink.table.store.table.source.snapshot.DataFileSnapshotEnumerator;
+import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
 
 import javax.annotation.Nullable;
 
@@ -76,6 +76,6 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 splits,
                 nextSnapshotId,
                 discoveryInterval,
-                DataFileSnapshotEnumerator.create(table, scan, nextSnapshotId));
+                ContinuousDataFileSnapshotEnumerator.create(table, scan, nextSnapshotId));
     }
 }

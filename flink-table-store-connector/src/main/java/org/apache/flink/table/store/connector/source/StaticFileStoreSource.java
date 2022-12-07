@@ -26,9 +26,12 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
+import org.apache.flink.table.store.table.source.snapshot.StaticDataFileSnapshotEnumerator;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Collection;
 
 /** Bounded {@link FlinkSource} for reading records. It does not monitor new snapshots. */
@@ -62,12 +65,23 @@ public class StaticFileStoreSource extends FlinkSource {
             scan.withFilter(predicate);
         }
 
-        Long snapshotId;
+        Long snapshotId = null;
         Collection<FileStoreSourceSplit> splits;
         if (checkpoint == null) {
-            DataTableScan.DataFilePlan plan = scan.plan();
-            snapshotId = plan.snapshotId;
-            splits = new FileStoreSourceSplitGenerator().createSplits(plan);
+            splits = new ArrayList<>();
+            FileStoreSourceSplitGenerator splitGenerator = new FileStoreSourceSplitGenerator();
+
+            // read all splits from the enumerator in one go
+            SnapshotEnumerator snapshotEnumerator =
+                    StaticDataFileSnapshotEnumerator.create(table, table.newScan());
+            while (true) {
+                DataTableScan.DataFilePlan plan = snapshotEnumerator.enumerate();
+                if (plan == null) {
+                    break;
+                }
+                snapshotId = plan.snapshotId;
+                splits.addAll(splitGenerator.createSplits(plan));
+            }
         } else {
             // restore from checkpoint
             snapshotId = checkpoint.currentSnapshotId();

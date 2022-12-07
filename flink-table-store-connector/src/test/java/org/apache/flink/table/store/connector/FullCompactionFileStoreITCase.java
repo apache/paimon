@@ -55,11 +55,11 @@ public class FullCompactionFileStoreITCase extends FileStoreTableITCase {
     }
 
     @Test
-    public void testReadCompacted() throws Exception {
+    public void testCompactedScanMode() throws Exception {
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(
                         streamSqlIter(
-                                "SELECT * FROM %s /*+ OPTIONS('read.compacted'='true') */", table));
+                                "SELECT * FROM %s /*+ OPTIONS('scan.mode'='compacted') */", table));
 
         batchSql("INSERT INTO %s VALUES ('1', '2', '3'), ('4', '5', '6')", table);
         assertThat(iterator.collect(2))
@@ -68,7 +68,7 @@ public class FullCompactionFileStoreITCase extends FileStoreTableITCase {
         batchSql("INSERT INTO %s VALUES ('7', '8', '9')", table);
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("7", "8", "9"));
 
-        assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('read.compacted'='true') */"))
+        assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.mode'='compacted') */"))
                 .containsExactlyInAnyOrder(
                         Row.of("1", "2", "3"), Row.of("4", "5", "6"), Row.of("7", "8", "9"));
     }

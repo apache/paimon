@@ -19,13 +19,14 @@
 package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateFilter;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.source.snapshot.DeltaSnapshotEnumerator;
+import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
+import org.apache.flink.table.store.table.source.snapshot.DeltaFollowUpScanner;
+import org.apache.flink.table.store.table.source.snapshot.FullStartingScanner;
 import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
 import org.apache.flink.table.store.utils.TypeUtils;
 
@@ -88,8 +89,12 @@ public class TableStreamingReader {
             scan.withFilter(predicate);
         }
         enumerator =
-                new DeltaSnapshotEnumerator(
-                        table.location(), scan, CoreOptions.StartupMode.FULL, null, null);
+                new ContinuousDataFileSnapshotEnumerator(
+                        table.location(),
+                        scan,
+                        new FullStartingScanner(),
+                        new DeltaFollowUpScanner(),
+                        null);
     }
 
     @Nullable
