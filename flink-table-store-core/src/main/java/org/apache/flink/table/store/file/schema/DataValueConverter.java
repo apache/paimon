@@ -78,6 +78,11 @@ public class DataValueConverter {
                         return StringData.fromString(
                                 StringUtils.stripEnd(sourceValue.toString(), " "));
                     }
+
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Cannot convert value[%s] from %s to %s type",
+                                    sourceType, sourceType, targetType));
                 }
             case VARBINARY:
                 {
@@ -86,6 +91,11 @@ public class DataValueConverter {
                             || sourceType.getTypeRoot() == BINARY) {
                         return sourceValue;
                     }
+
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Cannot convert value[%s] from %s to %s type",
+                                    sourceType, sourceType, targetType));
                 }
             case DECIMAL:
                 {
@@ -142,6 +152,11 @@ public class DataValueConverter {
                                         decimalType.getScale());
                             }
                     }
+
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Cannot convert value[%s] from %s to %s type",
+                                    sourceType, sourceType, targetType));
                 }
             case SMALLINT:
                 {
@@ -152,6 +167,11 @@ public class DataValueConverter {
                         case SMALLINT:
                             return getShort(sourceValue);
                     }
+
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Cannot convert value[%s] from %s to %s type",
+                                    sourceType, sourceType, targetType));
                 }
             case INTEGER:
                 {
@@ -164,6 +184,11 @@ public class DataValueConverter {
                         case INTEGER:
                             return getInt(sourceValue);
                     }
+
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Cannot convert value[%s] from %s to %s type",
+                                    sourceType, sourceType, targetType));
                 }
             case BIGINT:
                 {
@@ -178,6 +203,11 @@ public class DataValueConverter {
                         case BIGINT:
                             return getLong(sourceValue);
                     }
+
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Cannot convert value[%s] from %s to %s type",
+                                    sourceType, sourceType, targetType));
                 }
             case FLOAT:
                 {
@@ -196,6 +226,11 @@ public class DataValueConverter {
                         case DECIMAL:
                             return getDecimal(sourceValue).floatValue();
                     }
+
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Cannot convert value[%s] from %s to %s type",
+                                    sourceType, sourceType, targetType));
                 }
             case DOUBLE:
                 {
@@ -216,6 +251,11 @@ public class DataValueConverter {
                         case DECIMAL:
                             return getDecimal(sourceValue).doubleValue();
                     }
+
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Cannot convert value[%s] from %s to %s type",
+                                    sourceType, sourceType, targetType));
                 }
             case DATE:
                 {
@@ -227,6 +267,11 @@ public class DataValueConverter {
                         return DateTimeUtils.toInternal(
                                 new Date(timestampData.toTimestamp().getTime()));
                     }
+
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Cannot convert value[%s] from %s to %s type",
+                                    sourceType, sourceType, targetType));
                 }
                 /**
                  * TODO Convert from TIMESTAMP_WITH_TIME_ZONE which is not supported
