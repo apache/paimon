@@ -88,7 +88,7 @@ public class OrcFileFormat extends FileFormat {
         if (filters != null) {
             for (Predicate pred : filters) {
                 Optional<OrcFilters.Predicate> orcPred =
-                        pred.visit(OrcPredicateFunctionVisitor.visitor());
+                        pred.visit(OrcPredicateFunctionVisitor.VISITOR);
                 orcPred.ifPresent(orcPredicates::add);
             }
         }
