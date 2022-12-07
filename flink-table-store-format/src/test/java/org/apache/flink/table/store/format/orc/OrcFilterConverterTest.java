@@ -32,7 +32,7 @@ import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Unit Tests for {@link OrcFilterConverter}. */
+/** Unit Tests for {@link OrcPredicateFunctionVisitor}. */
 public class OrcFilterConverterTest {
 
     @Test
@@ -74,7 +74,7 @@ public class OrcFilterConverterTest {
     }
 
     private void test(Predicate predicate, OrcFilters.Predicate orcPredicate) {
-        assertThat(OrcFilterConverter.toOrcPredicate(predicate))
+        assertThat(predicate.visit(OrcPredicateFunctionVisitor.VISITOR).get())
                 .hasToString(orcPredicate.toString());
     }
 }
