@@ -336,12 +336,14 @@ public class SchemaEvolutionUtil {
             } else {
                 DataField tableField = tableFields.get(i);
                 DataField dataField = dataFields.get(dataIndex);
-                checkState(
-                        tableField.type() instanceof AtomicDataType
-                                && dataField.type() instanceof AtomicDataType);
                 if (dataField.type().equals(tableField.type())) {
                     converterMapping[i] = null;
                 } else {
+                    // TODO support column type evolution in nested type
+                    checkState(
+                            tableField.type() instanceof AtomicDataType
+                                    && dataField.type() instanceof AtomicDataType,
+                            "Only support column type evolution in atomic data type.");
                     converterMapping[i] =
                             new DataValueConverter(
                                     dataField.type().logicalType(),
