@@ -25,6 +25,10 @@ import org.apache.flink.table.store.table.source.DataTableScan;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * {@link FollowUpScanner} for {@link
+ * org.apache.flink.table.store.CoreOptions.ChangelogProducer#NONE} changelog producer.
+ */
 public class DeltaFollowUpScanner implements FollowUpScanner {
 
     private static final Logger LOG = LoggerFactory.getLogger(DeltaFollowUpScanner.class);

@@ -26,6 +26,11 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
 
+/**
+ * {@link StartingScanner} for the {@link
+ * org.apache.flink.table.store.CoreOptions.StartupMode#FROM_TIMESTAMP} startup mode of a streaming
+ * read.
+ */
 public class ContinuousFromTimestampStartingScanner implements StartingScanner {
 
     private static final Logger LOG =

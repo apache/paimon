@@ -26,6 +26,7 @@ import org.apache.flink.table.store.table.source.DataTableScan;
 
 import javax.annotation.Nullable;
 
+/** {@link SnapshotEnumerator} for batch read. */
 public class StaticDataFileSnapshotEnumerator implements SnapshotEnumerator {
 
     private final SnapshotManager snapshotManager;

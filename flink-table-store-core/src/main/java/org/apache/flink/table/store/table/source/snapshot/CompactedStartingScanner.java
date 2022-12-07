@@ -25,6 +25,10 @@ import org.apache.flink.table.store.table.source.DataTableScan;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * {@link StartingScanner} for the {@link
+ * org.apache.flink.table.store.CoreOptions.StartupMode#COMPACTED} startup mode.
+ */
 public class CompactedStartingScanner implements StartingScanner {
 
     private static final Logger LOG = LoggerFactory.getLogger(CompactedStartingScanner.class);

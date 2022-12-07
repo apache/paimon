@@ -21,6 +21,7 @@ package org.apache.flink.table.store.table.source.snapshot;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.source.DataTableScan;
 
+/** Helper class for the first enumeration of a {@link SnapshotEnumerator}. */
 public interface StartingScanner {
 
     DataTableScan.DataFilePlan getPlan(SnapshotManager snapshotManager, DataTableScan scan);

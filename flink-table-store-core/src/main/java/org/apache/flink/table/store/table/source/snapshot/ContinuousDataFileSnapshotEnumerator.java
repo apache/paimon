@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+/** {@link SnapshotEnumerator} for streaming read. */
 public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator {
 
     private static final Logger LOG =

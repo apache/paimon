@@ -21,6 +21,7 @@ package org.apache.flink.table.store.table.source.snapshot;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.table.source.DataTableScan;
 
+/** Helper class for the follow-up enumeration of a {@link SnapshotEnumerator}. */
 public interface FollowUpScanner {
 
     boolean shouldScanSnapshot(Snapshot snapshot);
