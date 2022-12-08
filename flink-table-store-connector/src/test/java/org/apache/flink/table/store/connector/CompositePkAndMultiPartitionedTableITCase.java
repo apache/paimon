@@ -87,7 +87,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends ReadWriteTableTes
 
         // test streaming read
         final StreamTableEnvironment streamTableEnv =
-                TableEnvironmentTestUtils.create(buildStreamEnv());
+                StreamTableEnvironment.create(buildStreamEnv());
         registerTable(streamTableEnv, managedTable);
         BlockingIterator<Row, Row> streamIter =
                 collectAndCheck(
@@ -273,7 +273,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends ReadWriteTableTes
 
         // test streaming read
         final StreamTableEnvironment streamTableEnv =
-                TableEnvironmentTestUtils.create(buildStreamEnv());
+                StreamTableEnvironment.create(buildStreamEnv());
         registerTable(streamTableEnv, managedTable);
         BlockingIterator<Row, Row> streamIter =
                 collectAndCheck(
@@ -402,7 +402,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends ReadWriteTableTes
 
         // test streaming read
         final StreamTableEnvironment streamTableEnv =
-                TableEnvironmentTestUtils.create(buildStreamEnv());
+                StreamTableEnvironment.create(buildStreamEnv());
         registerTable(streamTableEnv, managedTable);
         BlockingIterator<Row, Row> streamIter =
                 collectAndCheck(
@@ -495,7 +495,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends ReadWriteTableTes
 
         // test streaming read
         final StreamTableEnvironment streamTableEnv =
-                TableEnvironmentTestUtils.create(buildStreamEnv());
+                StreamTableEnvironment.create(buildStreamEnv());
         registerTable(streamTableEnv, managedTable);
         BlockingIterator<Row, Row> streamIter =
                 collectAndCheck(
@@ -598,7 +598,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends ReadWriteTableTes
 
         // test streaming read
         final StreamTableEnvironment streamTableEnv =
-                TableEnvironmentTestUtils.create(buildStreamEnv());
+                StreamTableEnvironment.create(buildStreamEnv());
         registerTable(streamTableEnv, managedTable);
         BlockingIterator<Row, Row> streamIter =
                 collectAndCheck(
@@ -737,8 +737,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends ReadWriteTableTes
 
         // batch read to check data refresh
         final StreamTableEnvironment batchTableEnv =
-                TableEnvironmentTestUtils.create(
-                        buildBatchEnv(), EnvironmentSettings.inBatchMode());
+                StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
         registerTable(batchTableEnv, managedTable);
         collectAndCheck(
                 batchTableEnv,
@@ -843,8 +842,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends ReadWriteTableTes
 
         // batch read to check data refresh
         final StreamTableEnvironment batchTableEnv =
-                TableEnvironmentTestUtils.create(
-                        buildBatchEnv(), EnvironmentSettings.inBatchMode());
+                StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
         registerTable(batchTableEnv, managedTable);
         collectAndCheck(
                 batchTableEnv,
@@ -925,8 +923,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends ReadWriteTableTes
 
         // batch read to check data refresh
         final StreamTableEnvironment batchTableEnv =
-                TableEnvironmentTestUtils.create(
-                        buildBatchEnv(), EnvironmentSettings.inBatchMode());
+                StreamTableEnvironment.create(buildBatchEnv(), EnvironmentSettings.inBatchMode());
         registerTable(batchTableEnv, managedTable);
         collectAndCheck(
                 batchTableEnv,

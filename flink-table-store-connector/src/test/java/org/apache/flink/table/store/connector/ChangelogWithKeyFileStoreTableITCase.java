@@ -99,13 +99,12 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
     }
 
     private TableEnvironment createBatchTableEnvironment() {
-        return TableEnvironmentTestUtils.create(
-                EnvironmentSettings.newInstance().inBatchMode().build());
+        return TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
     }
 
     private TableEnvironment createStreamingTableEnvironment() {
         TableEnvironment sEnv =
-                TableEnvironmentTestUtils.create(
+                TableEnvironment.create(
                         EnvironmentSettings.newInstance().inStreamingMode().build());
         // set checkpoint interval to a random number to emulate different speed of commit
         sEnv.getConfig()
