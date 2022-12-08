@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.table.source.snapshot;
 
-import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -27,31 +25,16 @@ import org.apache.flink.table.store.table.source.DataTableScan;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
 /**
- * A {@link DataFileSnapshotEnumerator} which scans incremental changes in {@link
- * Snapshot#changelogManifestList()} for each newly created snapshots.
- *
- * <p>This enumerator looks for changelog files produced directly from input. Can only be used when
- * {@link CoreOptions#CHANGELOG_PRODUCER} is set to {@link CoreOptions.ChangelogProducer#INPUT}.
+ * {@link FollowUpScanner} for {@link
+ * org.apache.flink.table.store.CoreOptions.ChangelogProducer#NONE} changelog producer.
  */
-public class InputChangelogSnapshotEnumerator extends DataFileSnapshotEnumerator {
+public class DeltaFollowUpScanner implements FollowUpScanner {
 
-    private static final Logger LOG =
-            LoggerFactory.getLogger(InputChangelogSnapshotEnumerator.class);
-
-    public InputChangelogSnapshotEnumerator(
-            Path tablePath,
-            DataTableScan scan,
-            CoreOptions.StartupMode startupMode,
-            @Nullable Long startupMillis,
-            Long nextSnapshotId) {
-        super(tablePath, scan, startupMode, startupMillis, nextSnapshotId);
-    }
+    private static final Logger LOG = LoggerFactory.getLogger(DeltaFollowUpScanner.class);
 
     @Override
-    protected boolean shouldReadSnapshot(Snapshot snapshot) {
+    public boolean shouldScanSnapshot(Snapshot snapshot) {
         if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
             return true;
         }
@@ -64,7 +47,7 @@ public class InputChangelogSnapshotEnumerator extends DataFileSnapshotEnumerator
     }
 
     @Override
-    protected DataTableScan.DataFilePlan getPlan(DataTableScan scan) {
-        return scan.withKind(ScanKind.CHANGELOG).plan();
+    public DataTableScan.DataFilePlan getPlan(long snapshotId, DataTableScan scan) {
+        return scan.withKind(ScanKind.DELTA).withSnapshot(snapshotId).plan();
     }
 }

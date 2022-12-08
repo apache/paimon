@@ -60,7 +60,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private final ManifestList manifestList;
     private final int numOfBuckets;
     private final boolean checkNumOfBuckets;
-    private final boolean readCompacted;
 
     private final ConcurrentMap<Long, TableSchema> tableSchemas;
     private final SchemaManager schemaManager;
@@ -84,8 +83,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
-            boolean checkNumOfBuckets,
-            boolean readCompacted) {
+            boolean checkNumOfBuckets) {
         this.partitionStatsConverter = new FieldStatsArraySerializer(partitionType);
         this.partitionConverter = new RowDataToObjectArrayConverter(partitionType);
         Preconditions.checkArgument(
@@ -98,7 +96,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         this.manifestList = manifestListFactory.create();
         this.numOfBuckets = numOfBuckets;
         this.checkNumOfBuckets = checkNumOfBuckets;
-        this.readCompacted = readCompacted;
         this.tableSchemas = new ConcurrentHashMap<>();
     }
 
@@ -180,10 +177,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         Long snapshotId = specifiedSnapshotId;
         if (manifests == null) {
             if (snapshotId == null) {
-                snapshotId =
-                        readCompacted
-                                ? snapshotManager.latestCompactedSnapshotId()
-                                : snapshotManager.latestSnapshotId();
+                snapshotId = snapshotManager.latestSnapshotId();
             }
             if (snapshotId == null) {
                 manifests = Collections.emptyList();
