@@ -34,6 +34,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.flink.table.store.file.schema.TableSchema.SEQUENCE_NUMBER;
+import static org.apache.flink.table.store.file.schema.TableSchema.VALUE_KIND;
 import static org.apache.flink.util.Preconditions.checkState;
 
 /**
@@ -41,8 +43,6 @@ import static org.apache.flink.util.Preconditions.checkState;
  * reused.
  */
 public class KeyValue {
-    private static final String SEQUENCE_NUMBER = "_SEQUENCE_NUMBER";
-    private static final String VALUE_KIND = "_VALUE_KIND";
 
     public static final long UNKNOWN_SEQUENCE = -1;
     public static final int UNKNOWN_LEVEL = -1;

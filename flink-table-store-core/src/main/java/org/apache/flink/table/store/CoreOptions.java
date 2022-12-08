@@ -50,6 +50,9 @@ import java.util.Set;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
 import static org.apache.flink.configuration.description.TextElement.text;
+import static org.apache.flink.table.store.file.schema.TableSchema.KEY_FIELD_PREFIX;
+import static org.apache.flink.table.store.file.schema.TableSchema.SYSTEM_FIELD_NAMES;
+import static org.apache.flink.util.Preconditions.checkState;
 
 /** Core options for table store. */
 public class CoreOptions implements Serializable {
@@ -788,6 +791,22 @@ public class CoreOptions implements Serializable {
             throw new UnsupportedOperationException(
                     "Changelog table with full compaction must have primary keys");
         }
+
+        // Check column names in schema
+        schema.fieldNames()
+                .forEach(
+                        f -> {
+                            checkState(
+                                    !SYSTEM_FIELD_NAMES.contains(f),
+                                    String.format(
+                                            "Field name[%s] in schema cannot be exist in [%s]",
+                                            f, SYSTEM_FIELD_NAMES.toString()));
+                            checkState(
+                                    !f.startsWith(KEY_FIELD_PREFIX),
+                                    String.format(
+                                            "Field name[%s] in schema cannot start with [%s]",
+                                            f, KEY_FIELD_PREFIX));
+                        });
     }
 
     @Internal
