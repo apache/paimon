@@ -55,11 +55,10 @@ import java.util.stream.Collectors;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.pickTransformFieldMapping;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.splitAnd;
+import static org.apache.flink.table.store.file.schema.TableSchema.KEY_FIELD_PREFIX;
 
 /** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode with primary keys. */
 public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
-
-    private static final String KEY_FIELD_PREFIX = "_KEY_";
 
     private static final long serialVersionUID = 1L;
 

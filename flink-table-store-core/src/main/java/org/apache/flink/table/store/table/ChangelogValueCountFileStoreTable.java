@@ -51,6 +51,8 @@ import org.apache.flink.types.RowKind;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.flink.table.store.file.schema.TableSchema.VALUE_COUNT;
+
 /** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode without primary keys. */
 public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
 
@@ -173,7 +175,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
         @Override
         public List<DataField> valueFields(TableSchema schema) {
             return Collections.singletonList(
-                    new DataField(0, "_VALUE_COUNT", new AtomicDataType(new BigIntType(false))));
+                    new DataField(0, VALUE_COUNT, new AtomicDataType(new BigIntType(false))));
         }
     }
 }
