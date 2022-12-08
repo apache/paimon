@@ -65,12 +65,8 @@ public abstract class FileStoreTableITCase extends AbstractTestBase {
 
     @Before
     public void before() throws IOException {
-        bEnv =
-                TableEnvironmentTestUtils.create(
-                        EnvironmentSettings.newInstance().inBatchMode().build());
-        sEnv =
-                TableEnvironmentTestUtils.create(
-                        EnvironmentSettings.newInstance().inStreamingMode().build());
+        bEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
+        sEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inStreamingMode().build());
         sEnv.getConfig().getConfiguration().set(CHECKPOINTING_INTERVAL, Duration.ofMillis(100));
         path = TEMPORARY_FOLDER.newFolder().toURI().toString();
         prepareConfiguration(bEnv, path);

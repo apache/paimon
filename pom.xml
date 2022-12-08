@@ -444,7 +444,7 @@ under the License.
                     <trimStackTrace>false</trimStackTrace>
                     <systemPropertyVariables>
                         <forkNumber>0${surefire.forkNumber}</forkNumber>
-                        <checkpointing.randomization>true</checkpointing.randomization>
+                        <checkpointing.randomization>false</checkpointing.randomization>
                         <project.basedir>${project.basedir}</project.basedir>
                         <!--suppress MavenModelInspection -->
                         <test.randomization.seed>${test.randomization.seed}</test.randomization.seed>
