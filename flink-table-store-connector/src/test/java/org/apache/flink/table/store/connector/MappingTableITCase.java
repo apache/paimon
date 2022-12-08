@@ -44,9 +44,7 @@ public class MappingTableITCase extends AbstractTestBase {
 
     @Before
     public void before() throws IOException {
-        tEnv =
-                TableEnvironmentTestUtils.create(
-                        EnvironmentSettings.newInstance().inBatchMode().build());
+        tEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
         path = TEMPORARY_FOLDER.newFolder().toURI().toString();
     }
 

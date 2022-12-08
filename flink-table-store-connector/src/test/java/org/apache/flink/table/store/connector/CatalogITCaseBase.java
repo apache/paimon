@@ -49,9 +49,7 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
 
     @Before
     public void before() throws IOException {
-        tEnv =
-                TableEnvironmentTestUtils.create(
-                        EnvironmentSettings.newInstance().inBatchMode().build());
+        tEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
         String catalog = "TABLE_STORE";
         tEnv.executeSql(
                 String.format(
@@ -59,9 +57,7 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
                         catalog, TEMPORARY_FOLDER.newFolder().toURI()));
         tEnv.useCatalog(catalog);
 
-        sEnv =
-                TableEnvironmentTestUtils.create(
-                        EnvironmentSettings.newInstance().inStreamingMode().build());
+        sEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inStreamingMode().build());
         sEnv.getConfig().getConfiguration().set(CHECKPOINTING_INTERVAL, Duration.ofMillis(100));
         sEnv.registerCatalog(catalog, tEnv.getCatalog(catalog).get());
         sEnv.useCatalog(catalog);

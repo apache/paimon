@@ -33,7 +33,6 @@ import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
-import org.apache.flink.table.store.connector.TableEnvironmentTestUtils;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.types.Row;
@@ -134,7 +133,7 @@ public class SinkSavepointITCase extends AbstractTestBase {
 
         EnvironmentSettings settings = EnvironmentSettings.newInstance().inStreamingMode().build();
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(conf);
-        StreamTableEnvironment tEnv = TableEnvironmentTestUtils.create(env, settings);
+        StreamTableEnvironment tEnv = StreamTableEnvironment.create(env, settings);
         tEnv.getConfig()
                 .getConfiguration()
                 .set(ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL, Duration.ofMillis(500));
@@ -206,7 +205,7 @@ public class SinkSavepointITCase extends AbstractTestBase {
 
     private void checkRecoverFromSavepointResult(String failingPath) throws Exception {
         EnvironmentSettings settings = EnvironmentSettings.newInstance().inBatchMode().build();
-        TableEnvironment tEnv = TableEnvironmentTestUtils.create(settings);
+        TableEnvironment tEnv = TableEnvironment.create(settings);
         // no failure should occur when checking for answer
         FailingAtomicRenameFileSystem.reset(failingName, 0, 1);
 
