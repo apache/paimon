@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.table.source.snapshot;
 
-import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -27,40 +25,30 @@ import org.apache.flink.table.store.table.source.DataTableScan;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
 /**
- * A {@link DataFileSnapshotEnumerator} which scans incremental changes in {@link
- * Snapshot#deltaManifestList()} for each newly created snapshots.
+ * {@link FollowUpScanner} for {@link
+ * org.apache.flink.table.store.CoreOptions.ChangelogProducer#FULL_COMPACTION} changelog producer.
  */
-public class DeltaSnapshotEnumerator extends DataFileSnapshotEnumerator {
+public class CompactionChangelogFollowUpScanner implements FollowUpScanner {
 
-    private static final Logger LOG = LoggerFactory.getLogger(DeltaSnapshotEnumerator.class);
-
-    public DeltaSnapshotEnumerator(
-            Path tablePath,
-            DataTableScan scan,
-            CoreOptions.StartupMode startupMode,
-            @Nullable Long startupMillis,
-            @Nullable Long nextSnapshotId) {
-        super(tablePath, scan, startupMode, startupMillis, nextSnapshotId);
-    }
+    private static final Logger LOG =
+            LoggerFactory.getLogger(CompactionChangelogFollowUpScanner.class);
 
     @Override
-    protected boolean shouldReadSnapshot(Snapshot snapshot) {
-        if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
+    public boolean shouldScanSnapshot(Snapshot snapshot) {
+        if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
             return true;
         }
 
         LOG.debug(
-                "Next snapshot id {} is not APPEND, but is {}, check next one.",
+                "Next snapshot id {} is not COMPACT, but is {}, check next one.",
                 snapshot.id(),
                 snapshot.commitKind());
         return false;
     }
 
     @Override
-    protected DataTableScan.DataFilePlan getPlan(DataTableScan scan) {
-        return scan.withKind(ScanKind.DELTA).plan();
+    public DataTableScan.DataFilePlan getPlan(long snapshotId, DataTableScan scan) {
+        return scan.withKind(ScanKind.CHANGELOG).withSnapshot(snapshotId).plan();
     }
 }

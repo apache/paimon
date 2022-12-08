@@ -50,11 +50,11 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Base test class for {@link DataFileSnapshotEnumerator}.
+ * Base test class for {@link SnapshotEnumerator} and related classes.
  *
  * <p>TODO: merge this class with FileStoreTableTestBase.
  */
-public abstract class DataFileSnapshotEnumeratorTestBase {
+public abstract class SnapshotEnumeratorTestBase {
 
     private static final RowType ROW_TYPE =
             RowType.of(
@@ -115,7 +115,10 @@ public abstract class DataFileSnapshotEnumeratorTestBase {
     }
 
     protected FileStoreTable createFileStoreTable() throws Exception {
-        Configuration conf = getConf();
+        return createFileStoreTable(new Configuration());
+    }
+
+    protected FileStoreTable createFileStoreTable(Configuration conf) throws Exception {
         SchemaManager schemaManager = new SchemaManager(tablePath);
         TableSchema tableSchema =
                 schemaManager.commitNewVersion(
@@ -127,6 +130,4 @@ public abstract class DataFileSnapshotEnumeratorTestBase {
                                 ""));
         return FileStoreTableFactory.create(tablePath, tableSchema, conf);
     }
-
-    protected abstract Configuration getConf();
 }

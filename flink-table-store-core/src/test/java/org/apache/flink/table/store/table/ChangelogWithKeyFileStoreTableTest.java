@@ -38,7 +38,9 @@ import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
-import org.apache.flink.table.store.table.source.snapshot.InputChangelogSnapshotEnumerator;
+import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
+import org.apache.flink.table.store.table.source.snapshot.FullStartingScanner;
+import org.apache.flink.table.store.table.source.snapshot.InputChangelogFollowUpScanner;
 import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
 import org.apache.flink.table.store.utils.CompatibilityTestUtils;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -373,8 +375,12 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 Collections.singletonList("-D 2|10|301|binary|varbinary")));
 
         SnapshotEnumerator enumerator =
-                new InputChangelogSnapshotEnumerator(
-                        tablePath, table.newScan(), CoreOptions.StartupMode.FULL, null, 1L);
+                new ContinuousDataFileSnapshotEnumerator(
+                        tablePath,
+                        table.newScan(),
+                        new FullStartingScanner(),
+                        new InputChangelogFollowUpScanner(),
+                        1L);
 
         FunctionWithException<Integer, Void, Exception> assertNextSnapshot =
                 i -> {
