@@ -27,8 +27,6 @@ import org.apache.flink.table.store.CoreOptions.LogConsistency;
 import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.table.sink.LogSinkFunction;
 
-import org.apache.kafka.clients.producer.ProducerConfig;
-
 import javax.annotation.Nullable;
 
 import java.util.Properties;
@@ -70,7 +68,6 @@ public class KafkaLogSinkProvider implements LogSinkProvider {
         Semantic semantic;
         switch (consistency) {
             case TRANSACTIONAL:
-                properties.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "log-store-" + topic);
                 semantic = Semantic.EXACTLY_ONCE;
                 break;
             case EVENTUAL:
