@@ -25,29 +25,24 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.source.hybrid.HybridSource;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.CoreOptions.MergeEngine;
 import org.apache.flink.table.store.CoreOptions.StartupMode;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
 import org.apache.flink.table.store.utils.Projection;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
-import java.util.HashMap;
 import java.util.Optional;
 
-import static org.apache.flink.table.store.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.flink.table.store.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
-import static org.apache.flink.table.store.CoreOptions.ChangelogProducer.FULL_COMPACTION;
-import static org.apache.flink.table.store.CoreOptions.MERGE_ENGINE;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED;
 
 /** Source builder to build a Flink {@link Source}. */
@@ -128,23 +123,7 @@ public class FlinkSourceBuilder {
 
     private Source<RowData, ?, ?> buildSource() {
         if (isContinuous) {
-            // TODO move validation to a dedicated method
-            MergeEngine mergeEngine = conf.get(MERGE_ENGINE);
-            HashMap<MergeEngine, String> mergeEngineDesc =
-                    new HashMap<MergeEngine, String>() {
-                        {
-                            put(MergeEngine.PARTIAL_UPDATE, "Partial update");
-                            put(MergeEngine.AGGREGATE, "Pre-aggregate");
-                        }
-                    };
-            if (table.schema().primaryKeys().size() > 0
-                    && mergeEngineDesc.containsKey(mergeEngine)
-                    && conf.get(CHANGELOG_PRODUCER) != FULL_COMPACTION) {
-                throw new ValidationException(
-                        mergeEngineDesc.get(mergeEngine)
-                                + " continuous reading is not supported. "
-                                + "You can use full compaction changelog producer to support streaming reading.");
-            }
+            SnapshotEnumerator.validateContinuous(table.schema());
 
             // TODO visit all options through CoreOptions
             StartupMode startupMode = CoreOptions.startupMode(conf);

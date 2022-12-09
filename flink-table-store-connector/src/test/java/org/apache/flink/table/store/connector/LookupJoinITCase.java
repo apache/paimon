@@ -34,6 +34,7 @@ import java.util.concurrent.ExecutionException;
 
 import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for lookup join. */
 public class LookupJoinITCase extends AbstractTestBase {
@@ -444,6 +445,42 @@ public class LookupJoinITCase extends AbstractTestBase {
                         Row.of(2, 44, 444),
                         Row.of(3, 33, 333),
                         Row.of(4, null, null));
+
+        iterator.close();
+    }
+
+    @Test
+    public void testLookupPartialUpdateIllegal() throws Exception {
+        executeSql(
+                "CREATE TABLE DIM2 (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
+                        + " ('merge-engine'='partial-update','continuous.discovery-interval'='1 ms')");
+        String query =
+                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM2 for system_time as of T.proctime AS D ON T.i = D.i";
+        assertThatThrownBy(() -> env.executeSql(query))
+                .hasRootCauseMessage(
+                        "Partial update continuous reading is not supported. "
+                                + "You can use full compaction changelog producer to support streaming reading.");
+    }
+
+    @Test
+    public void testLookupPartialUpdate() throws Exception {
+        executeSql(
+                "CREATE TABLE DIM2 (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
+                        + " ('merge-engine'='partial-update',"
+                        + " 'changelog-producer'='full-compaction',"
+                        + " 'changelog-producer.compaction-interval'='1 s',"
+                        + " 'continuous.discovery-interval'='10 ms')");
+        executeSql("INSERT INTO DIM2 VALUES (1, CAST(NULL AS INT), 111, CAST(NULL AS INT))");
+        String query =
+                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM2 for system_time as of T.proctime AS D ON T.i = D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+        executeSql("INSERT INTO T VALUES (1)");
+        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(1, null, 111, null));
+
+        executeSql("INSERT INTO DIM2 VALUES (1, 11, CAST(NULL AS INT), 1111)");
+        Thread.sleep(2000); // wait refresh
+        executeSql("INSERT INTO T VALUES (1)");
+        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(1, 11, 111, 1111));
 
         iterator.close();
     }
