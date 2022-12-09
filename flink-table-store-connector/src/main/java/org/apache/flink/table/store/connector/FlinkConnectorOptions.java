@@ -46,24 +46,6 @@ public class FlinkConnectorOptions {
                     .noDefaultValue()
                     .withDescription("The root file path of the table store in the filesystem.");
 
-    @Internal
-    @Documentation.ExcludeFromDocumentation("Internal use only")
-    public static final ConfigOption<Boolean> COMPACTION_MANUAL_TRIGGERED =
-            ConfigOptions.key("compaction.manual-triggered")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "An internal flag to indicate a manual triggered compaction job.");
-
-    @Internal
-    @Documentation.ExcludeFromDocumentation("Internal use only")
-    public static final ConfigOption<String> COMPACTION_PARTITION_SPEC =
-            ConfigOptions.key("compaction.partition-spec")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "An internal json string to record the user-specified partition spec for the manual triggered compaction.");
-
     public static final ConfigOption<String> LOG_SYSTEM =
             ConfigOptions.key("log.system")
                     .stringType()

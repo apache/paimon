@@ -120,9 +120,7 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
         Configuration conf = Configuration.fromMap(table.schema().options());
         // Do not sink to log store when overwrite mode
         final LogSinkFunction logSinkFunction =
-                overwrite || conf.get(FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED)
-                        ? null
-                        : (logSinkProvider == null ? null : logSinkProvider.createSink());
+                overwrite ? null : (logSinkProvider == null ? null : logSinkProvider.createSink());
         return new TableStoreDataStreamSinkProvider(
                 (dataStream) ->
                         new FlinkSinkBuilder(table)

@@ -25,7 +25,6 @@ import org.apache.flink.table.factories.ManagedTableFactory;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.util.Preconditions;
 
@@ -39,8 +38,6 @@ import java.util.Optional;
 import static org.apache.flink.table.store.CoreOptions.BUCKET;
 import static org.apache.flink.table.store.CoreOptions.PATH;
 import static org.apache.flink.table.store.CoreOptions.WRITE_MODE;
-import static org.apache.flink.table.store.connector.FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED;
-import static org.apache.flink.table.store.connector.FlinkConnectorOptions.COMPACTION_PARTITION_SPEC;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.ROOT_PATH;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.TABLE_STORE_PREFIX;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.relativeTablePath;
@@ -173,11 +170,7 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
     @Override
     public Map<String, String> onCompactTable(
             Context context, CatalogPartitionSpec catalogPartitionSpec) {
-        Map<String, String> newOptions = new HashMap<>(context.getCatalogTable().getOptions());
-        newOptions.put(COMPACTION_MANUAL_TRIGGERED.key(), String.valueOf(true));
-        newOptions.put(
-                COMPACTION_PARTITION_SPEC.key(),
-                JsonSerdeUtil.toJson(catalogPartitionSpec.getPartitionSpec()));
-        return newOptions;
+        throw new UnsupportedOperationException(
+                "Table store does not support ALTER TABLE ... COMPACT ...");
     }
 }
