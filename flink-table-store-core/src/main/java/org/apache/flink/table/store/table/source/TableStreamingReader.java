@@ -25,8 +25,6 @@ import org.apache.flink.table.store.file.predicate.PredicateFilter;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
-import org.apache.flink.table.store.table.source.snapshot.DeltaFollowUpScanner;
-import org.apache.flink.table.store.table.source.snapshot.FullStartingScanner;
 import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
 import org.apache.flink.table.store.utils.TypeUtils;
 
@@ -88,13 +86,7 @@ public class TableStreamingReader {
         if (predicate != null) {
             scan.withFilter(predicate);
         }
-        enumerator =
-                new ContinuousDataFileSnapshotEnumerator(
-                        table.location(),
-                        scan,
-                        new FullStartingScanner(),
-                        new DeltaFollowUpScanner(),
-                        null);
+        enumerator = ContinuousDataFileSnapshotEnumerator.createWithSnapshotStarting(table, scan);
     }
 
     @Nullable
