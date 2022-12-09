@@ -30,6 +30,7 @@ import org.apache.flink.table.store.file.predicate.PredicateFilter;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.TableStreamingReader;
+import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.FileUtils;
@@ -85,6 +86,8 @@ public class FileStoreLookupFunction extends TableFunction<RowData> {
         checkArgument(
                 schema.partitionKeys().isEmpty(), "Currently only support non-partitioned table.");
         checkArgument(schema.primaryKeys().size() > 0, "Currently only support primary key table.");
+        ContinuousDataFileSnapshotEnumerator.validate(table.schema());
+
         this.table = table;
 
         // join keys are based on projection fields

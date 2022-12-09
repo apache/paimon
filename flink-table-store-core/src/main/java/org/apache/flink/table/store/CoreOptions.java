@@ -446,6 +446,10 @@ public class CoreOptions implements Serializable {
         return options.get(MANIFEST_MERGE_MIN_COUNT);
     }
 
+    public MergeEngine mergeEngine() {
+        return options.get(MERGE_ENGINE);
+    }
+
     public long splitTargetSize() {
         return options.get(SOURCE_SPLIT_TARGET_SIZE).getBytes();
     }
