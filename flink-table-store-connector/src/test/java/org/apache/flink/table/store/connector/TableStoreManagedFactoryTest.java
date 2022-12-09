@@ -21,14 +21,12 @@ package org.apache.flink.table.store.connector;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.api.TableException;
-import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
-import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -37,12 +35,10 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -58,8 +54,6 @@ import static org.apache.flink.table.store.CoreOptions.BUCKET;
 import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.flink.table.store.CoreOptions.PATH;
 import static org.apache.flink.table.store.CoreOptions.path;
-import static org.apache.flink.table.store.connector.FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED;
-import static org.apache.flink.table.store.connector.FlinkConnectorOptions.COMPACTION_PARTITION_SPEC;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.ROOT_PATH;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.TABLE_STORE_PREFIX;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.relativeTablePath;
@@ -225,24 +219,6 @@ public class TableStoreManagedFactoryTest {
                     .isInstanceOf(expectedResult.expectedType)
                     .hasMessageContaining(expectedResult.expectedMessage);
         }
-    }
-
-    @ParameterizedTest
-    @ValueSource(ints = {0, 1, 2})
-    public void testOnCompactTable(int partitionNum) {
-        context = createEnrichedContext(Collections.emptyMap());
-
-        Map<String, String> partSpec =
-                partitionNum == 0
-                        ? Collections.emptyMap()
-                        : partitionNum == 1 ? of("foo", "bar") : of("foo", "bar", "meow", "burr");
-        CatalogPartitionSpec catalogPartSpec = new CatalogPartitionSpec(partSpec);
-        Map<String, String> newOptions =
-                tableStoreManagedFactory.onCompactTable(context, catalogPartSpec);
-        assertThat(newOptions)
-                .containsEntry(COMPACTION_MANUAL_TRIGGERED.key(), String.valueOf(true));
-        assertThat(newOptions)
-                .containsEntry(COMPACTION_PARTITION_SPEC.key(), JsonSerdeUtil.toJson(partSpec));
     }
 
     // ~ Tools ------------------------------------------------------------------

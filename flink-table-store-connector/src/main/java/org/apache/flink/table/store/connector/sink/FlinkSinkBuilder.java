@@ -18,15 +18,12 @@
 
 package org.apache.flink.table.store.connector.sink;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.connector.FlinkConnectorOptions;
 import org.apache.flink.table.store.file.operation.Lock;
-import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.LogSinkFunction;
 
@@ -38,7 +35,6 @@ import java.util.Map;
 public class FlinkSinkBuilder {
 
     private final FileStoreTable table;
-    private final Configuration conf;
 
     private DataStream<RowData> input;
     private Lock.Factory lockFactory = Lock.emptyFactory();
@@ -48,7 +44,6 @@ public class FlinkSinkBuilder {
 
     public FlinkSinkBuilder(FileStoreTable table) {
         this.table = table;
-        this.conf = Configuration.fromMap(table.schema().options());
     }
 
     public FlinkSinkBuilder withInput(DataStream<RowData> input) {
@@ -76,16 +71,6 @@ public class FlinkSinkBuilder {
         return this;
     }
 
-    @SuppressWarnings("unchecked")
-    @Nullable
-    private Map<String, String> getCompactPartSpec() {
-        String json = conf.get(FlinkConnectorOptions.COMPACTION_PARTITION_SPEC);
-        if (json == null) {
-            return null;
-        }
-        return JsonSerdeUtil.fromJson(json, Map.class);
-    }
-
     public DataStreamSink<?> build() {
         BucketStreamPartitioner partitioner = new BucketStreamPartitioner(table.schema());
         PartitionTransformation<RowData> partitioned =
@@ -95,14 +80,7 @@ public class FlinkSinkBuilder {
         }
 
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
-        StoreSink sink =
-                new StoreSink(
-                        table,
-                        lockFactory,
-                        conf.get(FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED),
-                        getCompactPartSpec(),
-                        overwritePartition,
-                        logSinkFunction);
+        StoreSink sink = new StoreSink(table, lockFactory, overwritePartition, logSinkFunction);
         return sink.sinkFrom(new DataStream<>(env, partitioned));
     }
 }
