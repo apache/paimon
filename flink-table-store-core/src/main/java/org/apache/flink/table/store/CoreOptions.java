@@ -593,7 +593,7 @@ public class CoreOptions implements Serializable {
     /** Specifies the startup mode for log consumer. */
     public enum StartupMode implements DescribedEnum {
         DEFAULT(
-                "deafult",
+                "default",
                 "Determines actual startup mode according to other table properties. "
                         + "If \"scan.timestamp-millis\" is set the actual startup mode will be \"from-timestamp\". "
                         + "Otherwise the actual startup mode will be \"full\"."),
