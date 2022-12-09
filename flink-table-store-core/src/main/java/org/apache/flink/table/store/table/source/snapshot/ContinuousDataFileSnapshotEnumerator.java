@@ -102,17 +102,35 @@ public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator 
     //  static create methods
     // ------------------------------------------------------------------------
 
+    public static ContinuousDataFileSnapshotEnumerator createWithSnapshotStarting(
+            FileStoreTable table, DataTableScan scan) {
+        StartingScanner startingScanner =
+                table.options().startupMode() == CoreOptions.StartupMode.COMPACTED
+                        ? new CompactedStartingScanner()
+                        : new FullStartingScanner();
+        return new ContinuousDataFileSnapshotEnumerator(
+                table.location(), scan, startingScanner, createFollowUpScanner(table, scan), null);
+    }
+
     public static ContinuousDataFileSnapshotEnumerator create(
-            FileStoreTable table, DataTableScan scan, Long nextSnapshotId) {
+            FileStoreTable table, DataTableScan scan, @Nullable Long nextSnapshotId) {
+        return new ContinuousDataFileSnapshotEnumerator(
+                table.location(),
+                scan,
+                createStartingScanner(table),
+                createFollowUpScanner(table, scan),
+                nextSnapshotId);
+    }
+
+    private static StartingScanner createStartingScanner(FileStoreTable table) {
         CoreOptions.StartupMode startupMode = table.options().startupMode();
         Long startupMillis = table.options().logScanTimestampMills();
-        StartingScanner startingScanner;
         if (startupMode == CoreOptions.StartupMode.FULL) {
-            startingScanner = new FullStartingScanner();
+            return new FullStartingScanner();
         } else if (startupMode == CoreOptions.StartupMode.LATEST) {
-            startingScanner = new ContinuousLatestStartingScanner();
+            return new ContinuousLatestStartingScanner();
         } else if (startupMode == CoreOptions.StartupMode.COMPACTED) {
-            startingScanner = new CompactedStartingScanner();
+            return new CompactedStartingScanner();
         } else if (startupMode == CoreOptions.StartupMode.FROM_TIMESTAMP) {
             Preconditions.checkNotNull(
                     startupMillis,
@@ -121,27 +139,25 @@ public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator 
                             CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
                             CoreOptions.StartupMode.FROM_TIMESTAMP,
                             CoreOptions.SCAN_MODE.key()));
-            startingScanner = new ContinuousFromTimestampStartingScanner(startupMillis);
+            return new ContinuousFromTimestampStartingScanner(startupMillis);
         } else {
             throw new UnsupportedOperationException("Unknown startup mode " + startupMode.name());
         }
+    }
 
+    private static FollowUpScanner createFollowUpScanner(FileStoreTable table, DataTableScan scan) {
         CoreOptions.ChangelogProducer changelogProducer = table.options().changelogProducer();
-        FollowUpScanner followUpScanner;
         if (changelogProducer == CoreOptions.ChangelogProducer.NONE) {
-            followUpScanner = new DeltaFollowUpScanner();
+            return new DeltaFollowUpScanner();
         } else if (changelogProducer == CoreOptions.ChangelogProducer.INPUT) {
-            followUpScanner = new InputChangelogFollowUpScanner();
+            return new InputChangelogFollowUpScanner();
         } else if (changelogProducer == CoreOptions.ChangelogProducer.FULL_COMPACTION) {
             // this change in scan will affect both starting scanner and follow-up scanner
             scan.withLevel(table.options().numLevels() - 1);
-            followUpScanner = new CompactionChangelogFollowUpScanner();
+            return new CompactionChangelogFollowUpScanner();
         } else {
             throw new UnsupportedOperationException(
                     "Unknown changelog producer " + changelogProducer.name());
         }
-
-        return new ContinuousDataFileSnapshotEnumerator(
-                table.location(), scan, startingScanner, followUpScanner, nextSnapshotId);
     }
 }

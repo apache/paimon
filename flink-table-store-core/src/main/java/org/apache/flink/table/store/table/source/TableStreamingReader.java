@@ -86,7 +86,7 @@ public class TableStreamingReader {
         if (predicate != null) {
             scan.withFilter(predicate);
         }
-        enumerator = ContinuousDataFileSnapshotEnumerator.create(table, scan, null);
+        enumerator = ContinuousDataFileSnapshotEnumerator.createWithSnapshotStarting(table, scan);
     }
 
     @Nullable
