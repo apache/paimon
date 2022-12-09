@@ -56,32 +56,22 @@ public class StoreSink implements Serializable {
 
     private final FileStoreTable table;
     private final Lock.Factory lockFactory;
-    private final boolean compactionTask;
-    @Nullable private final Map<String, String> compactPartitionSpec;
     @Nullable private final Map<String, String> overwritePartition;
     @Nullable private final LogSinkFunction logSinkFunction;
 
     public StoreSink(
             FileStoreTable table,
             Lock.Factory lockFactory,
-            boolean compactionTask,
-            @Nullable Map<String, String> compactPartitionSpec,
             @Nullable Map<String, String> overwritePartition,
             @Nullable LogSinkFunction logSinkFunction) {
         this.table = table;
         this.lockFactory = lockFactory;
-        this.compactionTask = compactionTask;
-        this.compactPartitionSpec = compactPartitionSpec;
         this.overwritePartition = overwritePartition;
         this.logSinkFunction = logSinkFunction;
     }
 
     private OneInputStreamOperator<RowData, Committable> createWriteOperator(
             String initialCommitUser) {
-        if (compactionTask) {
-            return new StoreCompactOperator(table, initialCommitUser, compactPartitionSpec);
-        }
-
         boolean isOverwrite = overwritePartition != null;
         StoreSinkWrite.Provider writeProvider;
         if (table.options().changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION) {

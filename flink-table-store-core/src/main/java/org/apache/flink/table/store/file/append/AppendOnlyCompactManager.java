@@ -174,7 +174,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     }
 
     /**
-     * A {@link CompactTask} impl for ALTER TABLE COMPACT of append-only table.
+     * A {@link CompactTask} impl for full compaction of append-only table.
      *
      * <p>This task accepts a pre-scanned file list as input and pick the candidate files to compact
      * iteratively until reach the end of the input. There might be multiple times of rewrite

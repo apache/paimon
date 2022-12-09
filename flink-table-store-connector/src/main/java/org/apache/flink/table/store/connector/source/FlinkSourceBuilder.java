@@ -42,8 +42,6 @@ import javax.annotation.Nullable;
 
 import java.util.Optional;
 
-import static org.apache.flink.table.store.connector.FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED;
-
 /**
  * Source builder to build a Flink {@link StaticFileStoreSource} or {@link
  * ContinuousFileStoreSource}. This is for normal read/write jobs.
@@ -155,9 +153,7 @@ public class FlinkSourceBuilder {
                         .orElse(rowType);
         DataStreamSource<RowData> dataStream =
                 env.fromSource(
-                        conf.get(COMPACTION_MANUAL_TRIGGERED)
-                                ? new FileStoreEmptySource()
-                                : buildSource(),
+                        buildSource(),
                         watermarkStrategy == null
                                 ? WatermarkStrategy.noWatermarks()
                                 : watermarkStrategy,
