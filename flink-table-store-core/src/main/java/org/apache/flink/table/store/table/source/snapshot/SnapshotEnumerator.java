@@ -18,17 +18,9 @@
 
 package org.apache.flink.table.store.table.source.snapshot;
 
-import org.apache.flink.table.api.ValidationException;
-import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.CoreOptions.MergeEngine;
-import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.source.DataTableScan;
 
 import javax.annotation.Nullable;
-
-import java.util.HashMap;
-
-import static org.apache.flink.table.store.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 
 /** Enumerate incremental changes from newly created snapshots. */
 public interface SnapshotEnumerator {
@@ -44,24 +36,4 @@ public interface SnapshotEnumerator {
      */
     @Nullable
     DataTableScan.DataFilePlan enumerate();
-
-    static void validateContinuous(TableSchema schema) {
-        CoreOptions options = new CoreOptions(schema.options());
-        MergeEngine mergeEngine = options.mergeEngine();
-        HashMap<MergeEngine, String> mergeEngineDesc =
-                new HashMap<MergeEngine, String>() {
-                    {
-                        put(MergeEngine.PARTIAL_UPDATE, "Partial update");
-                        put(MergeEngine.AGGREGATE, "Pre-aggregate");
-                    }
-                };
-        if (schema.primaryKeys().size() > 0
-                && mergeEngineDesc.containsKey(mergeEngine)
-                && options.changelogProducer() != FULL_COMPACTION) {
-            throw new ValidationException(
-                    mergeEngineDesc.get(mergeEngine)
-                            + " continuous reading is not supported. "
-                            + "You can use full compaction changelog producer to support streaming reading.");
-        }
-    }
 }

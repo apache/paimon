@@ -19,8 +19,10 @@
 package org.apache.flink.table.store.table.source.snapshot;
 
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -30,6 +32,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+
+import java.util.HashMap;
+
+import static org.apache.flink.table.store.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 
 /** {@link SnapshotEnumerator} for streaming read. */
 public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator {
@@ -158,6 +164,26 @@ public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator 
         } else {
             throw new UnsupportedOperationException(
                     "Unknown changelog producer " + changelogProducer.name());
+        }
+    }
+
+    public static void validate(TableSchema schema) {
+        CoreOptions options = new CoreOptions(schema.options());
+        CoreOptions.MergeEngine mergeEngine = options.mergeEngine();
+        HashMap<CoreOptions.MergeEngine, String> mergeEngineDesc =
+                new HashMap<CoreOptions.MergeEngine, String>() {
+                    {
+                        put(CoreOptions.MergeEngine.PARTIAL_UPDATE, "Partial update");
+                        put(CoreOptions.MergeEngine.AGGREGATE, "Pre-aggregate");
+                    }
+                };
+        if (schema.primaryKeys().size() > 0
+                && mergeEngineDesc.containsKey(mergeEngine)
+                && options.changelogProducer() != FULL_COMPACTION) {
+            throw new ValidationException(
+                    mergeEngineDesc.get(mergeEngine)
+                            + " continuous reading is not supported. "
+                            + "You can use full compaction changelog producer to support streaming reading.");
         }
     }
 }
