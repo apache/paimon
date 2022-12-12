@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.util.HashMap;
 
 import static org.apache.flink.table.store.CoreOptions.ChangelogProducer.FULL_COMPACTION;
@@ -185,5 +186,16 @@ public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator 
                             + " continuous reading is not supported. "
                             + "You can use full compaction changelog producer to support streaming reading.");
         }
+    }
+
+    // ------------------------------------------------------------------------
+    //  factory interface
+    // ------------------------------------------------------------------------
+
+    /** Factory to create {@link ContinuousDataFileSnapshotEnumerator}. */
+    public interface Factory extends Serializable {
+
+        ContinuousDataFileSnapshotEnumerator create(
+                DataTable table, DataTableScan scan, @Nullable Long nextSnapshotId);
     }
 }

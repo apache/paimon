@@ -102,16 +102,19 @@ public abstract class SnapshotEnumeratorTestBase {
         List<String> result = new ArrayList<>();
         while (iterator.hasNext()) {
             RowData rowData = iterator.next();
-            result.add(
-                    String.format(
-                            "%s %d|%d|%d",
-                            rowData.getRowKind().shortString(),
-                            rowData.getInt(0),
-                            rowData.getInt(1),
-                            rowData.getLong(2)));
+            result.add(rowDataToString(rowData));
         }
         iterator.close();
         return result;
+    }
+
+    protected String rowDataToString(RowData rowData) {
+        return String.format(
+                "%s %d|%d|%d",
+                rowData.getRowKind().shortString(),
+                rowData.getInt(0),
+                rowData.getInt(1),
+                rowData.getLong(2));
     }
 
     protected FileStoreTable createFileStoreTable() throws Exception {

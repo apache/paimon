@@ -44,7 +44,10 @@ import java.util.Optional;
 
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED;
 
-/** Source builder to build a Flink {@link Source}. */
+/**
+ * Source builder to build a Flink {@link StaticFileStoreSource} or {@link
+ * ContinuousFileStoreSource}. This is for normal read/write jobs.
+ */
 public class FlinkSourceBuilder {
 
     private final ObjectIdentifier tableIdentifier;

@@ -37,17 +37,28 @@ import java.util.Collection;
 /** Bounded {@link FlinkSource} for reading records. It does not monitor new snapshots. */
 public class StaticFileStoreSource extends FlinkSource {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 3L;
 
     private final DataTable table;
+    private final StaticDataFileSnapshotEnumerator.Factory enumeratorFactory;
 
     public StaticFileStoreSource(
             DataTable table,
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
             @Nullable Long limit) {
+        this(table, projectedFields, predicate, limit, StaticDataFileSnapshotEnumerator::create);
+    }
+
+    public StaticFileStoreSource(
+            DataTable table,
+            @Nullable int[][] projectedFields,
+            @Nullable Predicate predicate,
+            @Nullable Long limit,
+            StaticDataFileSnapshotEnumerator.Factory enumeratorFactory) {
         super(table, projectedFields, predicate, limit);
         this.table = table;
+        this.enumeratorFactory = enumeratorFactory;
     }
 
     @Override
@@ -72,8 +83,7 @@ public class StaticFileStoreSource extends FlinkSource {
             FileStoreSourceSplitGenerator splitGenerator = new FileStoreSourceSplitGenerator();
 
             // read all splits from the enumerator in one go
-            SnapshotEnumerator snapshotEnumerator =
-                    StaticDataFileSnapshotEnumerator.create(table, table.newScan());
+            SnapshotEnumerator snapshotEnumerator = enumeratorFactory.create(table, scan);
             while (true) {
                 DataTableScan.DataFilePlan plan = snapshotEnumerator.enumerate();
                 if (plan == null) {

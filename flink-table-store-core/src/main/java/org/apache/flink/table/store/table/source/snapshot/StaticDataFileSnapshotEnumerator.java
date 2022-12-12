@@ -26,6 +26,8 @@ import org.apache.flink.table.store.table.source.DataTableScan;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
+
 /** {@link SnapshotEnumerator} for batch read. */
 public class StaticDataFileSnapshotEnumerator implements SnapshotEnumerator {
 
@@ -35,7 +37,7 @@ public class StaticDataFileSnapshotEnumerator implements SnapshotEnumerator {
 
     private boolean hasNext;
 
-    private StaticDataFileSnapshotEnumerator(
+    public StaticDataFileSnapshotEnumerator(
             Path tablePath, DataTableScan scan, StartingScanner startingScanner) {
         this.snapshotManager = new SnapshotManager(tablePath);
         this.scan = scan;
@@ -72,5 +74,15 @@ public class StaticDataFileSnapshotEnumerator implements SnapshotEnumerator {
         }
 
         return new StaticDataFileSnapshotEnumerator(table.location(), scan, startingScanner);
+    }
+
+    // ------------------------------------------------------------------------
+    //  factory interface
+    // ------------------------------------------------------------------------
+
+    /** Factory to create {@link StaticDataFileSnapshotEnumerator}. */
+    public interface Factory extends Serializable {
+
+        StaticDataFileSnapshotEnumerator create(DataTable table, DataTableScan scan);
     }
 }
