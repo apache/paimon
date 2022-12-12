@@ -34,17 +34,33 @@ import java.util.Collection;
 /** Unbounded {@link FlinkSource} for reading records. It continuously monitors new snapshots. */
 public class ContinuousFileStoreSource extends FlinkSource {
 
-    private static final long serialVersionUID = 2L;
+    private static final long serialVersionUID = 3L;
 
     private final DataTable table;
+    private final ContinuousDataFileSnapshotEnumerator.Factory enumeratorFactory;
 
     public ContinuousFileStoreSource(
             DataTable table,
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
             @Nullable Long limit) {
+        this(
+                table,
+                projectedFields,
+                predicate,
+                limit,
+                ContinuousDataFileSnapshotEnumerator::create);
+    }
+
+    public ContinuousFileStoreSource(
+            DataTable table,
+            @Nullable int[][] projectedFields,
+            @Nullable Predicate predicate,
+            @Nullable Long limit,
+            ContinuousDataFileSnapshotEnumerator.Factory enumeratorFactory) {
         super(table, projectedFields, predicate, limit);
         this.table = table;
+        this.enumeratorFactory = enumeratorFactory;
     }
 
     @Override
@@ -73,6 +89,6 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 splits,
                 nextSnapshotId,
                 table.options().continuousDiscoveryInterval().toMillis(),
-                ContinuousDataFileSnapshotEnumerator.create(table, scan, nextSnapshotId));
+                enumeratorFactory.create(table, scan, nextSnapshotId));
     }
 }
