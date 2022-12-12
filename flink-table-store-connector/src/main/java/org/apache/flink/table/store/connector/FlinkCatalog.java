@@ -164,7 +164,7 @@ public class FlinkCatalog extends AbstractCatalog {
                     .put(PATH.key(), catalog.getTableLocation(tablePath).toString());
             return catalogTable;
         } else {
-            return new MetadataCatalogTable(table);
+            return new SystemCatalogTable(table);
         }
     }
 

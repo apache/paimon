@@ -24,7 +24,7 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
 import org.apache.flink.table.store.table.source.snapshot.StaticDataFileSnapshotEnumerator;
@@ -39,10 +39,10 @@ public class StaticFileStoreSource extends FlinkSource {
 
     private static final long serialVersionUID = 1L;
 
-    private final FileStoreTable table;
+    private final DataTable table;
 
     public StaticFileStoreSource(
-            FileStoreTable table,
+            DataTable table,
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
             @Nullable Long limit) {

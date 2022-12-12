@@ -28,12 +28,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/** A {@link CatalogTable} to represent metadata table. */
-public class MetadataCatalogTable implements CatalogTable {
+/** A {@link CatalogTable} to represent system table. */
+public class SystemCatalogTable implements CatalogTable {
 
     private final Table table;
 
-    public MetadataCatalogTable(Table table) {
+    public SystemCatalogTable(Table table) {
         this.table = table;
     }
 
@@ -60,7 +60,7 @@ public class MetadataCatalogTable implements CatalogTable {
 
     @Override
     public CatalogTable copy(Map<String, String> map) {
-        return new MetadataCatalogTable(table.copy(map));
+        return new SystemCatalogTable(table.copy(map));
     }
 
     @Override

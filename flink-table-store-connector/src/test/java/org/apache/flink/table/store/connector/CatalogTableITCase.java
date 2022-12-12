@@ -25,7 +25,7 @@ import org.junit.Test;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.file.catalog.Catalog.METADATA_TABLE_SPLITTER;
+import static org.apache.flink.table.store.file.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -64,12 +64,12 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 .hasRootCauseMessage(
                         String.format(
                                 "Table name[%s] cannot contain '%s' separator",
-                                "T$snapshots", METADATA_TABLE_SPLITTER));
+                                "T$snapshots", SYSTEM_TABLE_SPLITTER));
         assertThatThrownBy(() -> sql("CREATE TABLE T$aa$bb (a INT, b INT)"))
                 .hasRootCauseMessage(
                         String.format(
                                 "Table name[%s] cannot contain '%s' separator",
-                                "T$aa$bb", METADATA_TABLE_SPLITTER));
+                                "T$aa$bb", SYSTEM_TABLE_SPLITTER));
     }
 
     @Test

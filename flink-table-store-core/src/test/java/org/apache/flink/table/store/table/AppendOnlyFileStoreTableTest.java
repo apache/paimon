@@ -32,7 +32,7 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
-import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.AbstractDataTableScan;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 
@@ -203,7 +203,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         Predicate partitionFilter =
                 new PredicateBuilder(table.schema().logicalRowType()).equal(0, partition);
         List<Split> splits =
-                ((DataTableScan) table.newScan())
+                ((AbstractDataTableScan) table.newScan())
                         .withFilter(partitionFilter)
                         .withBucket(bucket)
                         .plan()

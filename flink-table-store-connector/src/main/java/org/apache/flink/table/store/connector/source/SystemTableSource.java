@@ -18,31 +18,38 @@
 
 package org.apache.flink.table.store.connector.source;
 
+import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.SourceProvider;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.Table;
 
 import javax.annotation.Nullable;
 
-/** A {@link FlinkTableSource} for metadata table. */
-public class MetadataTableSource extends FlinkTableSource {
+/** A {@link FlinkTableSource} for system table. */
+public class SystemTableSource extends FlinkTableSource {
 
     private final Table table;
+    private final boolean isStreamingMode;
 
-    public MetadataTableSource(Table table) {
+    public SystemTableSource(Table table, boolean isStreamingMode) {
         super(table);
         this.table = table;
+        this.isStreamingMode = isStreamingMode;
     }
 
-    public MetadataTableSource(
+    public SystemTableSource(
             Table table,
+            boolean isStreamingMode,
             @Nullable Predicate predicate,
             @Nullable int[][] projectFields,
             @Nullable Long limit) {
         super(table, predicate, projectFields, limit);
         this.table = table;
+        this.isStreamingMode = isStreamingMode;
     }
 
     @Override
@@ -52,16 +59,27 @@ public class MetadataTableSource extends FlinkTableSource {
 
     @Override
     public ScanRuntimeProvider getScanRuntimeProvider(ScanContext scanContext) {
-        return SourceProvider.of(new MetadataSource(table, projectFields, predicate, limit));
+        Source<RowData, ?, ?> source;
+        if (table instanceof DataTable) {
+            DataTable dataTable = (DataTable) table;
+            source =
+                    isStreamingMode
+                            ? new ContinuousFileStoreSource(
+                                    dataTable, projectFields, predicate, limit)
+                            : new StaticFileStoreSource(dataTable, projectFields, predicate, limit);
+        } else {
+            source = new SimpleSystemSource(table, projectFields, predicate, limit);
+        }
+        return SourceProvider.of(source);
     }
 
     @Override
     public DynamicTableSource copy() {
-        return new MetadataTableSource(table, predicate, projectFields, limit);
+        return new SystemTableSource(table, isStreamingMode, predicate, projectFields, limit);
     }
 
     @Override
     public String asSummaryString() {
-        return "TableStore-MetadataSource";
+        return "TableStore-SystemTable-Source";
     }
 }
