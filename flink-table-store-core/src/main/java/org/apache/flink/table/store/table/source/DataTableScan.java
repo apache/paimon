@@ -19,150 +19,29 @@
 package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.manifest.FileKind;
-import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.file.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 
-import static org.apache.flink.table.store.file.predicate.PredicateBuilder.transformFieldMapping;
+/** A {@link TableScan} for reading data. */
+public interface DataTableScan extends TableScan {
 
-/** An abstraction layer above {@link FileStoreScan} to provide input split generation. */
-public abstract class DataTableScan implements TableScan {
+    DataTableScan withKind(ScanKind kind);
 
-    private final FileStoreScan scan;
-    private final TableSchema tableSchema;
-    private final FileStorePathFactory pathFactory;
-    private final CoreOptions options;
+    DataTableScan withSnapshot(long snapshotId);
 
-    private ScanKind scanKind = ScanKind.ALL;
-
-    protected DataTableScan(
-            FileStoreScan scan,
-            TableSchema tableSchema,
-            FileStorePathFactory pathFactory,
-            CoreOptions options) {
-        this.scan = scan;
-        this.tableSchema = tableSchema;
-        this.pathFactory = pathFactory;
-        this.options = options;
-    }
-
-    public DataTableScan withSnapshot(long snapshotId) {
-        scan.withSnapshot(snapshotId);
-        return this;
-    }
+    DataTableScan withLevel(int level);
 
     @Override
-    public DataTableScan withFilter(Predicate predicate) {
-        List<String> partitionKeys = tableSchema.partitionKeys();
-        int[] fieldIdxToPartitionIdx =
-                tableSchema.fields().stream()
-                        .mapToInt(f -> partitionKeys.indexOf(f.name()))
-                        .toArray();
+    DataTableScan withFilter(Predicate predicate);
 
-        List<Predicate> partitionFilters = new ArrayList<>();
-        List<Predicate> nonPartitionFilters = new ArrayList<>();
-        for (Predicate p : PredicateBuilder.splitAnd(predicate)) {
-            Optional<Predicate> mapped = transformFieldMapping(p, fieldIdxToPartitionIdx);
-            if (mapped.isPresent()) {
-                partitionFilters.add(mapped.get());
-            } else {
-                nonPartitionFilters.add(p);
-            }
-        }
-
-        if (partitionFilters.size() > 0) {
-            scan.withPartitionFilter(PredicateBuilder.and(partitionFilters));
-        }
-        if (nonPartitionFilters.size() > 0) {
-            withNonPartitionFilter(PredicateBuilder.and(nonPartitionFilters));
-        }
-        return this;
-    }
-
-    public DataTableScan withKind(ScanKind scanKind) {
-        this.scanKind = scanKind;
-        scan.withKind(scanKind);
-        return this;
-    }
-
-    public DataTableScan withLevel(int level) {
-        scan.withLevel(level);
-        return this;
-    }
-
-    @VisibleForTesting
-    public DataTableScan withBucket(int bucket) {
-        scan.withBucket(bucket);
-        return this;
-    }
-
-    @Override
-    public DataFilePlan plan() {
-        FileStoreScan.Plan plan = scan.plan();
-        return new DataFilePlan(
-                plan.snapshotId(), generateSplits(plan.groupByPartFiles(plan.files(FileKind.ADD))));
-    }
-
-    private List<DataSplit> generateSplits(
-            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
-        return generateSplits(
-                scanKind != ScanKind.ALL, splitGenerator(pathFactory), groupedDataFiles);
-    }
-
-    @VisibleForTesting
-    public static List<DataSplit> generateSplits(
-            boolean isIncremental,
-            SplitGenerator splitGenerator,
-            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
-        List<DataSplit> splits = new ArrayList<>();
-        for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> entry :
-                groupedDataFiles.entrySet()) {
-            BinaryRowData partition = entry.getKey();
-            Map<Integer, List<DataFileMeta>> buckets = entry.getValue();
-            for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry : buckets.entrySet()) {
-                int bucket = bucketEntry.getKey();
-                if (isIncremental) {
-                    // Don't split when incremental
-                    splits.add(new DataSplit(partition, bucket, bucketEntry.getValue(), true));
-                } else {
-                    splitGenerator.split(bucketEntry.getValue()).stream()
-                            .map(files -> new DataSplit(partition, bucket, files, false))
-                            .forEach(splits::add);
-                }
-            }
-        }
-        return splits;
-    }
-
-    protected abstract SplitGenerator splitGenerator(FileStorePathFactory pathFactory);
-
-    protected abstract void withNonPartitionFilter(Predicate predicate);
-
-    public CoreOptions options() {
-        return options;
-    }
-
-    public SnapshotManager snapshotManager() {
-        return new SnapshotManager(pathFactory.root());
-    }
+    DataTableScan.DataFilePlan plan();
 
     /** Scanning plan containing snapshot ID and input splits. */
-    public static class DataFilePlan implements Plan {
+    class DataFilePlan implements Plan {
 
         @Nullable public final Long snapshotId;
         public final List<DataSplit> splits;

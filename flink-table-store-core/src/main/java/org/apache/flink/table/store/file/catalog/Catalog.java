@@ -36,7 +36,7 @@ public interface Catalog extends AutoCloseable {
 
     String DEFAULT_DATABASE = "default";
 
-    String METADATA_TABLE_SPLITTER = "$";
+    String SYSTEM_TABLE_SPLITTER = "$";
 
     /**
      * Get lock factory from catalog. Lock is used to support multiple concurrent writes on the

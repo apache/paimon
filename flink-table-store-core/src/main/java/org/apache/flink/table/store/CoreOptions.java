@@ -466,6 +466,10 @@ public class CoreOptions implements Serializable {
         return options.getOptional(WRITE_BUFFER_SPILLABLE).orElse(usingObjectStore);
     }
 
+    public Duration continuousDiscoveryInterval() {
+        return options.get(CONTINUOUS_DISCOVERY_INTERVAL);
+    }
+
     public int localSortMaxNumFileHandles() {
         return options.get(LOCAL_SORT_MAX_NUM_FILE_HANDLES);
     }

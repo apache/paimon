@@ -42,7 +42,6 @@ import javax.annotation.Nullable;
 
 import java.util.Optional;
 
-import static org.apache.flink.table.store.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.COMPACTION_MANUAL_TRIGGERED;
 
 /** Source builder to build a Flink {@link Source}. */
@@ -108,17 +107,12 @@ public class FlinkSourceBuilder {
         return this;
     }
 
-    private long discoveryIntervalMills() {
-        return conf.get(CONTINUOUS_DISCOVERY_INTERVAL).toMillis();
-    }
-
     private StaticFileStoreSource buildStaticFileSource() {
         return new StaticFileStoreSource(table, projectedFields, predicate, limit);
     }
 
     private ContinuousFileStoreSource buildContinuousFileSource() {
-        return new ContinuousFileStoreSource(
-                table, discoveryIntervalMills(), projectedFields, predicate, limit);
+        return new ContinuousFileStoreSource(table, projectedFields, predicate, limit);
     }
 
     private Source<RowData, ?, ?> buildSource() {

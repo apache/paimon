@@ -21,6 +21,8 @@ package org.apache.flink.table.store.table;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.data.conversion.RowRowConverter;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.file.WriteMode;
@@ -42,6 +44,7 @@ import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnap
 import org.apache.flink.table.store.table.source.snapshot.FullStartingScanner;
 import org.apache.flink.table.store.table.source.snapshot.InputChangelogFollowUpScanner;
 import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
+import org.apache.flink.table.store.table.system.AuditLogTable;
 import org.apache.flink.table.store.utils.CompatibilityTestUtils;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -613,6 +616,83 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(splits1.get(0).files()).hasSize(1);
         assertThat(splits1.get(0).files().get(0).fileName())
                 .isNotEqualTo(splits0.get(0).files().get(0).fileName());
+    }
+
+    @Test
+    public void testAuditLog() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
+
+        // first commit
+        write.write(rowDataWithKind(RowKind.INSERT, 1, 10, 100L));
+        write.write(rowDataWithKind(RowKind.INSERT, 2, 20, 200L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        // second commit
+        write.write(rowDataWithKind(RowKind.UPDATE_AFTER, 1, 30, 300L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        write.close();
+        commit.close();
+
+        AuditLogTable auditLogTable = new AuditLogTable(table);
+        RowRowConverter converter =
+                RowRowConverter.create(
+                        DataTypes.ROW(
+                                DataTypes.STRING(),
+                                DataTypes.INT(),
+                                DataTypes.INT(),
+                                DataTypes.BIGINT()));
+        Function<RowData, String> rowDataToString = row -> converter.toExternal(row).toString();
+        PredicateBuilder predicateBuilder = new PredicateBuilder(auditLogTable.rowType());
+
+        // Read all
+        TableScan scan = auditLogTable.newScan();
+        TableRead read = auditLogTable.newRead();
+        List<String> result = getResult(read, scan.plan().splits(), rowDataToString);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[+I, 2, 20, 200]", "+I[+U, 1, 30, 300]", "+I[+I, 1, 10, 100]");
+
+        // Read by filter row kind (No effect)
+        Predicate rowKindEqual = predicateBuilder.equal(0, StringData.fromString("+I"));
+        scan = auditLogTable.newScan().withFilter(rowKindEqual);
+        read = auditLogTable.newRead().withFilter(rowKindEqual);
+        result = getResult(read, scan.plan().splits(), rowDataToString);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[+I, 2, 20, 200]", "+I[+U, 1, 30, 300]", "+I[+I, 1, 10, 100]");
+
+        // Read by filter
+        scan = auditLogTable.newScan().withFilter(predicateBuilder.equal(2, 10));
+        read = auditLogTable.newRead().withFilter(predicateBuilder.equal(2, 10));
+        result = getResult(read, scan.plan().splits(), rowDataToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[+I, 1, 10, 100]");
+
+        // Read by projection
+        scan = auditLogTable.newScan();
+        read = auditLogTable.newRead().withProjection(new int[] {2, 0, 1});
+        RowRowConverter projConverter1 =
+                RowRowConverter.create(
+                        DataTypes.ROW(DataTypes.INT(), DataTypes.STRING(), DataTypes.INT()));
+        Function<RowData, String> projectToString1 =
+                row -> projConverter1.toExternal(row).toString();
+        result = getResult(read, scan.plan().splits(), projectToString1);
+        assertThat(result)
+                .containsExactlyInAnyOrder("+I[20, +I, 2]", "+I[30, +U, 1]", "+I[10, +I, 1]");
+
+        // Read by projection without row kind
+        scan = auditLogTable.newScan();
+        read = auditLogTable.newRead().withProjection(new int[] {2, 1});
+        RowRowConverter projConverter2 =
+                RowRowConverter.create(DataTypes.ROW(DataTypes.INT(), DataTypes.INT()));
+        Function<RowData, String> projectToString2 =
+                row -> projConverter2.toExternal(row).toString();
+        result = getResult(read, scan.plan().splits(), projectToString2);
+        assertThat(result).containsExactlyInAnyOrder("+I[20, 2]", "+I[30, 1]", "+I[10, 1]");
     }
 
     @Override

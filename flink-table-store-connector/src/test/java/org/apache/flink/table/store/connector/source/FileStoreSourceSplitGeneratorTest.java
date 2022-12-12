@@ -23,6 +23,7 @@ import org.apache.flink.table.store.file.manifest.FileKind;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
+import org.apache.flink.table.store.table.source.AbstractDataTableScan;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
 
@@ -76,7 +77,7 @@ public class FileStoreSourceSplitGeneratorTest {
                     }
                 };
         List<DataSplit> scanSplits =
-                DataTableScan.generateSplits(
+                AbstractDataTableScan.generateSplits(
                         false,
                         Collections::singletonList,
                         plan.groupByPartFiles(plan.files(FileKind.ADD)));

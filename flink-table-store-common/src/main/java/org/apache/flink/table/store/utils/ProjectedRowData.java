@@ -42,11 +42,11 @@ import java.util.Arrays;
  */
 public class ProjectedRowData implements RowData {
 
-    private final int[] indexMapping;
+    protected final int[] indexMapping;
 
-    private RowData row;
+    protected RowData row;
 
-    private ProjectedRowData(int[] indexMapping) {
+    protected ProjectedRowData(int[] indexMapping) {
         this.indexMapping = indexMapping;
     }
 
@@ -81,6 +81,7 @@ public class ProjectedRowData implements RowData {
     @Override
     public boolean isNullAt(int pos) {
         if (indexMapping[pos] < 0) {
+            // TODO move this logical to hive
             return true;
         }
         return row.isNullAt(indexMapping[pos]);

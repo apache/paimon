@@ -24,7 +24,7 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.util.Preconditions;
 
@@ -109,7 +109,7 @@ public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator 
     // ------------------------------------------------------------------------
 
     public static ContinuousDataFileSnapshotEnumerator createWithSnapshotStarting(
-            FileStoreTable table, DataTableScan scan) {
+            DataTable table, DataTableScan scan) {
         StartingScanner startingScanner =
                 table.options().startupMode() == CoreOptions.StartupMode.COMPACTED
                         ? new CompactedStartingScanner()
@@ -119,7 +119,7 @@ public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator 
     }
 
     public static ContinuousDataFileSnapshotEnumerator create(
-            FileStoreTable table, DataTableScan scan, @Nullable Long nextSnapshotId) {
+            DataTable table, DataTableScan scan, @Nullable Long nextSnapshotId) {
         return new ContinuousDataFileSnapshotEnumerator(
                 table.location(),
                 scan,
@@ -128,7 +128,7 @@ public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator 
                 nextSnapshotId);
     }
 
-    private static StartingScanner createStartingScanner(FileStoreTable table) {
+    private static StartingScanner createStartingScanner(DataTable table) {
         CoreOptions.StartupMode startupMode = table.options().startupMode();
         Long startupMillis = table.options().logScanTimestampMills();
         if (startupMode == CoreOptions.StartupMode.FULL) {
@@ -151,7 +151,7 @@ public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator 
         }
     }
 
-    private static FollowUpScanner createFollowUpScanner(FileStoreTable table, DataTableScan scan) {
+    private static FollowUpScanner createFollowUpScanner(DataTable table, DataTableScan scan) {
         CoreOptions.ChangelogProducer changelogProducer = table.options().changelogProducer();
         if (changelogProducer == CoreOptions.ChangelogProducer.NONE) {
             return new DeltaFollowUpScanner();
