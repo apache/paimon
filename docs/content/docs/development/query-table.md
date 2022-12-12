@@ -153,3 +153,31 @@ SELECT * FROM MyTable$options;
 +------------------------+--------------------+
 1 rows in set
 ```
+
+## Audit log Table
+
+If you need to audit the changelog of the table, you can use the `audit_log` to
+stream read table. Through `audit_log` table, you can get the `rowkind` column
+when you get the incremental data of the table. You can use this column for
+filtering and other operations to complete the audit.
+
+There are four values for `rowkind`:
+- `+I` Insertion operation.
+- `-U` Update operation with the previous content of the updated row.
+- `+U` Update operation with new content of the updated row.
+- `-D` Deletion operation.
+
+```sql
+SELECT * FROM MyTable$audit_log;
+
++------------------+-----------------+-----------------+
+|     rowkind      |     column_0    |     column_1    |
++------------------+-----------------+-----------------+
+|        +I        |      ...        |      ...        |
++------------------+-----------------+-----------------+
+|        -U        |      ...        |      ...        |
++------------------+-----------------+-----------------+
+|        +U        |      ...        |      ...        |
++------------------+-----------------+-----------------+
+3 rows in set
+```
