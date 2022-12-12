@@ -68,7 +68,7 @@ public class SystemTableSource extends FlinkTableSource {
                                     dataTable, projectFields, predicate, limit)
                             : new StaticFileStoreSource(dataTable, projectFields, predicate, limit);
         } else {
-            source = new SimpleRuntimeSource(table, projectFields, predicate, limit);
+            source = new SimpleSystemSource(table, projectFields, predicate, limit);
         }
         return SourceProvider.of(source);
     }

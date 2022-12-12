@@ -35,7 +35,7 @@ import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.utils.MappingRowData;
+import org.apache.flink.table.store.utils.ProjectedRowData;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.RowType.RowField;
 import org.apache.flink.table.types.logical.VarCharType;
@@ -243,12 +243,12 @@ public class AuditLogTable implements DataTable {
         }
     }
 
-    /** A {@link MappingRowData} which returns row kind when mapping index is negative. */
-    private static class AuditLogRowData extends MappingRowData {
+    /** A {@link ProjectedRowData} which returns row kind when mapping index is negative. */
+    private static class AuditLogRowData extends ProjectedRowData {
 
         private AuditLogRowData(int[] indexMapping, RowData row) {
             super(indexMapping);
-            this.row = row;
+            replaceRow(row);
         }
 
         @Override

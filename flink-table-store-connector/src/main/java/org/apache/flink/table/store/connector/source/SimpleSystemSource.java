@@ -30,11 +30,11 @@ import javax.annotation.Nullable;
 import java.util.Collection;
 
 /** A {@link FlinkSource} for system table. */
-public class SimpleRuntimeSource extends FlinkSource {
+public class SimpleSystemSource extends FlinkSource {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
-    public SimpleRuntimeSource(
+    public SimpleSystemSource(
             Table table,
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,

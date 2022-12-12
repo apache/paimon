@@ -629,6 +629,11 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowDataWithKind(RowKind.INSERT, 2, 20, 200L));
         commit.commit(0, write.prepareCommit(true, 0));
 
+        write = table.newWrite(commitUser);
+        commit = table.newCommit(commitUser);
+        write.write(rowDataWithKind(RowKind.UPDATE_AFTER, 1, 30, 300L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
         AuditLogTable auditLogTable = new AuditLogTable(table);
         RowRowConverter converter =
                 RowRowConverter.create(
@@ -644,14 +649,18 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         TableScan scan = auditLogTable.newScan();
         TableRead read = auditLogTable.newRead();
         List<String> result = getResult(read, scan.plan().splits(), rowDataToString);
-        assertThat(result).containsExactlyInAnyOrder("+I[+I, 2, 20, 200]", "+I[+I, 1, 10, 100]");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[+I, 2, 20, 200]", "+I[+U, 1, 30, 300]", "+I[+I, 1, 10, 100]");
 
-        // Read by filter row kind
+        // Read by filter row kind (No effect)
         Predicate rowKindEqual = predicateBuilder.equal(0, StringData.fromString("+I"));
         scan = auditLogTable.newScan().withFilter(rowKindEqual);
         read = auditLogTable.newRead().withFilter(rowKindEqual);
         result = getResult(read, scan.plan().splits(), rowDataToString);
-        assertThat(result).containsExactlyInAnyOrder("+I[+I, 2, 20, 200]", "+I[+I, 1, 10, 100]");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[+I, 2, 20, 200]", "+I[+U, 1, 30, 300]", "+I[+I, 1, 10, 100]");
 
         // Read by filter
         scan = auditLogTable.newScan().withFilter(predicateBuilder.equal(2, 10));
@@ -668,7 +677,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         Function<RowData, String> projectToString1 =
                 row -> projConverter1.toExternal(row).toString();
         result = getResult(read, scan.plan().splits(), projectToString1);
-        assertThat(result).containsExactlyInAnyOrder("+I[20, +I, 2]", "+I[10, +I, 1]");
+        assertThat(result)
+                .containsExactlyInAnyOrder("+I[20, +I, 2]", "+I[30, +U, 1]", "+I[10, +I, 1]");
 
         // Read by projection without row kind
         scan = auditLogTable.newScan();
@@ -678,7 +688,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         Function<RowData, String> projectToString2 =
                 row -> projConverter2.toExternal(row).toString();
         result = getResult(read, scan.plan().splits(), projectToString2);
-        assertThat(result).containsExactlyInAnyOrder("+I[20, 2]", "+I[10, 1]");
+        assertThat(result).containsExactlyInAnyOrder("+I[20, 2]", "+I[30, 1]", "+I[10, 1]");
     }
 
     @Override
