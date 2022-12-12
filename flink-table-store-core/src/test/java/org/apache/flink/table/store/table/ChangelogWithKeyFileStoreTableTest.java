@@ -625,14 +625,18 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                         conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
         TableWrite write = table.newWrite(commitUser);
         TableCommit commit = table.newCommit(commitUser);
+
+        // first commit
         write.write(rowDataWithKind(RowKind.INSERT, 1, 10, 100L));
         write.write(rowDataWithKind(RowKind.INSERT, 2, 20, 200L));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        write = table.newWrite(commitUser);
-        commit = table.newCommit(commitUser);
+        // second commit
         write.write(rowDataWithKind(RowKind.UPDATE_AFTER, 1, 30, 300L));
         commit.commit(1, write.prepareCommit(true, 1));
+
+        write.close();
+        commit.close();
 
         AuditLogTable auditLogTable = new AuditLogTable(table);
         RowRowConverter converter =
