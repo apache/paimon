@@ -17,7 +17,6 @@
  */
 package org.apache.flink.table.store.codegen
 
-import org.apache.flink.table.runtime.generated.{GeneratedRecordComparator, RecordComparator}
 import org.apache.flink.table.store.codegen.GenerateUtils.{newName, ROW_DATA}
 import org.apache.flink.table.types.logical.RowType
 
@@ -37,7 +36,10 @@ object ComparatorCodeGenerator {
    * @return
    *   A GeneratedRecordComparator
    */
-  def gen(name: String, inputType: RowType, sortSpec: SortSpec): GeneratedRecordComparator = {
+  def gen(
+      name: String,
+      inputType: RowType,
+      sortSpec: SortSpec): GeneratedClass[RecordComparator] = {
     val className = newName(name)
     val baseClass = classOf[RecordComparator]
 
@@ -65,7 +67,7 @@ object ComparatorCodeGenerator {
       }
       """.stripMargin
 
-    new GeneratedRecordComparator(className, code, ctx.references.toArray)
+    new GeneratedClass(className, code, ctx.references.toArray)
   }
 
 }
