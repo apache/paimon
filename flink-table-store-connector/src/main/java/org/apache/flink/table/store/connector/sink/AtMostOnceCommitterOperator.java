@@ -17,21 +17,15 @@
 
 package org.apache.flink.table.store.connector.sink;
 
-import org.apache.flink.api.common.state.ListState;
-import org.apache.flink.api.common.state.ListStateDescriptor;
-import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
-import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
-import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.util.function.SerializableFunction;
-import org.apache.flink.util.function.SerializableSupplier;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -44,8 +38,14 @@ import java.util.TreeMap;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
-/** Committer operator to commit {@link Committable}. */
-public class CommitterOperator extends AbstractStreamOperator<Committable>
+/**
+ * {@link Committable}s for each snapshot will be committed at most once. If fails, {@link
+ * Committable}s will be lost.
+ *
+ * <p>Useful for committing optional snapshots. For example COMPACT snapshots produced by a separate
+ * compact job.
+ */
+public class AtMostOnceCommitterOperator extends AbstractStreamOperator<Committable>
         implements OneInputStreamOperator<Committable, Committable>, BoundedOneInput {
 
     private static final long serialVersionUID = 1L;
@@ -54,10 +54,10 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     private final Deque<Committable> inputs = new ArrayDeque<>();
 
     /**
-     * If checkpoint is enabled we should do nothing in {@link CommitterOperator#endInput}.
-     * Remaining data will be committed in {@link CommitterOperator#notifyCheckpointComplete}. If
-     * checkpoint is not enabled we need to commit remaining data in {@link
-     * CommitterOperator#endInput}.
+     * If checkpoint is enabled we should do nothing in {@link
+     * AtMostOnceCommitterOperator#endInput}. Remaining data will be committed in {@link
+     * AtMostOnceCommitterOperator#notifyCheckpointComplete}. If checkpoint is not enabled we need
+     * to commit remaining data in {@link AtMostOnceCommitterOperator#endInput}.
      */
     private final boolean streamingCheckpointEnabled;
 
@@ -69,14 +69,7 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     private final String initialCommitUser;
 
     /** Group the committable by the checkpoint id. */
-    private final NavigableMap<Long, ManifestCommittable> committablesPerCheckpoint;
-
-    /** The committable's serializer. */
-    private final SerializableSupplier<SimpleVersionedSerializer<ManifestCommittable>>
-            committableSerializer;
-
-    /** ManifestCommittable state of this job. Used to filter out previous successful commits. */
-    private ListState<ManifestCommittable> streamingCommitterState;
+    protected final NavigableMap<Long, ManifestCommittable> committablesPerCheckpoint;
 
     private final SerializableFunction<String, Committer> committerFactory;
 
@@ -84,19 +77,16 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
      * Aggregate committables to global committables and commit the global committables to the
      * external system.
      */
-    private Committer committer;
+    protected Committer committer;
 
     private boolean endInput = false;
 
-    public CommitterOperator(
+    public AtMostOnceCommitterOperator(
             boolean streamingCheckpointEnabled,
             String initialCommitUser,
-            SerializableFunction<String, Committer> committerFactory,
-            SerializableSupplier<SimpleVersionedSerializer<ManifestCommittable>>
-                    committableSerializer) {
+            SerializableFunction<String, Committer> committerFactory) {
         this.streamingCheckpointEnabled = streamingCheckpointEnabled;
         this.initialCommitUser = initialCommitUser;
-        this.committableSerializer = committableSerializer;
         this.committablesPerCheckpoint = new TreeMap<>();
         this.committerFactory = checkNotNull(committerFactory);
         setChainingStrategy(ChainingStrategy.ALWAYS);
@@ -114,36 +104,6 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
                         context, "commit_user_state", String.class, initialCommitUser);
         // parallelism of commit operator is always 1, so commitUser will never be null
         committer = committerFactory.apply(commitUser);
-
-        streamingCommitterState =
-                new SimpleVersionedListState<>(
-                        context.getOperatorStateStore()
-                                .getListState(
-                                        new ListStateDescriptor<>(
-                                                "streaming_committer_raw_states",
-                                                BytePrimitiveArraySerializer.INSTANCE)),
-                        committableSerializer.get());
-        List<ManifestCommittable> restored = new ArrayList<>();
-        streamingCommitterState.get().forEach(restored::add);
-        streamingCommitterState.clear();
-        commit(true, restored);
-    }
-
-    private void commit(boolean isRecover, List<ManifestCommittable> committables)
-            throws Exception {
-        if (isRecover) {
-            committables = committer.filterRecoveredCommittables(committables);
-            if (!committables.isEmpty()) {
-                committer.commit(committables);
-                throw new RuntimeException(
-                        "This exception is intentionally thrown "
-                                + "after committing the restored checkpoints. "
-                                + "By restarting the job we hope that "
-                                + "writers can start writing based on these new commits.");
-            }
-        } else {
-            committer.commit(committables);
-        }
     }
 
     private ManifestCommittable toCommittables(long checkpoint, List<Committable> inputs)
@@ -155,10 +115,9 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     public void snapshotState(StateSnapshotContext context) throws Exception {
         super.snapshotState(context);
         pollInputs();
-        streamingCommitterState.update(committables(committablesPerCheckpoint));
     }
 
-    private List<ManifestCommittable> committables(NavigableMap<Long, ManifestCommittable> map) {
+    protected List<ManifestCommittable> committables(NavigableMap<Long, ManifestCommittable> map) {
         return new ArrayList<>(map.values());
     }
 
@@ -182,7 +141,7 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     private void commitUpToCheckpoint(long checkpointId) throws Exception {
         NavigableMap<Long, ManifestCommittable> headMap =
                 committablesPerCheckpoint.headMap(checkpointId, true);
-        commit(false, committables(headMap));
+        committer.commit(committables(headMap));
         headMap.clear();
     }
 
