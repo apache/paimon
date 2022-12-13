@@ -31,9 +31,7 @@ under the License.
 [Build Flink Table Store]({{< ref "docs/engines/build" >}}), you can find the shaded jars under
 `./flink-table-store-filesystems/flink-table-store-oss/target/flink-table-store-oss-{{< version >}}.jar`.
 
-## Configuration
-
-For example, if users want set up a Flink job and use OSS as the underlay file system, and want to read from Spark/Hive side.
+## Use
 
 - On Flink side, configure `flink-conf.yaml` like
     ```yaml
