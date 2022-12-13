@@ -22,7 +22,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-filesystem</artifactId>
+        <artifactId>flink-table-store-filesystems</artifactId>
         <groupId>org.apache.flink</groupId>
         <version>0.3-SNAPSHOT</version>
     </parent>
