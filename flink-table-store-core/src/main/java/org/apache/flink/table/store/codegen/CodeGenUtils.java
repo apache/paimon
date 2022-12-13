@@ -18,12 +18,6 @@
 
 package org.apache.flink.table.store.codegen;
 
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.runtime.generated.GeneratedRecordComparator;
-import org.apache.flink.table.runtime.generated.NormalizedKeyComputer;
-import org.apache.flink.table.runtime.generated.Projection;
-import org.apache.flink.table.runtime.generated.RecordComparator;
 import org.apache.flink.table.store.utils.BinaryRowDataUtil;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -33,22 +27,17 @@ import java.util.List;
 /** Utils for code generations. */
 public class CodeGenUtils {
 
-    public static final Projection<RowData, BinaryRowData> EMPTY_PROJECTION =
-            input -> BinaryRowDataUtil.EMPTY_ROW;
+    public static final Projection EMPTY_PROJECTION = input -> BinaryRowDataUtil.EMPTY_ROW;
 
-    public static Projection<RowData, BinaryRowData> newProjection(
-            RowType inputType, int[] mapping) {
+    public static Projection newProjection(RowType inputType, int[] mapping) {
         if (mapping.length == 0) {
             return EMPTY_PROJECTION;
         }
 
-        @SuppressWarnings("unchecked")
-        Projection<RowData, BinaryRowData> projection =
-                CodeGenLoader.getInstance()
-                        .discover(CodeGenerator.class)
-                        .generateProjection("Projection", inputType, mapping)
-                        .newInstance(CodeGenUtils.class.getClassLoader());
-        return projection;
+        return CodeGenLoader.getInstance()
+                .discover(CodeGenerator.class)
+                .generateProjection("Projection", inputType, mapping)
+                .newInstance(CodeGenUtils.class.getClassLoader());
     }
 
     public static NormalizedKeyComputer newNormalizedKeyComputer(
@@ -59,7 +48,7 @@ public class CodeGenUtils {
                 .newInstance(CodeGenUtils.class.getClassLoader());
     }
 
-    public static GeneratedRecordComparator generateRecordComparator(
+    public static GeneratedClass<RecordComparator> generateRecordComparator(
             List<LogicalType> fieldTypes, String name) {
         return CodeGenLoader.getInstance()
                 .discover(CodeGenerator.class)

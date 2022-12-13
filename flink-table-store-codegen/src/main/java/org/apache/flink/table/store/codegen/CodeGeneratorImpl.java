@@ -18,9 +18,6 @@
 
 package org.apache.flink.table.store.codegen;
 
-import org.apache.flink.table.runtime.generated.GeneratedNormalizedKeyComputer;
-import org.apache.flink.table.runtime.generated.GeneratedProjection;
-import org.apache.flink.table.runtime.generated.GeneratedRecordComparator;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -31,7 +28,7 @@ import java.util.List;
 public class CodeGeneratorImpl implements CodeGenerator {
 
     @Override
-    public GeneratedProjection generateProjection(
+    public GeneratedClass<Projection> generateProjection(
             String name, RowType inputType, int[] inputMapping) {
         RowType outputType = TypeUtils.project(inputType, inputMapping);
         return ProjectionCodeGenerator.generateProjection(
@@ -39,7 +36,7 @@ public class CodeGeneratorImpl implements CodeGenerator {
     }
 
     @Override
-    public GeneratedNormalizedKeyComputer generateNormalizedKeyComputer(
+    public GeneratedClass<NormalizedKeyComputer> generateNormalizedKeyComputer(
             List<LogicalType> fieldTypes, String name) {
         return new SortCodeGenerator(
                         RowType.of(fieldTypes.toArray(new LogicalType[0])),
@@ -48,7 +45,7 @@ public class CodeGeneratorImpl implements CodeGenerator {
     }
 
     @Override
-    public GeneratedRecordComparator generateRecordComparator(
+    public GeneratedClass<RecordComparator> generateRecordComparator(
             List<LogicalType> fieldTypes, String name) {
         return ComparatorCodeGenerator.gen(
                 name,

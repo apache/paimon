@@ -19,7 +19,6 @@ package org.apache.flink.table.store.codegen
 
 import org.apache.flink.table.data.RowData
 import org.apache.flink.table.data.binary.BinaryRowData
-import org.apache.flink.table.runtime.generated.{GeneratedProjection, Projection}
 import org.apache.flink.table.store.codegen.GeneratedExpression.{NEVER_NULL, NO_CODE}
 import org.apache.flink.table.store.codegen.GenerateUtils.{generateRecordStatement, newName, DEFAULT_INPUT1_TERM, DEFAULT_OUT_RECORD_TERM, DEFAULT_OUT_RECORD_WRITER_TERM, ROW_DATA}
 import org.apache.flink.table.types.logical.RowType
@@ -85,9 +84,9 @@ object ProjectionCodeGenerator {
       inputTerm: String = DEFAULT_INPUT1_TERM,
       outRecordTerm: String = DEFAULT_OUT_RECORD_TERM,
       outRecordWriterTerm: String = DEFAULT_OUT_RECORD_WRITER_TERM,
-      reusedOutRecord: Boolean = true): GeneratedProjection = {
+      reusedOutRecord: Boolean = true): GeneratedClass[Projection] = {
     val className = newName(name)
-    val baseClass = classOf[Projection[_, _]]
+    val baseClass = classOf[Projection]
 
     val expression = generateProjectionExpression(
       ctx,
@@ -119,7 +118,7 @@ object ProjectionCodeGenerator {
          |}
         """.stripMargin
 
-    new GeneratedProjection(className, code, ctx.references.toArray)
+    new GeneratedClass(className, code, ctx.references.toArray)
   }
 
   /** For java invoke. */
@@ -128,7 +127,7 @@ object ProjectionCodeGenerator {
       name: String,
       inputType: RowType,
       outputType: RowType,
-      inputMapping: Array[Int]): GeneratedProjection =
+      inputMapping: Array[Int]): GeneratedClass[Projection] =
     generateProjection(
       ctx,
       name,

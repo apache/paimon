@@ -23,12 +23,11 @@ import org.apache.flink.runtime.io.disk.SimpleCollectingOutputView;
 import org.apache.flink.runtime.operators.sort.QuickSort;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.runtime.generated.NormalizedKeyComputer;
-import org.apache.flink.table.runtime.generated.RecordComparator;
-import org.apache.flink.table.runtime.operators.sort.BinaryIndexedSortable;
 import org.apache.flink.table.runtime.typeutils.AbstractRowDataSerializer;
 import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.runtime.util.MemorySegmentPool;
+import org.apache.flink.table.store.codegen.NormalizedKeyComputer;
+import org.apache.flink.table.store.codegen.RecordComparator;
 import org.apache.flink.util.MutableObjectIterator;
 
 import java.io.EOFException;

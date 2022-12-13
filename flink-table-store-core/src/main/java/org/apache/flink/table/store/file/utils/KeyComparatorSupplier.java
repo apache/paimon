@@ -19,9 +19,9 @@
 package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.generated.GeneratedRecordComparator;
-import org.apache.flink.table.runtime.generated.RecordComparator;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
+import org.apache.flink.table.store.codegen.GeneratedClass;
+import org.apache.flink.table.store.codegen.RecordComparator;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.function.SerializableSupplier;
 
@@ -33,7 +33,7 @@ public class KeyComparatorSupplier implements SerializableSupplier<Comparator<Ro
 
     private static final long serialVersionUID = 1L;
 
-    private final GeneratedRecordComparator genRecordComparator;
+    private final GeneratedClass<RecordComparator> genRecordComparator;
 
     public KeyComparatorSupplier(RowType keyType) {
         genRecordComparator =
