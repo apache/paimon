@@ -16,14 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
+package org.apache.flink.table.store.oss;
 
+import org.apache.flink.core.fs.FileSystemFactory;
+import org.apache.flink.table.store.plugin.FileSystemLoader;
 import org.apache.flink.table.store.plugin.PluginLoader;
 
-/** Copied and modified from the flink-table-planner-loader module. */
-public class CodeGenLoader {
+/** A {@link PluginLoader} to load oss. */
+public class OSSLoader implements FileSystemLoader {
 
-    private static final String FLINK_TABLE_STORE_CODEGEN_FAT_JAR = "flink-table-store-codegen.jar";
+    private static final String OSS_JAR = "flink-table-store-plugin-oss.jar";
+
+    private static final String OSS_CLASS = "org.apache.flink.fs.osshadoop.OSSFileSystemFactory";
 
     // Singleton lazy initialization
 
@@ -32,12 +36,13 @@ public class CodeGenLoader {
     private static synchronized PluginLoader getLoader() {
         if (loader == null) {
             // Avoid NoClassDefFoundError without cause by exception
-            loader = new PluginLoader(FLINK_TABLE_STORE_CODEGEN_FAT_JAR);
+            loader = new PluginLoader(OSS_JAR);
         }
         return loader;
     }
 
-    public static CodeGenerator getCodeGenerator() {
-        return getLoader().discover(CodeGenerator.class);
+    @Override
+    public FileSystemFactory load() {
+        return getLoader().newInstance(OSS_CLASS);
     }
 }

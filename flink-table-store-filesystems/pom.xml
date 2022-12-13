@@ -33,6 +33,7 @@
 
     <modules>
         <module>flink-table-store-oss</module>
+        <module>flink-table-store-s3</module>
     </modules>
 
 </project>
