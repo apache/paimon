@@ -22,13 +22,13 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-filesystem</artifactId>
+        <artifactId>flink-table-store-filesystems</artifactId>
         <groupId>org.apache.flink</groupId>
         <version>0.3-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-fs-oss-hadoop</artifactId>
-    <name>Flink Table Store : FileSystem : OSS FS</name>
+    <artifactId>flink-table-store-oss</artifactId>
+    <name>Flink Table Store : FileSystems : OSS</name>
     <packaging>jar</packaging>
 
     <dependencies>

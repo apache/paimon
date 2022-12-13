@@ -27,12 +27,12 @@
         <version>0.3-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-filesystem</artifactId>
-    <name>Flink Table Store : FileSystem</name>
+    <artifactId>flink-table-store-filesystems</artifactId>
+    <name>Flink Table Store : FileSystems : </name>
     <packaging>pom</packaging>
 
     <modules>
-        <module>flink-table-store-fs-oss-hadoop</module>
+        <module>flink-table-store-oss</module>
     </modules>
 
 </project>
