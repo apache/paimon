@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.sort;
 
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.generated.RecordComparator;
+import org.apache.flink.table.store.codegen.RecordComparator;
 
 /** Example Int {@link RecordComparator}. */
 public class IntRecordComparator implements RecordComparator {

@@ -20,9 +20,9 @@ package org.apache.flink.table.store.table.sink;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.runtime.generated.Projection;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
+import org.apache.flink.table.store.codegen.Projection;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
@@ -34,9 +34,9 @@ public class BucketComputer {
 
     private final int numBucket;
 
-    private final Projection<RowData, BinaryRowData> rowProjection;
-    private final Projection<RowData, BinaryRowData> bucketProjection;
-    private final Projection<RowData, BinaryRowData> pkProjection;
+    private final Projection rowProjection;
+    private final Projection bucketProjection;
+    private final Projection pkProjection;
 
     public BucketComputer(TableSchema tableSchema) {
         this(

@@ -19,7 +19,6 @@ package org.apache.flink.table.store.codegen
 
 import org.apache.flink.table.data.{DecimalData, TimestampData}
 import org.apache.flink.table.data.binary.BinaryRowData
-import org.apache.flink.table.runtime.generated.{GeneratedNormalizedKeyComputer, NormalizedKeyComputer, RecordComparator}
 import org.apache.flink.table.runtime.operators.sort.SortUtil
 import org.apache.flink.table.runtime.types.PlannerTypeUtils
 import org.apache.flink.table.store.codegen.GenerateUtils.{newName, ROW_DATA, SEGMENT}
@@ -119,7 +118,7 @@ class SortCodeGenerator(val input: RowType, val sortSpec: SortSpec) {
    * @return
    *   A GeneratedNormalizedKeyComputer
    */
-  def generateNormalizedKeyComputer(name: String): GeneratedNormalizedKeyComputer = {
+  def generateNormalizedKeyComputer(name: String): GeneratedClass[NormalizedKeyComputer] = {
 
     val className = newName(name)
 
@@ -179,7 +178,7 @@ class SortCodeGenerator(val input: RowType, val sortSpec: SortSpec) {
       }
     """.stripMargin
 
-    new GeneratedNormalizedKeyComputer(className, code)
+    new GeneratedClass(className, code)
   }
 
   def generatePutNormalizedKeys(numKeyBytes: Int): mutable.ArrayBuffer[String] = {
