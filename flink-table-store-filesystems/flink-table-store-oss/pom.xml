@@ -27,8 +27,8 @@
         <version>0.3-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-fs-oss-hadoop</artifactId>
-    <name>Flink Table Store : FileSystem : OSS FS</name>
+    <artifactId>flink-table-store-oss</artifactId>
+    <name>Flink Table Store : FileSystems : OSS</name>
     <packaging>jar</packaging>
 
     <dependencies>

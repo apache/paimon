@@ -61,7 +61,7 @@ under the License.
         <module>flink-table-store-dist</module>
         <module>flink-table-store-docs</module>
         <module>flink-table-store-e2e-tests</module>
-        <module>flink-table-store-filesystem</module>
+        <module>flink-table-store-filesystems</module>
         <module>flink-table-store-format</module>
         <module>flink-table-store-shade</module>
         <module>flink-table-store-hive</module>
