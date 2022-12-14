@@ -52,7 +52,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link CompactorSourceBuilder}. */
+/** IT cases for {@link CompactorSourceBuilder}. */
 public class CompactorSourceITCase extends AbstractTestBase {
 
     private static final RowType ROW_TYPE =

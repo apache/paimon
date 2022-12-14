@@ -17,21 +17,15 @@
 
 package org.apache.flink.table.store.connector.sink;
 
-import org.apache.flink.api.common.state.ListState;
-import org.apache.flink.api.common.state.ListStateDescriptor;
-import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
-import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
-import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.util.function.SerializableFunction;
-import org.apache.flink.util.function.SerializableSupplier;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -44,7 +38,7 @@ import java.util.TreeMap;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
-/** Committer operator to commit {@link Committable}. */
+/** Operator to commit {@link Committable}s for each snapshot. */
 public class CommitterOperator extends AbstractStreamOperator<Committable>
         implements OneInputStreamOperator<Committable, Committable>, BoundedOneInput {
 
@@ -69,22 +63,17 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     private final String initialCommitUser;
 
     /** Group the committable by the checkpoint id. */
-    private final NavigableMap<Long, ManifestCommittable> committablesPerCheckpoint;
-
-    /** The committable's serializer. */
-    private final SerializableSupplier<SimpleVersionedSerializer<ManifestCommittable>>
-            committableSerializer;
-
-    /** ManifestCommittable state of this job. Used to filter out previous successful commits. */
-    private ListState<ManifestCommittable> streamingCommitterState;
+    protected final NavigableMap<Long, ManifestCommittable> committablesPerCheckpoint;
 
     private final SerializableFunction<String, Committer> committerFactory;
+
+    private final CommittableStateManager committableStateManager;
 
     /**
      * Aggregate committables to global committables and commit the global committables to the
      * external system.
      */
-    private Committer committer;
+    protected Committer committer;
 
     private boolean endInput = false;
 
@@ -92,13 +81,12 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
             boolean streamingCheckpointEnabled,
             String initialCommitUser,
             SerializableFunction<String, Committer> committerFactory,
-            SerializableSupplier<SimpleVersionedSerializer<ManifestCommittable>>
-                    committableSerializer) {
+            CommittableStateManager committableStateManager) {
         this.streamingCheckpointEnabled = streamingCheckpointEnabled;
         this.initialCommitUser = initialCommitUser;
-        this.committableSerializer = committableSerializer;
         this.committablesPerCheckpoint = new TreeMap<>();
         this.committerFactory = checkNotNull(committerFactory);
+        this.committableStateManager = committableStateManager;
         setChainingStrategy(ChainingStrategy.ALWAYS);
     }
 
@@ -115,35 +103,7 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
         // parallelism of commit operator is always 1, so commitUser will never be null
         committer = committerFactory.apply(commitUser);
 
-        streamingCommitterState =
-                new SimpleVersionedListState<>(
-                        context.getOperatorStateStore()
-                                .getListState(
-                                        new ListStateDescriptor<>(
-                                                "streaming_committer_raw_states",
-                                                BytePrimitiveArraySerializer.INSTANCE)),
-                        committableSerializer.get());
-        List<ManifestCommittable> restored = new ArrayList<>();
-        streamingCommitterState.get().forEach(restored::add);
-        streamingCommitterState.clear();
-        commit(true, restored);
-    }
-
-    private void commit(boolean isRecover, List<ManifestCommittable> committables)
-            throws Exception {
-        if (isRecover) {
-            committables = committer.filterRecoveredCommittables(committables);
-            if (!committables.isEmpty()) {
-                committer.commit(committables);
-                throw new RuntimeException(
-                        "This exception is intentionally thrown "
-                                + "after committing the restored checkpoints. "
-                                + "By restarting the job we hope that "
-                                + "writers can start writing based on these new commits.");
-            }
-        } else {
-            committer.commit(committables);
-        }
+        committableStateManager.initializeState(context, committer);
     }
 
     private ManifestCommittable toCommittables(long checkpoint, List<Committable> inputs)
@@ -155,7 +115,7 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     public void snapshotState(StateSnapshotContext context) throws Exception {
         super.snapshotState(context);
         pollInputs();
-        streamingCommitterState.update(committables(committablesPerCheckpoint));
+        committableStateManager.snapshotState(context, committables(committablesPerCheckpoint));
     }
 
     private List<ManifestCommittable> committables(NavigableMap<Long, ManifestCommittable> map) {
@@ -182,7 +142,7 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     private void commitUpToCheckpoint(long checkpointId) throws Exception {
         NavigableMap<Long, ManifestCommittable> headMap =
                 committablesPerCheckpoint.headMap(checkpointId, true);
-        commit(false, committables(headMap));
+        committer.commit(committables(headMap));
         headMap.clear();
     }
 

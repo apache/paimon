@@ -33,8 +33,8 @@ import org.apache.flink.table.data.conversion.DataStructureConverters;
 import org.apache.flink.table.runtime.typeutils.InternalSerializers;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.connector.sink.FileStoreSink;
 import org.apache.flink.table.store.connector.sink.FlinkSinkBuilder;
-import org.apache.flink.table.store.connector.sink.StoreSink;
 import org.apache.flink.table.store.connector.source.ContinuousFileStoreSource;
 import org.apache.flink.table.store.connector.source.FlinkSourceBuilder;
 import org.apache.flink.table.store.connector.source.StaticFileStoreSource;
@@ -80,7 +80,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * ITCase for {@link StaticFileStoreSource}, {@link ContinuousFileStoreSource} and {@link
- * StoreSink}.
+ * FileStoreSink}.
  */
 @RunWith(Parameterized.class)
 public class FileStoreITCase extends AbstractTestBase {
