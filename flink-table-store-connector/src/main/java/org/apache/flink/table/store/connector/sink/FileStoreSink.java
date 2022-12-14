@@ -24,13 +24,14 @@ import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.LogSinkFunction;
+import org.apache.flink.util.function.SerializableFunction;
 
 import javax.annotation.Nullable;
 
 import java.util.Map;
 
-/** {@link AbstractFlinkSink} for writing records into table store. */
-public class FileStoreSink extends AbstractFlinkSink {
+/** {@link FlinkSink} for writing records into table store. */
+public class FileStoreSink extends FlinkSink {
 
     private static final long serialVersionUID = 1L;
 
@@ -51,30 +52,27 @@ public class FileStoreSink extends AbstractFlinkSink {
 
     @Override
     protected OneInputStreamOperator<RowData, Committable> createWriteOperator(
-            String initialCommitUser, boolean isStreaming) {
-        return new StoreWriteOperator(
-                table, logSinkFunction, createWriteProvider(initialCommitUser));
+            StoreSinkWrite.Provider writeProvider, boolean isStreaming) {
+        return new StoreWriteOperator(table, logSinkFunction, writeProvider);
     }
 
     @Override
-    protected OneInputStreamOperator<Committable, Committable> createCommitterOperator(
-            String initialCommitUser, boolean streamingCheckpointEnabled) {
-        return new ExactlyOnceCommitOperator(
-                streamingCheckpointEnabled,
-                initialCommitUser,
-                // If checkpoint is enabled for streaming job, we have to
-                // commit new files list even if they're empty.
-                // Otherwise we can't tell if the commit is successful after
-                // a restart.
-                user -> createCommitter(user, streamingCheckpointEnabled),
-                ManifestCommittableSerializer::new);
+    protected SerializableFunction<String, Committer> createCommitterFactory(
+            boolean streamingCheckpointEnabled) {
+        // If checkpoint is enabled for streaming job, we have to
+        // commit new files list even if they're empty.
+        // Otherwise we can't tell if the commit is successful after
+        // a restart.
+        return user ->
+                new StoreCommitter(
+                        table.newCommit(user)
+                                .withOverwritePartition(overwritePartition)
+                                .withCreateEmptyCommit(streamingCheckpointEnabled)
+                                .withLock(lockFactory.create()));
     }
 
-    private StoreCommitter createCommitter(String user, boolean createEmptyCommit) {
-        return new StoreCommitter(
-                table.newCommit(user)
-                        .withOverwritePartition(overwritePartition)
-                        .withCreateEmptyCommit(createEmptyCommit)
-                        .withLock(lockFactory.create()));
+    @Override
+    protected CommittableStateManager createCommittableStateManager() {
+        return new RestoreAndFailCommittableStateManager(ManifestCommittableSerializer::new);
     }
 }

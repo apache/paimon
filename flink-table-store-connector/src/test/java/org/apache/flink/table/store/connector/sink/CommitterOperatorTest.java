@@ -37,8 +37,8 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.fail;
 
-/** Tests for {@link ExactlyOnceCommitOperator}. */
-public class ExactlyOnceCommitterOperatorTest extends CommitterOperatorTestBase {
+/** Tests for {@link CommitterOperator}. */
+public class CommitterOperatorTest extends CommitterOperatorTestBase {
 
     private String initialCommitUser;
 
@@ -48,12 +48,16 @@ public class ExactlyOnceCommitterOperatorTest extends CommitterOperatorTestBase 
         initialCommitUser = UUID.randomUUID().toString();
     }
 
+    // ------------------------------------------------------------------------
+    //  Recoverable operator tests
+    // ------------------------------------------------------------------------
+
     @Test
     public void testFailIntentionallyAfterRestore() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
-                createTestHarness(table);
+                createRecoverableTestHarness(table);
         testHarness.open();
 
         TableWrite write = table.newWrite(initialCommitUser);
@@ -69,7 +73,7 @@ public class ExactlyOnceCommitterOperatorTest extends CommitterOperatorTestBase 
         OperatorSubtaskState snapshot = testHarness.snapshot(0, timestamp++);
         assertThat(table.snapshotManager().latestSnapshotId()).isNull();
 
-        testHarness = createTestHarness(table);
+        testHarness = createRecoverableTestHarness(table);
         try {
             // commit snapshot from state, fail intentionally
             testHarness.initializeState(snapshot);
@@ -86,7 +90,7 @@ public class ExactlyOnceCommitterOperatorTest extends CommitterOperatorTestBase 
         assertResults(table, "1, 10", "2, 20");
 
         // snapshot is successfully committed, no failure is needed
-        testHarness = createTestHarness(table);
+        testHarness = createRecoverableTestHarness(table);
         testHarness.initializeState(snapshot);
         testHarness.open();
         assertResults(table, "1, 10", "2, 20");
@@ -96,7 +100,7 @@ public class ExactlyOnceCommitterOperatorTest extends CommitterOperatorTestBase 
     public void testCheckpointAbort() throws Exception {
         FileStoreTable table = createFileStoreTable();
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
-                createTestHarness(table);
+                createRecoverableTestHarness(table);
         testHarness.open();
 
         // files from multiple checkpoint
@@ -123,14 +127,94 @@ public class ExactlyOnceCommitterOperatorTest extends CommitterOperatorTestBase 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(cpId);
     }
 
-    private OneInputStreamOperatorTestHarness<Committable, Committable> createTestHarness(
-            FileStoreTable table) throws Exception {
-        ExactlyOnceCommitOperator operator =
-                new ExactlyOnceCommitOperator(
+    // ------------------------------------------------------------------------
+    //  Lossy operator tests
+    // ------------------------------------------------------------------------
+
+    @Test
+    public void testSnapshotLostWhenFailed() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createLossyTestHarness(table);
+        testHarness.open();
+
+        long timestamp = 1;
+
+        // this checkpoint is notified, should be committed
+        TableWrite write = table.newWrite(initialCommitUser);
+        write.write(GenericRowData.of(1, 10L));
+        write.write(GenericRowData.of(2, 20L));
+        for (FileCommittable committable : write.prepareCommit(false, 1)) {
+            testHarness.processElement(
+                    new Committable(1, Committable.Kind.FILE, committable), timestamp++);
+        }
+        testHarness.snapshot(1, timestamp++);
+        testHarness.notifyOfCompletedCheckpoint(1);
+
+        // this checkpoint is not notified, should not be committed
+        write.write(GenericRowData.of(3, 30L));
+        write.write(GenericRowData.of(4, 40L));
+        for (FileCommittable committable : write.prepareCommit(false, 2)) {
+            testHarness.processElement(
+                    new Committable(2, Committable.Kind.FILE, committable), timestamp++);
+        }
+        OperatorSubtaskState snapshot = testHarness.snapshot(2, timestamp++);
+
+        // reopen test harness
+        write.close();
+        testHarness.close();
+
+        testHarness = createLossyTestHarness(table);
+        testHarness.initializeState(snapshot);
+        testHarness.open();
+
+        // this checkpoint is notified, should be committed
+        write = table.newWrite(initialCommitUser);
+        write.write(GenericRowData.of(5, 50L));
+        write.write(GenericRowData.of(6, 60L));
+        for (FileCommittable committable : write.prepareCommit(false, 3)) {
+            testHarness.processElement(
+                    new Committable(3, Committable.Kind.FILE, committable), timestamp++);
+        }
+        testHarness.snapshot(3, timestamp++);
+        testHarness.notifyOfCompletedCheckpoint(3);
+
+        write.close();
+        testHarness.close();
+
+        assertResults(table, "1, 10", "2, 20", "5, 50", "6, 60");
+    }
+
+    // ------------------------------------------------------------------------
+    //  Test utils
+    // ------------------------------------------------------------------------
+
+    private OneInputStreamOperatorTestHarness<Committable, Committable>
+            createRecoverableTestHarness(FileStoreTable table) throws Exception {
+        CommitterOperator operator =
+                new CommitterOperator(
                         true,
                         initialCommitUser,
                         user -> new StoreCommitter(table.newCommit(user)),
-                        ManifestCommittableSerializer::new);
+                        new RestoreAndFailCommittableStateManager(
+                                ManifestCommittableSerializer::new));
+        return createTestHarness(operator);
+    }
+
+    private OneInputStreamOperatorTestHarness<Committable, Committable> createLossyTestHarness(
+            FileStoreTable table) throws Exception {
+        CommitterOperator operator =
+                new CommitterOperator(
+                        true,
+                        initialCommitUser,
+                        user -> new StoreCommitter(table.newCommit(user)),
+                        new NoopCommittableStateManager());
+        return createTestHarness(operator);
+    }
+
+    private OneInputStreamOperatorTestHarness<Committable, Committable> createTestHarness(
+            CommitterOperator operator) throws Exception {
         TypeSerializer<Committable> serializer =
                 new CommittableTypeInfo().createSerializer(new ExecutionConfig());
         OneInputStreamOperatorTestHarness<Committable, Committable> harness =

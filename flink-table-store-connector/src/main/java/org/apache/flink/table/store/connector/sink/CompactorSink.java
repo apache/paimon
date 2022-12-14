@@ -22,9 +22,10 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.util.function.SerializableFunction;
 
-/** {@link AbstractFlinkSink} for stand-alone compact jobs. */
-public class CompactorSink extends AbstractFlinkSink {
+/** {@link FlinkSink} for stand-alone compact jobs. */
+public class CompactorSink extends FlinkSink {
 
     private static final long serialVersionUID = 1L;
 
@@ -37,18 +38,18 @@ public class CompactorSink extends AbstractFlinkSink {
 
     @Override
     protected OneInputStreamOperator<RowData, Committable> createWriteOperator(
-            String initialCommitUser, boolean isStreaming) {
-        return new StoreCompactOperator(table, createWriteProvider(initialCommitUser), isStreaming);
+            StoreSinkWrite.Provider writeProvider, boolean isStreaming) {
+        return new StoreCompactOperator(table, writeProvider, isStreaming);
     }
 
     @Override
-    protected OneInputStreamOperator<Committable, Committable> createCommitterOperator(
-            String initialCommitUser, boolean streamingCheckpointEnabled) {
-        return new AtMostOnceCommitterOperator(
-                streamingCheckpointEnabled, initialCommitUser, this::createCommitter);
+    protected SerializableFunction<String, Committer> createCommitterFactory(
+            boolean streamingCheckpointEnabled) {
+        return user -> new StoreCommitter(table.newCommit(user).withLock(lockFactory.create()));
     }
 
-    private StoreCommitter createCommitter(String user) {
-        return new StoreCommitter(table.newCommit(user).withLock(lockFactory.create()));
+    @Override
+    protected CommittableStateManager createCommittableStateManager() {
+        return new NoopCommittableStateManager();
     }
 }

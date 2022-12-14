@@ -35,12 +35,13 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.utils.StreamExecutionEnvironmentUtils;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.util.Preconditions;
+import org.apache.flink.util.function.SerializableFunction;
 
 import java.io.Serializable;
 import java.util.UUID;
 
 /** Abstract sink of table store. */
-public abstract class AbstractFlinkSink implements Serializable {
+public abstract class FlinkSink implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -50,7 +51,7 @@ public abstract class AbstractFlinkSink implements Serializable {
     protected final FileStoreTable table;
     private final boolean isOverwrite;
 
-    public AbstractFlinkSink(FileStoreTable table, boolean isOverwrite) {
+    public FlinkSink(FileStoreTable table, boolean isOverwrite) {
         this.table = table;
         this.isOverwrite = isOverwrite;
     }
@@ -99,15 +100,19 @@ public abstract class AbstractFlinkSink implements Serializable {
                 input.transform(
                                 WRITER_NAME,
                                 typeInfo,
-                                createWriteOperator(initialCommitUser, isStreaming))
+                                createWriteOperator(
+                                        createWriteProvider(initialCommitUser), isStreaming))
                         .setParallelism(input.getParallelism());
 
         SingleOutputStreamOperator<?> committed =
                 written.transform(
                                 GLOBAL_COMMITTER_NAME,
                                 typeInfo,
-                                createCommitterOperator(
-                                        initialCommitUser, streamingCheckpointEnabled))
+                                new CommitterOperator(
+                                        streamingCheckpointEnabled,
+                                        initialCommitUser,
+                                        createCommitterFactory(streamingCheckpointEnabled),
+                                        createCommittableStateManager()))
                         .setParallelism(1)
                         .setMaxParallelism(1);
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
@@ -127,8 +132,10 @@ public abstract class AbstractFlinkSink implements Serializable {
     }
 
     protected abstract OneInputStreamOperator<RowData, Committable> createWriteOperator(
-            String initialCommitUser, boolean isStreaming);
+            StoreSinkWrite.Provider writeProvider, boolean isStreaming);
 
-    protected abstract OneInputStreamOperator<Committable, Committable> createCommitterOperator(
-            String initialCommitUser, boolean streamingCheckpointEnabled);
+    protected abstract SerializableFunction<String, Committer> createCommitterFactory(
+            boolean streamingCheckpointEnabled);
+
+    protected abstract CommittableStateManager createCommittableStateManager();
 }

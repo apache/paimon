@@ -38,14 +38,8 @@ import java.util.TreeMap;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
-/**
- * {@link Committable}s for each snapshot will be committed at most once. If fails, {@link
- * Committable}s will be lost.
- *
- * <p>Useful for committing optional snapshots. For example COMPACT snapshots produced by a separate
- * compact job.
- */
-public class AtMostOnceCommitterOperator extends AbstractStreamOperator<Committable>
+/** Operator to commit {@link Committable}s for each snapshot. */
+public class CommitterOperator extends AbstractStreamOperator<Committable>
         implements OneInputStreamOperator<Committable, Committable>, BoundedOneInput {
 
     private static final long serialVersionUID = 1L;
@@ -54,10 +48,10 @@ public class AtMostOnceCommitterOperator extends AbstractStreamOperator<Committa
     private final Deque<Committable> inputs = new ArrayDeque<>();
 
     /**
-     * If checkpoint is enabled we should do nothing in {@link
-     * AtMostOnceCommitterOperator#endInput}. Remaining data will be committed in {@link
-     * AtMostOnceCommitterOperator#notifyCheckpointComplete}. If checkpoint is not enabled we need
-     * to commit remaining data in {@link AtMostOnceCommitterOperator#endInput}.
+     * If checkpoint is enabled we should do nothing in {@link CommitterOperator#endInput}.
+     * Remaining data will be committed in {@link CommitterOperator#notifyCheckpointComplete}. If
+     * checkpoint is not enabled we need to commit remaining data in {@link
+     * CommitterOperator#endInput}.
      */
     private final boolean streamingCheckpointEnabled;
 
@@ -73,6 +67,8 @@ public class AtMostOnceCommitterOperator extends AbstractStreamOperator<Committa
 
     private final SerializableFunction<String, Committer> committerFactory;
 
+    private final CommittableStateManager committableStateManager;
+
     /**
      * Aggregate committables to global committables and commit the global committables to the
      * external system.
@@ -81,14 +77,16 @@ public class AtMostOnceCommitterOperator extends AbstractStreamOperator<Committa
 
     private boolean endInput = false;
 
-    public AtMostOnceCommitterOperator(
+    public CommitterOperator(
             boolean streamingCheckpointEnabled,
             String initialCommitUser,
-            SerializableFunction<String, Committer> committerFactory) {
+            SerializableFunction<String, Committer> committerFactory,
+            CommittableStateManager committableStateManager) {
         this.streamingCheckpointEnabled = streamingCheckpointEnabled;
         this.initialCommitUser = initialCommitUser;
         this.committablesPerCheckpoint = new TreeMap<>();
         this.committerFactory = checkNotNull(committerFactory);
+        this.committableStateManager = committableStateManager;
         setChainingStrategy(ChainingStrategy.ALWAYS);
     }
 
@@ -104,6 +102,8 @@ public class AtMostOnceCommitterOperator extends AbstractStreamOperator<Committa
                         context, "commit_user_state", String.class, initialCommitUser);
         // parallelism of commit operator is always 1, so commitUser will never be null
         committer = committerFactory.apply(commitUser);
+
+        committableStateManager.initializeState(context, committer);
     }
 
     private ManifestCommittable toCommittables(long checkpoint, List<Committable> inputs)
@@ -115,9 +115,10 @@ public class AtMostOnceCommitterOperator extends AbstractStreamOperator<Committa
     public void snapshotState(StateSnapshotContext context) throws Exception {
         super.snapshotState(context);
         pollInputs();
+        committableStateManager.snapshotState(context, committables(committablesPerCheckpoint));
     }
 
-    protected List<ManifestCommittable> committables(NavigableMap<Long, ManifestCommittable> map) {
+    private List<ManifestCommittable> committables(NavigableMap<Long, ManifestCommittable> map) {
         return new ArrayList<>(map.values());
     }
 

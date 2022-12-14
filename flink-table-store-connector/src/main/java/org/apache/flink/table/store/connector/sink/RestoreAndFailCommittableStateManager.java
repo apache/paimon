@@ -25,41 +25,41 @@ import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
-import org.apache.flink.util.function.SerializableFunction;
 import org.apache.flink.util.function.SerializableSupplier;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * {@link Committable}s for each snapshot will be committed exactly once.
+ * A {@link CommittableStateManager} which stores uncommitted {@link ManifestCommittable}s in state.
+ *
+ * <p>When the job restarts, these {@link ManifestCommittable}s will be restored and committed, then
+ * an intended failure will occur, hoping that after the job restarts, all writers can start writing
+ * based on the restored snapshot.
  *
  * <p>Useful for committing snapshots containing records. For example snapshots produced by table
  * store writers.
  */
-public class ExactlyOnceCommitOperator extends AtMostOnceCommitterOperator {
+public class RestoreAndFailCommittableStateManager implements CommittableStateManager {
 
-    /** ManifestCommittable state of this job. Used to filter out previous successful commits. */
-    private ListState<ManifestCommittable> streamingCommitterState;
+    private static final long serialVersionUID = 1L;
 
     /** The committable's serializer. */
     private final SerializableSupplier<SimpleVersionedSerializer<ManifestCommittable>>
             committableSerializer;
 
-    public ExactlyOnceCommitOperator(
-            boolean streamingCheckpointEnabled,
-            String initialCommitUser,
-            SerializableFunction<String, Committer> committerFactory,
+    /** ManifestCommittable state of this job. Used to filter out previous successful commits. */
+    private ListState<ManifestCommittable> streamingCommitterState;
+
+    public RestoreAndFailCommittableStateManager(
             SerializableSupplier<SimpleVersionedSerializer<ManifestCommittable>>
                     committableSerializer) {
-        super(streamingCheckpointEnabled, initialCommitUser, committerFactory);
         this.committableSerializer = committableSerializer;
     }
 
     @Override
-    public void initializeState(StateInitializationContext context) throws Exception {
-        super.initializeState(context);
-
+    public void initializeState(StateInitializationContext context, Committer committer)
+            throws Exception {
         streamingCommitterState =
                 new SimpleVersionedListState<>(
                         context.getOperatorStateStore()
@@ -71,10 +71,11 @@ public class ExactlyOnceCommitOperator extends AtMostOnceCommitterOperator {
         List<ManifestCommittable> restored = new ArrayList<>();
         streamingCommitterState.get().forEach(restored::add);
         streamingCommitterState.clear();
-        recover(restored);
+        recover(restored, committer);
     }
 
-    private void recover(List<ManifestCommittable> committables) throws Exception {
+    private void recover(List<ManifestCommittable> committables, Committer committer)
+            throws Exception {
         committables = committer.filterRecoveredCommittables(committables);
         if (!committables.isEmpty()) {
             committer.commit(committables);
@@ -87,8 +88,8 @@ public class ExactlyOnceCommitOperator extends AtMostOnceCommitterOperator {
     }
 
     @Override
-    public void snapshotState(StateSnapshotContext context) throws Exception {
-        super.snapshotState(context);
-        streamingCommitterState.update(committables(committablesPerCheckpoint));
+    public void snapshotState(StateSnapshotContext context, List<ManifestCommittable> committables)
+            throws Exception {
+        streamingCommitterState.update(committables);
     }
 }

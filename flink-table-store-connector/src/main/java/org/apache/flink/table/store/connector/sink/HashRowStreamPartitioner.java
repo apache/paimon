@@ -22,29 +22,19 @@ import org.apache.flink.runtime.io.network.api.writer.SubtaskStateMapper;
 import org.apache.flink.runtime.plugable.SerializationDelegate;
 import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
-import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
-import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
-import java.util.ArrayList;
-import java.util.List;
-
-/**
- * {@link StreamPartitioner} for stand-alone compact job sinks so that the same bucket is compacted
- * by the same sink parallelism.
- */
-public class CompactorStreamPartitioner extends StreamPartitioner<RowData> {
+/** {@link StreamPartitioner} to partition {@link RowData} according to its hash value. */
+public class HashRowStreamPartitioner extends StreamPartitioner<RowData> {
 
     private final RowType rowType;
 
     private transient RowDataSerializer serializer;
 
-    public CompactorStreamPartitioner(RowType partitionType) {
-        List<LogicalType> types = new ArrayList<>(partitionType.getChildren());
-        types.add(DataTypes.INT().getLogicalType());
-        this.rowType = RowType.of(types.toArray(new LogicalType[0]));
+    public HashRowStreamPartitioner(RowType rowType) {
+        this.rowType = rowType;
     }
 
     @Override

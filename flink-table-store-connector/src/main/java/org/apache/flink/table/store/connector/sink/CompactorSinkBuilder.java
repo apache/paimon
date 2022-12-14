@@ -25,6 +25,7 @@ import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.system.BucketsTable;
 
 /** Builder for {@link CompactorSink}. */
 public class CompactorSinkBuilder {
@@ -49,8 +50,9 @@ public class CompactorSinkBuilder {
     }
 
     public DataStreamSink<?> build() {
-        CompactorStreamPartitioner partitioner =
-                new CompactorStreamPartitioner(table.schema().logicalPartitionType());
+        HashRowStreamPartitioner partitioner =
+                new HashRowStreamPartitioner(
+                        BucketsTable.rowType(table.schema().logicalPartitionType()));
         PartitionTransformation<RowData> partitioned =
                 new PartitionTransformation<>(input.getTransformation(), partitioner);
 
