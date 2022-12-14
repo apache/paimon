@@ -258,7 +258,6 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     // schema0, read all data
                     TableRead read1 =
                             table.newRead().withFilter(PredicateBuilder.or(predicateList));
-                    System.out.println(getResult(read1, splits, SCHEMA_1_ROW_TO_STRING));
                     assertThat(getResult(read1, splits, SCHEMA_1_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Arrays.asList(

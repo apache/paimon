@@ -57,7 +57,8 @@ public abstract class FlinkSink implements Serializable {
     }
 
     protected StoreSinkWrite.Provider createWriteProvider(String initialCommitUser) {
-        if (table.options().changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION) {
+        if (table.options().changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION
+                && !table.options().writeCompactionSkip()) {
             long fullCompactionThresholdMs =
                     table.options().changelogProducerFullCompactionTriggerInterval().toMillis();
             return (table, context, ioManager) ->

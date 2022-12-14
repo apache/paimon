@@ -77,7 +77,7 @@ public abstract class E2eTestBase {
     private final List<String> currentResults = new ArrayList<>();
 
     protected DockerComposeContainer<?> environment;
-    private ContainerState jobManager;
+    protected ContainerState jobManager;
 
     @BeforeEach
     public void before() throws Exception {
