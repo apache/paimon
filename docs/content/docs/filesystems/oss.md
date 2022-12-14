@@ -33,7 +33,8 @@ under the License.
 
 ## Use
 
-- On Flink side, configure `flink-conf.yaml` like
+- On Flink side, [prepare OSS jar](https://nightlies.apache.org/flink/flink-docs-master/docs/deployment/filesystems/oss/#shaded-hadoop-oss-file-system),
+  configure `flink-conf.yaml` like
     ```yaml
     fs.oss.endpoint: oss-cn-hangzhou.aliyun.cs.com
     fs.oss.accessKey: xxx
