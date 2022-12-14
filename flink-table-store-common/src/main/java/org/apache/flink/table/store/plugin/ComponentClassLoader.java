@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
+package org.apache.flink.table.store.plugin;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.util.function.FunctionWithException;

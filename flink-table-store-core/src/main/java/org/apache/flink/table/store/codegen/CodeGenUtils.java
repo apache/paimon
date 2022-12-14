@@ -34,25 +34,21 @@ public class CodeGenUtils {
             return EMPTY_PROJECTION;
         }
 
-        return CodeGenLoader.getInstance()
-                .discover(CodeGenerator.class)
+        return CodeGenLoader.getCodeGenerator()
                 .generateProjection("Projection", inputType, mapping)
                 .newInstance(CodeGenUtils.class.getClassLoader());
     }
 
     public static NormalizedKeyComputer newNormalizedKeyComputer(
             List<LogicalType> fieldTypes, String name) {
-        return CodeGenLoader.getInstance()
-                .discover(CodeGenerator.class)
+        return CodeGenLoader.getCodeGenerator()
                 .generateNormalizedKeyComputer(fieldTypes, name)
                 .newInstance(CodeGenUtils.class.getClassLoader());
     }
 
     public static GeneratedClass<RecordComparator> generateRecordComparator(
             List<LogicalType> fieldTypes, String name) {
-        return CodeGenLoader.getInstance()
-                .discover(CodeGenerator.class)
-                .generateRecordComparator(fieldTypes, name);
+        return CodeGenLoader.getCodeGenerator().generateRecordComparator(fieldTypes, name);
     }
 
     public static RecordComparator newRecordComparator(List<LogicalType> fieldTypes, String name) {
