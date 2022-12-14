@@ -25,63 +25,39 @@ import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.sink.LogSinkFunction;
+import org.apache.flink.table.store.table.system.BucketsTable;
 
-import javax.annotation.Nullable;
-
-import java.util.Map;
-
-/** Builder for {@link FileStoreSink}. */
-public class FlinkSinkBuilder {
+/** Builder for {@link CompactorSink}. */
+public class CompactorSinkBuilder {
 
     private final FileStoreTable table;
 
     private DataStream<RowData> input;
     private Lock.Factory lockFactory = Lock.emptyFactory();
-    @Nullable private Map<String, String> overwritePartition;
-    @Nullable private LogSinkFunction logSinkFunction;
-    @Nullable private Integer parallelism;
 
-    public FlinkSinkBuilder(FileStoreTable table) {
+    public CompactorSinkBuilder(FileStoreTable table) {
         this.table = table;
     }
 
-    public FlinkSinkBuilder withInput(DataStream<RowData> input) {
+    public CompactorSinkBuilder withInput(DataStream<RowData> input) {
         this.input = input;
         return this;
     }
 
-    public FlinkSinkBuilder withLockFactory(Lock.Factory lockFactory) {
+    public CompactorSinkBuilder withLockFactory(Lock.Factory lockFactory) {
         this.lockFactory = lockFactory;
         return this;
     }
 
-    public FlinkSinkBuilder withOverwritePartition(Map<String, String> overwritePartition) {
-        this.overwritePartition = overwritePartition;
-        return this;
-    }
-
-    public FlinkSinkBuilder withLogSinkFunction(@Nullable LogSinkFunction logSinkFunction) {
-        this.logSinkFunction = logSinkFunction;
-        return this;
-    }
-
-    public FlinkSinkBuilder withParallelism(@Nullable Integer parallelism) {
-        this.parallelism = parallelism;
-        return this;
-    }
-
     public DataStreamSink<?> build() {
-        BucketStreamPartitioner partitioner = new BucketStreamPartitioner(table.schema());
+        HashRowStreamPartitioner partitioner =
+                new HashRowStreamPartitioner(
+                        BucketsTable.rowType(table.schema().logicalPartitionType()));
         PartitionTransformation<RowData> partitioned =
                 new PartitionTransformation<>(input.getTransformation(), partitioner);
-        if (parallelism != null) {
-            partitioned.setParallelism(parallelism);
-        }
 
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
-        FileStoreSink sink =
-                new FileStoreSink(table, lockFactory, overwritePartition, logSinkFunction);
+        CompactorSink sink = new CompactorSink(table, lockFactory);
         return sink.sinkFrom(new DataStream<>(env, partitioned));
     }
 }

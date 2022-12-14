@@ -53,16 +53,9 @@ public class BucketsTable implements DataTable {
     private static final long serialVersionUID = 1L;
 
     private final FileStoreTable wrapped;
-    private final RowType rowType;
 
     public BucketsTable(FileStoreTable wrapped) {
         this.wrapped = wrapped;
-
-        RowType partitionType = wrapped.schema().logicalPartitionType();
-        List<RowType.RowField> fields = new ArrayList<>(partitionType.getFields());
-        // same with ManifestEntry.schema
-        fields.add(new RowType.RowField("_BUCKET", new IntType()));
-        this.rowType = new RowType(fields);
     }
 
     @Override
@@ -82,7 +75,15 @@ public class BucketsTable implements DataTable {
 
     @Override
     public RowType rowType() {
-        return rowType;
+        RowType partitionType = wrapped.schema().logicalPartitionType();
+        return rowType(partitionType);
+    }
+
+    public static RowType rowType(RowType partitionType) {
+        List<RowType.RowField> fields = new ArrayList<>(partitionType.getFields());
+        // same with ManifestEntry.schema
+        fields.add(new RowType.RowField("_BUCKET", new IntType()));
+        return new RowType(fields);
     }
 
     @Override

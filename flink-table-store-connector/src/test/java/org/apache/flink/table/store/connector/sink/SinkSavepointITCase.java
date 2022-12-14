@@ -53,7 +53,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-/** IT cases for {@link StoreSink} when writing file store and with savepoints. */
+/** IT cases for {@link FileStoreSink} when writing file store and with savepoints. */
 public class SinkSavepointITCase extends AbstractTestBase {
 
     private String path;

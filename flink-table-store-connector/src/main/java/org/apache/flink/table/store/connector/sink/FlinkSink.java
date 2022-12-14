@@ -33,75 +33,46 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.utils.StreamExecutionEnvironmentUtils;
-import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
-import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.sink.LogSinkFunction;
 import org.apache.flink.util.Preconditions;
-
-import javax.annotation.Nullable;
+import org.apache.flink.util.function.SerializableFunction;
 
 import java.io.Serializable;
-import java.util.Map;
 import java.util.UUID;
 
-/** Sink of dynamic store. */
-public class StoreSink implements Serializable {
+/** Abstract sink of table store. */
+public abstract class FlinkSink implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
     private static final String WRITER_NAME = "Writer";
-
     private static final String GLOBAL_COMMITTER_NAME = "Global Committer";
 
-    private final FileStoreTable table;
-    private final Lock.Factory lockFactory;
-    @Nullable private final Map<String, String> overwritePartition;
-    @Nullable private final LogSinkFunction logSinkFunction;
+    protected final FileStoreTable table;
+    private final boolean isOverwrite;
 
-    public StoreSink(
-            FileStoreTable table,
-            Lock.Factory lockFactory,
-            @Nullable Map<String, String> overwritePartition,
-            @Nullable LogSinkFunction logSinkFunction) {
+    public FlinkSink(FileStoreTable table, boolean isOverwrite) {
         this.table = table;
-        this.lockFactory = lockFactory;
-        this.overwritePartition = overwritePartition;
-        this.logSinkFunction = logSinkFunction;
+        this.isOverwrite = isOverwrite;
     }
 
-    private OneInputStreamOperator<RowData, Committable> createWriteOperator(
-            String initialCommitUser) {
-        boolean isOverwrite = overwritePartition != null;
-        StoreSinkWrite.Provider writeProvider;
+    protected StoreSinkWrite.Provider createWriteProvider(String initialCommitUser) {
         if (table.options().changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION) {
             long fullCompactionThresholdMs =
                     table.options().changelogProducerFullCompactionTriggerInterval().toMillis();
-            writeProvider =
-                    (table, context, ioManager) ->
-                            new FullChangelogStoreSinkWrite(
-                                    table,
-                                    context,
-                                    initialCommitUser,
-                                    ioManager,
-                                    isOverwrite,
-                                    fullCompactionThresholdMs);
+            return (table, context, ioManager) ->
+                    new FullChangelogStoreSinkWrite(
+                            table,
+                            context,
+                            initialCommitUser,
+                            ioManager,
+                            isOverwrite,
+                            fullCompactionThresholdMs);
         } else {
-            writeProvider =
-                    (table, context, ioManager) ->
-                            new StoreSinkWriteImpl(
-                                    table, context, initialCommitUser, ioManager, isOverwrite);
+            return (table, context, ioManager) ->
+                    new StoreSinkWriteImpl(
+                            table, context, initialCommitUser, ioManager, isOverwrite);
         }
-
-        return new StoreWriteOperator(table, logSinkFunction, writeProvider);
-    }
-
-    private StoreCommitter createCommitter(String user, boolean createEmptyCommit) {
-        return new StoreCommitter(
-                table.newCommit(user)
-                        .withOverwritePartition(overwritePartition)
-                        .withCreateEmptyCommit(createEmptyCommit)
-                        .withLock(lockFactory.create()));
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<RowData> input) {
@@ -116,17 +87,22 @@ public class StoreSink implements Serializable {
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
 
-        CommittableTypeInfo typeInfo = new CommittableTypeInfo();
-        SingleOutputStreamOperator<Committable> written =
-                input.transform(WRITER_NAME, typeInfo, createWriteOperator(initialCommitUser))
-                        .setParallelism(input.getParallelism());
-
+        boolean isStreaming =
+                conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
         boolean streamingCheckpointEnabled =
-                conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING
-                        && checkpointConfig.isCheckpointingEnabled();
+                isStreaming && checkpointConfig.isCheckpointingEnabled();
         if (streamingCheckpointEnabled) {
             assertCheckpointConfiguration(env);
         }
+
+        CommittableTypeInfo typeInfo = new CommittableTypeInfo();
+        SingleOutputStreamOperator<Committable> written =
+                input.transform(
+                                WRITER_NAME,
+                                typeInfo,
+                                createWriteOperator(
+                                        createWriteProvider(initialCommitUser), isStreaming))
+                        .setParallelism(input.getParallelism());
 
         SingleOutputStreamOperator<?> committed =
                 written.transform(
@@ -135,12 +111,8 @@ public class StoreSink implements Serializable {
                                 new CommitterOperator(
                                         streamingCheckpointEnabled,
                                         initialCommitUser,
-                                        // If checkpoint is enabled for streaming job, we have to
-                                        // commit new files list even if they're empty.
-                                        // Otherwise we can't tell if the commit is successful after
-                                        // a restart.
-                                        user -> createCommitter(user, streamingCheckpointEnabled),
-                                        ManifestCommittableSerializer::new))
+                                        createCommitterFactory(streamingCheckpointEnabled),
+                                        createCommittableStateManager()))
                         .setParallelism(1)
                         .setMaxParallelism(1);
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
@@ -158,4 +130,12 @@ public class StoreSink implements Serializable {
                         + ExecutionCheckpointingOptions.CHECKPOINTING_MODE.key()
                         + " to exactly-once");
     }
+
+    protected abstract OneInputStreamOperator<RowData, Committable> createWriteOperator(
+            StoreSinkWrite.Provider writeProvider, boolean isStreaming);
+
+    protected abstract SerializableFunction<String, Committer> createCommitterFactory(
+            boolean streamingCheckpointEnabled);
+
+    protected abstract CommittableStateManager createCommittableStateManager();
 }
