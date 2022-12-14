@@ -19,9 +19,9 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.plugin.PluginUtils;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.operation.Lock;
+import org.apache.flink.table.store.filesystem.FileSystems;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 
 import org.apache.spark.sql.connector.catalog.SessionConfigSupport;
@@ -68,8 +68,7 @@ public class SparkSource implements DataSourceRegister, SessionConfigSupport {
             StructType schema, Transform[] partitioning, Map<String, String> options) {
         Configuration configuration =
                 Configuration.fromMap(SparkCaseSensitiveConverter.convert(options));
-        FileSystem.initialize(
-                configuration, PluginUtils.createPluginManagerFromRootFolder(configuration));
+        FileSystems.initialize(CoreOptions.path(options), configuration);
         return new SparkTable(
                 FileStoreTableFactory.create(Configuration.fromMap(options)), Lock.emptyFactory());
     }

@@ -41,14 +41,19 @@ public interface CatalogFactory {
 
     Catalog create(String warehouse, Configuration options);
 
-    static Catalog createCatalog(Configuration options) {
-        // manual validation
-        // because different catalog types may have different options
-        // we can't list them all in the optionalOptions() method
+    static Path warehouse(Configuration options) {
         String warehouse =
                 Preconditions.checkNotNull(
                         options.get(WAREHOUSE),
                         "Table store '" + WAREHOUSE.key() + "' path must be set");
+        return new Path(warehouse);
+    }
+
+    static Catalog createCatalog(Configuration options) {
+        // manual validation
+        // because different catalog types may have different options
+        // we can't list them all in the optionalOptions() method
+        String warehouse = warehouse(options).toUri().toString();
 
         String metastore = options.get(METASTORE);
         List<CatalogFactory> factories = new ArrayList<>();

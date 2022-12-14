@@ -19,14 +19,13 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.plugin.PluginUtils;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.filesystem.FileSystems;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
@@ -76,8 +75,7 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         this.name = name;
         Configuration configuration =
                 Configuration.fromMap(SparkCaseSensitiveConverter.convert(options));
-        FileSystem.initialize(
-                configuration, PluginUtils.createPluginManagerFromRootFolder(configuration));
+        FileSystems.initialize(CatalogFactory.warehouse(configuration), configuration);
         this.catalog = CatalogFactory.createCatalog(configuration);
     }
 

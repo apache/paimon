@@ -18,12 +18,11 @@
 
 package org.apache.flink.table.store.hive;
 
-import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.core.plugin.PluginUtils;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.filesystem.FileSystems;
 import org.apache.flink.table.types.logical.LogicalType;
 
 import org.apache.hadoop.conf.Configuration;
@@ -80,15 +79,15 @@ public class HiveSchema {
                             + ". Currently Flink table store only supports external table for Hive "
                             + "so location property must be set.");
         }
+        Path path = new Path(location);
         if (configuration != null) {
             org.apache.flink.configuration.Configuration flinkConf =
                     org.apache.flink.configuration.Configuration.fromMap(
                             getPropsWithPrefix(configuration, TABLE_STORE_PREFIX));
-            FileSystem.initialize(
-                    flinkConf, PluginUtils.createPluginManagerFromRootFolder(flinkConf));
+            FileSystems.initialize(path, flinkConf);
         }
         TableSchema tableSchema =
-                new SchemaManager(new Path(location))
+                new SchemaManager(path)
                         .latest()
                         .orElseThrow(
                                 () ->
