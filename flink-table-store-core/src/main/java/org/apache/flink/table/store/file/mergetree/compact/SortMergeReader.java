@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.mergetree.compact;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -31,6 +32,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeSet;
 
 /**
@@ -200,7 +202,10 @@ public class SortMergeReader<T> implements RecordReader<T> {
 
         private KeyValue nextImpl() throws IOException {
 
-            if (nodeIndexes.size() > 0) {
+            Preconditions.checkState(
+                    !released, "SortMergeIterator#advanceNext is called after release");
+
+            if (!nodeIndexes.isEmpty()) {
                 KeyValue keyValue = leaves[nodeIndexes.get(nodeIndexes.size() - 1)];
                 for (int i = 0; i < nodeIndexes.size(); i++) {
                     Integer index = nodeIndexes.get(i);
@@ -245,6 +250,23 @@ public class SortMergeReader<T> implements RecordReader<T> {
         public Element(long sequenceNumber, int nodeIndex) {
             this.sequenceNumber = sequenceNumber;
             this.nodeIndex = nodeIndex;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Element element = (Element) o;
+            return sequenceNumber == element.sequenceNumber && nodeIndex == element.nodeIndex;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(sequenceNumber, nodeIndex);
         }
     }
 }
