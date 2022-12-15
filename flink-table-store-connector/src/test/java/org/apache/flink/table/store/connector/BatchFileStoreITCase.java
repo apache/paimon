@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector;
 
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.types.Row;
 
 import org.junit.Test;
@@ -26,6 +27,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for batch file store. */
 public class BatchFileStoreITCase extends FileStoreTableITCase {
@@ -49,5 +51,85 @@ public class BatchFileStoreITCase extends FileStoreTableITCase {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.mode'='compacted-full') */"))
                 .isEmpty();
+    }
+
+    @Test
+    public void testTimeTravelRead() {
+        batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
+        long time1 = System.currentTimeMillis();
+        batchSql("INSERT INTO T VALUES (3, 33, 333), (4, 44, 444)");
+        long time2 = System.currentTimeMillis();
+        batchSql("INSERT INTO T VALUES (5, 55, 555), (6, 66, 666)");
+        long time3 = System.currentTimeMillis();
+        batchSql("INSERT INTO T VALUES (7, 77, 777), (8, 88, 888)");
+
+        assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='1') */"))
+                .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
+
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT * FROM T /*+ OPTIONS('scan.timestamp-millis'='%s') */",
+                                        time1)))
+                .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
+
+        assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='2') */"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111),
+                        Row.of(2, 22, 222),
+                        Row.of(3, 33, 333),
+                        Row.of(4, 44, 444));
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT * FROM T /*+ OPTIONS('scan.timestamp-millis'='%s') */",
+                                        time2)))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111),
+                        Row.of(2, 22, 222),
+                        Row.of(3, 33, 333),
+                        Row.of(4, 44, 444));
+
+        assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='3') */"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111),
+                        Row.of(2, 22, 222),
+                        Row.of(3, 33, 333),
+                        Row.of(4, 44, 444),
+                        Row.of(5, 55, 555),
+                        Row.of(6, 66, 666));
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT * FROM T /*+ OPTIONS('scan.timestamp-millis'='%s') */",
+                                        time3)))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111),
+                        Row.of(2, 22, 222),
+                        Row.of(3, 33, 333),
+                        Row.of(4, 44, 444),
+                        Row.of(5, 55, 555),
+                        Row.of(6, 66, 666));
+
+        assertThatThrownBy(
+                        () ->
+                                batchSql(
+                                        String.format(
+                                                "SELECT * FROM T /*+ OPTIONS('scan.timestamp-millis'='%s', 'scan.snapshot-id'='1') */",
+                                                time3)))
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage(
+                        "%s must be null when you set %s",
+                        CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                        CoreOptions.SCAN_TIMESTAMP_MILLIS.key());
+
+        assertThatThrownBy(
+                        () ->
+                                batchSql(
+                                        "SELECT * FROM T /*+ OPTIONS('scan.mode'='full', 'scan.snapshot-id'='1') */"))
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage(
+                        "%s must be null when you use full for scan.mode",
+                        CoreOptions.SCAN_SNAPSHOT_ID.key());
     }
 }

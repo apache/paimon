@@ -23,6 +23,7 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -69,6 +70,26 @@ public class StaticDataFileSnapshotEnumerator implements SnapshotEnumerator {
             startingScanner = new FullStartingScanner();
         } else if (startupMode == CoreOptions.StartupMode.COMPACTED_FULL) {
             startingScanner = new CompactedStartingScanner();
+        } else if (startupMode == CoreOptions.StartupMode.FROM_TIMESTAMP) {
+            Long startupMillis = table.options().scanTimestampMills();
+            Preconditions.checkNotNull(
+                    startupMillis,
+                    String.format(
+                            "%s can not be null when you use %s for %s",
+                            CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
+                            CoreOptions.StartupMode.FROM_TIMESTAMP,
+                            CoreOptions.SCAN_MODE.key()));
+            startingScanner = new FromTimestampStartingScanner(startupMillis);
+        } else if (startupMode == CoreOptions.StartupMode.FROM_SNAPSHOT) {
+            Long snapshotId = table.options().scanSnapshotId();
+            Preconditions.checkNotNull(
+                    snapshotId,
+                    String.format(
+                            "%s can not be null when you use %s for %s",
+                            CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                            CoreOptions.StartupMode.FROM_SNAPSHOT,
+                            CoreOptions.SCAN_MODE.key()));
+            startingScanner = new FromSnapshotStartingScanner(snapshotId);
         } else {
             throw new UnsupportedOperationException("Unknown startup mode " + startupMode.name());
         }

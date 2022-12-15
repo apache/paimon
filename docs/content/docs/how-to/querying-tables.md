@@ -180,3 +180,13 @@ SELECT * FROM MyTable$audit_log;
 3 rows in set
 */
 ```
+
+## Time Travel Reading
+You can read snapshot specific by commit time or snapshot id from a table.
+```sql
+-- Read snapshot specified by commit time.
+SELECT * FROM T /*+ OPTIONS('scan.timestamp-millis'='121230')*/;
+
+-- Read snapshot specified by snapshot id.
+SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='12')*/;
+```

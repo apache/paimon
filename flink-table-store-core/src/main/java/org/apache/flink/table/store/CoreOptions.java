@@ -340,6 +340,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Optional timestamp used in case of \"from-timestamp\" scan mode.");
 
+    public static final ConfigOption<Long> SCAN_SNAPSHOT_ID =
+            ConfigOptions.key("scan.snapshot-id")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Optional snapshot id used in case of \"from-snapshot\" scan mode");
+
     public static final ConfigOption<Duration> LOG_RETENTION =
             ConfigOptions.key("log.retention")
                     .durationType()
@@ -543,6 +550,8 @@ public class CoreOptions implements Serializable {
         if (mode == StartupMode.DEFAULT) {
             if (options.getOptional(SCAN_TIMESTAMP_MILLIS).isPresent()) {
                 return StartupMode.FROM_TIMESTAMP;
+            } else if (options.getOptional(SCAN_SNAPSHOT_ID).isPresent()) {
+                return StartupMode.FROM_SNAPSHOT;
             } else {
                 return StartupMode.LATEST_FULL;
             }
@@ -553,8 +562,12 @@ public class CoreOptions implements Serializable {
         }
     }
 
-    public Long logScanTimestampMills() {
+    public Long scanTimestampMills() {
         return options.get(SCAN_TIMESTAMP_MILLIS);
+    }
+
+    public Long scanSnapshotId() {
+        return options.get(SCAN_SNAPSHOT_ID);
     }
 
     public Duration changelogProducerFullCompactionTriggerInterval() {
@@ -634,7 +647,15 @@ public class CoreOptions implements Serializable {
                 "For streaming sources, continuously reads changes "
                         + "starting from timestamp specified by \"scan.timestamp-millis\", "
                         + "without producing a snapshot at the beginning. "
-                        + "Unsupported for batch sources.");
+                        + "For batch sources, produces a snapshot at timestamp specified by \"scan.timestamp-millis\" "
+                        + "but does not read new changes."),
+
+        FROM_SNAPSHOT(
+                "from-snapshot",
+                "For streaming sources, continuously reads changes "
+                        + "starting from snapshot specified by \"scan.snapshot-id\", "
+                        + "without producing a snapshot at the beginning. For batch sources, "
+                        + "produces a snapshot specified by \"scan.snapshot-id\" but does not read new changes.");
 
         private final String value;
         private final String description;
@@ -766,21 +787,14 @@ public class CoreOptions implements Serializable {
     public static void validateTableSchema(TableSchema schema) {
         CoreOptions options = new CoreOptions(schema.options());
         if (options.startupMode() == StartupMode.FROM_TIMESTAMP) {
-            Preconditions.checkArgument(
-                    options.logScanTimestampMills() != null,
-                    String.format(
-                            "%s can not be null when you use %s for %s",
-                            SCAN_TIMESTAMP_MILLIS.key(),
-                            StartupMode.FROM_TIMESTAMP,
-                            SCAN_MODE.key()));
+            checkOptionExistInMode(options, SCAN_TIMESTAMP_MILLIS, StartupMode.FROM_TIMESTAMP);
+            checkOptionsConflict(options, SCAN_SNAPSHOT_ID, SCAN_TIMESTAMP_MILLIS);
+        } else if (options.startupMode() == StartupMode.FROM_SNAPSHOT) {
+            checkOptionExistInMode(options, SCAN_SNAPSHOT_ID, StartupMode.FROM_SNAPSHOT);
+            checkOptionsConflict(options, SCAN_TIMESTAMP_MILLIS, SCAN_SNAPSHOT_ID);
         } else {
-            Preconditions.checkArgument(
-                    options.logScanTimestampMills() == null,
-                    String.format(
-                            "%s should be %s when you set %s",
-                            SCAN_MODE.key(),
-                            StartupMode.FROM_TIMESTAMP,
-                            SCAN_TIMESTAMP_MILLIS.key()));
+            checkOptionNotExistInMode(options, SCAN_TIMESTAMP_MILLIS, options.startupMode());
+            checkOptionNotExistInMode(options, SCAN_SNAPSHOT_ID, options.startupMode());
         }
 
         Preconditions.checkArgument(
@@ -815,6 +829,32 @@ public class CoreOptions implements Serializable {
                                             "Field name[%s] in schema cannot start with [%s]",
                                             f, KEY_FIELD_PREFIX));
                         });
+    }
+
+    private static void checkOptionExistInMode(
+            CoreOptions options, ConfigOption<?> option, StartupMode startupMode) {
+        Preconditions.checkArgument(
+                options.options.contains(option),
+                String.format(
+                        "%s can not be null when you use %s for %s",
+                        option.key(), startupMode, SCAN_MODE.key()));
+    }
+
+    private static void checkOptionNotExistInMode(
+            CoreOptions options, ConfigOption<?> option, StartupMode startupMode) {
+        Preconditions.checkArgument(
+                !options.options.contains(option),
+                String.format(
+                        "%s must be null when you use %s for %s",
+                        option.key(), startupMode, SCAN_MODE.key()));
+    }
+
+    private static void checkOptionsConflict(
+            CoreOptions options, ConfigOption<?> illegalOption, ConfigOption<?> legalOption) {
+        Preconditions.checkArgument(
+                !options.options.contains(illegalOption),
+                String.format(
+                        "%s must be null when you set %s", illegalOption.key(), legalOption.key()));
     }
 
     @Internal
