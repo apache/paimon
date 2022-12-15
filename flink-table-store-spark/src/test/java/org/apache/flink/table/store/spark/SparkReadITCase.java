@@ -96,13 +96,13 @@ public class SparkReadITCase extends SparkReadTestBase {
         List<Row> schemas =
                 spark.table("tablestore.default.`schemasTable$schemas`").collectAsList();
         List<?> fieldsList = schemas.stream().map(row -> row.get(1)).collect(Collectors.toList());
-        assertThat(fieldsList.toString())
-                .isEqualTo(
-                        "[[{\"id\":0,\"name\":\"a\",\"type\":\"BIGINT NOT NULL\"},"
-                                + "{\"id\":1,\"name\":\"b\",\"type\":\"VARCHAR(2147483647)\"}], "
-                                + "[{\"id\":0,\"name\":\"a\",\"type\":\"BIGINT NOT NULL\"},"
+        assertThat(fieldsList.stream().map(Object::toString).collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "[{\"id\":0,\"name\":\"a\",\"type\":\"BIGINT NOT NULL\"},"
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"VARCHAR(2147483647)\"}]",
+                        "[{\"id\":0,\"name\":\"a\",\"type\":\"BIGINT NOT NULL\"},"
                                 + "{\"id\":1,\"name\":\"b\",\"type\":\"VARCHAR(2147483647)\"},"
-                                + "{\"id\":2,\"name\":\"c\",\"type\":\"VARCHAR(2147483647)\"}]]");
+                                + "{\"id\":2,\"name\":\"c\",\"type\":\"VARCHAR(2147483647)\"}]");
     }
 
     @Test
