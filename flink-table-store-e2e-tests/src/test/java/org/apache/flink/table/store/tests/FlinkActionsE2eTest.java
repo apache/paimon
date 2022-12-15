@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.tests;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,29 +25,22 @@ import org.testcontainers.containers.Container;
 
 import java.util.UUID;
 
-/** Tests for stand-alone compact jobs. */
-public class TableStoreCompactJobE2eTest extends E2eTestBase {
+/** Tests for {@link org.apache.flink.table.store.connector.action.FlinkActions}. */
+public class FlinkActionsE2eTest extends E2eTestBase {
 
-    private static final Logger LOG = LoggerFactory.getLogger(TableStoreCompactJobE2eTest.class);
+    private static final Logger LOG = LoggerFactory.getLogger(FlinkActionsE2eTest.class);
 
-    private String topicName;
-
-    public TableStoreCompactJobE2eTest() {
+    public FlinkActionsE2eTest() {
         super(true, false);
     }
 
-    @Override
-    @BeforeEach
-    public void before() throws Exception {
-        super.before();
-        topicName = "ts-topic-" + UUID.randomUUID();
+    @Test
+    public void testCompact() throws Exception {
+        String topicName = "ts-topic-" + UUID.randomUUID();
         createKafkaTopic(topicName, 1);
         // prepare first part of test data
         sendKafkaMessage("1.csv", "20221205,1,100\n20221206,1,100\n20221207,1,100", topicName);
-    }
 
-    @Test
-    public void testFullCompaction() throws Exception {
         String testDataSourceDdl =
                 String.format(
                         "CREATE TEMPORARY TABLE test_source (\n"
@@ -103,14 +95,22 @@ public class TableStoreCompactJobE2eTest extends E2eTestBase {
                         "bin/flink",
                         "run",
                         "-c",
-                        "org.apache.flink.table.store.connector.TableStoreCompactJob",
+                        "org.apache.flink.table.store.connector.action.FlinkActions",
                         "-D",
                         "execution.checkpointing.interval=1s",
+                        "--detached",
                         "lib/flink-table-store.jar",
+                        "compact",
+                        "--warehouse",
                         warehousePath,
+                        "--database",
                         "default",
+                        "--table",
                         "ts_table",
-                        "dt=20221205/dt=20221206");
+                        "--partition",
+                        "dt=20221205",
+                        "--partition",
+                        "dt=20221206");
         LOG.info(execResult.getStdout());
         LOG.info(execResult.getStderr());
 

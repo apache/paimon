@@ -27,6 +27,7 @@ import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
+import org.apache.flink.table.store.connector.action.FlinkActions;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.test.util.MiniClusterWithClientResource;
@@ -291,7 +292,8 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
         for (int i = enableConflicts ? 2 : 1; i > 0; i--) {
             StreamExecutionEnvironment env = createStreamExecutionEnvironment();
             env.setParallelism(2);
-            TableStoreCompactJob.runCompactJob(new Path(path + "/default.db/T"), null, env);
+            FlinkActions.compact(new Path(path + "/default.db/T")).build(env);
+            env.executeAsync();
         }
 
         // sleep for a random amount of time to check

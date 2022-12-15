@@ -16,10 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.connector;
+package org.apache.flink.table.store.connector.action;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -61,8 +60,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** IT cases for {@link TableStoreCompactJob}. */
-public class TableStoreCompactJobITCase extends AbstractTestBase {
+/** IT cases for {@link CompactAction}. */
+public class CompactActionITCase extends AbstractTestBase {
 
     private static final RowType ROW_TYPE =
             RowType.of(
@@ -112,15 +111,8 @@ public class TableStoreCompactJobITCase extends AbstractTestBase {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        JobClient jobClient =
-                TableStoreCompactJob.runCompactJob(
-                        tablePath, "dt=20221208,hh=15/dt=20221209,hh=15", env);
-        while (true) {
-            if (jobClient.getJobStatus().get().isGloballyTerminalState()) {
-                break;
-            }
-            Thread.sleep(1000);
-        }
+        new CompactAction(tablePath).withPartitions(getSpecifiedPartitions()).build(env);
+        env.execute();
 
         snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
         Assert.assertEquals(3, snapshot.id());
@@ -173,7 +165,8 @@ public class TableStoreCompactJobITCase extends AbstractTestBase {
         env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
         env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
         env.getCheckpointConfig().setCheckpointInterval(500);
-        TableStoreCompactJob.runCompactJob(tablePath, "dt=20221208,hh=15/dt=20221209,hh=15", env);
+        new CompactAction(tablePath).withPartitions(getSpecifiedPartitions()).build(env);
+        env.executeAsync();
 
         while (true) {
             plan = snapshotEnumerator.enumerate();
@@ -217,6 +210,18 @@ public class TableStoreCompactJobITCase extends AbstractTestBase {
                         "-U 20221208|15|1|100",
                         "-U 20221209|15|1|100"),
                 actual);
+    }
+
+    private List<Map<String, String>> getSpecifiedPartitions() {
+        Map<String, String> partition1 = new HashMap<>();
+        partition1.put("dt", "20221208");
+        partition1.put("hh", "15");
+
+        Map<String, String> partition2 = new HashMap<>();
+        partition2.put("dt", "20221209");
+        partition2.put("hh", "15");
+
+        return Arrays.asList(partition1, partition2);
     }
 
     private GenericRowData rowData(Object... values) {
