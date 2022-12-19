@@ -21,10 +21,13 @@ package org.apache.flink.table.store.connector;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.runtime.client.JobStatusMessage;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
+import org.apache.flink.streaming.api.CheckpointingMode;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
+import org.apache.flink.table.store.connector.action.FlinkActions;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.test.util.MiniClusterWithClientResource;
@@ -113,6 +116,14 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
                         CHECKPOINTING_INTERVAL,
                         Duration.ofMillis(ThreadLocalRandom.current().nextInt(900) + 100));
         return sEnv;
+    }
+
+    private StreamExecutionEnvironment createStreamExecutionEnvironment() {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
+        env.getCheckpointConfig()
+                .setCheckpointInterval(ThreadLocalRandom.current().nextInt(900) + 100);
+        return env;
     }
 
     // ------------------------------------------------------------------------
@@ -225,6 +236,13 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
         testFullCompactionChangelogProducerRandom(sEnv, random.nextInt(1, 3), random.nextBoolean());
     }
 
+    @Test
+    public void testStandAloneFullCompactJobRandom() throws Exception {
+        TableEnvironment sEnv = createStreamingTableEnvironment();
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        testStandAloneFullCompactJobRandom(sEnv, random.nextInt(1, 3), random.nextBoolean());
+    }
+
     private static final int NUM_PARTS = 4;
     private static final int NUM_KEYS = 64;
     private static final int NUM_VALUES = 1024;
@@ -253,6 +271,39 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
         // if we can first read complete records then read incremental records correctly
         Thread.sleep(ThreadLocalRandom.current().nextInt(5000));
 
+        checkFullCompactionTestResult(numProducers);
+    }
+
+    private void testStandAloneFullCompactJobRandom(
+            TableEnvironment tEnv, int numProducers, boolean enableConflicts) throws Exception {
+        testRandom(
+                tEnv,
+                numProducers,
+                false,
+                "'bucket' = '4',"
+                        + "'changelog-producer' = 'full-compaction',"
+                        + "'changelog-producer.compaction-interval' = '1s',"
+                        + "'write.compaction-skip' = 'true'");
+
+        // sleep for a random amount of time to check
+        // if stand-alone compactor job can find first snapshot to compact correctly
+        Thread.sleep(ThreadLocalRandom.current().nextInt(2500));
+
+        for (int i = enableConflicts ? 2 : 1; i > 0; i--) {
+            StreamExecutionEnvironment env = createStreamExecutionEnvironment();
+            env.setParallelism(2);
+            FlinkActions.compact(new Path(path + "/default.db/T")).build(env);
+            env.executeAsync();
+        }
+
+        // sleep for a random amount of time to check
+        // if we can first read complete records then read incremental records correctly
+        Thread.sleep(ThreadLocalRandom.current().nextInt(2500));
+
+        checkFullCompactionTestResult(numProducers);
+    }
+
+    private void checkFullCompactionTestResult(int numProducers) throws Exception {
         TableEnvironment sEnv = createStreamingTableEnvironment();
         sEnv.getConfig()
                 .getConfiguration()
