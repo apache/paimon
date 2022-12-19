@@ -64,10 +64,10 @@ public class StaticDataFileSnapshotEnumerator implements SnapshotEnumerator {
     public static StaticDataFileSnapshotEnumerator create(DataTable table, DataTableScan scan) {
         CoreOptions.StartupMode startupMode = table.options().startupMode();
         StartingScanner startingScanner;
-        if (startupMode == CoreOptions.StartupMode.FULL
+        if (startupMode == CoreOptions.StartupMode.LATEST_FULL
                 || startupMode == CoreOptions.StartupMode.LATEST) {
             startingScanner = new FullStartingScanner();
-        } else if (startupMode == CoreOptions.StartupMode.COMPACTED) {
+        } else if (startupMode == CoreOptions.StartupMode.COMPACTED_FULL) {
             startingScanner = new CompactedStartingScanner();
         } else {
             throw new UnsupportedOperationException("Unknown startup mode " + startupMode.name());

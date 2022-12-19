@@ -544,8 +544,10 @@ public class CoreOptions implements Serializable {
             if (options.getOptional(SCAN_TIMESTAMP_MILLIS).isPresent()) {
                 return StartupMode.FROM_TIMESTAMP;
             } else {
-                return StartupMode.FULL;
+                return StartupMode.LATEST_FULL;
             }
+        } else if (mode == StartupMode.FULL) {
+            return StartupMode.LATEST_FULL;
         } else {
             return mode;
         }
@@ -604,22 +606,24 @@ public class CoreOptions implements Serializable {
                 "default",
                 "Determines actual startup mode according to other table properties. "
                         + "If \"scan.timestamp-millis\" is set the actual startup mode will be \"from-timestamp\". "
-                        + "Otherwise the actual startup mode will be \"full\"."),
+                        + "Otherwise the actual startup mode will be \"latest-full\"."),
 
-        FULL(
-                "full",
+        LATEST_FULL(
+                "latest-full",
                 "For streaming sources, produces the latest snapshot on the table upon first startup, "
                         + "and continue to read the latest changes. "
                         + "For batch sources, just produce the latest snapshot but does not read new changes."),
+
+        FULL("full", "Deprecated. Same as \"latest-full\"."),
 
         LATEST(
                 "latest",
                 "For streaming sources, continuously reads latest changes "
                         + "without producing a snapshot at the beginning. "
-                        + "For batch sources, behaves the same as the \"full\" startup mode."),
+                        + "For batch sources, behaves the same as the \"latest-full\" startup mode."),
 
-        COMPACTED(
-                "compacted",
+        COMPACTED_FULL(
+                "compacted-full",
                 "For streaming sources, produces a snapshot after the latest compaction on the table "
                         + "upon first startup, and continue to read the latest changes. "
                         + "For batch sources, just produce a snapshot after the latest compaction "
@@ -630,8 +634,7 @@ public class CoreOptions implements Serializable {
                 "For streaming sources, continuously reads changes "
                         + "starting from timestamp specified by \"scan.timestamp-millis\", "
                         + "without producing a snapshot at the beginning. "
-                        + "For batch sources, produces a snapshot at timestamp specified by \"scan.timestamp-millis\" "
-                        + "but does not read new changes.");
+                        + "Unsupported for batch sources.");
 
         private final String value;
         private final String description;
