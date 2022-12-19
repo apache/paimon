@@ -207,6 +207,20 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
             return Optional.empty();
         }
 
+        if (earliestId > identifierToCheck) {
+            throw new RuntimeException(
+                    String.format(
+                            "Can't find snapshot with identifier %d from user %s. "
+                                    + "Earliest snapshot from all users has identifier %d. "
+                                    + "This is rare but it might be that snapshots are expiring too fast.\n"
+                                    + "If this exception happens continuously, please consider increasing %s or %s.",
+                            identifierToCheck,
+                            commitUser,
+                            earliestId,
+                            CoreOptions.SNAPSHOT_TIME_RETAINED.key(),
+                            CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key()));
+        }
+
         // We must find the snapshot whose identifier is exactly `identifierToCheck`.
         // We can't just compare with the latest snapshot identifier by this user (like what we do
         // in `AbstractFileStoreWrite`), because even if the latest snapshot identifier is newer,
@@ -225,16 +239,7 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
             }
         }
 
-        throw new RuntimeException(
-                String.format(
-                        "All snapshot from user %s has identifier larger than %d. "
-                                + "This is rare but it might be that snapshots are expiring too fast.\n"
-                                + "If this exception happens continuously, please consider increasing "
-                                + CoreOptions.SNAPSHOT_TIME_RETAINED.key()
-                                + " or "
-                                + CoreOptions.SNAPSHOT_NUM_RETAINED_MIN,
-                        commitUser,
-                        identifierToCheck));
+        return Optional.empty();
     }
 
     @Override
