@@ -125,7 +125,7 @@ public class FlinkSourceBuilder {
             if (logSourceProvider == null) {
                 return buildContinuousFileSource();
             } else {
-                if (startupMode != StartupMode.FULL) {
+                if (startupMode != StartupMode.LATEST_FULL) {
                     return logSourceProvider.createSource(null);
                 }
                 return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(

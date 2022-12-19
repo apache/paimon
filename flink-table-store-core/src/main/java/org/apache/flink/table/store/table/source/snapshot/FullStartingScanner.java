@@ -26,8 +26,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * {@link StartingScanner} for the {@link org.apache.flink.table.store.CoreOptions.StartupMode#FULL}
- * startup mode.
+ * {@link StartingScanner} for the {@link
+ * org.apache.flink.table.store.CoreOptions.StartupMode#LATEST_FULL} startup mode.
  */
 public class FullStartingScanner implements StartingScanner {
 

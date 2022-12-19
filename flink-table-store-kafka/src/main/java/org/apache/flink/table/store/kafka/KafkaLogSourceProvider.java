@@ -122,7 +122,7 @@ public class KafkaLogSourceProvider implements LogSourceProvider {
 
     private OffsetsInitializer toOffsetsInitializer(@Nullable Map<Integer, Long> bucketOffsets) {
         switch (scanMode) {
-            case FULL:
+            case LATEST_FULL:
                 return bucketOffsets == null
                         ? OffsetsInitializer.earliest()
                         : OffsetsInitializer.offsets(toKafkaOffsets(bucketOffsets));

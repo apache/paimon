@@ -112,7 +112,7 @@ public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator 
     public static ContinuousDataFileSnapshotEnumerator createWithSnapshotStarting(
             DataTable table, DataTableScan scan) {
         StartingScanner startingScanner =
-                table.options().startupMode() == CoreOptions.StartupMode.COMPACTED
+                table.options().startupMode() == CoreOptions.StartupMode.COMPACTED_FULL
                         ? new CompactedStartingScanner()
                         : new FullStartingScanner();
         return new ContinuousDataFileSnapshotEnumerator(
@@ -132,11 +132,11 @@ public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator 
     private static StartingScanner createStartingScanner(DataTable table) {
         CoreOptions.StartupMode startupMode = table.options().startupMode();
         Long startupMillis = table.options().logScanTimestampMills();
-        if (startupMode == CoreOptions.StartupMode.FULL) {
+        if (startupMode == CoreOptions.StartupMode.LATEST_FULL) {
             return new FullStartingScanner();
         } else if (startupMode == CoreOptions.StartupMode.LATEST) {
             return new ContinuousLatestStartingScanner();
-        } else if (startupMode == CoreOptions.StartupMode.COMPACTED) {
+        } else if (startupMode == CoreOptions.StartupMode.COMPACTED_FULL) {
             return new CompactedStartingScanner();
         } else if (startupMode == CoreOptions.StartupMode.FROM_TIMESTAMP) {
             Preconditions.checkNotNull(

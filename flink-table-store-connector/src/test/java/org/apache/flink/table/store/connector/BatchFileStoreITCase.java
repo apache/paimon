@@ -47,6 +47,7 @@ public class BatchFileStoreITCase extends FileStoreTableITCase {
     @Test
     public void testCompactedScanModeEmpty() {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
-        assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.mode'='compacted') */")).isEmpty();
+        assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.mode'='compacted-full') */"))
+                .isEmpty();
     }
 }
