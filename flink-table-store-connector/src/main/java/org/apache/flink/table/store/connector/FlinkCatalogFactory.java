@@ -54,11 +54,17 @@ public class FlinkCatalogFactory implements org.apache.flink.table.factories.Cat
 
     @Override
     public FlinkCatalog createCatalog(Context context) {
-        return createCatalog(context.getName(), Configuration.fromMap(context.getOptions()));
+        return createCatalog(
+                context.getName(),
+                Configuration.fromMap(context.getOptions()),
+                context.getClassLoader());
     }
 
-    public static FlinkCatalog createCatalog(String catalogName, Configuration options) {
+    public static FlinkCatalog createCatalog(
+            String catalogName, Configuration options, ClassLoader classLoader) {
         return new FlinkCatalog(
-                CatalogFactory.createCatalog(options), catalogName, options.get(DEFAULT_DATABASE));
+                CatalogFactory.createCatalog(options, classLoader),
+                catalogName,
+                options.get(DEFAULT_DATABASE));
     }
 }
