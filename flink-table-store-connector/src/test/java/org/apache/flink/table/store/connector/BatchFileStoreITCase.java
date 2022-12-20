@@ -129,7 +129,7 @@ public class BatchFileStoreITCase extends FileStoreTableITCase {
                                         "SELECT * FROM T /*+ OPTIONS('scan.mode'='full', 'scan.snapshot-id'='1') */"))
                 .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage(
-                        "%s must be null when you use full for scan.mode",
+                        "%s must be null when you use latest-full for scan.mode",
                         CoreOptions.SCAN_SNAPSHOT_ID.key());
     }
 }
