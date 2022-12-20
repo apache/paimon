@@ -3,7 +3,7 @@ title: "Overview"
 weight: 1
 type: docs
 aliases:
-- /development/overview.html
+- /concepts/overview.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -36,8 +36,10 @@ batch processing in Flink, supporting high-speed data ingestion and timely data 
 As shown in the architecture above:
 
 **Read/Write:** Table Store supports a versatile way to read/write data and perform OLAP queries.
-- For reads, it supports consuming data <1> from historical snapshots (in batch mode), <2>from the
-  latest offset (in streaming mode), or <3> reading incremental snapshots in a hybrid way.
+- For reads, it supports consuming data
+  - from historical snapshots (in batch mode),
+  - from the latest offset (in streaming mode), or 
+  - reading incremental snapshots in a hybrid way.
 - For writes, it supports streaming synchronization from the changelog of databases (CDC) or batch
   insert/overwrite from offline data.
 
@@ -48,29 +50,6 @@ engines like Apache Hive, Apache Spark and Trino.
 historical data and a queue system to store incremental data. The former stores the columnar files on
 the filesystem/object-store and uses the LSM tree structure to support a large volume of data updates
 and high-performance queries. The latter uses Apache Kafka to capture data in real-time.
-
-## Setup Table Store
-
-{{< hint info >}}
-__Note:__ Table Store is only supported since Flink 1.14.
-{{< /hint >}}
-
-{{< stable >}}
-- Download [flink-table-store-dist-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-dist-{{< version >}}.jar) for Flink 1.16.
-- Download [flink-table-store-dist-{{< version >}}_1.15.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-dist-{{< version >}}_1.15.jar) for Flink 1.15.
-- Download [flink-table-store-dist-{{< version >}}_1.14.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-dist-{{< version >}}_1.14.jar) for Flink 1.14.
-{{< /stable >}}
-{{< unstable >}}
-You are using an unreleased version of Table Store, you need to manually [Build Bundled Jar]({{< ref "docs/engines/build" >}}) from the source code.
-{{< /unstable >}}
-
-Flink Table Store has shaded all the dependencies in the package, so you don't have
-to worry about conflicts with other connector dependencies.
-
-The steps to set up are:
-- Copy the Table Store bundle jar to `flink/lib`.
-- Setting the HADOOP_CLASSPATH environment variable or copy the
-  [Pre-bundled Hadoop Jar](https://flink.apache.org/downloads.html) to `flink/lib`.
 
 ## Unified Storage
 

@@ -1,9 +1,10 @@
 ---
-title: Try Table Store
-icon: <i class="fa fa-rocket title appetizer" aria-hidden="true"></i>
+title: Maintenance Actions
+icon: <i class="fa fa-wrench title maindish" aria-hidden="true"></i>
 bold: true
+sectionBreak: true
 bookCollapseSection: true
-weight: 1
+weight: 6
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

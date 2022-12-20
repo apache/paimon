@@ -1,10 +1,9 @@
 ---
-title: Development
-icon: <i class="fa fa-code title maindish" aria-hidden="true"></i>
-bold: true
-sectionBreak: true
-bookCollapseSection: true
-weight: 2
+title: "Configurations"
+weight: 3
+type: docs
+aliases:
+- /development/configurations.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,3 +23,23 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 -->
+
+# Configuration
+
+### CoreOptions
+
+Core options for table store.
+
+{{< generated/core_configuration >}}
+
+### CatalogOptions
+
+Options for table store catalog.
+
+{{< generated/catalog_configuration >}}
+
+### FlinkConnectorOptions
+
+Flink connector options for table store.
+
+{{< generated/flink_connector_configuration >}}

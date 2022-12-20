@@ -1,9 +1,9 @@
 ---
-title: "Overview"
-weight: 1
+title: "Consistency Guarantees"
+weight: 4
 type: docs
 aliases:
-- /engines/overview.html
+- /concepts/file-layouts.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,18 +24,8 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Overview
+# Consistency Guarantees
 
-Table Store not only supports Flink SQL writes and queries natively,
-but also provides queries from other popular engines, such as
-Apache Spark and Apache Hive.
+Table Store writers uses two-phase commit protocol to atomically commit a batch of records to the table. Each commit produces at most two [snapshots]({{< ref "docs/concepts/basic-concepts#snapshot" >}}) at commit time.
 
-## Compatibility Matrix
-
-| Engine | Version | Feature | Read Pushdown |
-|---|---|---|---|
-| Flink | 1.16/1.15/1.14 | read, write, create/drop table, create/drop database | Projection, Filter |
-| Hive      | 3.1/2.3/2.2/2.1/2.1 CDH 6.3 | read | Projection, Filter |
-| Spark     | 3.3/3.2/3.1/3.0 | read, create/drop table, create/drop database | Projection, Filter |
-| Spark     | 2.4 | read | Projection, Filter |
-| Trino     | 388/358 | read | Projection, Filter |
+For any two writers modifying a table at the same time, as long as they do not modify the same bucket, their commits are serializable. If they modify the same bucket, only snapshot isolation is guaranteed. That is, the final table state may be a mix of the two commits, but no changes are lost.
