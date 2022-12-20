@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.casting;
 
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.utils.DateTimeUtils;
+import org.apache.flink.table.store.utils.DateTimeUtils;
 
 import javax.annotation.Nullable;
 
