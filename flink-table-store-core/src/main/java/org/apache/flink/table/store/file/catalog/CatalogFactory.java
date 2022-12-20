@@ -49,7 +49,15 @@ public interface CatalogFactory {
         return new Path(warehouse);
     }
 
+    /**
+     * If the ClassLoader is not specified, using the context ClassLoader of current thread as
+     * default.
+     */
     static Catalog createCatalog(Configuration options) {
+        return createCatalog(options, Thread.currentThread().getContextClassLoader());
+    }
+
+    static Catalog createCatalog(Configuration options, ClassLoader classLoader) {
         // manual validation
         // because different catalog types may have different options
         // we can't list them all in the optionalOptions() method
@@ -57,7 +65,7 @@ public interface CatalogFactory {
 
         String metastore = options.get(METASTORE);
         List<CatalogFactory> factories = new ArrayList<>();
-        ServiceLoader.load(CatalogFactory.class, Thread.currentThread().getContextClassLoader())
+        ServiceLoader.load(CatalogFactory.class, classLoader)
                 .iterator()
                 .forEachRemaining(
                         f -> {

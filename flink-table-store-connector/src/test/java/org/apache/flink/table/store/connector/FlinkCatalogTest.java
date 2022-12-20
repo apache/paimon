@@ -75,7 +75,9 @@ public class FlinkCatalogTest {
         String path = TEMPORARY_FOLDER.newFolder().toURI().toString();
         Configuration conf = new Configuration();
         conf.setString("warehouse", path);
-        catalog = FlinkCatalogFactory.createCatalog("test-catalog", conf);
+        catalog =
+                FlinkCatalogFactory.createCatalog(
+                        "test-catalog", conf, FlinkCatalogTest.class.getClassLoader());
     }
 
     private ResolvedSchema createSchema() {
