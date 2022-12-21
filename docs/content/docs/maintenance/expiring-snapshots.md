@@ -3,7 +3,7 @@ title: "Expiring Snapshots"
 weight: 2
 type: docs
 aliases:
-- /maintenance-actions/expiring-snapshots.html
+- /maintenance/expiring-snapshots.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

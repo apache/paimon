@@ -3,7 +3,7 @@ title: "Creating Tables"
 weight: 2
 type: docs
 aliases:
-- /sql-api/creating-tables.html
+- /how-to/creating-tables.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -28,7 +28,7 @@ under the License.
 
 ## Creating Catalog Managed Tables
 
-Tables created in Table Store [catalogs]({{< ref "docs/sql-api/creating-catalogs" >}}) are managed by the catalog. When the table is dropped from catalog, its table files will also be deleted.
+Tables created in Table Store [catalogs]({{< ref "docs/how-to/creating-catalogs" >}}) are managed by the catalog. When the table is dropped from catalog, its table files will also be deleted.
 
 The following SQL assumes that you have registered and are using a Table Store catalog. It creates a managed table named `MyTable` with five columns in the catalog's `default` database.
 
@@ -51,7 +51,7 @@ CREATE TABLE MyTable (
 {{< tab "Spark3" >}}
 
 ```sql
-CREATE TABLE tablestore.default.MyTable (
+CREATE TABLE MyTable (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -88,7 +88,7 @@ CREATE TABLE MyTable (
 {{< tab "Spark3" >}}
 
 ```sql
-CREATE TABLE tablestore.default.MyTable (
+CREATE TABLE MyTable (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -126,7 +126,7 @@ CREATE TABLE MyTable (
 {{< tab "Spark3" >}}
 
 ```sql
-CREATE TABLE tablestore.default.MyTable (
+CREATE TABLE MyTable (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -147,7 +147,7 @@ Partition keys must be a subset of primary keys if primary keys are defined.
 
 ### Table Properties
 
-Users can specify table properties to enable features or improve performance of Table Store. For a complete list of such properties, see [configurations]({{< ref "docs/maintenance-actions/configurations" >}}).
+Users can specify table properties to enable features or improve performance of Table Store. For a complete list of such properties, see [configurations]({{< ref "docs/maintenance/configurations" >}}).
 
 The following SQL creates a table named `MyTable` with five columns partitioned by `dt` and `hh`. This table has two properties: `'bucket' = '2'` and `'bucket-key' = 'user_id'`.
 
@@ -173,7 +173,7 @@ CREATE TABLE MyTable (
 {{< tab "Spark3" >}}
 
 ```sql
-CREATE TABLE tablestore.default.MyTable (
+CREATE TABLE MyTable (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -214,6 +214,26 @@ CREATE TABLE MyTable (
     'auto-create' = 'true' -- this table property creates table files for an empty table if table path does not exist
                            -- currently only supported by Flink
 );
+```
+
+{{< /tab >}}
+
+{{< tab "Spark3" >}}
+
+Spark3 only supports creating external tables through Scala API. The following Scala code loads the table located at `hdfs://path/to/table` into a `DataSet`.
+
+```scala
+val dataset = spark.read.format("tablestore").load("hdfs://path/to/table")
+```
+
+{{< /tab >}}
+
+{{< tab "Spark2" >}}
+
+Spark2 only supports creating external tables through Scala API. The following Scala code loads the table located at `hdfs://path/to/table` into a `DataSet`.
+
+```scala
+val dataset = spark.read.format("tablestore").load("hdfs://path/to/table")
 ```
 
 {{< /tab >}}

@@ -34,7 +34,7 @@ Changelog table is the default table type when creating a table. Users can inser
 
 Primary keys are a set of columns that are unique for each record. Table Store imposes an ordering of data, which means the system will sort the primary key within each bucket. Using this feature, users can achieve high performance by adding filter conditions on the primary key.
 
-By [defining primary keys]({{< ref "docs/sql-api/creating-tables#tables-with-primary-keys" >}}) on a changelog table, users can access the following features.
+By [defining primary keys]({{< ref "docs/how-to/creating-tables#tables-with-primary-keys" >}}) on a changelog table, users can access the following features.
 
 ### Merge Engines
 

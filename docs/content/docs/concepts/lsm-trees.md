@@ -48,4 +48,4 @@ To limit the number of sorted runs, we have to merge several sorted runs into on
 
 However, compaction is a resource intensive procedure which consumes a certain amount of CPU time and disk IO, so too frequent compaction may in turn result in slower writes. It is a trade-off between query and write performance. Table Store currently adapts a compaction strategy similar to Rocksdb's [universal compaction](https://github.com/facebook/rocksdb/wiki/Universal-Compaction).
 
-By default, when Table Store writers append records to the LSM tree, they'll also perform compactions as needed. Users can also choose to perform all compactions in a dedicated compaction job. See [dedicated compaction job]({{< ref "docs/maintenance-actions/write-performance#dedicated-compaction-job" >}}) for more info.
+By default, when Table Store writers append records to the LSM tree, they'll also perform compactions as needed. Users can also choose to perform all compactions in a dedicated compaction job. See [dedicated compaction job]({{< ref "docs/maintenance/write-performance#dedicated-compaction-job" >}}) for more info.

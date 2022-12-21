@@ -37,7 +37,6 @@ All snapshot files are stored in the `snapshot` directory.
 A snapshot file is a JSON file containing information about this snapshot, including
 
 * the schema file in use
-* the manifest list containing all changes prior to this snapshot
 * the manifest list containing all changes of this snapshot
 
 ## Manifest Files

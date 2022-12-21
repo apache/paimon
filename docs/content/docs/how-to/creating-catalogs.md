@@ -3,7 +3,7 @@ title: "Creating Catalogs"
 weight: 1
 type: docs
 aliases:
-- /sql-api/creating-catalogs.html
+- /how-to/creating-catalogs.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -58,6 +58,12 @@ The following shell command registers a Table Store catalog named `tablestore`. 
 spark-sql ... \
     --conf spark.sql.catalog.tablestore=org.apache.flink.table.store.spark.SparkCatalog \
     --conf spark.sql.catalog.tablestore.warehouse=hdfs://path/to/warehouse
+```
+
+After `spark-sql` is started, you can switch to the `default` database of the `tablestore` catalog with the following SQL.
+
+```sql
+USE tablestore.default;
 ```
 
 {{< /tab >}}
@@ -143,6 +149,12 @@ spark-sql ... \
     --conf spark.sql.catalog.tablestore.warehouse=hdfs://path/to/warehouse \
     --conf spark.sql.catalog.tablestore.metastore=hive \
     --conf spark.sql.catalog.tablestore.uri=thrift://<hive-metastore-host-name>:<port>
+```
+
+After `spark-sql` is started, you can switch to the `default` database of the `tablestore` catalog with the following SQL.
+
+```sql
+USE tablestore.default;
 ```
 
 {{< /tab >}}

@@ -2,7 +2,6 @@
 title: Filesystems
 icon: <i class="fa fa-folder title maindish" aria-hidden="true"></i>
 bold: true
-sectionBreak: true
 bookCollapseSection: true
 weight: 3
 ---

@@ -2,7 +2,6 @@
 title: Features
 icon: <i class="fa fa-star title maindish" aria-hidden="true"></i>
 bold: true
-sectionBreak: true
 bookCollapseSection: true
 weight: 5
 ---

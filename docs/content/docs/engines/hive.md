@@ -86,7 +86,7 @@ By using table store Hive catalog, you can create, drop and insert into table st
 
 **Step 1: Prepare Table Store Hive Catalog Jar File for Flink**
 
-See [creating a catalog with Hive metastore]({{< ref "docs/sql-api/creating-catalogs#creating-a-catalog-with-hive-metastore" >}}).
+See [creating a catalog with Hive metastore]({{< ref "docs/how-to/creating-catalogs#creating-a-catalog-with-hive-metastore" >}}).
 
 **Step 2: Create Test Data with Flink SQL**
 

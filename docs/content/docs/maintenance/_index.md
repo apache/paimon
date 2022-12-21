@@ -1,10 +1,9 @@
 ---
-title: SQL API
-icon: <i class="fa fa-database title maindish" aria-hidden="true"></i>
+title: Maintenance
+icon: <i class="fa fa-wrench title maindish" aria-hidden="true"></i>
 bold: true
-sectionBreak: true
 bookCollapseSection: true
-weight: 4
+weight: 6
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

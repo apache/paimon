@@ -2,7 +2,6 @@
 title: Concepts
 icon: <i class="fa fa-book title maindish" aria-hidden="true"></i>
 bold: true
-sectionBreak: true
 bookCollapseSection: true
 weight: 1
 ---

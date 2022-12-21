@@ -36,6 +36,8 @@ By default, changes in the log systems are visible to consumers only after a sna
 
 However, users can also specify the table property `'log.consistency' = 'eventual'` so that changelog written into the log system can be immediately consumed by the consumers, without waiting for the next snapshot. This behavior decreases the latency of changelog, but it can only guarantee the at-least-once semantics (that is, consumers might see duplicated records) due to possible failures.
 
+If `'log.consistency' = 'eventual'` is set, in order to achieve correct results, Table Store source in Flink will automatically adds a "normalize" operator for deduplication. This operator persists the values of each key in states. As one can easily tell, this operator will be very costly and should be avoided.
+
 ## Supported Log Systems
 
 ### Kafka

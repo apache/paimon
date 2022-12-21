@@ -2,7 +2,6 @@
 title: Engines
 icon: <i class="fa fa-gear title maindish" aria-hidden="true"></i>
 bold: true
-sectionBreak: true
 bookCollapseSection: true
 weight: 2
 ---

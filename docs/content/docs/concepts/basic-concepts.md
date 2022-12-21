@@ -48,8 +48,8 @@ Partition keys must be a subset of primary keys if primary keys are defined.
 
 Unpartitioned tables, or partitions in partitioned tables, are sub-divided into buckets, to provide extra structure to the data that may be used for more efficient querying.
 
-The range for a bucket is determined by the hash value of one or more columns in the records. Users can specify bucketing columns by providing the [`bucket-key` option]({{< ref "docs/maintenance-actions/configurations#coreoptions" >}}). If no `bucket-key` option is specified, the primary key (if defined) or the complete record will be used as the bucket key.
+The range for a bucket is determined by the hash value of one or more columns in the records. Users can specify bucketing columns by providing the [`bucket-key` option]({{< ref "docs/maintenance/configurations#coreoptions" >}}). If no `bucket-key` option is specified, the primary key (if defined) or the complete record will be used as the bucket key.
 
 A bucket is the smallest storage unit for reads and writes, so the number of buckets limits the maximum processing parallelism. This number should not be too big, though, as it will result in lots of small files and low read performance. In general, the recommended data size in each bucket is about 1GB.
 
-See [file layouts]({{< ref "docs/concepts/file-layouts" >}}) for how files are divided into buckets. Also, see [rescale bucket]({{< ref "docs/maintenance-actions/rescale-bucket" >}}) if you want to adjust the number of buckets after a table is created.
+See [file layouts]({{< ref "docs/concepts/file-layouts" >}}) for how files are divided into buckets. Also, see [rescale bucket]({{< ref "docs/maintenance/rescale-bucket" >}}) if you want to adjust the number of buckets after a table is created.

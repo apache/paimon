@@ -3,7 +3,7 @@ title: "Altering Tables"
 weight: 3
 type: docs
 aliases:
-- /sql-api/altering-tables.html
+- /how-to/altering-tables.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -45,7 +45,7 @@ ALTER TABLE my_table SET (
 {{< tab "Spark3" >}}
 
 ```sql
-ALTER TABLE tablestore.default.my_table SET TBLPROPERTIES (
+ALTER TABLE my_table SET TBLPROPERTIES (
     'write-buffer-size' = '256 MB'
 );
 ```
@@ -71,7 +71,7 @@ ALTER TABLE my_table RESET ('write-buffer-size');
 {{< tab "Spark3" >}}
 
 ```sql
-ALTER TABLE tablestore.default.my_table UNSET TBLPROPERTIES ('write-buffer-size');
+ALTER TABLE my_table UNSET TBLPROPERTIES ('write-buffer-size');
 ```
 
 {{< /tab >}}
@@ -87,7 +87,7 @@ The following SQL adds two columns `c1` and `c2` to table `my_table`.
 {{< tab "Spark3" >}}
 
 ```sql
-ALTER TABLE tablestore.default.my_table ADD COLUMNS (
+ALTER TABLE my_table ADD COLUMNS (
     c1 INT,
     c2 STRING
 );
@@ -106,7 +106,7 @@ The following SQL sets column `coupon_info` to be nullable.
 {{< tab "Spark3" >}}
 
 ```sql
-ALTER TABLE tablestore.default.my_table ALTER COLUMN coupon_info DROP NOT NULL;
+ALTER TABLE my_table ALTER COLUMN coupon_info DROP NOT NULL;
 ```
 
 {{< /tab >}}
@@ -122,7 +122,7 @@ The following SQL changes comment of column `buy_count` to `buy count`.
 {{< tab "Spark3" >}}
 
 ```sql
-ALTER TABLE tablestore.default.my_table ALTER COLUMN buy_count COMMENT 'buy count';
+ALTER TABLE my_table ALTER COLUMN buy_count COMMENT 'buy count';
 ```
 
 {{< /tab >}}

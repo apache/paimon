@@ -3,7 +3,7 @@ title: "Querying Tables"
 weight: 5
 type: docs
 aliases:
-- /sql-api/querying-tables.html
+- /how-to/querying-tables.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

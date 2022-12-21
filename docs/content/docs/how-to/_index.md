@@ -1,10 +1,9 @@
 ---
-title: Maintenance Actions
-icon: <i class="fa fa-wrench title maindish" aria-hidden="true"></i>
+title: How to
+icon: <i class="fa fa-database title maindish" aria-hidden="true"></i>
 bold: true
-sectionBreak: true
 bookCollapseSection: true
-weight: 6
+weight: 4
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
