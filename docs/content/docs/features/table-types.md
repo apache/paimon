@@ -30,7 +30,7 @@ Table Store supports various types of tables. Users can specify `write-mode` tab
 
 ## Changelog Tables with Primary Keys
 
-Changelog table is the default table type when creating a table. Users can also specify `'write-mode' = 'change-log'` explicitly in table properties when creating the table.
+Changelog table is the default table type when creating a table. Users can insert, update or delete records in the table.
 
 Primary keys are a set of columns that are unique for each record. Table Store imposes an ordering of data, which means the system will sort the primary key within each bucket. Using this feature, users can achieve high performance by adding filter conditions on the primary key.
 
@@ -97,13 +97,21 @@ Streaming queries will continuously produce latest changes. These changes can co
 
 By specifying the `changelog-producer` table property when creating the table, users can choose the pattern of changes produced from files.
 
+{{< hint info >}}
+
+The `changelog-producer` table property only affects changelog from files. It does not affect the external log system.
+
+{{< /hint >}}
+
 #### None
 
 By default, no extra changelog producer will be applied to the writer of table. Table Store source can only see the merged changes across snapshots, like what keys are removed and what are the new values of some keys.
 
-However, these merged changes cannot form a complete changelog, because we can't read the old values of the keys directly from them. Merged changes require the consumers to "remember" the values of each key and to rewrite the values without seeing the old ones.
+However, these merged changes cannot form a complete changelog, because we can't read the old values of the keys directly from them. Merged changes require the consumers to "remember" the values of each key and to rewrite the values without seeing the old ones. Some consumers, however, need the old values to ensure correctness or efficiency.
 
-`none` changelog producers are best suited for consumers such as a database system. Flink also has a built-in "normalize" operator which persists the values of each key in states. As one can easily tell, this operator will be very costly and should be avoided.
+Consider a consumer which calculates the sum on some grouping keys (might not be equal to the primary keys). If the consumer only sees a new value `5`, it cannot determine what values should be added to the summing result. For example, if the old value is `4`, it should add `1` to the result. But if the old value is `6`, it should in turn subtract `1` from the result. Old values are important for these types of consumers.
+
+To conclude, `none` changelog producers are best suited for consumers such as a database system. Flink also has a built-in "normalize" operator which persists the values of each key in states. As one can easily tell, this operator will be very costly and should be avoided.
 
 {{< img src="/img/changelog-producer-none.png">}}
 
