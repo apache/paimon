@@ -59,7 +59,7 @@ Produces the latest snapshot on the table upon first startup, and continues to r
 <tr>
 <td>compacted-full</td>
 <td>
-Produces the snapshot after the latest [compaction].
+Produces the snapshot after the latest <a href="{{< ref "docs/concepts/lsm-trees#compactions" >}}">compaction</a>.
 </td>
 <td>
 Produces the snapshot after the latest compaction on the table upon first startup, and continues to read the following changes.

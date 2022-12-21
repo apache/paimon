@@ -1,6 +1,6 @@
 ---
 title: "Rescale Bucket"
-weight: 2
+weight: 3
 type: docs
 aliases:
 - /maintenance-actions/rescale-bucket.html

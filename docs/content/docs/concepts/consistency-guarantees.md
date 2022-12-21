@@ -1,6 +1,6 @@
 ---
 title: "Consistency Guarantees"
-weight: 4
+weight: 5
 type: docs
 aliases:
 - /concepts/file-layouts.html
