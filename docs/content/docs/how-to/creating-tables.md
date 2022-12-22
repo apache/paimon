@@ -30,43 +30,7 @@ under the License.
 
 Tables created in Table Store [catalogs]({{< ref "docs/how-to/creating-catalogs" >}}) are managed by the catalog. When the table is dropped from catalog, its table files will also be deleted.
 
-The following SQL assumes that you have registered and are using a Table Store catalog. It creates a managed table named `MyTable` with five columns in the catalog's `default` database.
-
-{{< tabs "catalog-managed-table-example" >}}
-
-{{< tab "Flink" >}}
-
-```sql
-CREATE TABLE MyTable (
-    user_id BIGINT,
-    item_id BIGINT,
-    behavior STRING,
-    dt STRING,
-    hh STRING
-);
-```
-
-{{< /tab >}}
-
-{{< tab "Spark3" >}}
-
-```sql
-CREATE TABLE MyTable (
-    user_id BIGINT,
-    item_id BIGINT,
-    behavior STRING,
-    dt STRING,
-    hh STRING
-);
-```
-
-{{< /tab >}}
-
-{{< /tabs >}}
-
-### Tables with Primary Keys
-
-The following SQL creates a table named `MyTable` with five columns, where `dt`, `hh` and `user_id` are the primary keys.
+The following SQL assumes that you have registered and are using a Table Store catalog. It creates a managed table named `MyTable` with five columns in the catalog's `default` database, where `dt`, `hh` and `user_id` are the primary keys.
 
 {{< tabs "primary-keys-example" >}}
 
@@ -105,7 +69,7 @@ CREATE TABLE MyTable (
 
 ### Partitioned Tables
 
-The following SQL creates a table named `MyTable` with five columns partitioned by `dt` and `hh`.
+The following SQL creates a table named `MyTable` with five columns partitioned by `dt` and `hh`, where `dt`, `hh` and `user_id` are the primary keys.
 
 {{< tabs "partitions-example" >}}
 
@@ -117,7 +81,8 @@ CREATE TABLE MyTable (
     item_id BIGINT,
     behavior STRING,
     dt STRING,
-    hh STRING
+    hh STRING,
+    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
 ) PARTITIONED BY (dt, hh);
 ```
 
@@ -132,7 +97,9 @@ CREATE TABLE MyTable (
     behavior STRING,
     dt STRING,
     hh STRING
-) PARTITIONED BY (dt, hh);
+) PARTITIONED BY (dt, hh) TBLPROPERTIES (
+    'primary-key' = 'dt,hh,user_id'
+);
 ```
 
 {{< /tab >}}
@@ -149,7 +116,7 @@ Partition keys must be a subset of primary keys if primary keys are defined.
 
 Users can specify table properties to enable features or improve performance of Table Store. For a complete list of such properties, see [configurations]({{< ref "docs/maintenance/configurations" >}}).
 
-The following SQL creates a table named `MyTable` with five columns partitioned by `dt` and `hh`. This table has two properties: `'bucket' = '2'` and `'bucket-key' = 'user_id'`.
+The following SQL creates a table named `MyTable` with five columns partitioned by `dt` and `hh`, where `dt`, `hh` and `user_id` are the primary keys. This table has two properties: `'bucket' = '2'` and `'bucket-key' = 'user_id'`.
 
 {{< tabs "table-properties-example" >}}
 
@@ -161,7 +128,8 @@ CREATE TABLE MyTable (
     item_id BIGINT,
     behavior STRING,
     dt STRING,
-    hh STRING
+    hh STRING,
+    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
 ) PARTITIONED BY (dt, hh) WITH (
     'bucket' = '2',
     'bucket-key' = 'user_id'
@@ -180,6 +148,7 @@ CREATE TABLE MyTable (
     dt STRING,
     hh STRING
 ) PARTITIONED BY (dt, hh) TBLPROPERTIES (
+    'primary-key' = 'dt,hh,user_id',
     'bucket' = '2',
     'bucket-key' = 'user_id'
 );
@@ -207,7 +176,8 @@ CREATE TABLE MyTable (
     item_id BIGINT,
     behavior STRING,
     dt STRING,
-    hh STRING
+    hh STRING,
+    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
 ) WITH (
     'connector' = 'table-store',
     'path' = 'hdfs://path/to/table',
@@ -254,6 +224,10 @@ LOCATION 'hdfs://path/to/table';
 
 ## Creating Temporary Tables
 
+{{< tabs "temporary-table-example" >}}
+
+{{< tab "Flink" >}}
+
 Temporary tables are only supported by Flink. Like external tables, temporary tables are just recorded but not managed by the current Flink SQL session. If the temporary table is dropped, its resources will not be deleted. Temporary tables are also dropped when Flink SQL session is closed.
 
 If you want to use Table Store catalog along with other tables but do not want to store them in other catalogs, you can create a temporary table. The following Flink SQL creates a Table Store catalog and a temporary table and also illustrates how to use both tables together.
@@ -279,3 +253,7 @@ CREATE TEMPORARY TABLE temp_table (
 
 SELECT my_table.k, my_table.v, temp_table.v FROM my_table JOIN temp_table ON my_table.k = temp_table.k;
 ```
+
+{{< /tab >}}
+
+{{< /tabs >}}
