@@ -24,7 +24,7 @@
     <parent>
         <artifactId>flink-table-store-parent</artifactId>
         <groupId>org.apache.flink</groupId>
-        <version>0.3-SNAPSHOT</version>
+        <version>0.4-SNAPSHOT</version>
     </parent>
 
     <artifactId>flink-table-store-filesystems</artifactId>
