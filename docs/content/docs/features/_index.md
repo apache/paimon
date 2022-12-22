@@ -1,9 +1,9 @@
 ---
-title: Try Table Store
-icon: <i class="fa fa-rocket title appetizer" aria-hidden="true"></i>
+title: Features
+icon: <i class="fa fa-star title maindish" aria-hidden="true"></i>
 bold: true
 bookCollapseSection: true
-weight: 1
+weight: 5
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

@@ -36,7 +36,7 @@ Table Store offers the following core capabilities:
 ## Try Table Store
 
 If you’re interested in playing around with Flink Table Store, check out our
-[Quickstart]({{< ref "docs/try-table-store/quick-start" >}}). It provides a step by
+quick start guide with [Flink]({{< ref "docs/engines/flink" >}}), [Spark]({{< ref "docs/engines/spark3" >}}) or [Hive]({{< ref "docs/engines/hive" >}}). It provides a step by
 step introduction to the APIs and guides you through real applications.
 
 <--->

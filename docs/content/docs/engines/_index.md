@@ -1,10 +1,9 @@
 ---
 title: Engines
-icon: <i class="fa fa-random title maindish" aria-hidden="true"></i>
+icon: <i class="fa fa-gear title maindish" aria-hidden="true"></i>
 bold: true
-sectionBreak: true
 bookCollapseSection: true
-weight: 3
+weight: 2
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

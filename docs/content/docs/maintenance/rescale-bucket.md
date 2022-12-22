@@ -1,9 +1,9 @@
 ---
 title: "Rescale Bucket"
-weight: 7
+weight: 3
 type: docs
 aliases:
-- /development/rescale-bucket.html
+- /maintenance/rescale-bucket.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

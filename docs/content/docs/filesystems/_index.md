@@ -1,10 +1,9 @@
 ---
-title: FileSystems
-icon: <i class="fa fa-sliders title maindish" aria-hidden="true"></i>
+title: Filesystems
+icon: <i class="fa fa-folder title maindish" aria-hidden="true"></i>
 bold: true
-sectionBreak: true
 bookCollapseSection: true
-weight: 4
+weight: 3
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
