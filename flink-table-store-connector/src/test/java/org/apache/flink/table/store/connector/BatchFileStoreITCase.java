@@ -54,17 +54,25 @@ public class BatchFileStoreITCase extends FileStoreTableITCase {
     }
 
     @Test
-    public void testTimeTravelRead() {
+    public void testTimeTravelRead() throws InterruptedException {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         long time1 = System.currentTimeMillis();
+
+        Thread.sleep(10);
         batchSql("INSERT INTO T VALUES (3, 33, 333), (4, 44, 444)");
         long time2 = System.currentTimeMillis();
+
+        Thread.sleep(10);
         batchSql("INSERT INTO T VALUES (5, 55, 555), (6, 66, 666)");
         long time3 = System.currentTimeMillis();
+
+        Thread.sleep(10);
         batchSql("INSERT INTO T VALUES (7, 77, 777), (8, 88, 888)");
 
         assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='1') */"))
                 .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
+
+        assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='0') */")).isEmpty();
 
         assertThat(
                         batchSql(

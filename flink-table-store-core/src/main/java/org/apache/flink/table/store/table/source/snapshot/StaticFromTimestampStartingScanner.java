@@ -30,13 +30,14 @@ import org.slf4j.LoggerFactory;
  * org.apache.flink.table.store.CoreOptions.StartupMode#FROM_TIMESTAMP} startup mode of a batch
  * read.
  */
-public class FromTimestampStartingScanner implements StartingScanner {
+public class StaticFromTimestampStartingScanner implements StartingScanner {
 
-    private static final Logger LOG = LoggerFactory.getLogger(FromTimestampStartingScanner.class);
+    private static final Logger LOG =
+            LoggerFactory.getLogger(StaticFromTimestampStartingScanner.class);
 
     private final long startupMillis;
 
-    public FromTimestampStartingScanner(long startupMillis) {
+    public StaticFromTimestampStartingScanner(long startupMillis) {
         this.startupMillis = startupMillis;
     }
 
@@ -44,7 +45,9 @@ public class FromTimestampStartingScanner implements StartingScanner {
     public DataTableScan.DataFilePlan getPlan(SnapshotManager snapshotManager, DataTableScan scan) {
         Long startingSnapshotId = snapshotManager.earlierOrEqualTimeMills(startupMillis);
         if (startingSnapshotId == null) {
-            LOG.debug("There is currently no snapshot. Waiting for snapshot generation.");
+            LOG.debug(
+                    "There is currently no snapshot earlier than or equal to timestamp[{}]",
+                    startupMillis);
             return null;
         }
         return scan.withKind(ScanKind.ALL).withSnapshot(startingSnapshotId).plan();

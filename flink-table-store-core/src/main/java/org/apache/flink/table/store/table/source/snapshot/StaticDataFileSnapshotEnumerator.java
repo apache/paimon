@@ -79,7 +79,7 @@ public class StaticDataFileSnapshotEnumerator implements SnapshotEnumerator {
                             CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
                             CoreOptions.StartupMode.FROM_TIMESTAMP,
                             CoreOptions.SCAN_MODE.key()));
-            startingScanner = new FromTimestampStartingScanner(startupMillis);
+            startingScanner = new StaticFromTimestampStartingScanner(startupMillis);
         } else if (startupMode == CoreOptions.StartupMode.FROM_SNAPSHOT) {
             Long snapshotId = table.options().scanSnapshotId();
             Preconditions.checkNotNull(
@@ -89,7 +89,7 @@ public class StaticDataFileSnapshotEnumerator implements SnapshotEnumerator {
                             CoreOptions.SCAN_SNAPSHOT_ID.key(),
                             CoreOptions.StartupMode.FROM_SNAPSHOT,
                             CoreOptions.SCAN_MODE.key()));
-            startingScanner = new FromSnapshotStartingScanner(snapshotId);
+            startingScanner = new StaticFromSnapshotStartingScanner(snapshotId);
         } else {
             throw new UnsupportedOperationException("Unknown startup mode " + startupMode.name());
         }

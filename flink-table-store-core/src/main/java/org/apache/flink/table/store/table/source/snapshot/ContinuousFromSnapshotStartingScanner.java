@@ -21,9 +21,6 @@ package org.apache.flink.table.store.table.source.snapshot;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.source.DataTableScan;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.Collections;
 
 /**
@@ -33,9 +30,6 @@ import java.util.Collections;
  */
 public class ContinuousFromSnapshotStartingScanner implements StartingScanner {
 
-    private static final Logger LOG =
-            LoggerFactory.getLogger(ContinuousFromTimestampStartingScanner.class);
-
     private final long snapshotId;
 
     public ContinuousFromSnapshotStartingScanner(long snapshotId) {
@@ -44,6 +38,14 @@ public class ContinuousFromSnapshotStartingScanner implements StartingScanner {
 
     @Override
     public DataTableScan.DataFilePlan getPlan(SnapshotManager snapshotManager, DataTableScan scan) {
-        return new DataTableScan.DataFilePlan(snapshotId, Collections.emptyList());
+        Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+        if (earliestSnapshotId == null) {
+            return null;
+        }
+        // We should use `snapshotId - 1` here to start to scan delta data from specific snapshot
+        // id. If the snapshotId < earliestSnapshotId, start to scan from the earliest.
+        return new DataTableScan.DataFilePlan(
+                snapshotId >= earliestSnapshotId ? snapshotId - 1 : earliestSnapshotId - 1,
+                Collections.emptyList());
     }
 }

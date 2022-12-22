@@ -26,15 +26,19 @@ import org.apache.flink.table.store.table.source.DataTableScan;
  * {@link StartingScanner} for the {@link
  * org.apache.flink.table.store.CoreOptions.StartupMode#FROM_SNAPSHOT} startup mode of a batch read.
  */
-public class FromSnapshotStartingScanner implements StartingScanner {
+public class StaticFromSnapshotStartingScanner implements StartingScanner {
     private final long snapshotId;
 
-    public FromSnapshotStartingScanner(long snapshotId) {
+    public StaticFromSnapshotStartingScanner(long snapshotId) {
         this.snapshotId = snapshotId;
     }
 
     @Override
     public DataTableScan.DataFilePlan getPlan(SnapshotManager snapshotManager, DataTableScan scan) {
+        if (snapshotManager.earliestSnapshotId() == null
+                || snapshotId < snapshotManager.earliestSnapshotId()) {
+            return null;
+        }
         return scan.withKind(ScanKind.ALL).withSnapshot(snapshotId).plan();
     }
 }
