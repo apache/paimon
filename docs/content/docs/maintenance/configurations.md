@@ -1,9 +1,9 @@
 ---
-title: "Overview"
-weight: 1
+title: "Configurations"
+weight: 4
 type: docs
 aliases:
-- /engines/overview.html
+- /development/configurations.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,18 +24,22 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Overview
+# Configuration
 
-Table Store not only supports Flink SQL writes and queries natively,
-but also provides queries from other popular engines, such as
-Apache Spark and Apache Hive.
+### CoreOptions
 
-## Compatibility Matrix
+Core options for table store.
 
-| Engine | Version | Feature | Read Pushdown |
-|---|---|---|---|
-| Flink | 1.16/1.15/1.14 | read, write, create/drop table, create/drop database | Projection, Filter |
-| Hive      | 3.1/2.3/2.2/2.1/2.1 CDH 6.3 | read | Projection, Filter |
-| Spark     | 3.3/3.2/3.1/3.0 | read, create/drop table, create/drop database | Projection, Filter |
-| Spark     | 2.4 | read | Projection, Filter |
-| Trino     | 388/358 | read | Projection, Filter |
+{{< generated/core_configuration >}}
+
+### CatalogOptions
+
+Options for table store catalog.
+
+{{< generated/catalog_configuration >}}
+
+### FlinkConnectorOptions
+
+Flink connector options for table store.
+
+{{< generated/flink_connector_configuration >}}

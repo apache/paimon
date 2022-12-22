@@ -1,6 +1,6 @@
 ---
 title: "Hive"
-weight: 2
+weight: 5
 type: docs
 aliases:
 - /engines/hive.html
@@ -26,9 +26,7 @@ under the License.
 
 # Hive
 
-Table Store currently supports the following features related with Hive:
-* Create, drop and insert into table store tables in Flink SQL through table store Hive catalog. Tables created in this way can also be read directly from Hive.
-* Register existing table store tables as external tables in Hive SQL.
+This documentation is a guide for using Table Store in Hive.
 
 ## Version
 
@@ -38,36 +36,10 @@ Table Store currently supports Hive 2.1, 2.2, 2.3 and 3.1.
 
 Table Store currently supports MR and Tez execution engine for Hive.
 
-## Install
-
-### Table Store Hive Catalog (For Flink)
+## Installation
 
 {{< stable >}}
-Download the jar file with corresponding version.
 
-|          | Jar                                                                                                                                                                                            |
-|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Hive 3.1 | [flink-table-store-hive-catalog-{{< version >}}_3.1.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_3.1.jar) |
-| Hive 2.3 | [flink-table-store-hive-catalog-{{< version >}}_2.3.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.3.jar) |
-| Hive 2.2 | [flink-table-store-hive-catalog-{{< version >}}_2.2.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.2.jar) |
-| Hive 2.1 | [flink-table-store-hive-catalog-{{< version >}}_2.1.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.1.jar) |
-
-{{< /stable >}}
-{{< unstable >}}
-
-You are using an unreleased version of Table Store. See [Build From Source]({{< ref "docs/engines/build" >}}) for how to build and find Table Store Hive catalog jar file.
-
-{{< /unstable >}}
-
-If you're aiming for Hive 2.1 CDH 6.3, see [Build From Source]({{< ref "docs/engines/build" >}}) for more information.
-
-To enable Table Store Hive Catalog support in Flink, you can pick one of the following two methods.
-* Copy the jar file into the `lib` directory of your Flink installation directory. Note that this must be done before starting your Flink cluster.
-* If you're using Flink's SQL client, append `--jar /path/to/flink-table-store-hive-catalog-{{< version >}}.jar` to the starting command of SQL client.
-
-### Table Store Hive Connector (For Hive)
-
-{{< stable >}}
 Download the jar file with corresponding version.
 
 | |Jar|
@@ -77,29 +49,48 @@ Download the jar file with corresponding version.
 |Hive 2.2|[flink-table-store-hive-connector-{{< version >}}_2.2.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-{{< version >}}_2.2.jar)|
 |Hive 2.1|[flink-table-store-hive-connector-{{< version >}}_2.1.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-{{< version >}}_2.1.jar)|
 
+You can also manually build bundled jar from the source code.
+
 {{< /stable >}}
+
 {{< unstable >}}
 
-You are using an unreleased version of Table Store. See [Build From Source]({{< ref "docs/engines/build" >}}) for how to build and find Table Store Hive connector jar file.
+You are using an unreleased version of Table Store so you need to manually build bundled jar from the source code.
 
 {{< /unstable >}}
 
-If you're aiming for Hive 2.1 CDH 6.3, see [Build From Source]({{< ref "docs/engines/build" >}}) for more information.
+To build from source code, either [download the source of a release](https://flink.apache.org/downloads.html) or [clone the git repository]({{< github_repo >}}).
+
+Build bundled jar with the following command.
+
+| Version | Command |
+|---|---|
+| Hive 3.1 | `mvn clean install -Dmaven.test.skip=true -Phive-3.1` |
+| Hive 2.3 | `mvn clean install -Dmaven.test.skip=true` |
+| Hive 2.2 | `mvn clean install -Dmaven.test.skip=true -Phive-2.2` |
+| Hive 2.1 | `mvn clean install -Dmaven.test.skip=true -Phive-2.1` |
+| Hive 2.1 CDH 6.3 | `mvn clean install -Dmaven.test.skip=true -Phive-2.1-cdh-6.3` |
+
+You can find Hive connector jar in `./flink-table-store-hive/flink-table-store-hive-connector/target/flink-table-store-hive-connector-{{< version >}}.jar`.
 
 There are several ways to add this jar to Hive.
 
 * You can create an `auxlib` folder under the root directory of Hive, and copy `flink-table-store-hive-connector-{{< version >}}.jar` into `auxlib`.
 * You can also copy this jar to a path accessible by Hive, then use `add jar /path/to/flink-table-store-hive-connector-{{< version >}}.jar` to enable table store support in Hive. Note that this method is not recommended. If you're using the MR execution engine and running a join statement, you may be faced with the exception `org.apache.hive.com.esotericsoftware.kryo.kryoexception: unable to find class`.
 
-{{< hint info >}}
-__Note:__ If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR` is set.
-{{< /hint >}}
+NOTE: If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR` is set.
 
-## Using Table Store Hive Catalog
+## Quick Start with Table Store Hive Catalog
 
 By using table store Hive catalog, you can create, drop and insert into table store tables from Flink. These operations directly affect the corresponding Hive metastore. Tables created in this way can also be accessed directly from Hive.
 
-Execute the following Flink SQL script in Flink SQL client to define a table store Hive catalog and create a table store table.
+**Step 1: Prepare Table Store Hive Catalog Jar File for Flink**
+
+See [creating a catalog with Hive metastore]({{< ref "docs/how-to/creating-catalogs#creating-a-catalog-with-hive-metastore" >}}).
+
+**Step 2: Create Test Data with Flink SQL**
+
+Execute the following Flink SQL script in Flink SQL client to define a Table Store Hive catalog and create a table.
 
 ```sql
 -- Flink SQL CLI
@@ -141,6 +132,8 @@ SELECT * FROM test_table;
 */
 ```
 
+**Step 3: Query the Table in Hive**
+
 Run the following Hive SQL in Hive CLI to access the created table.
 
 ```sql
@@ -166,7 +159,7 @@ OK
 */
 ```
 
-## Using External Table
+## Quick Start with External Table
 
 To access existing table store table, you can also register them as external tables in Hive. Run the following Hive SQL in Hive CLI.
 
@@ -191,7 +184,7 @@ OK
 */
 ```
 
-### Hive Type Conversion
+## Hive Type Conversion
 
 This section lists all supported type conversion between Hive and Flink.
 All Hive's data types are available in package `org.apache.hadoop.hive.serde2.typeinfo`.

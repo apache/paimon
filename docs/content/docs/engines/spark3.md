@@ -26,184 +26,89 @@ under the License.
 
 # Spark3
 
-Table Store supports reading table store tables through Spark.
+This documentation is a guide for using Table Store in Spark3.
 
-## Version
-
-Table Store supports Spark 3+. It is highly recommended to use Spark 3+ version with many improvements.
-
-## Install
+## Preparing Table Store Jar File
 
 {{< stable >}}
+
 Download [flink-table-store-spark-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-spark-{{< version >}}.jar).
+
+You can also manually build bundled jar from the source code.
+
 {{< /stable >}}
+
 {{< unstable >}}
-You are using an unreleased version of Table Store, you need to manually [Build Spark Bundled Jar]({{< ref "docs/engines/build" >}}) from the source code.
+
+You are using an unreleased version of Table Store so you need to manually build bundled jar from the source code.
+
 {{< /unstable >}}
 
-Use `--jars` in spark-sql:
+To build from source code, either [download the source of a release](https://flink.apache.org/downloads.html) or [clone the git repository]({{< github_repo >}}).
+
+Build bundled jar with the following command.
+
 ```bash
-spark-sql ... --jars flink-table-store-spark-{{< version >}}.jar
+mvn clean install -DskipTests
 ```
 
-Alternatively, you can copy `flink-table-store-spark-{{< version >}}.jar` under `spark/jars` in your Spark installation.
+You can find the bundled jar in `./flink-table-store-spark/target/flink-table-store-spark-{{< version >}}.jar`.
+
+## Quick Start
 
 {{< hint info >}}
-__Note:__ If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR` is set.
+
+If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR` is set.
+
 {{< /hint >}}
 
-## Catalog
+**Step 1: Prepare Test Data**
 
-The following command registers the Table Store's Spark catalog with the name `tablestore`:
+Table Store currently only supports reading tables through Spark. To create a Table Store table with records, please follow our [Flink quick start guide]({{< ref "docs/engines/flink#quick-start" >}}).
+
+After the guide, all table files should be stored under the path `/tmp/table_store`, or the warehouse path you've specified.
+
+**Step 2: Specify Table Store Jar File**
+
+You can append path to table store jar file to the `--jars` argument when starting `spark-sql`.
+
+```bash
+spark-sql ... --jars /path/to/flink-table-store-spark-{{< version >}}.jar
+```
+
+Alternatively, you can copy `flink-table-store-spark-{{< version >}}.jar` under `spark/jars` in your Spark installation directory.
+
+**Step 3: Specify Table Store Catalog**
+
+When starting `spark-sql`, use the following command to register Table Store’s Spark catalog with the name `tablestore`. Table files of the warehouse is stored under `/tmp/table_store`.
 
 ```bash
 spark-sql ... \
     --conf spark.sql.catalog.tablestore=org.apache.flink.table.store.spark.SparkCatalog \
-    --conf spark.sql.catalog.tablestore.warehouse=file:/tmp/warehouse
+    --conf spark.sql.catalog.tablestore.warehouse=file:/tmp/table_store
 ```
 
-If you would like to use Table Store Hive catalog from Spark, please also find the jar file with corresponding Hive version and append its path to `--jars` argument.
-
-{{< stable >}}
-Download the jar file with corresponding version.
-
-| |Jar|
-|---|---|
-|Hive 2.3|[flink-table-store-hive-catalog-{{< version >}}_2.3.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.3.jar)|
-|Hive 2.2|[flink-table-store-hive-catalog-{{< version >}}_2.2.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.2.jar)|
-|Hive 2.1|[flink-table-store-hive-catalog-{{< version >}}_2.1.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.1.jar)|
-
-{{< /stable >}}
-{{< unstable >}}
-
-See [Build From Source]({{< ref "docs/engines/build" >}}) for how to build and find Table Store Hive catalog jar file.
-
-{{< /unstable >}}
-
-Some extra configurations are needed if your Table Store Catalog uses the Hive
-Metastore (No extra configuration is required for read-only).
-
-```bash
-spark-sql ... \
-    --conf spark.sql.catalog.tablestore=org.apache.flink.table.store.spark.SparkCatalog \
-    --conf spark.sql.catalog.tablestore.warehouse=file:/tmp/warehouse \
-    --conf spark.sql.catalog.tablestore.metastore=hive \
-    --conf spark.sql.catalog.tablestore.uri=thrift://...
-```
-
-## Query Table
+**Step 4: Query Table with SQL**
 
 ```sql
-SELECT * FROM tablestore.default.myTable;
+SELECT * FROM tablestore.default.word_count;
 ```
 
-## DataSet
+**Step 5: Query Table with Scala API**
 
-You can load a mapping table as DataSet on top of an existing Table Store table if you don't want to use Table Store Catalog.
+If you don't want to use Table Store catalog, you can also run `spark-shell` and query the table with Scala API.
+
+```bash
+spark-shell ... --jars /path/to/flink-table-store-spark-{{< version >}}.jar
+```
 
 ```scala
-val dataset = spark.read.format("tablestore").load("file:/tmp/warehouse/default.db/myTable")
+val dataset = spark.read.format("tablestore").load("file:/tmp/table_store/default.db/word_count")
+dataset.createOrReplaceTempView("word_count")
+spark.sql("SELECT * FROM word_count").show()
 ```
 
-## DDL Statements
-
-### Create Table
-```sql
-CREATE TABLE [IF NOT EXISTS] table_identifier 
-[ ( col_name1[:] col_type1 [ COMMENT col_comment1 ], ... ) ]
-[ USING tablestore ]    
-[ COMMENT table_comment ]
-[ PARTITIONED BY ( col_name1, col_name2, ... ) ]
-[ TBLPROPERTIES ( key1=val1, key2=val2, ... ) ]       
-```
-For example, create an order table with `order_id` as primary key and partitioned by `dt, hh`.
-```sql
-CREATE TABLE tablestore.default.OrderTable (
-    order_id BIGINT NOT NULL comment 'biz order id',
-    buyer_id BIGINT NOT NULL COMMENT 'buyer id',
-    coupon_info ARRAY<STRING> NOT NULL COMMENT 'coupon info',
-    order_amount DOUBLE NOT NULL COMMENT 'order amount',
-    dt STRING NOT NULL COMMENT 'yyyy-MM-dd',
-    hh STRING NOT NULL COMMENT 'HH'
-) COMMENT 'my table'
-PARTITIONED BY (dt, hh)
-TBLPROPERTIES ('foo' = 'bar', 'primary-key' = 'order_id,dt,hh')
-```
-{{< hint info >}}
-__Note:__
-- Primary key feature is supported via table properties, and composite primary key is delimited with comma.
-- Partition fields should be predefined, complex partition such like `PARTITIONED BY ( col_name2[:] col_type2 [ COMMENT col_comment2 ], ... )` is not supported.
-- For Spark 3.0, `CREATE TABLE USING tablestore` is required.
-{{< /hint >}}
-
-### Alter Table
-```sql
-ALTER TABLE table_identifier   
-SET TBLPROPERTIES ( key1=val1 ) 
-    | RESET TBLPROPERTIES (key2)
-    | ADD COLUMNS ( col_name col_type [ , ... ] )
-    | { ALTER | CHANGE } COLUMN col_name { DROP NOT NULL | COMMENT 'new_comment'}
-```
-
-- Change/add table properties
-```sql
-ALTER TABLE tablestore.default.OrderTable SET TBLPROPERTIES (
-    'write-buffer-size'='256 MB'
-)
-```
-
-- Remove a table property
-```sql
-ALTER TABLE tablestore.default.OrderTable UNSET TBLPROPERTIES ('write-buffer-size')
-```
-
-- Add a new column
-```sql
-ALTER TABLE tablestore.default.OrderTable ADD COLUMNS (buy_count INT)
-```
-
-- Change column nullability
-```sql
-ALTER TABLE tablestore.default.OrderTable ALTER COLUMN coupon_info DROP NOT NULL
-```
-
-- Change column comment
-```sql
-ALTER TABLE tablestore.default.OrderTable ALTER COLUMN buy_count COMMENT 'buy count'
-```
-
-{{< hint info >}}
-__Note:__
-- Spark does not support changing nullable column to nonnull column.
-{{< /hint >}}
-
-### Drop Table
-
-```sql
-DROP TABLE tablestore.default.OrderTable
-```
-{{< hint warning >}}
-__Attention__: Drop a table will delete both metadata and files on the disk.
-{{< /hint >}}
-
-### Create Namespace
-
-```sql
-CREATE NAMESPACE [IF NOT EXISTS] tablestore.bar
-```
-
-### Drop Namespace
-
-```sql
-DROP NAMESPACE tablestore.bar
-```
-
-{{< hint warning >}}
-__Attention__: Drop a namespace will delete all table's metadata and files under this namespace on the disk.
-{{< /hint >}}
-
-
-### Spark Type Conversion
+## Spark Type Conversion
 
 This section lists all supported type conversion between Spark and Flink.
 All Spark's data types are available in package `org.apache.spark.sql.types`.
@@ -296,7 +201,8 @@ All Spark's data types are available in package `org.apache.spark.sql.types`.
 </table>
 
 {{< hint info >}}
-__Note:__
+
 - Currently, Spark's field comment cannot be described under Flink CLI.
 - Conversion between Spark's `UserDefinedType` and Flink's `UserDefinedType` is not supported.
+
 {{< /hint >}}
