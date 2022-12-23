@@ -21,18 +21,41 @@ package org.apache.flink.table.store.file.casting;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.DecimalDataUtils;
+import org.apache.flink.table.types.logical.LogicalType;
 
 import javax.annotation.Nullable;
 
-/** Cast decimal to float. */
-public class DecimalToFloatCastExecutor implements CastExecutor<DecimalData, Float> {
-    public static final DecimalToFloatCastExecutor INSTANCE = new DecimalToFloatCastExecutor();
+/** Cast numeric to decimal. */
+public class NumericToDecimalCastExecutor implements CastExecutor<Number, DecimalData> {
+    private final LogicalType inputType;
+    private final int precision;
+    private final int scale;
 
-    private DecimalToFloatCastExecutor() {}
+    public NumericToDecimalCastExecutor(LogicalType inputType, int precision, int scale) {
+        this.inputType = inputType;
+        this.precision = precision;
+        this.scale = scale;
+    }
 
     @Nullable
     @Override
-    public Float cast(@Nullable DecimalData value) throws TableException {
-        return value == null ? null : (float) DecimalDataUtils.doubleValue(value);
+    public DecimalData cast(@Nullable Number value) throws TableException {
+        if (value == null) {
+            return null;
+        }
+
+        switch (inputType.getTypeRoot()) {
+            case TINYINT:
+            case SMALLINT:
+            case INTEGER:
+            case BIGINT:
+                {
+                    return DecimalDataUtils.castFrom(value.longValue(), precision, scale);
+                }
+            default:
+                {
+                    return DecimalDataUtils.castFrom(value.doubleValue(), precision, scale);
+                }
+        }
     }
 }

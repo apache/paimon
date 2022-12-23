@@ -31,4 +31,9 @@ public class StringToStringCastExecutor extends AbstractToStringCastExecutor<Str
     String getString(StringData value) {
         return value.toString();
     }
+
+    @Override
+    StringData getNullOutput() {
+        return null;
+    }
 }

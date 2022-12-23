@@ -43,7 +43,7 @@ public abstract class AbstractToStringCastExecutor<IN> implements CastExecutor<I
     @Override
     public StringData cast(@Nullable IN value) throws TableException {
         boolean inputIsNull = value == null;
-        BinaryStringData result;
+        StringData result;
         if (!inputIsNull) {
             String strVal = getString(value);
             BinaryStringData strData = BinaryStringData.fromString(strVal);
@@ -63,11 +63,24 @@ public abstract class AbstractToStringCastExecutor<IN> implements CastExecutor<I
                 }
             }
         } else {
-            result = BinaryStringData.EMPTY_UTF8;
+            result = getNullOutput();
         }
 
         return result;
     }
 
+    /**
+     * Get string value for input.
+     *
+     * @param value the input value
+     * @return the string result
+     */
     abstract String getString(IN value);
+
+    /**
+     * Get result for null input.
+     *
+     * @return the null input result
+     */
+    abstract StringData getNullOutput();
 }

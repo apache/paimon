@@ -299,6 +299,12 @@ public class CastExecutorTest {
                         CastExecutorProvider.resolve(new CharType(10), new CharType(20)),
                 StringData.fromString("12345678  "),
                 StringData.fromString("12345678            "));
+
+        compareCastResult(
+                (CastExecutor<Object, Object>)
+                        CastExecutorProvider.resolve(new CharType(10), new CharType(20)),
+                null,
+                null);
     }
 
     @Test

@@ -22,17 +22,14 @@ import org.apache.flink.table.types.logical.BinaryType;
 import org.apache.flink.table.types.logical.CharType;
 import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.LogicalTypeRoot;
 import org.apache.flink.table.types.logical.TimestampType;
 import org.apache.flink.table.types.logical.VarBinaryType;
 import org.apache.flink.table.types.logical.VarCharType;
 
 import javax.annotation.Nullable;
 
-import static org.apache.flink.table.types.logical.LogicalTypeRoot.BIGINT;
 import static org.apache.flink.table.types.logical.LogicalTypeRoot.BINARY;
 import static org.apache.flink.table.types.logical.LogicalTypeRoot.CHAR;
-import static org.apache.flink.table.types.logical.LogicalTypeRoot.DATE;
 import static org.apache.flink.table.types.logical.LogicalTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE;
 import static org.apache.flink.table.types.logical.LogicalTypeRoot.VARBINARY;
 import static org.apache.flink.table.types.logical.LogicalTypeRoot.VARCHAR;
@@ -51,159 +48,47 @@ public class CastExecutorProvider {
             LogicalType inputType, LogicalType outputType) {
         switch (inputType.getTypeRoot()) {
             case TINYINT:
-                {
-                    switch (outputType.getTypeRoot()) {
-                        case SMALLINT:
-                            {
-                                return ByteToShortCastExecutor.INSTANCE;
-                            }
-                        case INTEGER:
-                            {
-                                return ByteToIntegerCastExecutor.INSTANCE;
-                            }
-                        case BIGINT:
-                            {
-                                return ByteToLongCastExecutor.INSTANCE;
-                            }
-                        case FLOAT:
-                            {
-                                return ByteToFloatCastExecutor.INSTANCE;
-                            }
-                        case DOUBLE:
-                            {
-                                return ByteToDoubleCastExecutor.INSTANCE;
-                            }
-                        case DECIMAL:
-                            {
-                                DecimalType decimalType = (DecimalType) outputType;
-                                return new ByteToDecimalCastExecutor(
-                                        decimalType.getPrecision(), decimalType.getScale());
-                            }
-                        default:
-                            {
-                                return null;
-                            }
-                    }
-                }
             case SMALLINT:
-                {
-                    switch (outputType.getTypeRoot()) {
-                        case INTEGER:
-                            {
-                                return ShortToIntegerCastExecutor.INSTANCE;
-                            }
-                        case BIGINT:
-                            {
-                                return ShortToLongCastExecutor.INSTANCE;
-                            }
-                        case FLOAT:
-                            {
-                                return ShortToFloatCastExecutor.INSTANCE;
-                            }
-                        case DOUBLE:
-                            {
-                                return ShortToDoubleCastExecutor.INSTANCE;
-                            }
-                        case DECIMAL:
-                            {
-                                DecimalType decimalType = (DecimalType) outputType;
-                                return new ShortToDecimalCastExecutor(
-                                        decimalType.getPrecision(), decimalType.getScale());
-                            }
-                        default:
-                            {
-                                return null;
-                            }
-                    }
-                }
             case INTEGER:
-                {
-                    switch (outputType.getTypeRoot()) {
-                        case BIGINT:
-                            {
-                                return IntegerToLongCastExecutor.INSTANCE;
-                            }
-                        case FLOAT:
-                            {
-                                return IntegerToFloatCastExecutor.INSTANCE;
-                            }
-                        case DOUBLE:
-                            {
-                                return IntegerToDoubleCastExecutor.INSTANCE;
-                            }
-                        case DECIMAL:
-                            {
-                                DecimalType decimalType = (DecimalType) outputType;
-                                return new IntegerToDecimalCastExecutor(
-                                        decimalType.getPrecision(), decimalType.getScale());
-                            }
-                        default:
-                            {
-                                return null;
-                            }
-                    }
-                }
             case BIGINT:
-                {
-                    switch (outputType.getTypeRoot()) {
-                        case FLOAT:
-                            {
-                                return LongToFloatCastExecutor.INSTANCE;
-                            }
-                        case DOUBLE:
-                            {
-                                return LongToDoubleCastExecutor.INSTANCE;
-                            }
-                        case DECIMAL:
-                            {
-                                DecimalType decimalType = (DecimalType) outputType;
-                                return new LongToDecimalCastExecutor(
-                                        decimalType.getPrecision(), decimalType.getScale());
-                            }
-                        default:
-                            {
-                                return null;
-                            }
-                    }
-                }
             case FLOAT:
-                {
-                    switch (outputType.getTypeRoot()) {
-                        case DOUBLE:
-                            {
-                                return FloatToDoubleCastExecutor.INSTANCE;
-                            }
-                        case DECIMAL:
-                            {
-                                DecimalType decimalType = (DecimalType) outputType;
-                                return new FloatToDecimalCastExecutor(
-                                        decimalType.getPrecision(), decimalType.getScale());
-                            }
-                        default:
-                            {
-                                return null;
-                            }
-                    }
-                }
             case DOUBLE:
                 {
-                    if (outputType.getTypeRoot() == LogicalTypeRoot.DECIMAL) {
-                        DecimalType decimalType = (DecimalType) outputType;
-                        return new DoubleToDecimalCastExecutor(
-                                decimalType.getPrecision(), decimalType.getScale());
+                    switch (outputType.getTypeRoot()) {
+                        case TINYINT:
+                        case SMALLINT:
+                        case INTEGER:
+                        case BIGINT:
+                        case FLOAT:
+                        case DOUBLE:
+                            {
+                                return new NumericToNumericCastExecutor(inputType, outputType);
+                            }
+                        case DECIMAL:
+                            {
+                                DecimalType decimalType = (DecimalType) outputType;
+                                return new NumericToDecimalCastExecutor(
+                                        inputType,
+                                        decimalType.getPrecision(),
+                                        decimalType.getScale());
+                            }
+                        default:
+                            {
+                                return null;
+                            }
                     }
-                    return null;
                 }
             case DECIMAL:
                 {
                     switch (outputType.getTypeRoot()) {
+                        case TINYINT:
+                        case SMALLINT:
+                        case INTEGER:
+                        case BIGINT:
                         case FLOAT:
-                            {
-                                return DecimalToFloatCastExecutor.INSTANCE;
-                            }
                         case DOUBLE:
                             {
-                                return DecimalToDoubleCastExecutor.INSTANCE;
+                                return new DecimalToNumericCastExecutor(outputType);
                             }
                         case DECIMAL:
                             {
