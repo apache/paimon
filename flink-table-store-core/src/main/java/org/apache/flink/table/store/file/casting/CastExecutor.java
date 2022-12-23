@@ -20,8 +20,6 @@ package org.apache.flink.table.store.file.casting;
 
 import org.apache.flink.table.api.TableException;
 
-import javax.annotation.Nullable;
-
 /**
  * Interface to model a function that performs the casting of a value from one type to another.
  * Copied from flink.
@@ -36,6 +34,5 @@ public interface CastExecutor<IN, OUT> {
      *
      * @param value Input value.
      */
-    @Nullable
-    OUT cast(@Nullable IN value) throws TableException;
+    OUT cast(IN value) throws TableException;
 }

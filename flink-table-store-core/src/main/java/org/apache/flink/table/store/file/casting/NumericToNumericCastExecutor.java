@@ -21,8 +21,6 @@ package org.apache.flink.table.store.file.casting;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.types.logical.LogicalType;
 
-import javax.annotation.Nullable;
-
 /** Cast numeric to numeric. */
 public class NumericToNumericCastExecutor implements CastExecutor<Number, Number> {
     private final LogicalType inputType;
@@ -33,9 +31,8 @@ public class NumericToNumericCastExecutor implements CastExecutor<Number, Number
         this.outputType = outputType;
     }
 
-    @Nullable
     @Override
-    public Number cast(@Nullable Number value) throws TableException {
+    public Number cast(Number value) throws TableException {
         if (value == null) {
             return null;
         }

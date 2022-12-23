@@ -20,8 +20,6 @@ package org.apache.flink.table.store.file.casting;
 
 import org.apache.flink.table.api.TableException;
 
-import javax.annotation.Nullable;
-
 import java.util.Arrays;
 
 /** Cast binary to binary. */
@@ -32,9 +30,8 @@ public class BinaryToBinaryCastExecutor implements CastExecutor<byte[], byte[]> 
         this.targetLength = targetLength;
     }
 
-    @Nullable
     @Override
-    public byte[] cast(@Nullable byte[] value) throws TableException {
+    public byte[] cast(byte[] value) throws TableException {
         return value == null
                 ? null
                 : ((value.length == targetLength) ? value : Arrays.copyOf(value, targetLength));

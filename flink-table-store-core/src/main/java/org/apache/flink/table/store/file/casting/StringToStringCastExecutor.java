@@ -18,22 +18,45 @@
 
 package org.apache.flink.table.store.file.casting;
 
+import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.data.binary.BinaryStringData;
+import org.apache.flink.table.data.binary.BinaryStringDataUtil;
 
 /** Cast string to string. */
-public class StringToStringCastExecutor extends AbstractToStringCastExecutor<StringData> {
+public class StringToStringCastExecutor implements CastExecutor<StringData, StringData> {
+    protected final boolean targetCharType;
+    protected final int targetLength;
 
     public StringToStringCastExecutor(boolean targetCharType, int targetLength) {
-        super(targetCharType, targetLength);
+        this.targetCharType = targetCharType;
+        this.targetLength = targetLength;
     }
 
     @Override
-    String getString(StringData value) {
-        return value.toString();
-    }
+    public StringData cast(StringData value) throws TableException {
+        if (value == null) {
+            return null;
+        }
+        StringData result;
+        String strVal = value.toString();
+        BinaryStringData strData = BinaryStringData.fromString(strVal);
+        if (strData.numChars() > targetLength) {
+            result = BinaryStringData.fromString(strVal.substring(0, targetLength));
+        } else {
+            if (strData.numChars() < targetLength) {
+                if (targetCharType) {
+                    int padLength = targetLength - strData.numChars();
+                    BinaryStringData padString = BinaryStringData.blankString(padLength);
+                    result = BinaryStringDataUtil.concat(strData, padString);
+                } else {
+                    result = strData;
+                }
+            } else {
+                result = strData;
+            }
+        }
 
-    @Override
-    StringData getNullOutput() {
-        return null;
+        return result;
     }
 }

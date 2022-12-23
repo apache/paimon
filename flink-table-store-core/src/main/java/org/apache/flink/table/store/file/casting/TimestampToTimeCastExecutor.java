@@ -22,17 +22,14 @@ import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.store.utils.DateTimeUtils;
 
-import javax.annotation.Nullable;
-
 /** Cast timestamp to time. */
 public class TimestampToTimeCastExecutor implements CastExecutor<TimestampData, Integer> {
     public static final TimestampToTimeCastExecutor INSTANCE = new TimestampToTimeCastExecutor();
 
     private TimestampToTimeCastExecutor() {}
 
-    @Nullable
     @Override
-    public Integer cast(@Nullable TimestampData value) throws TableException {
+    public Integer cast(TimestampData value) throws TableException {
         return value == null ? null : (int) (value.getMillisecond() % DateTimeUtils.MILLIS_PER_DAY);
     }
 }

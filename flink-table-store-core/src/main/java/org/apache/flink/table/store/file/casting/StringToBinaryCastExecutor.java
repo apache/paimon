@@ -21,8 +21,6 @@ package org.apache.flink.table.store.file.casting;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.data.StringData;
 
-import javax.annotation.Nullable;
-
 import java.util.Arrays;
 
 /** Cast string to binary. */
@@ -33,9 +31,8 @@ public class StringToBinaryCastExecutor implements CastExecutor<StringData, byte
         this.targetLength = targetLength;
     }
 
-    @Nullable
     @Override
-    public byte[] cast(@Nullable StringData value) throws TableException {
+    public byte[] cast(StringData value) throws TableException {
         if (value == null) {
             return null;
         }

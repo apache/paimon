@@ -23,8 +23,6 @@ import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.DecimalDataUtils;
 import org.apache.flink.table.types.logical.LogicalType;
 
-import javax.annotation.Nullable;
-
 /** Cast numeric to decimal. */
 public class NumericToDecimalCastExecutor implements CastExecutor<Number, DecimalData> {
     private final LogicalType inputType;
@@ -37,9 +35,8 @@ public class NumericToDecimalCastExecutor implements CastExecutor<Number, Decima
         this.scale = scale;
     }
 
-    @Nullable
     @Override
-    public DecimalData cast(@Nullable Number value) throws TableException {
+    public DecimalData cast(Number value) throws TableException {
         if (value == null) {
             return null;
         }

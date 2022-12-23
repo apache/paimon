@@ -22,8 +22,6 @@ import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.store.utils.DateTimeUtils;
 
-import javax.annotation.Nullable;
-
 /** Cast timestamp to timestamp. */
 public class TimestampToTimestampCastExecutor
         implements CastExecutor<TimestampData, TimestampData> {
@@ -33,9 +31,8 @@ public class TimestampToTimestampCastExecutor
         this.precision = precision;
     }
 
-    @Nullable
     @Override
-    public TimestampData cast(@Nullable TimestampData value) throws TableException {
+    public TimestampData cast(TimestampData value) throws TableException {
         return value == null ? null : DateTimeUtils.truncate(value, precision);
     }
 }

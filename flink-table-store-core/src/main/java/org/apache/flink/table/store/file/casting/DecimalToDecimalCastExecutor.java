@@ -22,8 +22,6 @@ import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.DecimalDataUtils;
 
-import javax.annotation.Nullable;
-
 /** Cast decimal to decimal. */
 public class DecimalToDecimalCastExecutor implements CastExecutor<DecimalData, DecimalData> {
     private final int precision;
@@ -34,9 +32,8 @@ public class DecimalToDecimalCastExecutor implements CastExecutor<DecimalData, D
         this.scale = scale;
     }
 
-    @Nullable
     @Override
-    public DecimalData cast(@Nullable DecimalData value) throws TableException {
+    public DecimalData cast(DecimalData value) throws TableException {
         return value == null ? null : DecimalDataUtils.castToDecimal(value, precision, scale);
     }
 }
