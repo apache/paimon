@@ -44,7 +44,7 @@ By specifying the `scan.mode` table property, users can specify where and how Ta
 <tr>
 <td>default</td>
 <td colspan="2">
-The default scan mode. Determines actual scan mode according to other table properties. If "scan.timestamp-millis" is set the actual scan mode will be "from-timestamp". Otherwise the actual scan mode will be "latest-full".
+The default scan mode. Determines actual scan mode according to other table properties. If "scan.timestamp-millis" is set the actual scan mode will be "from-timestamp", and if "scan.snapshot-id" is set the actual startup mode will be "from-snapshot". Otherwise the actual scan mode will be "latest-full".
 </td>
 </tr>
 <tr>
@@ -72,8 +72,13 @@ Produces the snapshot after the latest compaction on the table upon first startu
 </tr>
 <tr>
 <td>from-timestamp</td>
-<td>Unsupported</td>
+<td>Produces a snapshot earlier than or equals to the timestamp specified by "scan.timestamp-millis".</td>
 <td>Continuously reads changes starting from timestamp specified by "scan.timestamp-millis", without producing a snapshot at the beginning.</td>
+</tr>
+<tr>
+<td>from-snapshot</td>
+<td>Produces a snapshot specified by "scan.snapshot-id".</td>
+<td>Continuously reads changes starting from a snapshot specified by "scan.snapshot-id", without producing a snapshot at the beginning.</td>
 </tr>
 </tbody>
 </table>

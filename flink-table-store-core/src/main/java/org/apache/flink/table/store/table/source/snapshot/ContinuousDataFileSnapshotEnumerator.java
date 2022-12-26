@@ -131,7 +131,7 @@ public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator 
 
     private static StartingScanner createStartingScanner(DataTable table) {
         CoreOptions.StartupMode startupMode = table.options().startupMode();
-        Long startupMillis = table.options().logScanTimestampMills();
+        Long startupMillis = table.options().scanTimestampMills();
         if (startupMode == CoreOptions.StartupMode.LATEST_FULL) {
             return new FullStartingScanner();
         } else if (startupMode == CoreOptions.StartupMode.LATEST) {
@@ -147,6 +147,16 @@ public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator 
                             CoreOptions.StartupMode.FROM_TIMESTAMP,
                             CoreOptions.SCAN_MODE.key()));
             return new ContinuousFromTimestampStartingScanner(startupMillis);
+        } else if (startupMode == CoreOptions.StartupMode.FROM_SNAPSHOT) {
+            Long snapshotId = table.options().scanSnapshotId();
+            Preconditions.checkNotNull(
+                    snapshotId,
+                    String.format(
+                            "%s can not be null when you use %s for %s",
+                            CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                            CoreOptions.StartupMode.FROM_SNAPSHOT,
+                            CoreOptions.SCAN_MODE.key()));
+            return new ContinuousFromSnapshotStartingScanner(snapshotId);
         } else {
             throw new UnsupportedOperationException("Unknown startup mode " + startupMode.name());
         }
