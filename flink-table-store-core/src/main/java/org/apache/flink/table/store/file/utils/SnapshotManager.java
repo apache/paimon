@@ -129,6 +129,23 @@ public class SnapshotManager {
         return earliest - 1;
     }
 
+    /** Returns a snapshot earlier than or equals to the timestamp mills. */
+    public @Nullable Long earlierOrEqualTimeMills(long timestampMills) {
+        Long earliest = earliestSnapshotId();
+        Long latest = latestSnapshotId();
+        if (earliest == null || latest == null) {
+            return null;
+        }
+
+        for (long i = latest; i >= earliest; i--) {
+            long commitTime = snapshot(i).timeMillis();
+            if (commitTime <= timestampMills) {
+                return i;
+            }
+        }
+        return null;
+    }
+
     public long snapshotCount() throws IOException {
         return listVersionedFiles(snapshotDirectory(), SNAPSHOT_PREFIX).count();
     }
