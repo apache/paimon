@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -30,8 +29,6 @@ public interface DataTable extends Table {
     DataTableScan newScan();
 
     CoreOptions options();
-
-    Path location();
 
     SnapshotManager snapshotManager();
 }

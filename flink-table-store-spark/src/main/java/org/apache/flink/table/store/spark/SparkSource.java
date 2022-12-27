@@ -70,7 +70,9 @@ public class SparkSource implements DataSourceRegister, SessionConfigSupport {
                 Configuration.fromMap(SparkCaseSensitiveConverter.convert(options));
         FileSystems.initialize(CoreOptions.path(options), configuration);
         return new SparkTable(
-                FileStoreTableFactory.create(Configuration.fromMap(options)), Lock.emptyFactory());
+                FileStoreTableFactory.create(Configuration.fromMap(options)),
+                Lock.emptyFactory(),
+                configuration);
     }
 
     @Override

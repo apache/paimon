@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.spark;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.table.SupportsWrite;
 
@@ -34,15 +35,18 @@ public class SparkWriteBuilder implements WriteBuilder {
     private final SupportsWrite table;
     private final String queryId;
     private final Lock.Factory lockFactory;
+    private final Configuration conf;
 
-    public SparkWriteBuilder(SupportsWrite table, String queryId, Lock.Factory lockFactory) {
+    public SparkWriteBuilder(
+            SupportsWrite table, String queryId, Lock.Factory lockFactory, Configuration conf) {
         this.table = table;
         this.queryId = queryId;
         this.lockFactory = lockFactory;
+        this.conf = conf;
     }
 
     @Override
     public Write build() {
-        return new SparkWrite(table, queryId, lockFactory);
+        return new SparkWrite(table, queryId, lockFactory, conf);
     }
 }

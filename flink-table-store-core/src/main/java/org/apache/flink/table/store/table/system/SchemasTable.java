@@ -86,6 +86,11 @@ public class SchemasTable implements Table {
     }
 
     @Override
+    public Path location() {
+        return location;
+    }
+
+    @Override
     public TableScan newScan() {
         return new SchemasScan();
     }
