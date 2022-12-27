@@ -18,7 +18,9 @@
 
 package org.apache.flink.table.store.spark;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.file.operation.Lock;
+import org.apache.flink.table.store.filesystem.FileSystems;
 import org.apache.flink.table.store.table.SupportsWrite;
 import org.apache.flink.table.store.table.sink.BucketComputer;
 import org.apache.flink.table.store.table.sink.FileCommittable;
@@ -33,6 +35,7 @@ import org.apache.spark.sql.Row;
 import org.apache.spark.sql.connector.write.V1Write;
 import org.apache.spark.sql.sources.InsertableRelation;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -43,11 +46,14 @@ public class SparkWrite implements V1Write {
     private final SupportsWrite table;
     private final String queryId;
     private final Lock.Factory lockFactory;
+    private final Configuration conf;
 
-    public SparkWrite(SupportsWrite table, String queryId, Lock.Factory lockFactory) {
+    public SparkWrite(
+            SupportsWrite table, String queryId, Lock.Factory lockFactory, Configuration conf) {
         this.table = table;
         this.queryId = queryId;
         this.lockFactory = lockFactory;
+        this.conf = conf;
     }
 
     @Override
@@ -60,8 +66,8 @@ public class SparkWrite implements V1Write {
             long identifier = 0;
             List<SerializableCommittable> committables =
                     data.toJavaRDD()
-                            .groupBy(new ComputeBucket(table))
-                            .mapValues(new WriteRecords(table, queryId, identifier))
+                            .groupBy(new ComputeBucket(table, conf))
+                            .mapValues(new WriteRecords(table, queryId, identifier, conf))
                             .values()
                             .reduce(new ListConcat<>());
             try (TableCommit tableCommit =
@@ -81,12 +87,14 @@ public class SparkWrite implements V1Write {
 
         private final SupportsWrite table;
         private final RowType type;
+        private final Configuration conf;
 
         private transient BucketComputer lazyComputer;
 
-        private ComputeBucket(SupportsWrite table) {
+        private ComputeBucket(SupportsWrite table, Configuration conf) {
             this.table = table;
             this.type = table.rowType();
+            this.conf = conf;
         }
 
         private BucketComputer computer() {
@@ -100,6 +108,13 @@ public class SparkWrite implements V1Write {
         public Integer call(Row row) {
             return computer().bucket(new SparkRowData(type, row));
         }
+
+        private void readObject(java.io.ObjectInputStream in)
+                throws IOException, ClassNotFoundException {
+            in.defaultReadObject();
+            // TODO move file system initialization into common modules
+            FileSystems.initialize(table.location(), conf);
+        }
     }
 
     private static class WriteRecords
@@ -109,12 +124,15 @@ public class SparkWrite implements V1Write {
         private final RowType type;
         private final String queryId;
         private final long commitIdentifier;
+        private final Configuration conf;
 
-        private WriteRecords(SupportsWrite table, String queryId, long commitIdentifier) {
+        private WriteRecords(
+                SupportsWrite table, String queryId, long commitIdentifier, Configuration conf) {
             this.table = table;
             this.type = table.rowType();
             this.queryId = queryId;
             this.commitIdentifier = commitIdentifier;
+            this.conf = conf;
         }
 
         @Override
@@ -128,6 +146,13 @@ public class SparkWrite implements V1Write {
                         .map(SerializableCommittable::wrap)
                         .collect(Collectors.toList());
             }
+        }
+
+        private void readObject(java.io.ObjectInputStream in)
+                throws IOException, ClassNotFoundException {
+            in.defaultReadObject();
+            // TODO move file system initialization into common modules
+            FileSystems.initialize(table.location(), conf);
         }
     }
 

@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.types.logical.RowType;
@@ -31,6 +32,8 @@ public interface Table extends Serializable {
     String name();
 
     RowType rowType();
+
+    Path location();
 
     TableScan newScan();
 

@@ -48,9 +48,9 @@ You can find the shaded jars under
 [Prepare OSS jar](https://nightlies.apache.org/flink/flink-docs-master/docs/deployment/filesystems/oss/#shaded-hadoop-oss-file-system), then configure `flink-conf.yaml` like
 
 ```yaml
-fs.oss.endpoint: oss-cn-hangzhou.aliyun.cs.com
-fs.oss.accessKey: xxx
-fs.oss.accessSecret: yyy
+fs.oss.endpoint: oss-cn-hangzhou.aliyuncs.com
+fs.oss.accessKeyId: xxx
+fs.oss.accessKeySecret: yyy
 ```
 
 {{< /tab >}}
@@ -63,9 +63,9 @@ Place `flink-table-store-oss-{{< version >}}.jar` together with `flink-table-sto
 spark-sql \ 
   --conf spark.sql.catalog.tablestore=org.apache.flink.table.store.spark.SparkCatalog \
   --conf spark.sql.catalog.tablestore.warehouse=oss://<bucket-name>/ \
-  --conf spark.sql.catalog.tablestore.fs.oss.endpoint=oss-cn-hangzhou.aliyun.cs.com \
-  --conf spark.sql.catalog.tablestore.fs.oss.accessKey=xxx \
-  --conf spark.sql.catalog.tablestore.fs.oss.accessSecret=yyy
+  --conf spark.sql.catalog.tablestore.fs.oss.endpoint=oss-cn-hangzhou.aliyuncs.com \
+  --conf spark.sql.catalog.tablestore.fs.oss.accessKeyId=xxx \
+  --conf spark.sql.catalog.tablestore.fs.oss.accessKeySecret=yyy
 ```
 
 {{< /tab >}}
@@ -75,9 +75,9 @@ spark-sql \
 Place `flink-table-store-oss-{{< version >}}.jar` together with `flink-table-store-hive-connector-{{< version >}}.jar` under Hive's auxlib directory, and start like
 
 ```sql
-SET tablestore.fs.oss.endpoint=oss-cn-hangzhou.aliyun.cs.com;
-SET tablestore.fs.oss.accessKey=xxx;
-SET tablestore.fs.oss.accessSecret=yyy;
+SET tablestore.fs.oss.endpoint=oss-cn-hangzhou.aliyuncs.com;
+SET tablestore.fs.oss.accessKeyId=xxx;
+SET tablestore.fs.oss.accessKeySecret=yyy;
 
 CREATE EXTERNAL TABLE external_test_table
 STORED BY 'org.apache.flink.table.store.hive.TableStoreHiveStorageHandler'
