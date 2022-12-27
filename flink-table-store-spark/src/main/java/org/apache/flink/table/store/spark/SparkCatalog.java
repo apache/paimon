@@ -69,14 +69,14 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
 
     private String name = null;
     private Catalog catalog = null;
+    private Configuration conf = null;
 
     @Override
     public void initialize(String name, CaseInsensitiveStringMap options) {
         this.name = name;
-        Configuration configuration =
-                Configuration.fromMap(SparkCaseSensitiveConverter.convert(options));
-        FileSystems.initialize(CatalogFactory.warehouse(configuration), configuration);
-        this.catalog = CatalogFactory.createCatalog(configuration);
+        conf = Configuration.fromMap(SparkCaseSensitiveConverter.convert(options));
+        FileSystems.initialize(CatalogFactory.warehouse(conf), conf);
+        this.catalog = CatalogFactory.createCatalog(conf);
     }
 
     @Override
@@ -204,7 +204,9 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         try {
             ObjectPath path = objectPath(ident);
             return new SparkTable(
-                    catalog.getTable(path), Lock.factory(catalog.lockFactory().orElse(null), path));
+                    catalog.getTable(path),
+                    Lock.factory(catalog.lockFactory().orElse(null), path),
+                    conf);
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
         }
