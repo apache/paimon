@@ -360,7 +360,7 @@ under the License.
             <plugin>
                 <groupId>org.apache.rat</groupId>
                 <artifactId>apache-rat-plugin</artifactId>
-                <version>0.13</version>
+                <version>0.15</version>
                 <inherited>false</inherited>
                 <executions>
                     <execution>
@@ -679,7 +679,7 @@ under the License.
             <plugin>
                 <groupId>org.commonjava.maven.plugins</groupId>
                 <artifactId>directory-maven-plugin</artifactId>
-                <version>0.1</version>
+                <version>1.0</version>
                 <executions>
                     <execution>
                         <id>directories</id>
