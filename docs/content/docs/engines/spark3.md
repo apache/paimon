@@ -62,15 +62,9 @@ If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or 
 
 {{< /hint >}}
 
-**Step 1: Prepare Test Data**
+**Step 1: Specify Table Store Jar File**
 
-Table Store currently only supports reading tables through Spark. To create a Table Store table with records, please follow our [Flink quick start guide]({{< ref "docs/engines/flink#quick-start" >}}).
-
-After the guide, all table files should be stored under the path `/tmp/table_store`, or the warehouse path you've specified.
-
-**Step 2: Specify Table Store Jar File**
-
-You can append path to table store jar file to the `--jars` argument when starting `spark-sql`.
+Append path to table store jar file to the `--jars` argument when starting `spark-sql`.
 
 ```bash
 spark-sql ... --jars /path/to/flink-table-store-spark-{{< version >}}.jar
@@ -78,7 +72,7 @@ spark-sql ... --jars /path/to/flink-table-store-spark-{{< version >}}.jar
 
 Alternatively, you can copy `flink-table-store-spark-{{< version >}}.jar` under `spark/jars` in your Spark installation directory.
 
-**Step 3: Specify Table Store Catalog**
+**Step 2: Specify Table Store Catalog**
 
 When starting `spark-sql`, use the following command to register Table Store’s Spark catalog with the name `tablestore`. Table files of the warehouse is stored under `/tmp/table_store`.
 
@@ -88,13 +82,50 @@ spark-sql ... \
     --conf spark.sql.catalog.tablestore.warehouse=file:/tmp/table_store
 ```
 
+After `spark-sql` command line has started, run the following SQL to create and switch to database `tablestore.default`.
+
+```sql
+CREATE DATABASE tablestore.default;
+USE tablestore.default;
+```
+
+**Step 3: Create a table and Write Some Records**
+
+```sql
+create table my_table (
+    k int,
+    v string
+) tblproperties (
+    'primary-key' = 'k'
+);
+
+INSERT INTO my_table VALUES (1, 'Hi'), (2, 'Hello');
+```
+
 **Step 4: Query Table with SQL**
 
 ```sql
-SELECT * FROM tablestore.default.word_count;
+SELECT * FROM my_table;
+/*
+1	Hi
+2	Hello
+*/
 ```
 
-**Step 5: Query Table with Scala API**
+**Step 5: Update the Records**
+
+```sql
+INSERT INTO my_table VALUES (1, 'Hi Again'), (3, 'Test');
+
+SELECT * FROM my_table;
+/*
+1	Hi Again
+2	Hello
+3	Test
+*/
+```
+
+**Step 6: Query Table with Scala API**
 
 If you don't want to use Table Store catalog, you can also run `spark-shell` and query the table with Scala API.
 
@@ -103,9 +134,9 @@ spark-shell ... --jars /path/to/flink-table-store-spark-{{< version >}}.jar
 ```
 
 ```scala
-val dataset = spark.read.format("tablestore").load("file:/tmp/table_store/default.db/word_count")
-dataset.createOrReplaceTempView("word_count")
-spark.sql("SELECT * FROM word_count").show()
+val dataset = spark.read.format("tablestore").load("file:/tmp/table_store/default.db/my_table")
+dataset.createOrReplaceTempView("my_table")
+spark.sql("SELECT * FROM my_table").show()
 ```
 
 ## Spark Type Conversion

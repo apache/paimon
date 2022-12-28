@@ -40,6 +40,16 @@ INSERT INTO MyTable SELECT ...
 
 {{< /tab >}}
 
+{{< tab "Spark3" >}}
+
+Use `INSERT INTO` to apply records and changes to tables.
+
+```sql
+INSERT INTO MyTable SELECT ...
+```
+
+{{< /tab >}}
+
 {{< /tabs >}}
 
 ## Overwriting the Whole Table
