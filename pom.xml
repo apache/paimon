@@ -260,6 +260,13 @@ under the License.
                 <version>${flink.version}</version>
                 <scope>test</scope>
             </dependency>
+
+            <dependency>
+                <!-- pin transitive dependency of org.apache.hadoop:hadoop-common:2.8.5 -->
+                <groupId>net.minidev</groupId>
+                <artifactId>json-smart</artifactId>
+                <version>2.3</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
