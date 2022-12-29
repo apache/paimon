@@ -97,6 +97,50 @@ ALTER TABLE my_table ADD COLUMNS (
 
 {{< /tabs >}}
 
+## Renaming Column Name
+The following SQL renames column `c0` in table `my_table` to `c1`.
+
+{{< tabs "rename-column-name-example" >}}
+
+{{< tab "Spark3" >}}
+
+```sql
+ALTER TABLE my_table RENAME COLUMN c0 TO c1;
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+## Dropping Columns
+The syntax is:
+
+{{< tabs "drop-columns-syntax" >}}
+
+{{< tab "Spark3" >}}
+
+```sql
+ALTER TABLE table_identifier DROP { COLUMN | COLUMNS } [(] col_name [, ... ] [)]
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+The following SQL drops tow columns `c1` and `c2` from table `my_table`.
+
+{{< tabs "drop-columns-example" >}}
+
+{{< tab "Spark3" >}}
+
+```sql
+ALTER TABLE my_table DROP COLUMNS (c1, c2);
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
 ## Changing Column Nullability
 
 The following SQL sets column `coupon_info` to be nullable.
