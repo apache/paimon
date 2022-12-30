@@ -196,6 +196,7 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
     }
 
     private Optional<Snapshot> findSnapshot(long identifierToCheck) {
+        // TODO We need a mechanism to do timeout recovery in case of snapshot expiration.
         SnapshotManager snapshotManager = table.snapshotManager();
         Long latestId = snapshotManager.latestSnapshotId();
         if (latestId == null) {
@@ -205,20 +206,6 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
         Long earliestId = snapshotManager.earliestSnapshotId();
         if (earliestId == null) {
             return Optional.empty();
-        }
-
-        if (earliestId > identifierToCheck) {
-            throw new RuntimeException(
-                    String.format(
-                            "Can't find snapshot with identifier %d from user %s. "
-                                    + "Earliest snapshot from all users has identifier %d. "
-                                    + "This is rare but it might be that snapshots are expiring too fast.\n"
-                                    + "If this exception happens continuously, please consider increasing %s or %s.",
-                            identifierToCheck,
-                            commitUser,
-                            earliestId,
-                            CoreOptions.SNAPSHOT_TIME_RETAINED.key(),
-                            CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key()));
         }
 
         // We must find the snapshot whose identifier is exactly `identifierToCheck`.
