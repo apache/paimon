@@ -196,7 +196,7 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
     }
 
     private Optional<Snapshot> findSnapshot(long identifierToCheck) {
-        // TODO We need a mechanism to avoid timeout recovery in case of snapshot expiration.
+        // TODO We need a mechanism to do timeout recovery in case of snapshot expiration.
         SnapshotManager snapshotManager = table.snapshotManager();
         Long latestId = snapshotManager.latestSnapshotId();
         if (latestId == null) {
