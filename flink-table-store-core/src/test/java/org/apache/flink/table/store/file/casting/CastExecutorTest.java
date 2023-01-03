@@ -43,124 +43,79 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link CastExecutor}. */
 public class CastExecutorTest {
+
     @Test
     public void testNumericToNumeric() {
         // byte to other numeric
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new TinyIntType(false), new SmallIntType(false)),
+                CastExecutors.resolve(new TinyIntType(false), new SmallIntType(false)),
                 (byte) 1,
                 (short) 1);
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new TinyIntType(false), new IntType(false)),
-                (byte) 1,
-                1);
+                CastExecutors.resolve(new TinyIntType(false), new IntType(false)), (byte) 1, 1);
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new TinyIntType(false), new BigIntType(false)),
-                (byte) 1,
-                1L);
+                CastExecutors.resolve(new TinyIntType(false), new BigIntType(false)), (byte) 1, 1L);
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new TinyIntType(false), new FloatType(false)),
-                (byte) 1,
-                1F);
+                CastExecutors.resolve(new TinyIntType(false), new FloatType(false)), (byte) 1, 1F);
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new TinyIntType(false), new DoubleType(false)),
-                (byte) 1,
-                1D);
+                CastExecutors.resolve(new TinyIntType(false), new DoubleType(false)), (byte) 1, 1D);
 
         // short to other numeric
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new SmallIntType(false), new IntType(false)),
-                (short) 1,
-                1);
+                CastExecutors.resolve(new SmallIntType(false), new IntType(false)), (short) 1, 1);
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new SmallIntType(false), new BigIntType(false)),
+                CastExecutors.resolve(new SmallIntType(false), new BigIntType(false)),
                 (short) 1,
                 1L);
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new SmallIntType(false), new FloatType(false)),
+                CastExecutors.resolve(new SmallIntType(false), new FloatType(false)),
                 (short) 1,
                 1F);
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new SmallIntType(false), new DoubleType(false)),
+                CastExecutors.resolve(new SmallIntType(false), new DoubleType(false)),
                 (short) 1,
                 1D);
 
         // int to other numeric
-        compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new IntType(false), new BigIntType(false)),
-                1,
-                1L);
-        compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new IntType(false), new FloatType(false)),
-                1,
-                1F);
-        compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new IntType(false), new DoubleType(false)),
-                1,
-                1D);
+        compareCastResult(CastExecutors.resolve(new IntType(false), new BigIntType(false)), 1, 1L);
+        compareCastResult(CastExecutors.resolve(new IntType(false), new FloatType(false)), 1, 1F);
+        compareCastResult(CastExecutors.resolve(new IntType(false), new DoubleType(false)), 1, 1D);
 
         // bigint to other numeric
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new BigIntType(false), new FloatType(false)),
-                1L,
-                1F);
+                CastExecutors.resolve(new BigIntType(false), new FloatType(false)), 1L, 1F);
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new BigIntType(false), new DoubleType(false)),
-                1L,
-                1D);
+                CastExecutors.resolve(new BigIntType(false), new DoubleType(false)), 1L, 1D);
 
         // float to double
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new FloatType(false), new DoubleType(false)),
-                1F,
-                1D);
+                CastExecutors.resolve(new FloatType(false), new DoubleType(false)), 1F, 1D);
     }
 
     @Test
     public void testNumericToDecimal() {
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new TinyIntType(false), new DecimalType(10, 2)),
+                CastExecutors.resolve(new TinyIntType(false), new DecimalType(10, 2)),
                 (byte) 1,
                 DecimalDataUtils.castFrom(1, 10, 2));
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new SmallIntType(false), new DecimalType(10, 2)),
+                CastExecutors.resolve(new SmallIntType(false), new DecimalType(10, 2)),
                 (short) 1,
                 DecimalDataUtils.castFrom(1, 10, 2));
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new IntType(false), new DecimalType(10, 2)),
+                CastExecutors.resolve(new IntType(false), new DecimalType(10, 2)),
                 1,
                 DecimalDataUtils.castFrom(1, 10, 2));
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new BigIntType(false), new DecimalType(10, 2)),
+                CastExecutors.resolve(new BigIntType(false), new DecimalType(10, 2)),
                 1L,
                 DecimalDataUtils.castFrom(1, 10, 2));
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new FloatType(false), new DecimalType(10, 2)),
+                CastExecutors.resolve(new FloatType(false), new DecimalType(10, 2)),
                 1.23456F,
                 DecimalDataUtils.castFrom(1.23456D, 10, 2));
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new DoubleType(false), new DecimalType(10, 2)),
+                CastExecutors.resolve(new DoubleType(false), new DecimalType(10, 2)),
                 1.23456D,
                 DecimalDataUtils.castFrom(1.23456D, 10, 2));
     }
@@ -168,13 +123,11 @@ public class CastExecutorTest {
     @Test
     public void testDecimalToDecimal() {
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new DecimalType(10, 4), new DecimalType(10, 2)),
+                CastExecutors.resolve(new DecimalType(10, 4), new DecimalType(10, 2)),
                 DecimalDataUtils.castFrom(1.23456D, 10, 4),
                 DecimalDataUtils.castFrom(1.23456D, 10, 2));
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new DecimalType(10, 2), new DecimalType(10, 4)),
+                CastExecutors.resolve(new DecimalType(10, 2), new DecimalType(10, 4)),
                 DecimalDataUtils.castFrom(1.23456D, 10, 2),
                 DecimalDataUtils.castFrom(1.2300D, 10, 4));
     }
@@ -182,13 +135,11 @@ public class CastExecutorTest {
     @Test
     public void testDecimalToNumeric() {
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new DecimalType(10, 4), new FloatType(false)),
+                CastExecutors.resolve(new DecimalType(10, 4), new FloatType(false)),
                 DecimalDataUtils.castFrom(1.23456D, 10, 4),
                 1.2346F);
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new DecimalType(10, 2), new DoubleType(false)),
+                CastExecutors.resolve(new DecimalType(10, 2), new DoubleType(false)),
                 DecimalDataUtils.castFrom(1.23456D, 10, 2),
                 1.23D);
     }
@@ -197,57 +148,49 @@ public class CastExecutorTest {
     public void testStringToString() {
         // varchar(10) to varchar(5)
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new VarCharType(10), new VarCharType(5)),
+                CastExecutors.resolve(new VarCharType(10), new VarCharType(5)),
                 StringData.fromString("1234567890"),
                 StringData.fromString("12345"));
 
         // varchar(10) to varchar(20)
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new VarCharType(10), new VarCharType(20)),
+                CastExecutors.resolve(new VarCharType(10), new VarCharType(20)),
                 StringData.fromString("1234567890"),
                 StringData.fromString("1234567890"));
 
         // varchar(10) to char(5)
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new VarCharType(10), new CharType(5)),
+                CastExecutors.resolve(new VarCharType(10), new CharType(5)),
                 StringData.fromString("1234567890"),
                 StringData.fromString("12345"));
 
         // varchar(10) to char(20)
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new VarCharType(10), new CharType(20)),
+                CastExecutors.resolve(new VarCharType(10), new CharType(20)),
                 StringData.fromString("1234567890"),
                 StringData.fromString("1234567890          "));
 
         // char(10) to varchar(5)
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new CharType(10), new VarCharType(5)),
+                CastExecutors.resolve(new CharType(10), new VarCharType(5)),
                 StringData.fromString("1234567890"),
                 StringData.fromString("12345"));
 
         // char(10) to varchar(20)
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new CharType(10), new VarCharType(20)),
+                CastExecutors.resolve(new CharType(10), new VarCharType(20)),
                 StringData.fromString("12345678  "),
                 StringData.fromString("12345678  "));
 
         // char(10) to char(5)
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new CharType(10), new CharType(5)),
+                CastExecutors.resolve(new CharType(10), new CharType(5)),
                 StringData.fromString("12345678  "),
                 StringData.fromString("12345"));
 
         // char(10) to char(20)
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new CharType(10), new CharType(20)),
+                CastExecutors.resolve(new CharType(10), new CharType(20)),
                 StringData.fromString("12345678  "),
                 StringData.fromString("12345678            "));
     }
@@ -256,15 +199,13 @@ public class CastExecutorTest {
     public void testStringToBinary() {
         // string(10) to binary(5)
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new VarCharType(10), new VarBinaryType(5)),
+                CastExecutors.resolve(new VarCharType(10), new VarBinaryType(5)),
                 StringData.fromString("12345678"),
                 "12345".getBytes());
 
         // string(10) to binary(20)
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new VarCharType(10), new VarBinaryType(20)),
+                CastExecutors.resolve(new VarCharType(10), new VarBinaryType(20)),
                 StringData.fromString("12345678"),
                 "12345678".getBytes());
     }
@@ -273,15 +214,13 @@ public class CastExecutorTest {
     public void testBinaryToBinary() {
         // binary(10) to binary(5)
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new BinaryType(10), new BinaryType(5)),
+                CastExecutors.resolve(new BinaryType(10), new BinaryType(5)),
                 "1234567890".getBytes(),
                 "12345".getBytes());
 
         // binary(10) to binary(20)
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new BinaryType(10), new BinaryType(20)),
+                CastExecutors.resolve(new BinaryType(10), new BinaryType(20)),
                 "12345678".getBytes(),
                 new byte[] {49, 50, 51, 52, 53, 54, 55, 56, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
     }
@@ -293,27 +232,25 @@ public class CastExecutorTest {
 
         // timestamp(5) to timestamp(2)
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new TimestampType(5), new TimestampType(2)),
+                CastExecutors.resolve(new TimestampType(5), new TimestampType(2)),
                 timestampData,
                 DateTimeUtils.truncate(TimestampData.fromEpochMillis(mills), 2));
 
         // timestamp to date
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new TimestampType(5), new DateType()),
+                CastExecutors.resolve(new TimestampType(5), new DateType()),
                 TimestampData.fromEpochMillis(mills),
                 (int) (mills / DateTimeUtils.MILLIS_PER_DAY));
 
         // timestamp to time
         compareCastResult(
-                (CastExecutor<Object, Object>)
-                        CastExecutors.resolve(new TimestampType(5), new TimeType(2)),
+                CastExecutors.resolve(new TimestampType(5), new TimeType(2)),
                 TimestampData.fromEpochMillis(mills),
                 (int) (mills % DateTimeUtils.MILLIS_PER_DAY));
     }
 
-    private void compareCastResult(CastExecutor<Object, Object> cast, Object input, Object output) {
-        assertThat(cast.cast(input)).isEqualTo(output);
+    @SuppressWarnings("rawtypes")
+    private void compareCastResult(CastExecutor<?, ?> cast, Object input, Object output) {
+        assertThat(((CastExecutor) cast).cast(input)).isEqualTo(output);
     }
 }

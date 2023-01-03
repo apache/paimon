@@ -45,6 +45,7 @@ import static org.apache.flink.table.types.logical.LogicalTypeRoot.VARCHAR;
 
 /** Cast executors for input type and output type. */
 public class CastExecutors {
+
     /**
      * Resolve a {@link CastExecutor} for the provided input type and target type. Returns null if
      * no rule can be resolved.
@@ -65,209 +66,162 @@ public class CastExecutors {
                 {
                     switch (outputType.getTypeRoot()) {
                         case TINYINT:
-                            {
-                                return value -> ((Number) value).byteValue();
-                            }
+                            return value -> ((Number) value).byteValue();
                         case SMALLINT:
-                            {
-                                return value -> ((Number) value).shortValue();
-                            }
+                            return value -> ((Number) value).shortValue();
                         case INTEGER:
-                            {
-                                return value -> ((Number) value).intValue();
-                            }
+                            return value -> ((Number) value).intValue();
                         case BIGINT:
-                            {
-                                return value -> ((Number) value).longValue();
-                            }
+                            return value -> ((Number) value).longValue();
                         case FLOAT:
-                            {
-                                return value -> ((Number) value).floatValue();
-                            }
+                            return value -> ((Number) value).floatValue();
                         case DOUBLE:
-                            {
-                                return value -> ((Number) value).doubleValue();
-                            }
+                            return value -> ((Number) value).doubleValue();
                         case DECIMAL:
-                            {
-                                final DecimalType decimalType = (DecimalType) outputType;
-                                return value -> {
-                                    final Number number = (Number) value;
-                                    switch (inputType.getTypeRoot()) {
-                                        case TINYINT:
-                                        case SMALLINT:
-                                        case INTEGER:
-                                        case BIGINT:
-                                            {
-                                                return DecimalDataUtils.castFrom(
-                                                        number.longValue(),
-                                                        decimalType.getPrecision(),
-                                                        decimalType.getScale());
-                                            }
-                                        default:
-                                            {
-                                                return DecimalDataUtils.castFrom(
-                                                        number.doubleValue(),
-                                                        decimalType.getPrecision(),
-                                                        decimalType.getScale());
-                                            }
-                                    }
-                                };
-                            }
+                            final DecimalType decimalType = (DecimalType) outputType;
+                            return value -> {
+                                final Number number = (Number) value;
+                                switch (inputType.getTypeRoot()) {
+                                    case TINYINT:
+                                    case SMALLINT:
+                                    case INTEGER:
+                                    case BIGINT:
+                                        {
+                                            return DecimalDataUtils.castFrom(
+                                                    number.longValue(),
+                                                    decimalType.getPrecision(),
+                                                    decimalType.getScale());
+                                        }
+                                    default:
+                                        {
+                                            return DecimalDataUtils.castFrom(
+                                                    number.doubleValue(),
+                                                    decimalType.getPrecision(),
+                                                    decimalType.getScale());
+                                        }
+                                }
+                            };
                         default:
-                            {
-                                return null;
-                            }
+                            return null;
                     }
                 }
             case DECIMAL:
                 {
                     switch (outputType.getTypeRoot()) {
                         case TINYINT:
-                            {
-                                return value ->
-                                        (byte) DecimalDataUtils.castToIntegral((DecimalData) value);
-                            }
+                            return value ->
+                                    (byte) DecimalDataUtils.castToIntegral((DecimalData) value);
                         case SMALLINT:
-                            {
-                                return value ->
-                                        (short)
-                                                DecimalDataUtils.castToIntegral(
-                                                        (DecimalData) value);
-                            }
+                            return value ->
+                                    (short) DecimalDataUtils.castToIntegral((DecimalData) value);
                         case INTEGER:
-                            {
-                                return value ->
-                                        (int) DecimalDataUtils.castToIntegral((DecimalData) value);
-                            }
+                            return value ->
+                                    (int) DecimalDataUtils.castToIntegral((DecimalData) value);
                         case BIGINT:
-                            {
-                                return value ->
-                                        DecimalDataUtils.castToIntegral((DecimalData) value);
-                            }
+                            return value -> DecimalDataUtils.castToIntegral((DecimalData) value);
                         case FLOAT:
-                            {
-                                return value ->
-                                        (float) DecimalDataUtils.doubleValue((DecimalData) value);
-                            }
+                            return value ->
+                                    (float) DecimalDataUtils.doubleValue((DecimalData) value);
                         case DOUBLE:
-                            {
-                                return value -> DecimalDataUtils.doubleValue((DecimalData) value);
-                            }
+                            return value -> DecimalDataUtils.doubleValue((DecimalData) value);
                         case DECIMAL:
-                            {
-                                DecimalType decimalType = (DecimalType) outputType;
-                                return value ->
-                                        DecimalDataUtils.castToDecimal(
-                                                (DecimalData) value,
-                                                decimalType.getPrecision(),
-                                                decimalType.getScale());
-                            }
+                            DecimalType decimalType = (DecimalType) outputType;
+                            return value ->
+                                    DecimalDataUtils.castToDecimal(
+                                            (DecimalData) value,
+                                            decimalType.getPrecision(),
+                                            decimalType.getScale());
                         default:
-                            {
-                                return null;
-                            }
+                            return null;
                     }
                 }
             case CHAR:
             case VARCHAR:
-                {
-                    if (outputType.getTypeRoot() == CHAR || outputType.getTypeRoot() == VARCHAR) {
-                        final boolean targetCharType = outputType.getTypeRoot() == CHAR;
-                        final int targetLength = getStringLength(outputType);
-                        return value -> {
-                            StringData result;
-                            String strVal = value.toString();
-                            BinaryStringData strData = BinaryStringData.fromString(strVal);
-                            if (strData.numChars() > targetLength) {
-                                result =
-                                        BinaryStringData.fromString(
-                                                strVal.substring(0, targetLength));
-                            } else {
-                                if (strData.numChars() < targetLength) {
-                                    if (targetCharType) {
-                                        int padLength = targetLength - strData.numChars();
-                                        BinaryStringData padString =
-                                                BinaryStringData.blankString(padLength);
-                                        result = BinaryStringDataUtil.concat(strData, padString);
-                                    } else {
-                                        result = strData;
-                                    }
+                if (outputType.getTypeRoot() == CHAR || outputType.getTypeRoot() == VARCHAR) {
+                    final boolean targetCharType = outputType.getTypeRoot() == CHAR;
+                    final int targetLength = getStringLength(outputType);
+                    return value -> {
+                        StringData result;
+                        String strVal = value.toString();
+                        BinaryStringData strData = BinaryStringData.fromString(strVal);
+                        if (strData.numChars() > targetLength) {
+                            result = BinaryStringData.fromString(strVal.substring(0, targetLength));
+                        } else {
+                            if (strData.numChars() < targetLength) {
+                                if (targetCharType) {
+                                    int padLength = targetLength - strData.numChars();
+                                    BinaryStringData padString =
+                                            BinaryStringData.blankString(padLength);
+                                    result = BinaryStringDataUtil.concat(strData, padString);
                                 } else {
                                     result = strData;
                                 }
-                            }
-
-                            return result;
-                        };
-                    } else if (outputType.getTypeRoot() == VARBINARY) {
-                        final int targetLength = getBinaryLength(outputType);
-                        return value -> {
-                            byte[] byteArrayTerm = ((StringData) value).toBytes();
-                            if (byteArrayTerm.length <= targetLength) {
-                                return byteArrayTerm;
                             } else {
-                                return Arrays.copyOf(byteArrayTerm, targetLength);
+                                result = strData;
                             }
-                        };
-                    }
-                    return null;
+                        }
+
+                        return result;
+                    };
+                } else if (outputType.getTypeRoot() == VARBINARY) {
+                    final int targetLength = getBinaryLength(outputType);
+                    return value -> {
+                        byte[] byteArrayTerm = ((StringData) value).toBytes();
+                        if (byteArrayTerm.length <= targetLength) {
+                            return byteArrayTerm;
+                        } else {
+                            return Arrays.copyOf(byteArrayTerm, targetLength);
+                        }
+                    };
                 }
+                return null;
             case BINARY:
-                {
-                    if (outputType.getTypeRoot() == BINARY) {
-                        final int targetLength = getBinaryLength(outputType);
-                        return value ->
-                                ((((byte[]) value).length == targetLength)
-                                        ? value
-                                        : Arrays.copyOf((byte[]) value, targetLength));
-                    }
-                    return null;
+                if (outputType.getTypeRoot() == BINARY) {
+                    final int targetLength = getBinaryLength(outputType);
+                    return value ->
+                            ((((byte[]) value).length == targetLength)
+                                    ? value
+                                    : Arrays.copyOf((byte[]) value, targetLength));
                 }
+                return null;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
-                {
-                    switch (outputType.getTypeRoot()) {
-                        case DATE:
-                            {
-                                return value ->
-                                        (int)
-                                                (((TimestampData) value).getMillisecond()
-                                                        / DateTimeUtils.MILLIS_PER_DAY);
-                            }
-                        case TIMESTAMP_WITHOUT_TIME_ZONE:
-                            {
-                                return value ->
-                                        DateTimeUtils.truncate(
-                                                (TimestampData) value,
-                                                ((TimestampType) outputType).getPrecision());
-                            }
-                        case TIME_WITHOUT_TIME_ZONE:
-                            {
-                                return value ->
-                                        (int)
-                                                (((TimestampData) value).getMillisecond()
-                                                        % DateTimeUtils.MILLIS_PER_DAY);
-                            }
-                        default:
-                            {
-                                return null;
-                            }
-                    }
+                switch (outputType.getTypeRoot()) {
+                    case DATE:
+                        {
+                            return value ->
+                                    (int)
+                                            (((TimestampData) value).getMillisecond()
+                                                    / DateTimeUtils.MILLIS_PER_DAY);
+                        }
+                    case TIMESTAMP_WITHOUT_TIME_ZONE:
+                        {
+                            return value ->
+                                    DateTimeUtils.truncate(
+                                            (TimestampData) value,
+                                            ((TimestampType) outputType).getPrecision());
+                        }
+                    case TIME_WITHOUT_TIME_ZONE:
+                        {
+                            return value ->
+                                    (int)
+                                            (((TimestampData) value).getMillisecond()
+                                                    % DateTimeUtils.MILLIS_PER_DAY);
+                        }
+                    default:
+                        {
+                            return null;
+                        }
                 }
             case TIME_WITHOUT_TIME_ZONE:
-                {
-                    if (outputType.getTypeRoot() == TIMESTAMP_WITHOUT_TIME_ZONE) {
-                        return value ->
-                                (int)
-                                        (((TimestampData) value).getMillisecond()
-                                                % DateTimeUtils.MILLIS_PER_DAY);
-                    }
-                    return null;
+                if (outputType.getTypeRoot() == TIMESTAMP_WITHOUT_TIME_ZONE) {
+                    return value ->
+                            (int)
+                                    (((TimestampData) value).getMillisecond()
+                                            % DateTimeUtils.MILLIS_PER_DAY);
                 }
+                return null;
             default:
-                {
-                    return null;
-                }
+                return null;
         }
     }
 

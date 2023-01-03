@@ -18,10 +18,6 @@
 
 package org.apache.flink.table.store.file.casting;
 
-import org.apache.flink.table.api.TableException;
-
-import javax.annotation.Nonnull;
-
 /**
  * Interface to model a function that performs the casting of a value from one type to another.
  * Copied from flink.
@@ -30,11 +26,7 @@ import javax.annotation.Nonnull;
  * @param <OUT> Output internal type
  */
 public interface CastExecutor<IN, OUT> {
-    /**
-     * Cast the input value. The output is null only and only if the input is null. The method
-     * throws an exception if something goes wrong when casting.
-     *
-     * @param value Input value.
-     */
-    OUT cast(@Nonnull IN value) throws TableException;
+
+    /** Cast the input value. */
+    OUT cast(IN value);
 }
