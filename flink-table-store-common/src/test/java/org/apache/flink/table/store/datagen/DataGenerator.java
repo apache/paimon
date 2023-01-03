@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,19 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
+package org.apache.flink.table.store.datagen;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.annotation.Experimental;
 
 import java.io.Serializable;
-import java.util.Comparator;
+import java.util.Iterator;
 
-/**
- * Record comparator for {@code BinaryInMemorySortBuffer}. For performance, subclasses are usually
- * implemented through CodeGenerator. A new interface for helping JVM inline. Copied from Flink.
- */
-public interface RecordComparator extends Comparator<RowData>, Serializable {
+/** Stateful and re-scalable data generator. */
+@Experimental
+public interface DataGenerator<T> extends Serializable, Iterator<T> {
 
-    @Override
-    int compare(RowData o1, RowData o2);
+    void open();
 }

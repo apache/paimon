@@ -16,19 +16,27 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
+package org.apache.flink.table.store.data.converter;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.annotation.Internal;
+import org.apache.flink.table.types.logical.DateType;
+import org.apache.flink.table.utils.DateTimeUtils;
 
-import java.io.Serializable;
-import java.util.Comparator;
+import java.time.LocalDate;
 
-/**
- * Record comparator for {@code BinaryInMemorySortBuffer}. For performance, subclasses are usually
- * implemented through CodeGenerator. A new interface for helping JVM inline. Copied from Flink.
- */
-public interface RecordComparator extends Comparator<RowData>, Serializable {
+/** Converter for {@link DateType} of {@link java.time.LocalDate} external type. */
+@Internal
+public class DateLocalDateConverter implements DataStructureConverter<Integer, LocalDate> {
+
+    private static final long serialVersionUID = 1L;
 
     @Override
-    int compare(RowData o1, RowData o2);
+    public Integer toInternal(LocalDate external) {
+        return DateTimeUtils.toInternal(external);
+    }
+
+    @Override
+    public LocalDate toExternal(Integer internal) {
+        return DateTimeUtils.toLocalDate(internal);
+    }
 }

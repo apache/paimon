@@ -16,19 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
+package org.apache.flink.table.store.data;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.binary.BinaryRowData;
 
-import java.io.Serializable;
-import java.util.Comparator;
+import java.io.IOException;
 
-/**
- * Record comparator for {@code BinaryInMemorySortBuffer}. For performance, subclasses are usually
- * implemented through CodeGenerator. A new interface for helping JVM inline. Copied from Flink.
- */
-public interface RecordComparator extends Comparator<RowData>, Serializable {
+/** Row serializer, provided paged serialize paged method. */
+@Internal
+public abstract class AbstractRowDataSerializer<T extends RowData> extends PagedTypeSerializer<T> {
 
-    @Override
-    int compare(RowData o1, RowData o2);
+    private static final long serialVersionUID = 1L;
+
+    /** Get the number of fields. */
+    public abstract int getArity();
+
+    /** Convert a {@link RowData} to a {@link BinaryRowData}. */
+    public abstract BinaryRowData toBinaryRow(T rowData) throws IOException;
 }

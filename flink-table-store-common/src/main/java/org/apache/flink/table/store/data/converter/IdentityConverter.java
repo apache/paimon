@@ -16,19 +16,28 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
+package org.apache.flink.table.store.data.converter;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.annotation.Internal;
 
-import java.io.Serializable;
-import java.util.Comparator;
+/** No-op converter that just forwards its input. */
+@Internal
+public class IdentityConverter<I> implements DataStructureConverter<I, I> {
 
-/**
- * Record comparator for {@code BinaryInMemorySortBuffer}. For performance, subclasses are usually
- * implemented through CodeGenerator. A new interface for helping JVM inline. Copied from Flink.
- */
-public interface RecordComparator extends Comparator<RowData>, Serializable {
+    private static final long serialVersionUID = 1L;
 
     @Override
-    int compare(RowData o1, RowData o2);
+    public I toInternal(I external) {
+        return external;
+    }
+
+    @Override
+    public I toExternal(I internal) {
+        return internal;
+    }
+
+    @Override
+    public boolean isIdentityConversion() {
+        return true;
+    }
 }

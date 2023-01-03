@@ -16,19 +16,25 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
+package org.apache.flink.table.store.data.converter;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.annotation.Internal;
+import org.apache.flink.table.types.logical.TimeType;
+import org.apache.flink.table.utils.DateTimeUtils;
 
-import java.io.Serializable;
-import java.util.Comparator;
+/** Converter for {@link TimeType} of {@link java.sql.Time} external type. */
+@Internal
+public class TimeTimeConverter implements DataStructureConverter<Integer, java.sql.Time> {
 
-/**
- * Record comparator for {@code BinaryInMemorySortBuffer}. For performance, subclasses are usually
- * implemented through CodeGenerator. A new interface for helping JVM inline. Copied from Flink.
- */
-public interface RecordComparator extends Comparator<RowData>, Serializable {
+    private static final long serialVersionUID = 1L;
 
     @Override
-    int compare(RowData o1, RowData o2);
+    public Integer toInternal(java.sql.Time external) {
+        return DateTimeUtils.toInternal(external);
+    }
+
+    @Override
+    public java.sql.Time toExternal(Integer internal) {
+        return DateTimeUtils.toSQLTime(internal);
+    }
 }

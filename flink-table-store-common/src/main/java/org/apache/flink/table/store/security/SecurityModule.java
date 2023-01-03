@@ -16,19 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
+package org.apache.flink.table.store.security;
 
-import org.apache.flink.table.data.RowData;
+import java.security.GeneralSecurityException;
 
-import java.io.Serializable;
-import java.util.Comparator;
+/** An installable security module. */
+public interface SecurityModule {
 
-/**
- * Record comparator for {@code BinaryInMemorySortBuffer}. For performance, subclasses are usually
- * implemented through CodeGenerator. A new interface for helping JVM inline. Copied from Flink.
- */
-public interface RecordComparator extends Comparator<RowData>, Serializable {
+    /**
+     * Install the security module.
+     *
+     * @throws SecurityInstallException if the security module couldn't be installed.
+     */
+    void install() throws SecurityInstallException;
 
-    @Override
-    int compare(RowData o1, RowData o2);
+    /** Indicates a problem with installing or uninstalling a security module. */
+    class SecurityInstallException extends GeneralSecurityException {
+        private static final long serialVersionUID = 1L;
+
+        public SecurityInstallException(String msg, Throwable cause) {
+            super(msg, cause);
+        }
+    }
 }

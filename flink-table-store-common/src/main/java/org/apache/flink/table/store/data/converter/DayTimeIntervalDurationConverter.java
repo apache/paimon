@@ -16,19 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
+package org.apache.flink.table.store.data.converter;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.annotation.Internal;
+import org.apache.flink.table.types.logical.DayTimeIntervalType;
 
-import java.io.Serializable;
-import java.util.Comparator;
+import java.time.Duration;
 
-/**
- * Record comparator for {@code BinaryInMemorySortBuffer}. For performance, subclasses are usually
- * implemented through CodeGenerator. A new interface for helping JVM inline. Copied from Flink.
- */
-public interface RecordComparator extends Comparator<RowData>, Serializable {
+/** Converter for {@link DayTimeIntervalType} of {@link Duration} external type. */
+@Internal
+public class DayTimeIntervalDurationConverter implements DataStructureConverter<Long, Duration> {
+
+    public static final DayTimeIntervalDurationConverter INSTANCE =
+            new DayTimeIntervalDurationConverter();
+
+    private static final long serialVersionUID = 1L;
 
     @Override
-    int compare(RowData o1, RowData o2);
+    public Long toInternal(Duration external) {
+        return external.toMillis();
+    }
+
+    @Override
+    public Duration toExternal(Long internal) {
+        return Duration.ofMillis(internal);
+    }
 }

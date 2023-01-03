@@ -16,19 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
+package org.apache.flink.table.store.data.converter;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.annotation.Internal;
+import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.types.logical.LocalZonedTimestampType;
 
-import java.io.Serializable;
-import java.util.Comparator;
+/** Converter for {@link LocalZonedTimestampType} of {@link Long} external type. */
+@Internal
+public class LocalZonedTimestampLongConverter
+        implements DataStructureConverter<TimestampData, Long> {
 
-/**
- * Record comparator for {@code BinaryInMemorySortBuffer}. For performance, subclasses are usually
- * implemented through CodeGenerator. A new interface for helping JVM inline. Copied from Flink.
- */
-public interface RecordComparator extends Comparator<RowData>, Serializable {
+    private static final long serialVersionUID = 1L;
 
     @Override
-    int compare(RowData o1, RowData o2);
+    public TimestampData toInternal(Long external) {
+        return TimestampData.fromEpochMillis(external);
+    }
+
+    @Override
+    public Long toExternal(TimestampData internal) {
+        return internal.getMillisecond();
+    }
 }

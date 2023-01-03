@@ -127,6 +127,8 @@ under the License.
         <flink.sql.connector.kafka>flink-sql-connector-kafka</flink.sql.connector.kafka>
         <flink.test.utils>flink-test-utils</flink.test.utils>
         <flink.sql.parquet>flink-sql-parquet</flink.sql.parquet>
+        <janino.version>3.0.11</janino.version>
+        <mockito.version>3.4.6</mockito.version>
     </properties>
 
     <dependencies>

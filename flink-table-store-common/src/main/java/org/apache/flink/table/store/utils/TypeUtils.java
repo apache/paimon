@@ -19,16 +19,17 @@
 package org.apache.flink.table.store.utils;
 
 import org.apache.flink.table.api.TableException;
+import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.data.binary.BinaryStringData;
-import org.apache.flink.table.data.binary.BinaryStringDataUtil;
 import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.LocalZonedTimestampType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.TimestampType;
 
+import java.math.BigDecimal;
 import java.time.DateTimeException;
 import java.util.Arrays;
 import java.util.List;
@@ -71,20 +72,20 @@ public class TypeUtils {
                 return s.getBytes();
             case DECIMAL:
                 DecimalType decimalType = (DecimalType) type;
-                return BinaryStringDataUtil.toDecimal(
-                        str, decimalType.getPrecision(), decimalType.getScale());
+                return DecimalData.fromBigDecimal(
+                        new BigDecimal(s), decimalType.getPrecision(), decimalType.getScale());
             case TINYINT:
-                return BinaryStringDataUtil.toByte(str);
+                return Byte.valueOf(s);
             case SMALLINT:
-                return BinaryStringDataUtil.toShort(str);
+                return Short.valueOf(s);
             case INTEGER:
-                return BinaryStringDataUtil.toInt(str);
+                return Integer.valueOf(s);
             case BIGINT:
-                return BinaryStringDataUtil.toLong(str);
+                return Long.valueOf(s);
             case FLOAT:
-                return BinaryStringDataUtil.toFloat(str);
+                return Float.valueOf(s);
             case DOUBLE:
-                return BinaryStringDataUtil.toDouble(str);
+                return Double.valueOf(s);
             case DATE:
                 return toDate(str);
             case TIME_WITHOUT_TIME_ZONE:

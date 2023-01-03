@@ -16,19 +16,19 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
-
-import org.apache.flink.table.data.RowData;
-
-import java.io.Serializable;
-import java.util.Comparator;
+package org.apache.flink.table.store.security;
 
 /**
- * Record comparator for {@code BinaryInMemorySortBuffer}. For performance, subclasses are usually
- * implemented through CodeGenerator. A new interface for helping JVM inline. Copied from Flink.
+ * A factory for a {@link SecurityModule}. A factory can determine whether a {@link SecurityModule}
+ * works in the given environment (for example, it can check whether Hadoop dependencies are
+ * available) and can then create (or not) a module based on that.
  */
-public interface RecordComparator extends Comparator<RowData>, Serializable {
+@FunctionalInterface
+public interface SecurityModuleFactory {
 
-    @Override
-    int compare(RowData o1, RowData o2);
+    /**
+     * Creates and returns a {@link SecurityModule}. This can return {@code null} if the type of
+     * {@link SecurityModule} that this factory can create does not work in the current environment.
+     */
+    SecurityModule createModule(SecurityConfiguration securityConfig);
 }

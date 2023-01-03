@@ -16,19 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
+package org.apache.flink.table.store.data.converter;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.annotation.Internal;
+import org.apache.flink.table.data.ArrayData;
+import org.apache.flink.table.data.GenericArrayData;
+import org.apache.flink.table.types.logical.ArrayType;
 
-import java.io.Serializable;
-import java.util.Comparator;
+/** Converter for {@link ArrayType} of {@code byte[]} external type. */
+@Internal
+public class ArrayByteArrayConverter implements DataStructureConverter<ArrayData, byte[]> {
 
-/**
- * Record comparator for {@code BinaryInMemorySortBuffer}. For performance, subclasses are usually
- * implemented through CodeGenerator. A new interface for helping JVM inline. Copied from Flink.
- */
-public interface RecordComparator extends Comparator<RowData>, Serializable {
+    private static final long serialVersionUID = 1L;
 
     @Override
-    int compare(RowData o1, RowData o2);
+    public ArrayData toInternal(byte[] external) {
+        return new GenericArrayData(external);
+    }
+
+    @Override
+    public byte[] toExternal(ArrayData internal) {
+        return internal.toByteArray();
+    }
 }

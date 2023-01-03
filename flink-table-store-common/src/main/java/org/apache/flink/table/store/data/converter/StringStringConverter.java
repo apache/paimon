@@ -16,19 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
+package org.apache.flink.table.store.data.converter;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.annotation.Internal;
+import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.types.logical.CharType;
+import org.apache.flink.table.types.logical.VarCharType;
 
-import java.io.Serializable;
-import java.util.Comparator;
+/** Converter for {@link CharType}/{@link VarCharType} of {@link String} external type. */
+@Internal
+public class StringStringConverter implements DataStructureConverter<StringData, String> {
 
-/**
- * Record comparator for {@code BinaryInMemorySortBuffer}. For performance, subclasses are usually
- * implemented through CodeGenerator. A new interface for helping JVM inline. Copied from Flink.
- */
-public interface RecordComparator extends Comparator<RowData>, Serializable {
+    private static final long serialVersionUID = 1L;
 
     @Override
-    int compare(RowData o1, RowData o2);
+    public StringData toInternal(String external) {
+        return StringData.fromString(external);
+    }
+
+    @Override
+    public String toExternal(StringData internal) {
+        return internal.toString();
+    }
 }

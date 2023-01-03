@@ -16,19 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
+package org.apache.flink.table.store.security;
 
-import org.apache.flink.table.data.RowData;
+/** Install security module. */
+public class SecurityUtils {
 
-import java.io.Serializable;
-import java.util.Comparator;
-
-/**
- * Record comparator for {@code BinaryInMemorySortBuffer}. For performance, subclasses are usually
- * implemented through CodeGenerator. A new interface for helping JVM inline. Copied from Flink.
- */
-public interface RecordComparator extends Comparator<RowData>, Serializable {
-
-    @Override
-    int compare(RowData o1, RowData o2);
+    public static void install(SecurityConfiguration config) throws Exception {
+        SecurityModuleFactory moduleFactory = new HadoopModuleFactory();
+        SecurityModule module = moduleFactory.createModule(config);
+        // can be null if a SecurityModule is not supported in the current environment
+        if (module != null) {
+            module.install();
+        }
+    }
 }
