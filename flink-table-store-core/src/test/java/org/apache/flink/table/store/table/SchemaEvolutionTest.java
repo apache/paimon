@@ -126,6 +126,16 @@ public class SchemaEvolutionTest {
         // read where f3 = 3 (filter on new field)
         rows = readRecords(table, builder.equal(2, 3L));
         assertThat(rows).containsExactlyInAnyOrder(Row.of(3, 3L, 3L), Row.of(4, 4L, 4L));
+
+        // test add not null field
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.addColumn(
+                                                        "f4", new IntType(), false, null))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ADD COLUMN cannot specify NOT NULL.");
     }
 
     @Test

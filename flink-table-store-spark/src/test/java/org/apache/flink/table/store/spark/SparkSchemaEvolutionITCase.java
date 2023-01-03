@@ -80,6 +80,31 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
+    public void testAddNotNullColumn() throws Exception {
+        Path tablePath = new Path(warehousePath, "default.db/testAddNotNullColumn");
+        createTestHelper(tablePath);
+
+        List<Row> beforeAdd =
+                spark.sql("SHOW CREATE TABLE tablestore.default.testAddNotNullColumn")
+                        .collectAsList();
+        assertThat(beforeAdd.toString())
+                .isEqualTo(
+                        "[[CREATE TABLE testAddNotNullColumn (\n"
+                                + "  `a` INT NOT NULL,\n"
+                                + "  `b` BIGINT,\n"
+                                + "  `c` STRING)\n"
+                                + "]]");
+
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "ALTER TABLE tablestore.default.testAddNotNullColumn ADD COLUMNS (d INT NOT NULL)"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage(
+                        "java.lang.IllegalArgumentException: ADD COLUMN cannot specify NOT NULL.");
+    }
+
+    @Test
     public void testRenameColumn() throws Exception {
         Path tablePath = new Path(warehousePath, "default.db/testRenameColumn");
         SimpleTableTestHelper testHelper1 = createTestHelper(tablePath);
