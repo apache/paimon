@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.table.store.file.casting.CastExecutor;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.DataField;
-import org.apache.flink.table.store.file.schema.DataValueConverter;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
@@ -119,7 +119,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                                     ? null
                                     : SchemaEvolutionUtil.createIndexMapping(
                                             tableKeyFields, keyFields);
-                    final DataValueConverter[] converterMapping =
+                    final CastExecutor<?, ?>[] converterMapping =
                             tableSchema.id() == key
                                     ? null
                                     : SchemaEvolutionUtil.createConvertMapping(
@@ -127,7 +127,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                     return new FieldStatsArraySerializer(
                             RowDataType.toRowType(false, keyFields),
                             indexMapping,
-                            converterMapping);
+                            (CastExecutor<Object, Object>[]) converterMapping);
                 });
     }
 }

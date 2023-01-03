@@ -176,7 +176,7 @@ public class CastExecutors {
                 }
                 return null;
             case BINARY:
-                if (outputType.getTypeRoot() == BINARY) {
+                if (outputType.getTypeRoot() == BINARY || outputType.getTypeRoot() == VARBINARY) {
                     final int targetLength = getBinaryLength(outputType);
                     return value ->
                             ((((byte[]) value).length == targetLength)

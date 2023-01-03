@@ -124,8 +124,8 @@ public class ChangelogWithKeyTableColumnTypeFileMetaTest extends ColumnTypeFileM
             FieldStats[] statsArray = getTableValueStats(fileMeta).fields(null);
             assertThat(statsArray.length).isEqualTo(4);
             if (filesName.contains(fileMeta.fileName())) {
-                assertThat(statsArray[0].minValue()).isEqualTo(StringData.fromString("200"));
-                assertThat(statsArray[0].maxValue()).isEqualTo(StringData.fromString("300"));
+                assertThat(statsArray[0].minValue()).isEqualTo(StringData.fromString("200       "));
+                assertThat(statsArray[0].maxValue()).isEqualTo(StringData.fromString("300       "));
 
                 assertThat(statsArray[1].minValue()).isEqualTo(StringData.fromString("201"));
                 assertThat(statsArray[1].maxValue()).isEqualTo(StringData.fromString("301"));

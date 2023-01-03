@@ -294,8 +294,8 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
         assertThat(statsArray[0].minValue()).isEqualTo(2);
         assertThat(statsArray[0].maxValue()).isEqualTo(2);
 
-        assertThat(statsArray[1].minValue()).isEqualTo(StringData.fromString("200"));
-        assertThat(statsArray[1].maxValue()).isEqualTo(StringData.fromString("300"));
+        assertThat(statsArray[1].minValue()).isEqualTo(StringData.fromString("200       "));
+        assertThat(statsArray[1].maxValue()).isEqualTo(StringData.fromString("300       "));
 
         assertThat(statsArray[2].minValue()).isEqualTo(StringData.fromString("201"));
         assertThat(statsArray[2].maxValue()).isEqualTo(StringData.fromString("301"));

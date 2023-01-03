@@ -20,9 +20,9 @@ package org.apache.flink.table.store.file.stats;
 
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.casting.CastExecutor;
 import org.apache.flink.table.store.file.schema.AtomicDataType;
 import org.apache.flink.table.store.file.schema.DataField;
-import org.apache.flink.table.store.file.schema.DataValueConverter;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.format.FieldStats;
@@ -96,9 +96,10 @@ public class FieldStatsArraySerializerTest {
 
         int[] indexMapping =
                 SchemaEvolutionUtil.createIndexMapping(tableSchema.fields(), dataSchema.fields());
-        DataValueConverter[] converterMapping =
-                SchemaEvolutionUtil.createConvertMapping(
-                        tableSchema.fields(), dataSchema.fields(), indexMapping);
+        CastExecutor<Object, Object>[] converterMapping =
+                (CastExecutor<Object, Object>[])
+                        SchemaEvolutionUtil.createConvertMapping(
+                                tableSchema.fields(), dataSchema.fields(), indexMapping);
         FieldStatsArraySerializer fieldStatsArraySerializer =
                 new FieldStatsArraySerializer(
                         tableSchema.logicalRowType(), indexMapping, converterMapping);

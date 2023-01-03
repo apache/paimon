@@ -20,6 +20,8 @@ package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.casting.CastExecutor;
+import org.apache.flink.table.store.file.casting.CastExecutors;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateReplaceVisitor;
@@ -326,9 +328,10 @@ public class SchemaEvolutionUtil {
      * @param indexMapping the index mapping from table fields to data fields
      * @return the index mapping
      */
-    public static DataValueConverter[] createConvertMapping(
+    public static CastExecutor<?, ?>[] createConvertMapping(
             List<DataField> tableFields, List<DataField> dataFields, int[] indexMapping) {
-        DataValueConverter[] converterMapping = new DataValueConverter[tableFields.size()];
+        CastExecutor<?, ?>[] converterMapping = new CastExecutor<?, ?>[tableFields.size()];
+        boolean castExist = false;
         for (int i = 0; i < tableFields.size(); i++) {
             int dataIndex = indexMapping == null ? i : indexMapping[i];
             if (dataIndex < 0) {
@@ -345,12 +348,15 @@ public class SchemaEvolutionUtil {
                                     && dataField.type() instanceof AtomicDataType,
                             "Only support column type evolution in atomic data type.");
                     converterMapping[i] =
-                            new DataValueConverter(
-                                    dataField.type().logicalType(),
-                                    tableField.type().logicalType());
+                            checkNotNull(
+                                    CastExecutors.resolve(
+                                            dataField.type().logicalType(),
+                                            tableField.type().logicalType()));
+                    castExist = true;
                 }
             }
         }
-        return converterMapping;
+
+        return castExist ? converterMapping : null;
     }
 }
