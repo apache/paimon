@@ -19,9 +19,8 @@ package org.apache.flink.table.store.codegen
 
 import org.apache.flink.table.data.{DecimalData, TimestampData}
 import org.apache.flink.table.data.binary.BinaryRowData
-import org.apache.flink.table.runtime.operators.sort.SortUtil
-import org.apache.flink.table.runtime.types.PlannerTypeUtils
 import org.apache.flink.table.store.codegen.GenerateUtils.{newName, ROW_DATA, SEGMENT}
+import org.apache.flink.table.store.utils.{SortUtil, TypeUtils}
 import org.apache.flink.table.types.logical.{DecimalType, LogicalType, RowType, TimestampType}
 import org.apache.flink.table.types.logical.LogicalTypeRoot._
 
@@ -412,7 +411,7 @@ class SortCodeGenerator(val input: RowType, val sortSpec: SortSpec) {
 
   def supportNormalizedKey(t: LogicalType): Boolean = {
     t.getTypeRoot match {
-      case _ if PlannerTypeUtils.isPrimitive(t) => true
+      case _ if TypeUtils.isPrimitive(t) => true
       case VARCHAR | CHAR | VARBINARY | BINARY | DATE | TIME_WITHOUT_TIME_ZONE => true
       case TIMESTAMP_WITHOUT_TIME_ZONE =>
         // TODO: support normalize key for non-compact timestamp

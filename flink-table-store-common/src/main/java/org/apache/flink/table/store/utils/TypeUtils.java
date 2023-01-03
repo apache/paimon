@@ -26,6 +26,7 @@ import org.apache.flink.table.data.binary.BinaryStringData;
 import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.LocalZonedTimestampType;
 import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.LogicalTypeRoot;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.TimestampType;
 
@@ -142,5 +143,24 @@ public class TypeUtils {
     public static TimestampData toTimestamp(BinaryStringData input, int precision)
             throws DateTimeException {
         return DateTimeUtils.parseTimestampData(input.toString(), precision);
+    }
+
+    public static boolean isPrimitive(LogicalType type) {
+        return isPrimitive(type.getTypeRoot());
+    }
+
+    public static boolean isPrimitive(LogicalTypeRoot root) {
+        switch (root) {
+            case BOOLEAN:
+            case TINYINT:
+            case SMALLINT:
+            case INTEGER:
+            case BIGINT:
+            case FLOAT:
+            case DOUBLE:
+                return true;
+            default:
+                return false;
+        }
     }
 }
