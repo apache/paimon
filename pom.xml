@@ -265,7 +265,7 @@ under the License.
                 <!-- pin transitive dependency of org.apache.hadoop:hadoop-common:2.8.5 -->
                 <groupId>net.minidev</groupId>
                 <artifactId>json-smart</artifactId>
-                <version>2.3</version>
+                <version>2.3.1</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
