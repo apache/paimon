@@ -211,6 +211,8 @@ public class SchemaManager implements Serializable {
                                         "The column [%s] exists in the table[%s].",
                                         addColumn.fieldName(), tableRoot));
                     }
+                    Preconditions.checkArgument(
+                            addColumn.isNullable(), "ADD COLUMN cannot specify NOT NULL.");
                     int id = highestFieldId.incrementAndGet();
                     DataType dataType =
                             TableSchema.toDataType(addColumn.logicalType(), highestFieldId);
