@@ -268,8 +268,7 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
             validateAlterNestedField(add.fieldNames());
             return SchemaChange.addColumn(
                     add.fieldNames()[0],
-                    toFlinkType(add.dataType()),
-                    add.isNullable(),
+                    toFlinkType(add.dataType()).copy(add.isNullable()),
                     add.comment());
         } else if (change instanceof RenameColumn) {
             RenameColumn rename = (RenameColumn) change;

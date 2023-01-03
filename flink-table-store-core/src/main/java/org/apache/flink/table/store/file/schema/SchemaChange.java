@@ -37,12 +37,11 @@ public interface SchemaChange {
     }
 
     static SchemaChange addColumn(String fieldName, LogicalType logicalType) {
-        return addColumn(fieldName, logicalType, true, null);
+        return addColumn(fieldName, logicalType, null);
     }
 
-    static SchemaChange addColumn(
-            String fieldName, LogicalType logicalType, boolean isNullable, String comment) {
-        return new AddColumn(fieldName, logicalType, isNullable, comment);
+    static SchemaChange addColumn(String fieldName, LogicalType logicalType, String comment) {
+        return new AddColumn(fieldName, logicalType, comment);
     }
 
     static SchemaChange renameColumn(String fieldName, String newName) {
@@ -135,14 +134,11 @@ public interface SchemaChange {
     final class AddColumn implements SchemaChange {
         private final String fieldName;
         private final LogicalType logicalType;
-        private final boolean isNullable;
         private final String description;
 
-        private AddColumn(
-                String fieldName, LogicalType logicalType, boolean isNullable, String description) {
+        private AddColumn(String fieldName, LogicalType logicalType, String description) {
             this.fieldName = fieldName;
             this.logicalType = logicalType;
-            this.isNullable = isNullable;
             this.description = description;
         }
 
@@ -152,10 +148,6 @@ public interface SchemaChange {
 
         public LogicalType logicalType() {
             return logicalType;
-        }
-
-        public boolean isNullable() {
-            return isNullable;
         }
 
         @Nullable
@@ -172,15 +164,14 @@ public interface SchemaChange {
                 return false;
             }
             AddColumn addColumn = (AddColumn) o;
-            return isNullable == addColumn.isNullable
-                    && Objects.equals(fieldName, addColumn.fieldName)
+            return Objects.equals(fieldName, addColumn.fieldName)
                     && logicalType.equals(addColumn.logicalType)
                     && Objects.equals(description, addColumn.description);
         }
 
         @Override
         public int hashCode() {
-            int result = Objects.hash(logicalType, isNullable, description);
+            int result = Objects.hash(logicalType, description);
             result = 31 * result + Objects.hashCode(fieldName);
             return result;
         }
