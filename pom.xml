@@ -260,6 +260,13 @@ under the License.
                 <version>${flink.version}</version>
                 <scope>test</scope>
             </dependency>
+
+            <dependency>
+                <!-- pin transitive dependency of org.apache.hadoop:hadoop-common:2.8.5 -->
+                <groupId>net.minidev</groupId>
+                <artifactId>json-smart</artifactId>
+                <version>2.3</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -353,7 +360,7 @@ under the License.
             <plugin>
                 <groupId>org.apache.rat</groupId>
                 <artifactId>apache-rat-plugin</artifactId>
-                <version>0.13</version>
+                <version>0.15</version>
                 <inherited>false</inherited>
                 <executions>
                     <execution>
@@ -672,7 +679,7 @@ under the License.
             <plugin>
                 <groupId>org.commonjava.maven.plugins</groupId>
                 <artifactId>directory-maven-plugin</artifactId>
-                <version>0.1</version>
+                <version>1.0</version>
                 <executions>
                     <execution>
                         <id>directories</id>
