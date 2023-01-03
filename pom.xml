@@ -679,7 +679,7 @@ under the License.
             <plugin>
                 <groupId>org.commonjava.maven.plugins</groupId>
                 <artifactId>directory-maven-plugin</artifactId>
-                <version>1.0</version>
+                <version>0.1</version>
                 <executions>
                     <execution>
                         <id>directories</id>
