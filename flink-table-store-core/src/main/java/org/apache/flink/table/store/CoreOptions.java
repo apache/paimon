@@ -405,7 +405,7 @@ public class CoreOptions implements Serializable {
         this.options = options;
     }
 
-    public Map<String, String> getOptionMap() {
+    public Map<String, String> toMap() {
         return options.toMap();
     }
 

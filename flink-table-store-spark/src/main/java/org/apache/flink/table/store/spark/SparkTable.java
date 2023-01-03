@@ -124,7 +124,7 @@ public class SparkTable
     @Override
     public Map<String, String> properties() {
         if (table instanceof DataTable) {
-            return ((DataTable) table).options().getOptionMap();
+            return ((DataTable) table).options().toMap();
         } else {
             return Collections.emptyMap();
         }
