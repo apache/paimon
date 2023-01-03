@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.data.converter;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.table.store.utils.DateTimeUtils;
 import org.apache.flink.table.types.logical.TimeType;
-import org.apache.flink.table.utils.DateTimeUtils;
 
 /** Converter for {@link TimeType} of {@link java.sql.Time} external type. */
 @Internal

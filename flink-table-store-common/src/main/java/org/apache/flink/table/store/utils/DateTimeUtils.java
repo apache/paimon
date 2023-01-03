@@ -23,6 +23,7 @@ import org.apache.flink.table.data.TimestampData;
 import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.temporal.TemporalAccessor;
@@ -85,6 +86,15 @@ public class DateTimeUtils {
     }
 
     /**
+     * Converts the internal representation of a SQL TIME (int) to the Java type used for UDF
+     * parameters ({@link java.sql.Time}).
+     */
+    public static java.sql.Time toSQLTime(int v) {
+        // note that, in this case, can't handle Daylight Saving Time
+        return new java.sql.Time(v - LOCAL_TZ.getOffset(v));
+    }
+
+    /**
      * Converts the Java type used for UDF parameters of SQL DATE type ({@link java.sql.Date}) to
      * internal representation (int).
      */
@@ -93,8 +103,70 @@ public class DateTimeUtils {
         return (int) (ts / MILLIS_PER_DAY);
     }
 
+    /**
+     * Converts the Java type used for UDF parameters of SQL TIME type ({@link java.sql.Time}) to
+     * internal representation (int).
+     *
+     * <p>Converse of {@link #toSQLTime(int)}.
+     */
+    public static int toInternal(java.sql.Time time) {
+        long ts = time.getTime() + LOCAL_TZ.getOffset(time.getTime());
+        return (int) (ts % MILLIS_PER_DAY);
+    }
+
     public static int toInternal(LocalDate date) {
         return ymdToUnixDate(date.getYear(), date.getMonthValue(), date.getDayOfMonth());
+    }
+
+    public static int toInternal(LocalTime time) {
+        return time.getHour() * (int) MILLIS_PER_HOUR
+                + time.getMinute() * (int) MILLIS_PER_MINUTE
+                + time.getSecond() * (int) MILLIS_PER_SECOND
+                + time.getNano() / 1000_000;
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Java 8 time conversion
+    // --------------------------------------------------------------------------------------------
+
+    public static LocalDate toLocalDate(int date) {
+        return julianToLocalDate(date + EPOCH_JULIAN);
+    }
+
+    private static LocalDate julianToLocalDate(int julian) {
+        // this shifts the epoch back to astronomical year -4800 instead of the
+        // start of the Christian era in year AD 1 of the proleptic Gregorian
+        // calendar.
+        int j = julian + 32044;
+        int g = j / 146097;
+        int dg = j % 146097;
+        int c = (dg / 36524 + 1) * 3 / 4;
+        int dc = dg - c * 36524;
+        int b = dc / 1461;
+        int db = dc % 1461;
+        int a = (db / 365 + 1) * 3 / 4;
+        int da = db - a * 365;
+
+        // integer number of full years elapsed since March 1, 4801 BC
+        int y = g * 400 + c * 100 + b * 4 + a;
+        // integer number of full months elapsed since the last March 1
+        int m = (da * 5 + 308) / 153 - 2;
+        // number of days elapsed since day 1 of the month
+        int d = da - (m + 4) * 153 / 5 + 122;
+        int year = y - 4800 + (m + 2) / 12;
+        int month = (m + 2) % 12 + 1;
+        int day = d + 1;
+        return LocalDate.of(year, month, day);
+    }
+
+    public static LocalTime toLocalTime(int time) {
+        int h = time / 3600000;
+        int time2 = time % 3600000;
+        int m = time2 / 60000;
+        int time3 = time2 % 60000;
+        int s = time3 / 1000;
+        int ms = time3 % 1000;
+        return LocalTime.of(h, m, s, ms * 1000_000);
     }
 
     public static Integer parseDate(String s) {

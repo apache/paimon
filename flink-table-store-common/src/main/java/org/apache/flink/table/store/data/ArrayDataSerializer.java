@@ -32,7 +32,6 @@ import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.binary.BinaryArrayData;
 import org.apache.flink.table.data.binary.BinarySegmentUtils;
-import org.apache.flink.table.data.columnar.ColumnarArrayData;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.utils.LogicalTypeUtils;
 import org.apache.flink.util.InstantiationUtil;
@@ -82,8 +81,6 @@ public class ArrayDataSerializer extends TypeSerializer<ArrayData> {
     public ArrayData copy(ArrayData from) {
         if (from instanceof GenericArrayData) {
             return copyGenericArray((GenericArrayData) from);
-        } else if (from instanceof ColumnarArrayData) {
-            return copyColumnarArray((ColumnarArrayData) from);
         } else if (from instanceof BinaryArrayData) {
             return ((BinaryArrayData) from).copy();
         } else {
@@ -131,41 +128,6 @@ public class ArrayDataSerializer extends TypeSerializer<ArrayData> {
             }
             return new GenericArrayData(newArray);
         }
-    }
-
-    private GenericArrayData copyColumnarArray(ColumnarArrayData from) {
-        if (!eleType.isNullable()) {
-            // we don't need to copy the primitive arrays,
-            // because they are new array from ColumnarArrayData
-            switch (eleType.getTypeRoot()) {
-                case BOOLEAN:
-                    return new GenericArrayData(from.toBooleanArray());
-                case TINYINT:
-                    return new GenericArrayData(from.toByteArray());
-                case SMALLINT:
-                    return new GenericArrayData(from.toShortArray());
-                case INTEGER:
-                case DATE:
-                case TIME_WITHOUT_TIME_ZONE:
-                    return new GenericArrayData(from.toIntArray());
-                case BIGINT:
-                    return new GenericArrayData(from.toLongArray());
-                case FLOAT:
-                    return new GenericArrayData(from.toFloatArray());
-                case DOUBLE:
-                    return new GenericArrayData(from.toDoubleArray());
-            }
-        }
-
-        Object[] newArray = new Object[from.size()];
-        for (int i = 0; i < newArray.length; i++) {
-            if (!from.isNullAt(i)) {
-                newArray[i] = eleSer.copy(elementGetter.getElementOrNull(from, i));
-            } else {
-                newArray[i] = null;
-            }
-        }
-        return new GenericArrayData(newArray);
     }
 
     @Override
