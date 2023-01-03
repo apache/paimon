@@ -133,7 +133,7 @@ public class SchemaEvolutionTest {
                                 schemaManager.commitChanges(
                                         Collections.singletonList(
                                                 SchemaChange.addColumn(
-                                                        "f4", new IntType(), false, null))))
+                                                        "f4", new IntType().copy(false), null))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("ADD COLUMN cannot specify NOT NULL.");
     }
