@@ -360,4 +360,26 @@ public class DateTimeUtils {
         }
         return x;
     }
+
+    public static TimestampData truncate(TimestampData ts, int precision) {
+        String fraction = Integer.toString(ts.toLocalDateTime().getNano());
+        if (fraction.length() <= precision) {
+            return ts;
+        } else {
+            // need to truncate
+            if (precision <= 3) {
+                return TimestampData.fromEpochMillis(
+                        zeroLastDigits(ts.getMillisecond(), 3 - precision));
+            } else {
+                return TimestampData.fromEpochMillis(
+                        ts.getMillisecond(),
+                        (int) zeroLastDigits(ts.getNanoOfMillisecond(), 9 - precision));
+            }
+        }
+    }
+
+    private static long zeroLastDigits(long l, int n) {
+        long tenToTheN = (long) Math.pow(10, n);
+        return (l / tenToTheN) * tenToTheN;
+    }
 }
