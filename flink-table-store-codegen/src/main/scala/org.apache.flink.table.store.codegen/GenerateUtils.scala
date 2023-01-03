@@ -22,8 +22,7 @@ import org.apache.flink.api.common.typeinfo.{AtomicType => AtomicTypeInfo}
 import org.apache.flink.core.memory.MemorySegment
 import org.apache.flink.table.data._
 import org.apache.flink.table.data.binary.{BinaryRawValueData, BinaryRowData, BinaryStringData}
-import org.apache.flink.table.data.utils.JoinedRowData
-import org.apache.flink.table.data.writer.BinaryRowWriter
+import org.apache.flink.table.store.data.BinaryRowWriter
 import org.apache.flink.table.types.logical._
 import org.apache.flink.table.types.logical.LogicalTypeRoot._
 import org.apache.flink.table.types.logical.utils.LogicalTypeChecks.{getFieldCount, getFieldTypes, getPrecision, getScale}
@@ -132,7 +131,7 @@ object GenerateUtils {
       s"($leftTerm == $rightTerm ? 0 : ($leftTerm ? 1 : -1))"
     case BINARY | VARBINARY =>
       val sortUtil =
-        classOf[org.apache.flink.table.runtime.operators.sort.SortUtil].getCanonicalName
+        classOf[org.apache.flink.table.store.utils.SortUtil].getCanonicalName
       s"$sortUtil.compareBinary($leftTerm, $rightTerm)"
     case TINYINT | SMALLINT | INTEGER | BIGINT | FLOAT | DOUBLE | DATE | TIME_WITHOUT_TIME_ZONE |
         INTERVAL_YEAR_MONTH | INTERVAL_DAY_TIME =>
@@ -595,33 +594,6 @@ object GenerateUtils {
              |}
            """.stripMargin
       }
-    } else if (rowClass == classOf[GenericRowData] || rowClass == classOf[BoxedWrapperRowData]) {
-      val writeField = if (rowClass == classOf[GenericRowData]) {
-        s"$rowTerm.setField($indexTerm, $fieldTerm)"
-      } else {
-        boxedWrapperRowFieldSetAccess(rowTerm, indexTerm, fieldTerm, fieldType)
-      }
-      val setNullField = if (rowClass == classOf[GenericRowData]) {
-        s"$rowTerm.setField($indexTerm, null)"
-      } else {
-        s"$rowTerm.setNullAt($indexTerm)"
-      }
-
-      if (fieldType.isNullable) {
-        s"""
-           |${fieldExpr.code}
-           |if (${fieldExpr.nullTerm}) {
-           |  $setNullField;
-           |} else {
-           |  $writeField;
-           |}
-          """.stripMargin
-      } else {
-        s"""
-           |${fieldExpr.code}
-           |$writeField;
-         """.stripMargin
-      }
     } else {
       throw new UnsupportedOperationException("Not support set field for " + rowClass)
     }
@@ -879,16 +851,6 @@ object GenerateUtils {
          |$recordTerm = new $typeTerm(${getFieldCount(t)});
          |$writerTerm = new $binaryRowWriter($recordTerm);
          |""".stripMargin.trim
-    case ROW | STRUCTURED_TYPE
-        if clazz == classOf[GenericRowData] ||
-          clazz == classOf[BoxedWrapperRowData] =>
-      val typeTerm = clazz.getCanonicalName
-      ctx.addReusableMember(s"$typeTerm $recordTerm = new $typeTerm(${getFieldCount(t)});")
-      s"$recordTerm = new $typeTerm(${getFieldCount(t)});"
-    case ROW | STRUCTURED_TYPE if clazz == classOf[JoinedRowData] =>
-      val typeTerm = clazz.getCanonicalName
-      ctx.addReusableMember(s"$typeTerm $recordTerm = new $typeTerm();")
-      s"$recordTerm = new $typeTerm();"
     case DISTINCT_TYPE =>
       generateRecordStatement(
         t.asInstanceOf[DistinctType].getSourceType,

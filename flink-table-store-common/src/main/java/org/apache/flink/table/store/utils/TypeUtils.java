@@ -37,6 +37,9 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.flink.table.types.logical.LogicalTypeFamily.BINARY_STRING;
+import static org.apache.flink.table.types.logical.LogicalTypeFamily.CHARACTER_STRING;
+
 /** Type related helper functions. */
 public class TypeUtils {
 
@@ -161,6 +164,45 @@ public class TypeUtils {
                 return true;
             default:
                 return false;
+        }
+    }
+
+    /**
+     * Can the two types operate with each other. Such as: 1.CodeGen: equal, cast, assignment.
+     * 2.Join keys.
+     */
+    public static boolean isInteroperable(LogicalType t1, LogicalType t2) {
+        if (t1.getTypeRoot().getFamilies().contains(CHARACTER_STRING)
+                && t2.getTypeRoot().getFamilies().contains(CHARACTER_STRING)) {
+            return true;
+        }
+        if (t1.getTypeRoot().getFamilies().contains(BINARY_STRING)
+                && t2.getTypeRoot().getFamilies().contains(BINARY_STRING)) {
+            return true;
+        }
+
+        if (t1.getTypeRoot() != t2.getTypeRoot()) {
+            return false;
+        }
+
+        switch (t1.getTypeRoot()) {
+            case ARRAY:
+            case MAP:
+            case MULTISET:
+            case ROW:
+                List<LogicalType> children1 = t1.getChildren();
+                List<LogicalType> children2 = t2.getChildren();
+                if (children1.size() != children2.size()) {
+                    return false;
+                }
+                for (int i = 0; i < children1.size(); i++) {
+                    if (!isInteroperable(children1.get(i), children2.get(i))) {
+                        return false;
+                    }
+                }
+                return true;
+            default:
+                return t1.copy(true).equals(t2.copy(true));
         }
     }
 }
