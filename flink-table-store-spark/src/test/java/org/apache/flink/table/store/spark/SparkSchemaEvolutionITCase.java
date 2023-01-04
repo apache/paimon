@@ -93,6 +93,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                                 + "  `a` INT NOT NULL,\n"
                                 + "  `b` BIGINT,\n"
                                 + "  `c` STRING)\n"
+                                + buildTableProperties("default.db/testAddNotNullColumn")
                                 + "]]");
 
         assertThatThrownBy(
@@ -120,6 +121,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                                 + "  `a` INT NOT NULL,\n"
                                 + "  `b` BIGINT,\n"
                                 + "  `c` STRING)\n"
+                                + buildTableProperties("default.db/testRenameColumn")
                                 + "]]");
         Dataset<Row> table1 = spark.table("tablestore.default.testRenameColumn");
         List<Row> results = table1.select("a", "c").collectAsList();
@@ -135,6 +137,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                                 + "  `aa` INT NOT NULL,\n"
                                 + "  `b` BIGINT,\n"
                                 + "  `c` STRING)\n"
+                                + buildTableProperties("default.db/testRenameColumn")
                                 + "]]");
         Dataset<Row> table2 = spark.table("tablestore.default.testRenameColumn");
         results = table2.select("aa", "c").collectAsList();
@@ -163,7 +166,14 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         "[[CREATE TABLE testRenamePartitionKey (\n"
                                 + "  `a` BIGINT,\n"
                                 + "  `b` STRING)\n"
+                                + "USING tablestore\n"
                                 + "PARTITIONED BY (a)\n"
+                                + "COMMENT 'table comment'\n"
+                                + "TBLPROPERTIES(\n"
+                                + "  'foo' = 'bar',\n"
+                                + String.format(
+                                        "  'path' = '%s/%s')\n",
+                                        warehousePath, "default.db/testRenamePartitionKey")
                                 + "]]");
 
         assertThatThrownBy(
@@ -194,6 +204,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                                 + "  `a` INT NOT NULL,\n"
                                 + "  `b` BIGINT,\n"
                                 + "  `c` STRING)\n"
+                                + buildTableProperties("default.db/testDropSingleColumn")
                                 + "]]");
 
         spark.sql("ALTER TABLE tablestore.default.testDropSingleColumn DROP COLUMN a");
@@ -206,6 +217,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         "[[CREATE TABLE testDropSingleColumn (\n"
                                 + "  `b` BIGINT,\n"
                                 + "  `c` STRING)\n"
+                                + buildTableProperties("default.db/testDropSingleColumn")
                                 + "]]");
 
         Dataset<Row> table = spark.table("tablestore.default.testDropSingleColumn");
@@ -226,6 +238,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                                 + "  `a` INT NOT NULL,\n"
                                 + "  `b` BIGINT,\n"
                                 + "  `c` STRING)\n"
+                                + buildTableProperties("default.db/testDropColumns")
                                 + "]]");
 
         spark.sql("ALTER TABLE tablestore.default.testDropColumns DROP COLUMNS a, b");
@@ -233,7 +246,11 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         List<Row> afterRename =
                 spark.sql("SHOW CREATE TABLE tablestore.default.testDropColumns").collectAsList();
         assertThat(afterRename.toString())
-                .isEqualTo("[[CREATE TABLE testDropColumns (\n" + "  `c` STRING)\n" + "]]");
+                .isEqualTo(
+                        "[[CREATE TABLE testDropColumns (\n"
+                                + "  `c` STRING)\n"
+                                + buildTableProperties("default.db/testDropColumns")
+                                + "]]");
     }
 
     @Test
@@ -255,7 +272,14 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         "[[CREATE TABLE testDropPartitionKey (\n"
                                 + "  `a` BIGINT,\n"
                                 + "  `b` STRING)\n"
+                                + "USING tablestore\n"
                                 + "PARTITIONED BY (a)\n"
+                                + "COMMENT 'table comment'\n"
+                                + "TBLPROPERTIES(\n"
+                                + "  'foo' = 'bar',\n"
+                                + String.format(
+                                        "  'path' = '%s/%s')\n",
+                                        warehousePath, "default.db/testDropPartitionKey")
                                 + "]]");
 
         assertThatThrownBy(
@@ -288,7 +312,13 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         "[[CREATE TABLE testDropPrimaryKey (\n"
                                 + "  `a` BIGINT NOT NULL,\n"
                                 + "  `b` STRING NOT NULL)\n"
+                                + "USING tablestore\n"
                                 + "PARTITIONED BY (a)\n"
+                                + "COMMENT 'table comment'\n"
+                                + "TBLPROPERTIES(\n"
+                                + String.format(
+                                        "  'path' = '%s/%s')\n",
+                                        warehousePath, "default.db/testDropPrimaryKey")
                                 + "]]");
 
         assertThatThrownBy(
@@ -532,5 +562,11 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                                 .collectAsList()
                                 .toString())
                 .isEqualTo("[[15,18,17,16], [19,22,21,20]]");
+    }
+
+    private String buildTableProperties(String tablePath) {
+        return String.format(
+                "TBLPROPERTIES(\n" + "  'file.format' = 'avro',\n" + "  'path' = '%s/%s')\n",
+                warehousePath, tablePath);
     }
 }
