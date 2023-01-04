@@ -31,6 +31,10 @@ under the License.
     <artifactId>flink-table-store-format</artifactId>
     <name>Flink Table Store : Format</name>
 
+    <properties>
+        <parquet.version>1.12.3</parquet.version>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>org.apache.flink</groupId>
@@ -123,6 +127,58 @@ under the License.
             </exclusions>
         </dependency>
 
+        <!-- Parquet Start -->
+
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-avro</artifactId>
+            <version>${parquet.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-hadoop</artifactId>
+            <version>${parquet.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-column</artifactId>
+            <version>${parquet.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-common</artifactId>
+            <version>${parquet.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-encoding</artifactId>
+            <version>${parquet.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-format-structures</artifactId>
+            <version>${parquet.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-jackson</artifactId>
+            <version>${parquet.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>commons-pool</groupId>
+            <artifactId>commons-pool</artifactId>
+            <version>1.6</version>
+        </dependency>
+
+        <!-- Parquet End -->
+
         <!-- test dependencies -->
 
         <dependency>
@@ -151,27 +207,6 @@ under the License.
             <artifactId>flink-csv</artifactId>
             <version>${flink.version}</version>
             <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>${flink.parquet}</artifactId>
-            <version>${flink.version}</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>${flink.sql.parquet}</artifactId>
-            <version>${flink.version}</version>
-            <scope>runtime</scope>
-            <optional>true</optional>
-            <exclusions>
-                <exclusion>
-                    <groupId>*</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
 
         <dependency>
@@ -221,7 +256,17 @@ under the License.
                                 <includes combine.children="append">
                                     <include>org.apache.flink:flink-sql-avro</include>
                                     <include>org.apache.flink:${flink.sql.orc}</include>
-                                    <include>org.apache.flink:${flink.sql.parquet}</include>
+
+                                    <!-- Parquet -->
+                                    <include>org.apache.parquet:parquet-avro</include>
+                                    <include>org.apache.parquet:parquet-hadoop</include>
+                                    <include>org.apache.parquet:parquet-format</include>
+                                    <include>org.apache.parquet:parquet-column</include>
+                                    <include>org.apache.parquet:parquet-common</include>
+                                    <include>org.apache.parquet:parquet-encoding</include>
+                                    <include>org.apache.parquet:parquet-format-structures</include>
+                                    <include>org.apache.parquet:parquet-jackson</include>
+                                    <include>commons-pool:commons-pool</include>
                                 </includes>
                             </artifactSet>
                             <filters>
@@ -238,12 +283,6 @@ under the License.
                                 </filter>
                                 <filter>
                                     <artifact>org.apache.flink:${flink.sql.orc}</artifact>
-                                    <excludes>
-                                        <exclude>META-INF/services/**</exclude>
-                                    </excludes>
-                                </filter>
-                                <filter>
-                                    <artifact>org.apache.flink:${flink.sql.parquet}</artifact>
                                     <excludes>
                                         <exclude>META-INF/services/**</exclude>
                                     </excludes>
@@ -268,10 +307,6 @@ under the License.
                                 <relocation>
                                     <pattern>org.apache.parquet</pattern>
                                     <shadedPattern>org.apache.flink.table.store.shaded.org.apache.parquet</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.apache.flink.formats.parquet</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.flink.formats.parquet</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.apache.flink.orc</pattern>
