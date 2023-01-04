@@ -84,6 +84,31 @@ Use `INSERT OVERWRITE` to overwrite a partition.
 INSERT OVERWRITE MyTable PARTITION (key1 = value1, key2 = value2, ...) SELECT ...
 ```
 
+Particularly, you can use this syntax to delete data of a partition by inserting empty value to the partition:
+```sql
+INSERT OVERWRITE MyTable PARTITION (key1 = value1, key2 = value2, ...) SELECT selectSpec FROM MyTable WHERE false
+```
+
+{{< hint warning >}}
+The `selectSpec` should includes all the columns in the table except the partition columns behind PARTITION. 
+
+The following SQL is an example:
+```sql
+-- table definition
+CREATE TABLE MyTable (
+    k0 INT,
+    k1 INT,
+    v STRING
+) PARTITIONED BY (k0, k1);
+
+-- you can use
+INSERT OVERWRITE MyTable PARTITION (k0 = 0) SELECT k1, v FROM MyTable WHERE false
+
+-- or
+INSERT OVERWRITE MyTable PARTITION (k0 = 0, k1 = 0) SELECT v FROM MyTable WHERE false
+```
+{{< /hint >}}
+
 {{< /tab >}}
 
 {{< /tabs >}}
