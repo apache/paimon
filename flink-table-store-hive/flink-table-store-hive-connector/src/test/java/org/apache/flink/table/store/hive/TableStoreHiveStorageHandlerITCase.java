@@ -98,7 +98,6 @@ public class TableStoreHiveStorageHandlerITCase {
         } else {
             throw new UnsupportedOperationException("Unsupported engine " + engine);
         }
-        hiveShell.execute("SET tablestore.hahaha=you");
         hiveShell.execute("CREATE DATABASE IF NOT EXISTS test_db");
         hiveShell.execute("USE test_db");
 
