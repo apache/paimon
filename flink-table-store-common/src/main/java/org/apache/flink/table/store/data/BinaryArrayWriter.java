@@ -33,7 +33,7 @@ public final class BinaryArrayWriter extends AbstractBinaryWriter {
     private final int nullBitsSizeInBytes;
     private final BinaryArrayData array;
     private final int numElements;
-    private int fixedSize;
+    private final int fixedSize;
 
     public BinaryArrayWriter(BinaryArrayData array, int numElements, int elementSize) {
         this.nullBitsSizeInBytes = BinaryArrayData.calculateHeaderInBytes(numElements);

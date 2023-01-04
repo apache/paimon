@@ -45,7 +45,7 @@ import java.util.stream.IntStream;
 public class RowDataSerializer extends AbstractRowDataSerializer<RowData> {
     private static final long serialVersionUID = 1L;
 
-    private BinaryRowDataSerializer binarySerializer;
+    private final BinaryRowDataSerializer binarySerializer;
     private final LogicalType[] types;
     private final TypeSerializer[] fieldSerializers;
     private final RowData.FieldGetter[] fieldGetters;

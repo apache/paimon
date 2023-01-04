@@ -54,7 +54,7 @@ public final class InternalSerializers {
     /**
      * Creates a {@link TypeSerializer} for internal data structures of the given {@link RowType}.
      */
-    public static <T> RowDataSerializer create(RowType type) {
+    public static RowDataSerializer create(RowType type) {
         return (RowDataSerializer) createInternal(type);
     }
 
