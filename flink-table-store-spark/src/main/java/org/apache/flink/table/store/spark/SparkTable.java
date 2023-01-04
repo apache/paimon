@@ -21,6 +21,7 @@ package org.apache.flink.table.store.spark;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.SupportsPartition;
 import org.apache.flink.table.store.table.Table;
 
@@ -39,8 +40,10 @@ import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -116,6 +119,15 @@ public class SparkTable
 
         String commitUser = UUID.randomUUID().toString();
         castToWritable(table).deleteWhere(commitUser, predicates, lockFactory);
+    }
+
+    @Override
+    public Map<String, String> properties() {
+        if (table instanceof DataTable) {
+            return ((DataTable) table).options().toMap();
+        } else {
+            return Collections.emptyMap();
+        }
     }
 
     private static org.apache.flink.table.store.table.SupportsWrite castToWritable(Table table) {
