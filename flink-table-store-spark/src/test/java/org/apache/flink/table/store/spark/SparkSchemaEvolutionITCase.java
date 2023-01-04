@@ -661,4 +661,10 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                 "TBLPROPERTIES(\n" + "  'file.format' = 'avro',\n" + "  'path' = '%s/%s')\n",
                 warehousePath, tablePath);
     }
+
+    private String buildTableProperties(String tablePath) {
+        return String.format(
+                "TBLPROPERTIES(\n" + "  'file.format' = 'avro',\n" + "  'path' = '%s/%s')\n",
+                warehousePath, tablePath);
+    }
 }
