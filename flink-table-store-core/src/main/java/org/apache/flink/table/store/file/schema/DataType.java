@@ -53,6 +53,29 @@ public abstract class DataType implements Serializable {
      */
     public abstract DataType copy(boolean isNullable);
 
+    /**
+     * Compare two data types without nullable.
+     *
+     * @param o the target data type
+     */
+    public boolean equalsIgnoreNullable(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        DataType dataType = (DataType) o;
+        if (logicalType == dataType.logicalType) {
+            return true;
+        }
+        if (logicalType == null || logicalType.getClass() != dataType.logicalType.getClass()) {
+            return false;
+        }
+        return logicalType.getTypeRoot() == dataType.logicalType.getTypeRoot();
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {

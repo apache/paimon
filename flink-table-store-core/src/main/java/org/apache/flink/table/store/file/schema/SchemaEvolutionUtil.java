@@ -328,6 +328,7 @@ public class SchemaEvolutionUtil {
      * @param indexMapping the index mapping from table fields to data fields
      * @return the index mapping
      */
+    @Nullable
     public static CastExecutor<?, ?>[] createConvertMapping(
             List<DataField> tableFields, List<DataField> dataFields, int[] indexMapping) {
         CastExecutor<?, ?>[] converterMapping = new CastExecutor<?, ?>[tableFields.size()];
@@ -335,12 +336,12 @@ public class SchemaEvolutionUtil {
         for (int i = 0; i < tableFields.size(); i++) {
             int dataIndex = indexMapping == null ? i : indexMapping[i];
             if (dataIndex < 0) {
-                converterMapping[i] = null;
+                converterMapping[i] = CastExecutors.identityCastExecutor();
             } else {
                 DataField tableField = tableFields.get(i);
                 DataField dataField = dataFields.get(dataIndex);
-                if (dataField.type().equals(tableField.type())) {
-                    converterMapping[i] = null;
+                if (dataField.type().equalsIgnoreNullable(tableField.type())) {
+                    converterMapping[i] = CastExecutors.identityCastExecutor();
                 } else {
                     // TODO support column type evolution in nested type
                     checkState(

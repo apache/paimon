@@ -45,6 +45,7 @@ import static org.apache.flink.table.types.logical.LogicalTypeRoot.VARCHAR;
 
 /** Cast executors for input type and output type. */
 public class CastExecutors {
+    private static final CastExecutor<?, ?> IDENTITY_CAST_EXECUTOR = value -> value;
 
     /**
      * Resolve a {@link CastExecutor} for the provided input type and target type. Returns null if
@@ -177,11 +178,27 @@ public class CastExecutors {
                 return null;
             case BINARY:
                 if (outputType.getTypeRoot() == BINARY || outputType.getTypeRoot() == VARBINARY) {
+                    boolean targetBinaryType = outputType.getTypeRoot() == BINARY;
                     final int targetLength = getBinaryLength(outputType);
-                    return value ->
-                            ((((byte[]) value).length == targetLength)
-                                    ? value
-                                    : Arrays.copyOf((byte[]) value, targetLength));
+                    return value -> {
+                        byte[] bytes = (byte[]) value;
+                        if (((byte[]) value).length == targetLength) {
+                            return value;
+                        }
+                        if (targetBinaryType) {
+                            if (bytes.length == targetLength) {
+                                return bytes;
+                            } else {
+                                return Arrays.copyOf(bytes, targetLength);
+                            }
+                        } else {
+                            if (bytes.length <= targetLength) {
+                                return bytes;
+                            } else {
+                                return Arrays.copyOf(bytes, targetLength);
+                            }
+                        }
+                    };
                 }
                 return null;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
@@ -223,6 +240,10 @@ public class CastExecutors {
             default:
                 return null;
         }
+    }
+
+    public static CastExecutor<?, ?> identityCastExecutor() {
+        return IDENTITY_CAST_EXECUTOR;
     }
 
     private static int getStringLength(LogicalType logicalType) {
