@@ -148,6 +148,24 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
+    public void testShowTableProperties() {
+        spark.sql("USE tablestore");
+        spark.sql(
+                "CREATE TABLE default.tbl (\n"
+                        + "a INT\n"
+                        + ") TBLPROPERTIES (\n"
+                        + "'k1' = 'v1',\n"
+                        + "'k2' = 'v2'"
+                        + ")");
+
+        assertThat(
+                        spark.sql("SHOW TBLPROPERTIES default.tbl").collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .contains("[k1,v1]", "[k2,v2]");
+    }
+
+    @Test
     public void testCreateTableWithInvalidPk() {
         spark.sql("USE tablestore");
         assertThatThrownBy(
