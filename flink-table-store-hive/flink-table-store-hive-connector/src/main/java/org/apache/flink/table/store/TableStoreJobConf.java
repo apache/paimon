@@ -18,9 +18,13 @@
 
 package org.apache.flink.table.store;
 
+import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
+
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.mapred.JobConf;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 
@@ -31,6 +35,9 @@ import java.util.Properties;
 public class TableStoreJobConf {
 
     private static final String INTERNAL_LOCATION = "table-store.internal.location";
+    private static final String INTERNAL_CATALOG_CONFIG = "table-store.catalog.config";
+
+    private static final String TABLE_STORE_PREFIX = "tablestore.";
 
     private final JobConf jobConf;
 
@@ -38,7 +45,11 @@ public class TableStoreJobConf {
         this.jobConf = jobConf;
     }
 
-    public static void configureInputJobProperties(Properties properties, Map<String, String> map) {
+    public static void configureInputJobProperties(
+            Configuration configuration, Properties properties, Map<String, String> map) {
+        map.put(
+                INTERNAL_CATALOG_CONFIG,
+                JsonSerdeUtil.toJson(extractCatalogConfig(configuration).toMap()));
         map.put(
                 INTERNAL_LOCATION,
                 properties.getProperty(hive_metastoreConstants.META_TABLE_LOCATION));
@@ -46,5 +57,26 @@ public class TableStoreJobConf {
 
     public String getLocation() {
         return jobConf.get(INTERNAL_LOCATION);
+    }
+
+    @SuppressWarnings("unchecked")
+    public org.apache.flink.configuration.Configuration getCatalogConfig() {
+        return org.apache.flink.configuration.Configuration.fromMap(
+                JsonSerdeUtil.fromJson(jobConf.get(INTERNAL_CATALOG_CONFIG), Map.class));
+    }
+
+    /** Extract table store catalog conf from Hive conf. */
+    public static org.apache.flink.configuration.Configuration extractCatalogConfig(
+            Configuration hiveConf) {
+        Map<String, String> configMap = new HashMap<>();
+        for (Map.Entry<String, String> entry : hiveConf) {
+            String name = entry.getKey();
+            if (name.startsWith(TABLE_STORE_PREFIX)) {
+                String value = hiveConf.get(name);
+                name = name.substring(TABLE_STORE_PREFIX.length());
+                configMap.put(name, value);
+            }
+        }
+        return org.apache.flink.configuration.Configuration.fromMap(configMap);
     }
 }
