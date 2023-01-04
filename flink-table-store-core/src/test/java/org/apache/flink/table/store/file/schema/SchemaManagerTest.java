@@ -110,14 +110,18 @@ public class SchemaManagerTest {
 
         assertThatThrownBy(
                         () ->
-                                manager.commitNewVersion(
-                                        new UpdateSchema(
-                                                rowType,
-                                                partitionKeys,
-                                                primaryKeys,
-                                                Collections.singletonMap(
-                                                        CoreOptions.SEQUENCE_FIELD.key(), "f4"),
-                                                "")))
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitNewVersion(
+                                                        new UpdateSchema(
+                                                                rowType,
+                                                                partitionKeys,
+                                                                primaryKeys,
+                                                                Collections.singletonMap(
+                                                                        CoreOptions.SEQUENCE_FIELD
+                                                                                .key(),
+                                                                        "f4"),
+                                                                ""))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Nonexistent sequence field: 'f4'");
     }
