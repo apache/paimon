@@ -384,7 +384,22 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
     }
 
     @Test
-    public void testDeletePartitionDataUsingBatchOverWrite() throws Exception {
+    public void testPurgeTableUsingBatchOverWrite() throws Exception {
+        TableEnvironment tEnv =
+                TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
+        tEnv.executeSql(
+                String.format(
+                        "CREATE CATALOG test_catalog WITH ("
+                                + "'type'='table-store', 'warehouse'='%s')",
+                        TEMPORARY_FOLDER.newFolder().toURI()));
+        tEnv.useCatalog("test_catalog");
+        tEnv.executeSql("CREATE TABLE test (k1 INT, k2 STRING, v STRING)");
+
+        validateOverwriteResult(tEnv, "test", "", "*", Collections.emptyList());
+    }
+
+    @Test
+    public void testPurgePartitionUsingBatchOverWrite() throws Exception {
         TableEnvironment tEnv =
                 TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
         tEnv.executeSql(
@@ -398,10 +413,10 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
         tEnv.executeSql(
                 "CREATE TABLE test_single (k1 INT, k2 STRING, v STRING) PARTITIONED BY (k1)");
 
-        validateOverwritePartitionResult(
+        validateOverwriteResult(
                 tEnv,
                 "test_single",
-                "k1 = 0",
+                "PARTITION (k1 = 0)",
                 "k2, v",
                 Arrays.asList(
                         changelogRow("+I", 1, "2023-01-01", "flink"),
@@ -412,10 +427,10 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
         tEnv.executeSql(
                 "CREATE TABLE test_multiple0 (k1 INT, k2 STRING, v STRING) PARTITIONED BY (k1, k2)");
 
-        validateOverwritePartitionResult(
+        validateOverwriteResult(
                 tEnv,
                 "test_multiple0",
-                "k1 = 0",
+                "PARTITION (k1 = 0)",
                 "k2, v",
                 Arrays.asList(
                         changelogRow("+I", 1, "2023-01-01", "flink"),
@@ -426,10 +441,10 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
         tEnv.executeSql(
                 "CREATE TABLE test_multiple1 (k1 INT, k2 STRING, v STRING) PARTITIONED BY (k1, k2)");
 
-        validateOverwritePartitionResult(
+        validateOverwriteResult(
                 tEnv,
                 "test_multiple1",
-                "k1 = 0, k2 = '2023-01-01'",
+                "PARTITION (k1 = 0, k2 = '2023-01-01')",
                 "v",
                 Arrays.asList(
                         changelogRow("+I", 0, "2023-01-02", "world"),
@@ -1564,7 +1579,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
 
     // ------------------------ Tools ----------------------------------
 
-    private void validateOverwritePartitionResult(
+    private void validateOverwriteResult(
             TableEnvironment tEnv,
             String table,
             String partitionSpec,
@@ -1595,7 +1610,7 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
 
         tEnv.executeSql(
                         String.format(
-                                "INSERT OVERWRITE %s PARTITION (%s) SELECT %s FROM %s WHERE false",
+                                "INSERT OVERWRITE %s %s SELECT %s FROM %s WHERE false",
                                 table, partitionSpec, selectSpec, table))
                 .await();
 
