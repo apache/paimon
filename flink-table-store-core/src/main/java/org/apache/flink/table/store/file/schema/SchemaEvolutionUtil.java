@@ -20,6 +20,8 @@ package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.casting.CastExecutor;
+import org.apache.flink.table.store.file.casting.CastExecutors;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateReplaceVisitor;
@@ -37,6 +39,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.util.Preconditions.checkState;
 
 /** Utils for schema evolution. */
 public class SchemaEvolutionUtil {
@@ -303,5 +306,58 @@ public class SchemaEvolutionUtil {
 
         throw new IllegalArgumentException(
                 String.format("Can't find data field %s", dataField.name()));
+    }
+
+    /**
+     * Create converter mapping from table fields to underlying data fields. For example, the table
+     * and data fields are as follows
+     *
+     * <ul>
+     *   <li>table fields: 1->c INT, 6->b STRING, 3->a BIGINT
+     *   <li>data fields: 1->a BIGINT, 3->c DOUBLE
+     * </ul>
+     *
+     * <p>We can get the column types (1->a BIGINT), (3->c DOUBLE) from data fields for (1->c INT)
+     * and (3->a BIGINT) in table fields through index mapping [0, -1, 1], then compare the data
+     * type and create converter mapping.
+     *
+     * <p>/// TODO should support nest index mapping when nest schema evolution is supported.
+     *
+     * @param tableFields the fields of table
+     * @param dataFields the fields of underlying data
+     * @param indexMapping the index mapping from table fields to data fields
+     * @return the index mapping
+     */
+    @Nullable
+    public static CastExecutor<?, ?>[] createConvertMapping(
+            List<DataField> tableFields, List<DataField> dataFields, int[] indexMapping) {
+        CastExecutor<?, ?>[] converterMapping = new CastExecutor<?, ?>[tableFields.size()];
+        boolean castExist = false;
+        for (int i = 0; i < tableFields.size(); i++) {
+            int dataIndex = indexMapping == null ? i : indexMapping[i];
+            if (dataIndex < 0) {
+                converterMapping[i] = CastExecutors.identityCastExecutor();
+            } else {
+                DataField tableField = tableFields.get(i);
+                DataField dataField = dataFields.get(dataIndex);
+                if (dataField.type().equalsIgnoreNullable(tableField.type())) {
+                    converterMapping[i] = CastExecutors.identityCastExecutor();
+                } else {
+                    // TODO support column type evolution in nested type
+                    checkState(
+                            tableField.type() instanceof AtomicDataType
+                                    && dataField.type() instanceof AtomicDataType,
+                            "Only support column type evolution in atomic data type.");
+                    converterMapping[i] =
+                            checkNotNull(
+                                    CastExecutors.resolve(
+                                            dataField.type().logicalType(),
+                                            tableField.type().logicalType()));
+                    castExist = true;
+                }
+            }
+        }
+
+        return castExist ? converterMapping : null;
     }
 }

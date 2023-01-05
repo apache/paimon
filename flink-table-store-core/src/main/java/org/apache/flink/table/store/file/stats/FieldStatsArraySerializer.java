@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.stats;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
+import org.apache.flink.table.store.file.casting.CastExecutor;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.utils.RowDataUtils;
 import org.apache.flink.table.types.logical.ArrayType;
@@ -44,12 +45,14 @@ public class FieldStatsArraySerializer {
     private final RowData.FieldGetter[] fieldGetters;
 
     @Nullable private final int[] indexMapping;
+    @Nullable private final CastExecutor<Object, Object>[] converterMapping;
 
     public FieldStatsArraySerializer(RowType type) {
-        this(type, null);
+        this(type, null, null);
     }
 
-    public FieldStatsArraySerializer(RowType type, int[] indexMapping) {
+    public FieldStatsArraySerializer(
+            RowType type, int[] indexMapping, CastExecutor<Object, Object>[] converterMapping) {
         RowType safeType = toAllFieldsNullableRowType(type);
         this.serializer = new RowDataSerializer(safeType);
         this.fieldGetters =
@@ -60,6 +63,7 @@ public class FieldStatsArraySerializer {
                                                 safeType.getTypeAt(i), i))
                         .toArray(RowData.FieldGetter[]::new);
         this.indexMapping = indexMapping;
+        this.converterMapping = converterMapping;
     }
 
     public BinaryTableStats toBinary(FieldStats[] stats) {
@@ -95,11 +99,15 @@ public class FieldStatsArraySerializer {
                 }
                 stats[i] = new FieldStats(null, null, rowCount);
             } else {
-                stats[i] =
-                        new FieldStats(
-                                fieldGetters[fieldIndex].getFieldOrNull(array.min()),
-                                fieldGetters[fieldIndex].getFieldOrNull(array.max()),
-                                array.nullCounts()[fieldIndex]);
+                CastExecutor<Object, Object> converter =
+                        converterMapping == null ? null : converterMapping[i];
+                Object min = fieldGetters[fieldIndex].getFieldOrNull(array.min());
+                min = converter == null || min == null ? min : converter.cast(min);
+
+                Object max = fieldGetters[fieldIndex].getFieldOrNull(array.max());
+                max = converter == null || max == null ? max : converter.cast(max);
+
+                stats[i] = new FieldStats(min, max, array.nullCounts()[fieldIndex]);
             }
         }
         return stats;

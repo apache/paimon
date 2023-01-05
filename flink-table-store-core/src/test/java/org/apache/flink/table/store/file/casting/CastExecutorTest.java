@@ -223,6 +223,18 @@ public class CastExecutorTest {
                 CastExecutors.resolve(new BinaryType(10), new BinaryType(20)),
                 "12345678".getBytes(),
                 new byte[] {49, 50, 51, 52, 53, 54, 55, 56, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+
+        // binary(10) to varbinary(5)
+        compareCastResult(
+                CastExecutors.resolve(new BinaryType(10), new VarBinaryType(5)),
+                "1234567890".getBytes(),
+                "12345".getBytes());
+
+        // binary(10) to varbinary(20)
+        compareCastResult(
+                CastExecutors.resolve(new BinaryType(10), new VarBinaryType(20)),
+                "12345678".getBytes(),
+                "12345678".getBytes());
     }
 
     @Test
