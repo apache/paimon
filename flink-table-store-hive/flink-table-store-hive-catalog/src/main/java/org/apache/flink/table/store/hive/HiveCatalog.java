@@ -284,11 +284,13 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private void checkFieldNamesUpperCase(List<String> fieldNames) {
-        for (String fieldName : fieldNames) {
-            checkState(
-                    fieldName.equals(fieldName.toLowerCase()),
-                    String.format("Field name[%s] cannot contain upper case", fieldName));
-        }
+        List<String> illegalFieldNames =
+                fieldNames.stream()
+                        .filter(f -> !f.equals(f.toLowerCase()))
+                        .collect(Collectors.toList());
+        checkState(
+                illegalFieldNames.isEmpty(),
+                String.format("Field names %s cannot contain upper case", illegalFieldNames));
     }
 
     private Database convertToDatabase(String name) {

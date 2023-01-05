@@ -331,10 +331,10 @@ public class HiveCatalogITCase {
         assertThatThrownBy(
                         () ->
                                 tEnv.executeSql(
-                                                "CREATE TABLE t (A INT, b STRING) WITH ( 'file.format' = 'avro')")
+                                                "CREATE TABLE t (A INT, b STRING, C STRING) WITH ( 'file.format' = 'avro')")
                                         .await())
                 .hasRootCauseMessage(
-                        String.format("Field name[%s] cannot contain upper case", "A"));
+                        String.format("Field names %s cannot contain upper case", "[A, C]"));
     }
 
     private List<Row> collect(String sql) throws Exception {
