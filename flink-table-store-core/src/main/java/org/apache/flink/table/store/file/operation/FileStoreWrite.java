@@ -21,9 +21,12 @@ package org.apache.flink.table.store.file.operation;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileStore;
+import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.SinkRecord;
+
+import javax.annotation.Nullable;
 
 import java.util.List;
 
@@ -61,9 +64,15 @@ public interface FileStoreWrite<T> {
      * @param partition the partition to compact
      * @param bucket the bucket to compact
      * @param fullCompaction whether to trigger full compaction or just normal compaction
+     * @param extraCompactFiles extra level 0 files added to the writer before compaction
      * @throws Exception the thrown exception when compacting the records
      */
-    void compact(BinaryRowData partition, int bucket, boolean fullCompaction) throws Exception;
+    void compact(
+            BinaryRowData partition,
+            int bucket,
+            boolean fullCompaction,
+            @Nullable ExtraCompactFiles extraCompactFiles)
+            throws Exception;
 
     /**
      * Prepare commit in the write.
@@ -81,4 +90,23 @@ public interface FileStoreWrite<T> {
      * @throws Exception the thrown exception
      */
     void close() throws Exception;
+
+    /** Extra files added to the writer before compaction. */
+    class ExtraCompactFiles {
+        private final long snapshotId;
+        private final List<DataFileMeta> files;
+
+        public ExtraCompactFiles(long snapshotId, List<DataFileMeta> files) {
+            this.snapshotId = snapshotId;
+            this.files = files;
+        }
+
+        public long snapshotId() {
+            return snapshotId;
+        }
+
+        public List<DataFileMeta> files() {
+            return files;
+        }
+    }
 }

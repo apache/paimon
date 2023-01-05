@@ -21,6 +21,9 @@ package org.apache.flink.table.store.table.sink;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.operation.FileStoreWrite;
+
+import javax.annotation.Nullable;
 
 import java.util.List;
 
@@ -39,7 +42,17 @@ public interface TableWrite extends AutoCloseable {
     /** Log record need to preserve original pk (which includes partition fields). */
     SinkRecord toLogRecord(SinkRecord record);
 
-    void compact(BinaryRowData partition, int bucket, boolean fullCompaction) throws Exception;
+    default void compact(BinaryRowData partition, int bucket, boolean fullCompaction)
+            throws Exception {
+        compact(partition, bucket, fullCompaction, null);
+    }
+
+    void compact(
+            BinaryRowData partition,
+            int bucket,
+            boolean fullCompaction,
+            @Nullable FileStoreWrite.ExtraCompactFiles extraCompactFiles)
+            throws Exception;
 
     List<FileCommittable> prepareCommit(boolean blocking, long commitIdentifier) throws Exception;
 

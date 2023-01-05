@@ -54,12 +54,12 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private static final Logger LOG = LoggerFactory.getLogger(AbstractFileStoreWrite.class);
 
     private final String commitUser;
-    private final SnapshotManager snapshotManager;
+    protected final SnapshotManager snapshotManager;
     private final FileStoreScan scan;
 
     @Nullable protected IOManager ioManager;
 
-    protected final Map<BinaryRowData, Map<Integer, WriterWithCommit<T>>> writers;
+    protected final Map<BinaryRowData, Map<Integer, WriterWrapper<T>>> writers;
     private final ExecutorService compactExecutor;
 
     private boolean overwrite = false;
@@ -83,14 +83,13 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         return this;
     }
 
-    protected List<DataFileMeta> scanExistingFileMetas(BinaryRowData partition, int bucket) {
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+    protected List<DataFileMeta> scanExistingFileMetas(
+            Long snapshotId, BinaryRowData partition, int bucket) {
         List<DataFileMeta> existingFileMetas = new ArrayList<>();
-        if (latestSnapshotId != null) {
+        if (snapshotId != null) {
             // Concat all the DataFileMeta of existing files into existingFileMetas.
-            scan.withSnapshot(latestSnapshotId)
-                    .withPartitionFilter(Collections.singletonList(partition)).withBucket(bucket)
-                    .plan().files().stream()
+            scan.withSnapshot(snapshotId).withPartitionFilter(Collections.singletonList(partition))
+                    .withBucket(bucket).plan().files().stream()
                     .map(ManifestEntry::file)
                     .forEach(existingFileMetas::add);
         }
@@ -103,14 +102,32 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Override
     public void write(BinaryRowData partition, int bucket, T data) throws Exception {
-        RecordWriter<T> writer = getWriter(partition, bucket);
+        RecordWriter<T> writer = getWriterWrapper(partition, bucket).writer;
         writer.write(data);
     }
 
     @Override
-    public void compact(BinaryRowData partition, int bucket, boolean fullCompaction)
+    public void compact(
+            BinaryRowData partition,
+            int bucket,
+            boolean fullCompaction,
+            @Nullable ExtraCompactFiles extraCompactFiles)
             throws Exception {
-        getWriter(partition, bucket).compact(fullCompaction);
+        WriterWrapper<T> writerWrapper = getWriterWrapper(partition, bucket);
+        if (extraCompactFiles != null && LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Get extra compact files {}\nExtra snapshot {}, base snapshot {}",
+                    extraCompactFiles.files(),
+                    extraCompactFiles.snapshotId(),
+                    writerWrapper.baseSnapshotId);
+        }
+
+        List<DataFileMeta> extraFiles = Collections.emptyList();
+        if (extraCompactFiles != null
+                && extraCompactFiles.snapshotId() > writerWrapper.baseSnapshotId) {
+            extraFiles = extraCompactFiles.files();
+        }
+        writerWrapper.writer.compact(fullCompaction, extraFiles);
     }
 
     @Override
@@ -142,20 +159,20 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
         List<FileCommittable> result = new ArrayList<>();
 
-        Iterator<Map.Entry<BinaryRowData, Map<Integer, WriterWithCommit<T>>>> partIter =
+        Iterator<Map.Entry<BinaryRowData, Map<Integer, WriterWrapper<T>>>> partIter =
                 writers.entrySet().iterator();
         while (partIter.hasNext()) {
-            Map.Entry<BinaryRowData, Map<Integer, WriterWithCommit<T>>> partEntry = partIter.next();
+            Map.Entry<BinaryRowData, Map<Integer, WriterWrapper<T>>> partEntry = partIter.next();
             BinaryRowData partition = partEntry.getKey();
-            Iterator<Map.Entry<Integer, WriterWithCommit<T>>> bucketIter =
+            Iterator<Map.Entry<Integer, WriterWrapper<T>>> bucketIter =
                     partEntry.getValue().entrySet().iterator();
             while (bucketIter.hasNext()) {
-                Map.Entry<Integer, WriterWithCommit<T>> entry = bucketIter.next();
+                Map.Entry<Integer, WriterWrapper<T>> entry = bucketIter.next();
                 int bucket = entry.getKey();
-                WriterWithCommit<T> writerWithCommit = entry.getValue();
+                WriterWrapper<T> writerWrapper = entry.getValue();
 
                 RecordWriter.CommitIncrement increment =
-                        writerWithCommit.writer.prepareCommit(blocking);
+                        writerWrapper.writer.prepareCommit(blocking);
                 FileCommittable committable =
                         new FileCommittable(
                                 partition,
@@ -165,8 +182,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 result.add(committable);
 
                 if (committable.isEmpty()) {
-                    if (writerWithCommit.lastModifiedCommitIdentifier
-                            <= latestCommittedIdentifier) {
+                    if (writerWrapper.lastModifiedCommitIdentifier <= latestCommittedIdentifier) {
                         // Clear writer if no update, and if its latest modification has committed.
                         //
                         // We need a mechanism to clear writers, otherwise there will be more and
@@ -178,14 +194,14 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                             + "while latest committed identifier is {}",
                                     partition,
                                     bucket,
-                                    writerWithCommit.lastModifiedCommitIdentifier,
+                                    writerWrapper.lastModifiedCommitIdentifier,
                                     latestCommittedIdentifier);
                         }
-                        writerWithCommit.writer.close();
+                        writerWrapper.writer.close();
                         bucketIter.remove();
                     }
                 } else {
-                    writerWithCommit.lastModifiedCommitIdentifier = commitIdentifier;
+                    writerWrapper.lastModifiedCommitIdentifier = commitIdentifier;
                 }
             }
 
@@ -199,56 +215,63 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Override
     public void close() throws Exception {
-        for (Map<Integer, WriterWithCommit<T>> bucketWriters : writers.values()) {
-            for (WriterWithCommit<T> writerWithCommit : bucketWriters.values()) {
-                writerWithCommit.writer.close();
+        for (Map<Integer, WriterWrapper<T>> bucketWriters : writers.values()) {
+            for (WriterWrapper<T> writerWrapper : bucketWriters.values()) {
+                writerWrapper.writer.close();
             }
         }
         writers.clear();
         compactExecutor.shutdownNow();
     }
 
-    private RecordWriter<T> getWriter(BinaryRowData partition, int bucket) {
-        Map<Integer, WriterWithCommit<T>> buckets = writers.get(partition);
+    private WriterWrapper<T> getWriterWrapper(BinaryRowData partition, int bucket) {
+        Map<Integer, WriterWrapper<T>> buckets = writers.get(partition);
         if (buckets == null) {
             buckets = new HashMap<>();
             writers.put(partition.copy(), buckets);
         }
-        return buckets.computeIfAbsent(bucket, k -> createWriter(partition.copy(), bucket)).writer;
+        return buckets.computeIfAbsent(bucket, k -> createWriterWrapper(partition.copy(), bucket));
     }
 
-    private WriterWithCommit<T> createWriter(BinaryRowData partition, int bucket) {
+    private WriterWrapper<T> createWriterWrapper(BinaryRowData partition, int bucket) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("Creating writer for partition {}, bucket {}", partition, bucket);
         }
-        RecordWriter<T> writer =
+        WriterWrapper<T> writerWrapper =
                 overwrite
-                        ? createEmptyWriter(partition.copy(), bucket, compactExecutor)
-                        : createWriter(partition.copy(), bucket, compactExecutor);
-        notifyNewWriter(writer);
-        return new WriterWithCommit<>(writer);
+                        ? createEmptyWriterWrapper(partition.copy(), bucket, compactExecutor)
+                        : createWriterWrapper(partition.copy(), bucket, compactExecutor);
+        notifyNewWriter(writerWrapper.writer);
+        return writerWrapper;
     }
 
     protected void notifyNewWriter(RecordWriter<T> writer) {}
 
     /** Create a {@link RecordWriter} from partition and bucket. */
     @VisibleForTesting
-    public abstract RecordWriter<T> createWriter(
+    public abstract WriterWrapper<T> createWriterWrapper(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor);
 
     /** Create an empty {@link RecordWriter} from partition and bucket. */
     @VisibleForTesting
-    public abstract RecordWriter<T> createEmptyWriter(
+    public abstract WriterWrapper<T> createEmptyWriterWrapper(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor);
 
-    /** {@link RecordWriter} with identifier of its last modified commit. */
-    protected static class WriterWithCommit<T> {
+    /**
+     * {@link RecordWriter} with the snapshot id it is created upon and the identifier of its last
+     * modified commit.
+     */
+    @VisibleForTesting
+    public static class WriterWrapper<T> {
 
-        protected final RecordWriter<T> writer;
+        public final RecordWriter<T> writer;
+        private final long baseSnapshotId;
         private long lastModifiedCommitIdentifier;
 
-        private WriterWithCommit(RecordWriter<T> writer) {
+        protected WriterWrapper(RecordWriter<T> writer, Long baseSnapshotId) {
             this.writer = writer;
+            this.baseSnapshotId =
+                    baseSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : baseSnapshotId;
             this.lastModifiedCommitIdentifier = Long.MIN_VALUE;
         }
     }

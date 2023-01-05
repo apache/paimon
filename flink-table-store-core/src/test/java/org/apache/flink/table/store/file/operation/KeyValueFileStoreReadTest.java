@@ -223,9 +223,9 @@ public class KeyValueFileStoreReadTest {
             throws Exception {
         store.commitData(data, partitionCalculator, kv -> 0);
         FileStoreScan scan = store.newScan();
+        Long snapshotId = store.snapshotManager().latestSnapshotId();
         Map<BinaryRowData, List<ManifestEntry>> filesGroupedByPartition =
-                scan.withSnapshot(store.snapshotManager().latestSnapshotId()).plan().files()
-                        .stream()
+                scan.withSnapshot(snapshotId).plan().files().stream()
                         .collect(Collectors.groupingBy(ManifestEntry::partition));
         KeyValueFileStoreRead read = store.newRead();
         if (keyProjection != null) {
@@ -241,6 +241,7 @@ public class KeyValueFileStoreReadTest {
             RecordReader<KeyValue> reader =
                     read.createReader(
                             new DataSplit(
+                                    snapshotId,
                                     entry.getKey(),
                                     0,
                                     entry.getValue().stream()

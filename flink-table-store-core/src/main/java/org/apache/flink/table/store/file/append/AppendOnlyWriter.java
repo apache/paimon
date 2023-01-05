@@ -94,7 +94,8 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     }
 
     @Override
-    public void compact(boolean fullCompaction) throws Exception {
+    public void compact(boolean fullCompaction, List<DataFileMeta> extraFiles) throws Exception {
+        extraFiles.forEach(compactManager::addNewFile);
         flushWriter(true, fullCompaction);
     }
 

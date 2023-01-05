@@ -21,6 +21,7 @@ package org.apache.flink.table.store.table.source;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.FileKind;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
@@ -115,18 +116,20 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     @Override
     public DataFilePlan plan() {
         FileStoreScan.Plan plan = scan.plan();
-        return new DataFilePlan(
-                plan.snapshotId(), generateSplits(plan.groupByPartFiles(plan.files(FileKind.ADD))));
-    }
+        Long snapshotId = plan.snapshotId();
 
-    private List<DataSplit> generateSplits(
-            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
-        return generateSplits(
-                scanKind != ScanKind.ALL, splitGenerator(pathFactory), groupedDataFiles);
+        List<DataSplit> splits =
+                generateSplits(
+                        snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
+                        scanKind != ScanKind.ALL,
+                        splitGenerator(pathFactory),
+                        plan.groupByPartFiles(plan.files(FileKind.ADD)));
+        return new DataFilePlan(snapshotId, splits);
     }
 
     @VisibleForTesting
     public static List<DataSplit> generateSplits(
+            long snapshotId,
             boolean isIncremental,
             SplitGenerator splitGenerator,
             Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
@@ -139,10 +142,15 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                 int bucket = bucketEntry.getKey();
                 if (isIncremental) {
                     // Don't split when incremental
-                    splits.add(new DataSplit(partition, bucket, bucketEntry.getValue(), true));
+                    splits.add(
+                            new DataSplit(
+                                    snapshotId, partition, bucket, bucketEntry.getValue(), true));
                 } else {
                     splitGenerator.split(bucketEntry.getValue()).stream()
-                            .map(files -> new DataSplit(partition, bucket, files, false))
+                            .map(
+                                    files ->
+                                            new DataSplit(
+                                                    snapshotId, partition, bucket, files, false))
                             .forEach(splits::add);
                 }
             }

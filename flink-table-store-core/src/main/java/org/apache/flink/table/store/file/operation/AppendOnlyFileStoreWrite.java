@@ -81,19 +81,28 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
     }
 
     @Override
-    public RecordWriter<RowData> createWriter(
+    public WriterWrapper<RowData> createWriterWrapper(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
-        return createWriter(
-                partition, bucket, scanExistingFileMetas(partition, bucket), compactExecutor);
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        RecordWriter<RowData> writer =
+                createWriterWrapper(
+                        partition,
+                        bucket,
+                        scanExistingFileMetas(latestSnapshotId, partition, bucket),
+                        compactExecutor);
+        return new WriterWrapper<>(writer, latestSnapshotId);
     }
 
     @Override
-    public RecordWriter<RowData> createEmptyWriter(
+    public WriterWrapper<RowData> createEmptyWriterWrapper(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
-        return createWriter(partition, bucket, Collections.emptyList(), compactExecutor);
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        RecordWriter<RowData> writer =
+                createWriterWrapper(partition, bucket, Collections.emptyList(), compactExecutor);
+        return new WriterWrapper<>(writer, latestSnapshotId);
     }
 
-    private RecordWriter<RowData> createWriter(
+    private RecordWriter<RowData> createWriterWrapper(
             BinaryRowData partition,
             int bucket,
             List<DataFileMeta> restoredFiles,
@@ -140,7 +149,13 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
                             new LongCounter(toCompact.get(0).minSequenceNumber()));
             rewriter.write(
                     new RecordReaderIterator<>(
-                            read.createReader(new DataSplit(partition, bucket, toCompact, false))));
+                            read.createReader(
+                                    new DataSplit(
+                                            0L /* unused */,
+                                            partition,
+                                            bucket,
+                                            toCompact,
+                                            false))));
             rewriter.close();
             return rewriter.result();
         };

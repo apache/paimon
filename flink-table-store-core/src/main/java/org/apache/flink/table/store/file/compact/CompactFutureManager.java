@@ -51,9 +51,11 @@ public abstract class CompactFutureManager implements CompactManager {
                     result = taskFuture.get();
                 } catch (CancellationException e) {
                     LOG.info("Compaction future is cancelled", e);
+                    LOG.debug("OK task future " + taskFuture + " cancelled");
                     taskFuture = null;
                     return Optional.empty();
                 }
+                LOG.debug("OK task future " + taskFuture + " completed");
                 taskFuture = null;
                 return Optional.of(result);
             }

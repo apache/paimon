@@ -23,6 +23,8 @@ import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.SinkRecord;
@@ -82,6 +84,21 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     public void compact(BinaryRowData partition, int bucket, boolean fullCompaction)
             throws Exception {
         write.compact(partition, bucket, fullCompaction);
+    }
+
+    @Override
+    public void compact(
+            long snapshotId,
+            BinaryRowData partition,
+            int bucket,
+            boolean fullCompaction,
+            List<DataFileMeta> extraFiles)
+            throws Exception {
+        write.compact(
+                partition,
+                bucket,
+                fullCompaction,
+                new FileStoreWrite.ExtraCompactFiles(snapshotId, extraFiles));
     }
 
     @Override

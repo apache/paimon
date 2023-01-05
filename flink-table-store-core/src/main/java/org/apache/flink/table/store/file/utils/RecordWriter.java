@@ -19,7 +19,10 @@
 package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.table.store.file.io.CompactIncrement;
+import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.NewFilesIncrement;
+
+import java.util.List;
 
 /**
  * The {@code RecordWriter} is responsible for writing data and handling in-progress files used to
@@ -38,8 +41,9 @@ public interface RecordWriter<T> {
      * not be completed when the method returns.
      *
      * @param fullCompaction whether to trigger full compaction or just normal compaction
+     * @param extraFiles extra files added to the writer before compaction
      */
-    void compact(boolean fullCompaction) throws Exception;
+    void compact(boolean fullCompaction, List<DataFileMeta> extraFiles) throws Exception;
 
     /**
      * Prepare for a commit.

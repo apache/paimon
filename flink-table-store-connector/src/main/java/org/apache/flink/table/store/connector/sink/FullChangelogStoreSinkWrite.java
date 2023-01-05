@@ -34,9 +34,13 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.SinkRecord;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -44,15 +48,17 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
-import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 /**
  * {@link StoreSinkWrite} for {@link CoreOptions.ChangelogProducer#FULL_COMPACTION} changelog
  * producer. This writer will perform full compaction once in a while.
  */
 public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FullChangelogStoreSinkWrite.class);
 
     private final long fullCompactionThresholdMs;
 
@@ -64,7 +70,7 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
     private final NavigableMap<Long, Long> firstWriteMs;
     private final ListState<Tuple2<Long, Long>> firstWriteMsState;
 
-    private Long snapshotIdentifierToCheck;
+    private transient TreeSet<Long> commitIdentifiersToCheck;
 
     public FullChangelogStoreSinkWrite(
             FileStoreTable table,
@@ -116,7 +122,7 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
         firstWriteMs = new TreeMap<>();
         firstWriteMsState.get().forEach(t -> firstWriteMs.put(t.f0, t.f1));
 
-        snapshotIdentifierToCheck = null;
+        commitIdentifiersToCheck = new TreeSet<>();
     }
 
     @Override
@@ -133,7 +139,32 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
         touchBucket(partition, bucket);
     }
 
+    @Override
+    public void compact(
+            long snapshotId,
+            BinaryRowData partition,
+            int bucket,
+            boolean fullCompaction,
+            List<DataFileMeta> extraFiles)
+            throws Exception {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Receive {} extra files from snapshot {}, partition {}, bucket {}",
+                    extraFiles.size(),
+                    snapshotId,
+                    partition,
+                    bucket);
+        }
+
+        super.compact(snapshotId, partition, bucket, fullCompaction, extraFiles);
+        touchBucket(partition, bucket);
+    }
+
     private void touchBucket(BinaryRowData partition, int bucket) {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("touch partition {}, bucket {}", partition, bucket);
+        }
+
         // partition is a reused BinaryRowData
         // we first check if the tuple exists to minimize copying
         if (!currentWrittenBuckets.contains(Tuple2.of(partition, bucket))) {
@@ -148,15 +179,9 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
     @Override
     public List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
             throws IOException {
-        if (snapshotIdentifierToCheck != null) {
-            Optional<Snapshot> snapshot = findSnapshot(snapshotIdentifierToCheck);
-            if (snapshot.map(s -> s.commitKind() == Snapshot.CommitKind.COMPACT).orElse(false)) {
-                writtenBuckets.headMap(snapshotIdentifierToCheck, true).clear();
-                firstWriteMs.headMap(snapshotIdentifierToCheck, true).clear();
-                snapshotIdentifierToCheck = null;
-            }
-        }
+        checkSuccessfulFullCompaction();
 
+        // check what buckets we've modified during this checkpoint interval
         if (!currentWrittenBuckets.isEmpty()) {
             writtenBuckets
                     .computeIfAbsent(checkpointId, k -> new HashSet<>())
@@ -166,8 +191,18 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
             currentFirstWriteMs = null;
         }
 
-        if (snapshotIdentifierToCheck == null // wait for last forced full compaction to complete
-                && !writtenBuckets.isEmpty() // there should be something to compact
+        if (LOG.isDebugEnabled()) {
+            for (Map.Entry<Long, Set<Tuple2<BinaryRowData, Integer>>> checkpointIdAndBuckets :
+                    writtenBuckets.entrySet()) {
+                LOG.debug(
+                        "Written buckets for checkpoint #{} are:", checkpointIdAndBuckets.getKey());
+                for (Tuple2<BinaryRowData, Integer> bucket : checkpointIdAndBuckets.getValue()) {
+                    LOG.debug("  * partition {}, bucket {}", bucket.f0, bucket.f1);
+                }
+            }
+        }
+
+        if (!writtenBuckets.isEmpty() // there should be something to compact
                 && System.currentTimeMillis() - firstWriteMs.firstEntry().getValue()
                         >= fullCompactionThresholdMs // time without full compaction exceeds
         ) {
@@ -175,58 +210,64 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
         }
 
         if (doCompaction) {
-            snapshotIdentifierToCheck = checkpointId;
-            Set<Tuple2<BinaryRowData, Integer>> compactedBuckets = new HashSet<>();
-            for (Set<Tuple2<BinaryRowData, Integer>> buckets : writtenBuckets.values()) {
-                for (Tuple2<BinaryRowData, Integer> bucket : buckets) {
-                    if (compactedBuckets.contains(bucket)) {
-                        continue;
-                    }
-                    compactedBuckets.add(bucket);
-                    try {
-                        write.compact(bucket.f0, bucket.f1, true);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                }
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Submit full compaction for checkpoint #{}", checkpointId);
             }
+            submitFullCompaction();
+            commitIdentifiersToCheck.add(checkpointId);
         }
 
         return super.prepareCommit(doCompaction, checkpointId);
     }
 
-    private Optional<Snapshot> findSnapshot(long identifierToCheck) {
-        // TODO We need a mechanism to do timeout recovery in case of snapshot expiration.
+    private void checkSuccessfulFullCompaction() {
         SnapshotManager snapshotManager = table.snapshotManager();
         Long latestId = snapshotManager.latestSnapshotId();
         if (latestId == null) {
-            return Optional.empty();
+            return;
         }
-
         Long earliestId = snapshotManager.earliestSnapshotId();
         if (earliestId == null) {
-            return Optional.empty();
+            return;
         }
 
-        // We must find the snapshot whose identifier is exactly `identifierToCheck`.
-        // We can't just compare with the latest snapshot identifier by this user (like what we do
-        // in `AbstractFileStoreWrite`), because even if the latest snapshot identifier is newer,
-        // compact changes may still be discarded due to commit conflicts.
         for (long id = latestId; id >= earliestId; id--) {
             Snapshot snapshot = snapshotManager.snapshot(id);
-            if (!snapshot.commitUser().equals(commitUser)) {
-                continue;
-            }
-            if (snapshot.commitIdentifier() == identifierToCheck) {
-                return Optional.of(snapshot);
-            } else if (snapshot.commitIdentifier() < identifierToCheck) {
-                // We're searching from new snapshots to old ones. So if we find an older
-                // identifier, we can make sure our target snapshot will never occur.
-                return Optional.empty();
+            if (snapshot.commitUser().equals(commitUser)
+                    && snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
+                long commitIdentifier = snapshot.commitIdentifier();
+                if (commitIdentifiersToCheck.contains(commitIdentifier)) {
+                    // we found a full compaction snapshot
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug(
+                                "Found full compaction snapshot #{} with identifier {}",
+                                id,
+                                commitIdentifier);
+                    }
+                    writtenBuckets.headMap(commitIdentifier, true).clear();
+                    firstWriteMs.headMap(commitIdentifier, true).clear();
+                    commitIdentifiersToCheck.headSet(commitIdentifier).clear();
+                    break;
+                }
             }
         }
+    }
 
-        return Optional.empty();
+    private void submitFullCompaction() {
+        Set<Tuple2<BinaryRowData, Integer>> compactedBuckets = new HashSet<>();
+        for (Set<Tuple2<BinaryRowData, Integer>> buckets : writtenBuckets.values()) {
+            for (Tuple2<BinaryRowData, Integer> bucket : buckets) {
+                if (compactedBuckets.contains(bucket)) {
+                    continue;
+                }
+                compactedBuckets.add(bucket);
+                try {
+                    write.compact(bucket.f0, bucket.f1, true);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
     }
 
     @Override

@@ -33,13 +33,12 @@ public class ContinuousCompactorFollowUpScanner implements FollowUpScanner {
 
     @Override
     public boolean shouldScanSnapshot(Snapshot snapshot) {
-        if (snapshot.commitKind() == Snapshot.CommitKind.APPEND
-                || snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE) {
+        if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
             return true;
         }
 
         LOG.debug(
-                "Next snapshot id {} is neither APPEND nor OVERWRITE, but is {}, check next one.",
+                "Next snapshot id {} is not APPEND, but is {}, check next one.",
                 snapshot.id(),
                 snapshot.commitKind());
         return false;

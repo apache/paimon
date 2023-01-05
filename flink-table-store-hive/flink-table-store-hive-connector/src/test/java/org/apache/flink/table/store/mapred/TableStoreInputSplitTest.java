@@ -55,6 +55,7 @@ public class TableStoreInputSplitTest {
                 new TableStoreInputSplit(
                         tempDir.toString(),
                         new DataSplit(
+                                ThreadLocalRandom.current().nextLong(100),
                                 wantedPartition,
                                 0,
                                 generated.stream()

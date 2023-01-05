@@ -184,7 +184,8 @@ public class TestChangelogDataReadWrite {
                                 null, // not used, we only create an empty writer
                                 options,
                                 EXTRACTOR)
-                        .createEmptyWriter(partition, bucket, service);
+                        .createEmptyWriterWrapper(partition, bucket, service)
+                        .writer;
         ((MemoryOwner) writer)
                 .setMemoryPool(
                         new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));

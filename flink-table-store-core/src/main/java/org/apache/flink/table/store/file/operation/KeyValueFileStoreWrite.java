@@ -107,16 +107,25 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     }
 
     @Override
-    public RecordWriter<KeyValue> createWriter(
+    public WriterWrapper<KeyValue> createWriterWrapper(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
-        return createMergeTreeWriter(
-                partition, bucket, scanExistingFileMetas(partition, bucket), compactExecutor);
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        RecordWriter<KeyValue> writer =
+                createMergeTreeWriter(
+                        partition,
+                        bucket,
+                        scanExistingFileMetas(latestSnapshotId, partition, bucket),
+                        compactExecutor);
+        return new WriterWrapper<>(writer, latestSnapshotId);
     }
 
     @Override
-    public RecordWriter<KeyValue> createEmptyWriter(
+    public WriterWrapper<KeyValue> createEmptyWriterWrapper(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
-        return createMergeTreeWriter(partition, bucket, Collections.emptyList(), compactExecutor);
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        RecordWriter<KeyValue> writer =
+                createMergeTreeWriter(partition, bucket, Collections.emptyList(), compactExecutor);
+        return new WriterWrapper<>(writer, latestSnapshotId);
     }
 
     private MergeTreeWriter createMergeTreeWriter(
@@ -130,7 +139,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     partition,
                     bucket,
                     restoreFiles);
-            new RuntimeException().printStackTrace();
         }
 
         KeyValueFileWriterFactory writerFactory = writerFactoryBuilder.build(partition, bucket);

@@ -91,14 +91,20 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                 LOG.debug(
                         "Trigger forced full compaciton. Picking from the following runs\n{}",
                         runs);
+                new RuntimeException().printStackTrace();
             }
             optionalUnit = CompactStrategy.pickFullCompaction(levels.numberOfLevels(), runs);
         } else {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("task future? = " + taskFuture);
+                new RuntimeException().printStackTrace();
+            }
             if (taskFuture != null) {
                 return;
             }
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Trigger normal compaciton. Picking from the following runs\n{}", runs);
+                new RuntimeException().printStackTrace();
             }
             optionalUnit =
                     strategy.pick(levels.numberOfLevels(), runs)
@@ -156,6 +162,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                             .collect(Collectors.joining(", ")));
         }
         taskFuture = executor.submit(task);
+        LOG.debug("taskFuture = " + taskFuture);
     }
 
     /** Finish current task, and update result files to {@link Levels}. */

@@ -168,7 +168,7 @@ public class TestCommitThread extends Thread {
                 for (BinaryRowData partition : writtenPartitions) {
                     MergeTreeWriter writer =
                             writers.computeIfAbsent(partition, p -> createWriter(p, false));
-                    writer.compact(true);
+                    writer.compact(true, Collections.emptyList());
                     RecordWriter.CommitIncrement inc = writer.prepareCommit(true);
                     committable.addFileCommittable(
                             new FileCommittable(
@@ -279,8 +279,9 @@ public class TestCommitThread extends Thread {
                         });
         MergeTreeWriter writer =
                 empty
-                        ? (MergeTreeWriter) write.createEmptyWriter(partition, 0, service)
-                        : (MergeTreeWriter) write.createWriter(partition, 0, service);
+                        ? (MergeTreeWriter)
+                                write.createEmptyWriterWrapper(partition, 0, service).writer
+                        : (MergeTreeWriter) write.createWriterWrapper(partition, 0, service).writer;
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(
                         WRITE_BUFFER_SIZE.getBytes(), (int) PAGE_SIZE.getBytes()));
