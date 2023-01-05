@@ -17,10 +17,10 @@
 
 package org.apache.flink.table.store.format.parquet.reader;
 
-import org.apache.flink.table.data.columnar.vector.ColumnVector;
-import org.apache.flink.table.data.columnar.vector.heap.HeapArrayVector;
-import org.apache.flink.table.data.columnar.vector.heap.HeapMapVector;
-import org.apache.flink.table.data.columnar.vector.writable.WritableColumnVector;
+import org.apache.flink.table.store.data.columnar.ColumnVector;
+import org.apache.flink.table.store.data.columnar.heap.HeapArrayVector;
+import org.apache.flink.table.store.data.columnar.heap.HeapMapVector;
+import org.apache.flink.table.store.data.columnar.writable.WritableColumnVector;
 
 import java.io.IOException;
 

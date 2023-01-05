@@ -15,18 +15,24 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.format.parquet.reader;
+package org.apache.flink.table.store.data.columnar;
 
-import org.apache.flink.table.store.data.columnar.writable.WritableColumnVector;
+import org.apache.flink.annotation.Internal;
+import org.apache.flink.table.data.TimestampData;
 
-import java.io.IOException;
+/** The interface for dictionary in AbstractColumnVector to decode dictionary encoded values. */
+@Internal
+public interface Dictionary {
 
-/** Read a batch of records for a column to {@link WritableColumnVector} from parquet data file. */
-public interface ColumnReader<VECTOR extends WritableColumnVector> {
+    int decodeToInt(int id);
 
-    /**
-     * @param readNumber number to read.
-     * @param vector vector to write.
-     */
-    void readToVector(int readNumber, VECTOR vector) throws IOException;
+    long decodeToLong(int id);
+
+    float decodeToFloat(int id);
+
+    double decodeToDouble(int id);
+
+    byte[] decodeToBinary(int id);
+
+    TimestampData decodeToTimestamp(int id);
 }

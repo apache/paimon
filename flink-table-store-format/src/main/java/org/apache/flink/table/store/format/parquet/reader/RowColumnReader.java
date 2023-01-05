@@ -17,8 +17,8 @@
 
 package org.apache.flink.table.store.format.parquet.reader;
 
-import org.apache.flink.table.data.columnar.vector.heap.HeapRowVector;
-import org.apache.flink.table.data.columnar.vector.writable.WritableColumnVector;
+import org.apache.flink.table.store.data.columnar.heap.HeapRowVector;
+import org.apache.flink.table.store.data.columnar.writable.WritableColumnVector;
 
 import java.io.IOException;
 import java.util.List;

@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.format.parquet.reader;
 
 import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.data.columnar.vector.Dictionary;
+import org.apache.flink.table.store.data.columnar.Dictionary;
 
 import static org.apache.flink.table.store.format.parquet.reader.TimestampColumnReader.decodeInt96ToTimestamp;
 

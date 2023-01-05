@@ -18,18 +18,18 @@
 package org.apache.flink.table.store.format.parquet.reader;
 
 import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.data.columnar.vector.VectorizedColumnBatch;
-import org.apache.flink.table.data.columnar.vector.heap.HeapArrayVector;
-import org.apache.flink.table.data.columnar.vector.heap.HeapBooleanVector;
-import org.apache.flink.table.data.columnar.vector.heap.HeapByteVector;
-import org.apache.flink.table.data.columnar.vector.heap.HeapBytesVector;
-import org.apache.flink.table.data.columnar.vector.heap.HeapDoubleVector;
-import org.apache.flink.table.data.columnar.vector.heap.HeapFloatVector;
-import org.apache.flink.table.data.columnar.vector.heap.HeapIntVector;
-import org.apache.flink.table.data.columnar.vector.heap.HeapLongVector;
-import org.apache.flink.table.data.columnar.vector.heap.HeapShortVector;
-import org.apache.flink.table.data.columnar.vector.heap.HeapTimestampVector;
-import org.apache.flink.table.data.columnar.vector.writable.WritableColumnVector;
+import org.apache.flink.table.store.data.columnar.VectorizedColumnBatch;
+import org.apache.flink.table.store.data.columnar.heap.HeapArrayVector;
+import org.apache.flink.table.store.data.columnar.heap.HeapBooleanVector;
+import org.apache.flink.table.store.data.columnar.heap.HeapByteVector;
+import org.apache.flink.table.store.data.columnar.heap.HeapBytesVector;
+import org.apache.flink.table.store.data.columnar.heap.HeapDoubleVector;
+import org.apache.flink.table.store.data.columnar.heap.HeapFloatVector;
+import org.apache.flink.table.store.data.columnar.heap.HeapIntVector;
+import org.apache.flink.table.store.data.columnar.heap.HeapLongVector;
+import org.apache.flink.table.store.data.columnar.heap.HeapShortVector;
+import org.apache.flink.table.store.data.columnar.heap.HeapTimestampVector;
+import org.apache.flink.table.store.data.columnar.writable.WritableColumnVector;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.LogicalType;
 

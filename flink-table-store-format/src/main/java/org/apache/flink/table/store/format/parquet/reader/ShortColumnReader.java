@@ -17,8 +17,8 @@
 
 package org.apache.flink.table.store.format.parquet.reader;
 
-import org.apache.flink.table.data.columnar.vector.writable.WritableIntVector;
-import org.apache.flink.table.data.columnar.vector.writable.WritableShortVector;
+import org.apache.flink.table.store.data.columnar.writable.WritableIntVector;
+import org.apache.flink.table.store.data.columnar.writable.WritableShortVector;
 
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReader;

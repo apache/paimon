@@ -20,11 +20,11 @@ package org.apache.flink.table.store.format.parquet.reader;
 
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.columnar.vector.BytesColumnVector;
-import org.apache.flink.table.data.columnar.vector.ColumnVector;
-import org.apache.flink.table.data.columnar.vector.DecimalColumnVector;
-import org.apache.flink.table.data.columnar.vector.IntColumnVector;
-import org.apache.flink.table.data.columnar.vector.LongColumnVector;
+import org.apache.flink.table.store.data.columnar.BytesColumnVector;
+import org.apache.flink.table.store.data.columnar.ColumnVector;
+import org.apache.flink.table.store.data.columnar.DecimalColumnVector;
+import org.apache.flink.table.store.data.columnar.IntColumnVector;
+import org.apache.flink.table.store.data.columnar.LongColumnVector;
 import org.apache.flink.table.store.format.parquet.ParquetSchemaConverter;
 
 import org.apache.parquet.Preconditions;

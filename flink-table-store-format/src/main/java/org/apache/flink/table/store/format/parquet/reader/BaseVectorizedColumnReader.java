@@ -17,7 +17,7 @@
 
 package org.apache.flink.table.store.format.parquet.reader;
 
-import org.apache.flink.table.data.columnar.vector.writable.WritableColumnVector;
+import org.apache.flink.table.store.data.columnar.writable.WritableColumnVector;
 import org.apache.flink.table.types.logical.LogicalType;
 
 import org.apache.parquet.bytes.ByteBufferInputStream;
