@@ -22,6 +22,7 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nonnull;
+
 import java.io.Serializable;
 import java.util.Objects;
 
