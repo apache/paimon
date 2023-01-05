@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.table.store.file.casting.CastExecutor;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
@@ -110,14 +111,23 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 key -> {
                     final TableSchema tableSchema = scanTableSchema();
                     final TableSchema schema = scanTableSchema(key);
+                    final List<DataField> tableKeyFields =
+                            keyValueFieldsExtractor.keyFields(tableSchema);
                     final List<DataField> keyFields = keyValueFieldsExtractor.keyFields(schema);
-                    return new FieldStatsArraySerializer(
-                            RowDataType.toRowType(false, keyFields),
+                    final int[] indexMapping =
                             tableSchema.id() == key
                                     ? null
                                     : SchemaEvolutionUtil.createIndexMapping(
-                                            keyValueFieldsExtractor.keyFields(tableSchema),
-                                            keyFields));
+                                            tableKeyFields, keyFields);
+                    final CastExecutor<?, ?>[] converterMapping =
+                            tableSchema.id() == key
+                                    ? null
+                                    : SchemaEvolutionUtil.createConvertMapping(
+                                            tableKeyFields, keyFields, indexMapping);
+                    return new FieldStatsArraySerializer(
+                            RowDataType.toRowType(false, keyFields),
+                            indexMapping,
+                            (CastExecutor<Object, Object>[]) converterMapping);
                 });
     }
 }

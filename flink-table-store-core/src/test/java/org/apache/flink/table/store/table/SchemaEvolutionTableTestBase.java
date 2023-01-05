@@ -22,10 +22,13 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.DataTypes;
+import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.schema.AtomicDataType;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.SchemaChange;
@@ -36,12 +39,14 @@ import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.TraceableFileSystem;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.source.DataTableScan;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -52,6 +57,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -76,6 +82,29 @@ public abstract class SchemaEvolutionTableTestBase {
                     new DataField(8, "b", new AtomicDataType(DataTypes.STRING().getLogicalType())));
     protected static final List<String> PARTITION_NAMES = Collections.singletonList("pt");
     protected static final List<String> PRIMARY_KEY_NAMES = Arrays.asList("pt", "kt");
+
+    protected static final List<DataField> SCHEMA_FIELDS =
+            Arrays.asList(
+                    new DataField(0, "a", new AtomicDataType(DataTypes.INT().getLogicalType())),
+                    new DataField(1, "b", new AtomicDataType(DataTypes.CHAR(10).getLogicalType())),
+                    new DataField(
+                            2, "c", new AtomicDataType(DataTypes.VARCHAR(10).getLogicalType())),
+                    new DataField(
+                            3, "d", new AtomicDataType(DataTypes.DECIMAL(10, 2).getLogicalType())),
+                    new DataField(
+                            4, "e", new AtomicDataType(DataTypes.SMALLINT().getLogicalType())),
+                    new DataField(5, "f", new AtomicDataType(DataTypes.INT().getLogicalType())),
+                    new DataField(6, "g", new AtomicDataType(DataTypes.BIGINT().getLogicalType())),
+                    new DataField(7, "h", new AtomicDataType(DataTypes.FLOAT().getLogicalType())),
+                    new DataField(8, "i", new AtomicDataType(DataTypes.DOUBLE().getLogicalType())),
+                    new DataField(9, "j", new AtomicDataType(DataTypes.DATE().getLogicalType())),
+                    new DataField(
+                            10, "k", new AtomicDataType(DataTypes.TIMESTAMP(2).getLogicalType())),
+                    new DataField(
+                            11, "l", new AtomicDataType(DataTypes.BINARY(100).getLogicalType())));
+    protected static final List<String> SCHEMA_PARTITION_NAMES = Collections.singletonList("a");
+    protected static final List<String> SCHEMA_PRIMARY_KEYS =
+            Arrays.asList("a", "b", "c", "d", "e");
 
     protected Path tablePath;
     protected String commitUser;
@@ -185,6 +214,215 @@ public abstract class SchemaEvolutionTableTestBase {
         secondChecker.accept(result, tableSchemas);
     }
 
+    public static <R> void writeAndCheckFileResultForColumnType(
+            Function<Map<Long, TableSchema>, R> firstChecker,
+            BiConsumer<R, Map<Long, TableSchema>> secondChecker,
+            List<String> primaryKeyNames,
+            Configuration tableConfig,
+            Function<Map<Long, TableSchema>, FileStoreTable> createFileStoreTable)
+            throws Exception {
+        Map<Long, TableSchema> tableSchemas = new HashMap<>();
+        // Create schema with SCHEMA_FIELDS
+        tableSchemas.put(
+                0L,
+                new TableSchema(
+                        0,
+                        SCHEMA_FIELDS,
+                        12,
+                        SCHEMA_PARTITION_NAMES,
+                        primaryKeyNames,
+                        tableConfig.toMap(),
+                        ""));
+        FileStoreTable table = createFileStoreTable.apply(tableSchemas);
+        TableWrite write = table.newWrite("user");
+        TableCommit commit = table.newCommit("user");
+
+        /**
+         * Generate two files:
+         *
+         * <ul>
+         *   <li>file1 with one data: 1,"100","101",(102),short)
+         *       103,104,105L,106F,107D,108,toTimestamp(109 * millsPerDay),"110".getBytes()
+         *   <li>file2 with two data:
+         *       <ul>
+         *         <li>2,"200","201",toDecimal(202),(short)
+         *             203,204,205L,206F,207D,208,toTimestamp(209 * millsPerDay),toBytes("210")
+         *         <li>2,"300","301",toDecimal(302),(short)
+         *             303,304,305L,306F,307D,308,toTimestamp(309 * millsPerDay),toBytes("310")
+         *       </ul>
+         * </ul>
+         */
+        final long millsPerDay = 86400000;
+        write.write(
+                rowData(
+                        1,
+                        "100",
+                        "101",
+                        toDecimal(102),
+                        (short) 103,
+                        104,
+                        105L,
+                        106F,
+                        107D,
+                        108,
+                        toTimestamp(109 * millsPerDay),
+                        "110".getBytes()));
+        write.write(
+                rowData(
+                        2,
+                        "200",
+                        "201",
+                        toDecimal(202),
+                        (short) 203,
+                        204,
+                        205L,
+                        206F,
+                        207D,
+                        208,
+                        toTimestamp(209 * millsPerDay),
+                        toBytes("210")));
+        write.write(
+                rowData(
+                        2,
+                        "300",
+                        "301",
+                        toDecimal(302),
+                        (short) 303,
+                        304,
+                        305L,
+                        306F,
+                        307D,
+                        308,
+                        toTimestamp(309 * millsPerDay),
+                        toBytes("310")));
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        R result = firstChecker.apply(tableSchemas);
+
+        /**
+         * Fields before and after column type evolution:
+         *
+         * <ul>
+         *   <li>Before: a->string, b->char[10], c->varchar[10], d->decimal, e->smallint, f->int,
+         *       g->bigint, h->float, i->double, j->date, k->timestamp, l->binary
+         *   <li>After: a->string, b->varchar[10], c->varchar[10], d->double, e->int, f->decimal,
+         *       g->float, h->double, i->decimal, j->date, k->date, l->varbinary
+         * </ul>
+         */
+        //
+        List<DataField> evolutionFields = new ArrayList<>(SCHEMA_FIELDS);
+        evolutionFields.set(
+                1,
+                new DataField(1, "b", new AtomicDataType(DataTypes.VARCHAR(10).getLogicalType())));
+        evolutionFields.set(
+                3, new DataField(3, "d", new AtomicDataType(DataTypes.DOUBLE().getLogicalType())));
+        evolutionFields.set(
+                4, new DataField(4, "e", new AtomicDataType(DataTypes.INT().getLogicalType())));
+        evolutionFields.set(
+                5,
+                new DataField(
+                        5, "f", new AtomicDataType(DataTypes.DECIMAL(10, 2).getLogicalType())));
+        evolutionFields.set(
+                6, new DataField(6, "g", new AtomicDataType(DataTypes.FLOAT().getLogicalType())));
+        evolutionFields.set(
+                7, new DataField(7, "h", new AtomicDataType(DataTypes.DOUBLE().getLogicalType())));
+        evolutionFields.set(
+                8,
+                new DataField(
+                        8, "i", new AtomicDataType(DataTypes.DECIMAL(10, 2).getLogicalType())));
+        evolutionFields.set(
+                10, new DataField(10, "k", new AtomicDataType(DataTypes.DATE().getLogicalType())));
+        evolutionFields.set(
+                11,
+                new DataField(
+                        11, "l", new AtomicDataType(DataTypes.VARBINARY(100).getLogicalType())));
+        tableSchemas.put(
+                1L,
+                new TableSchema(
+                        1,
+                        evolutionFields,
+                        12,
+                        SCHEMA_PARTITION_NAMES,
+                        primaryKeyNames,
+                        tableConfig.toMap(),
+                        ""));
+        table = createFileStoreTable.apply(tableSchemas);
+        write = table.newWrite("user");
+        commit = table.newCommit("user");
+
+        /**
+         * Generate another two files:
+         *
+         * <ul>
+         *   <li>file1 with one data:
+         *       2,"400","401",402D,403,toDecimal(404),405F,406D,toDecimal(407),408,409,toBytes("410")
+         *   <li>file2 with two data:
+         *       <ul>
+         *         <li>1,"500","501",502D,503,toDecimal(504),505F,506D,toDecimal(507),508,509,toBytes("510")
+         *         <li>1,"600","601",602D,603,toDecimal(604),605F,606D,toDecimal(607),608,609,toBytes("610")
+         *       </ul>
+         * </ul>
+         */
+        write.write(
+                rowData(
+                        2,
+                        "400",
+                        "401",
+                        402D,
+                        403,
+                        toDecimal(404),
+                        405F,
+                        406D,
+                        toDecimal(407),
+                        408,
+                        409,
+                        toBytes("410")));
+        write.write(
+                rowData(
+                        1,
+                        "500",
+                        "501",
+                        502D,
+                        503,
+                        toDecimal(504),
+                        505F,
+                        506D,
+                        toDecimal(507),
+                        508,
+                        509,
+                        toBytes("510")));
+        write.write(
+                rowData(
+                        1,
+                        "600",
+                        "601",
+                        602D,
+                        603,
+                        toDecimal(604),
+                        605F,
+                        606D,
+                        toDecimal(607),
+                        608,
+                        609,
+                        toBytes("610")));
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+
+        secondChecker.accept(result, tableSchemas);
+    }
+
+    private static DecimalData toDecimal(int val) {
+        return DecimalData.fromBigDecimal(new BigDecimal(val), 10, 2);
+    }
+
+    private static TimestampData toTimestamp(long mills) {
+        return TimestampData.fromEpochMillis(mills);
+    }
+
+    private static byte[] toBytes(String val) {
+        return val.getBytes();
+    }
+
     protected static RowData rowData(Object... values) {
         List<Object> valueList = new ArrayList<>(values.length);
         for (Object value : values) {
@@ -195,6 +433,19 @@ public abstract class SchemaEvolutionTableTestBase {
             }
         }
         return GenericRowData.of(valueList.toArray(new Object[0]));
+    }
+
+    protected static void checkFilterRowCount(
+            DataTableScan.DataFilePlan plan, long expectedRowCount) {
+        List<DataFileMeta> fileMetaList =
+                plan.splits.stream().flatMap(s -> s.files().stream()).collect(Collectors.toList());
+        checkFilterRowCount(fileMetaList, expectedRowCount);
+    }
+
+    protected static void checkFilterRowCount(
+            List<DataFileMeta> fileMetaList, long expectedRowCount) {
+        assertThat(fileMetaList.stream().mapToLong(DataFileMeta::rowCount).sum())
+                .isEqualTo(expectedRowCount);
     }
 
     /** {@link SchemaManager} subclass for testing. */
