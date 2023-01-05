@@ -19,15 +19,16 @@
 package org.apache.flink.table.store.utils;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.connector.datagen.table.RandomGeneratorVisitor;
-import org.apache.flink.streaming.api.functions.source.datagen.DataGenerator;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
+import org.apache.flink.table.store.data.RowDataSerializer;
+import org.apache.flink.table.store.datagen.DataGenerator;
+import org.apache.flink.table.store.datagen.RandomGeneratorVisitor;
+import org.apache.flink.table.store.datagen.RowDataGenerator;
 import org.apache.flink.table.types.logical.LogicalTypeRoot;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -83,8 +84,8 @@ public class RowDataUtilsTest {
                                                                 new Configuration()))
                                                 .getGenerator())
                         .toArray(DataGenerator[]::new);
-        this.rowDataGenerator =
-                new RowDataGenerator(generators, ROW_TYPE.getFieldNames().toArray(new String[0]));
+        this.rowDataGenerator = new RowDataGenerator(generators);
+        this.rowDataGenerator.open();
         this.serializer = new RowDataSerializer(ROW_TYPE);
     }
 

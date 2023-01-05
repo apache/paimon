@@ -19,9 +19,9 @@ package org.apache.flink.table.store.codegen
 
 import org.apache.flink.table.data.RowData
 import org.apache.flink.table.data.binary.BinaryRowData
-import org.apache.flink.table.runtime.types.PlannerTypeUtils.isInteroperable
 import org.apache.flink.table.store.codegen.GeneratedExpression.{NEVER_NULL, NO_CODE}
 import org.apache.flink.table.store.codegen.GenerateUtils.{generateRecordStatement, rowSetField, DEFAULT_OUT_RECORD_TERM, DEFAULT_OUT_RECORD_WRITER_TERM}
+import org.apache.flink.table.store.utils.TypeUtils.isInteroperable
 import org.apache.flink.table.types.logical._
 
 class ExprCodeGenerator(ctx: CodeGeneratorContext) {

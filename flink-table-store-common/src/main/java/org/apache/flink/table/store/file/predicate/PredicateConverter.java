@@ -28,6 +28,7 @@ import org.apache.flink.table.expressions.TypeLiteralExpression;
 import org.apache.flink.table.expressions.ValueLiteralExpression;
 import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
 import org.apache.flink.table.functions.FunctionDefinition;
+import org.apache.flink.table.store.data.converter.DataStructureConverters;
 import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -44,7 +45,6 @@ import java.util.function.BiFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static org.apache.flink.table.data.conversion.DataStructureConverters.getConverter;
 import static org.apache.flink.table.types.logical.utils.LogicalTypeCasts.supportsImplicitCast;
 
 /**
@@ -229,7 +229,8 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             if (valueOpt.isPresent()) {
                 Object value = valueOpt.get();
                 if (actualLogicalType.getTypeRoot().equals(expectedLogicalType.getTypeRoot())) {
-                    return getConverter(expectedType).toInternalOrNull(value);
+                    return DataStructureConverters.getConverter(expectedType)
+                            .toInternalOrNull(value);
                 } else if (supportsImplicitCast(actualLogicalType, expectedLogicalType)) {
                     try {
                         return TypeUtils.castFromString(value.toString(), expectedLogicalType);

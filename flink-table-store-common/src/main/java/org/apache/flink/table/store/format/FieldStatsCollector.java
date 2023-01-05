@@ -20,7 +20,7 @@ package org.apache.flink.table.store.format;
 
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.typeutils.InternalSerializers;
+import org.apache.flink.table.store.data.InternalSerializers;
 import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
 import org.apache.flink.table.types.logical.RowType;
 

@@ -22,7 +22,7 @@ import org.apache.flink.api.common.typeutils.base.ListSerializer;
 import org.apache.flink.api.java.typeutils.runtime.NullableSerializer;
 import org.apache.flink.core.memory.DataInputViewStreamWrapper;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
-import org.apache.flink.table.runtime.typeutils.InternalSerializers;
+import org.apache.flink.table.store.data.InternalSerializers;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.types.logical.LogicalType;
 
