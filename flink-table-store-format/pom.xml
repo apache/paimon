@@ -305,10 +305,6 @@ under the License.
                                     <shadedPattern>org.apache.flink.table.store.shaded.org.apache.flink.formats.avro</shadedPattern>
                                 </relocation>
                                 <relocation>
-                                    <pattern>org.apache.parquet</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.parquet</shadedPattern>
-                                </relocation>
-                                <relocation>
                                     <pattern>org.apache.flink.orc</pattern>
                                     <shadedPattern>org.apache.flink.table.store.shaded.org.apache.flink.orc</shadedPattern>
                                 </relocation>
@@ -333,12 +329,22 @@ under the License.
                                     <shadedPattern>org.apache.flink.table.store.shaded.io.airlift</shadedPattern>
                                 </relocation>
                                 <relocation>
+                                    <pattern>com.google.protobuf</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.com.google.protobuf</shadedPattern>
+                                </relocation>
+
+                                <!-- Relocate parquet. -->
+                                <relocation>
+                                    <pattern>org.apache.parquet</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.parquet</shadedPattern>
+                                </relocation>
+                                <relocation>
                                     <pattern>org.apache.commons</pattern>
                                     <shadedPattern>org.apache.flink.table.store.shaded.org.apache.commons</shadedPattern>
                                 </relocation>
                                 <relocation>
-                                    <pattern>com.google.protobuf</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.com.google.protobuf</shadedPattern>
+                                    <pattern>shaded.parquet</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.parquet</shadedPattern>
                                 </relocation>
                             </relocations>
                         </configuration>
