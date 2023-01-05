@@ -70,10 +70,9 @@ public class ParquetFileFormat extends FileFormat {
         return Optional.of(new ParquetFileStatsExtractor(type));
     }
 
-    public static org.apache.hadoop.conf.Configuration getParquetConfiguration(
-            Configuration options) {
-        org.apache.hadoop.conf.Configuration conf = new org.apache.hadoop.conf.Configuration();
-        options.toMap().forEach((key, value) -> conf.set(IDENTIFIER + "." + key, value));
+    public static Configuration getParquetConfiguration(Configuration options) {
+        Configuration conf = new Configuration();
+        options.toMap().forEach((key, value) -> conf.setString(IDENTIFIER + "." + key, value));
         return conf;
     }
 }

@@ -18,17 +18,15 @@
 
 package org.apache.flink.table.store.format.parquet;
 
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.types.logical.RowType;
 
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.Path;
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.column.statistics.Statistics;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
-import org.apache.parquet.hadoop.util.HadoopInputFile;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -44,7 +42,6 @@ public class ParquetUtil {
      * @param path the path of parquet files to be read
      * @return result sets as map, key is column name, value is statistics (for example, null count,
      *     minimum value, maximum value)
-     * @throws IOException
      */
     public static Map<String, Statistics> extractColumnStats(Path path) throws IOException {
         ParquetMetadata parquetMetadata = getParquetReader(path).getFooter();
@@ -73,11 +70,10 @@ public class ParquetUtil {
      *
      * @param path the path of parquet files to be read
      * @return parquet reader, used for reading footer, status, etc.
-     * @throws IOException
      */
     public static ParquetFileReader getParquetReader(Path path) throws IOException {
-        HadoopInputFile hadoopInputFile = HadoopInputFile.fromPath(path, new Configuration());
-        return ParquetFileReader.open(hadoopInputFile, ParquetReadOptions.builder().build());
+        return ParquetFileReader.open(
+                ParquetInputFile.fromPath(path), ParquetReadOptions.builder().build());
     }
 
     static void assertStatsClass(

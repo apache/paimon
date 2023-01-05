@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.format.parquet;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.util.Pool;
@@ -31,17 +32,15 @@ import org.apache.flink.table.store.data.columnar.VectorizedColumnBatch;
 import org.apache.flink.table.store.data.columnar.writable.WritableColumnVector;
 import org.apache.flink.table.store.format.parquet.reader.ColumnReader;
 import org.apache.flink.table.store.format.parquet.reader.ParquetDecimalVector;
-import org.apache.flink.table.store.format.utils.SerializableConfiguration;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.LogicalTypeRoot;
 import org.apache.flink.table.types.logical.RowType;
 
-import org.apache.hadoop.conf.Configuration;
+import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.hadoop.ParquetFileReader;
-import org.apache.parquet.hadoop.metadata.BlockMetaData;
-import org.apache.parquet.hadoop.metadata.ParquetMetadata;
+import org.apache.parquet.hadoop.ParquetInputFormat;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Type;
@@ -60,8 +59,7 @@ import java.util.Set;
 
 import static org.apache.flink.table.store.format.parquet.reader.ParquetSplitReaderUtil.createColumnReader;
 import static org.apache.flink.table.store.format.parquet.reader.ParquetSplitReaderUtil.createWritableColumnVector;
-import static org.apache.parquet.format.converter.ParquetMetadataConverter.range;
-import static org.apache.parquet.hadoop.ParquetFileReader.readFooter;
+import static org.apache.parquet.hadoop.UnmaterializableRecordCounter.BAD_RECORD_THRESHOLD_CONF_KEY;
 
 /**
  * Parquet {@link BulkFormat} that reads data from the file to {@link VectorizedColumnBatch} in
@@ -73,20 +71,22 @@ public class ParquetReaderFactory implements BulkFormat<RowData, FileSourceSplit
 
     private static final long serialVersionUID = 1L;
 
+    private static final String ALLOCATION_SIZE = "parquet.read.allocation.size";
+
     private static final int BATCH_SIZE = 2048;
 
-    private final SerializableConfiguration hadoopConfig;
+    private final Configuration conf;
     private final String[] projectedFields;
     private final LogicalType[] projectedTypes;
     private final int batchSize;
     private final Set<Integer> unknownFieldsIndices = new HashSet<>();
 
-    public ParquetReaderFactory(Configuration hadoopConfig, RowType projectedType) {
-        this(hadoopConfig, projectedType, BATCH_SIZE);
+    public ParquetReaderFactory(Configuration formatConfig, RowType projectedType) {
+        this(formatConfig, projectedType, BATCH_SIZE);
     }
 
-    public ParquetReaderFactory(Configuration hadoopConfig, RowType projectedType, int batchSize) {
-        this.hadoopConfig = new SerializableConfiguration(hadoopConfig);
+    public ParquetReaderFactory(Configuration conf, RowType projectedType, int batchSize) {
+        this.conf = conf;
         this.projectedFields = projectedType.getFieldNames().toArray(new String[0]);
         this.projectedTypes = projectedType.getChildren().toArray(new LogicalType[0]);
         this.batchSize = batchSize;
@@ -101,34 +101,40 @@ public class ParquetReaderFactory implements BulkFormat<RowData, FileSourceSplit
         final long splitOffset = split.offset();
         final long splitLength = split.length();
 
-        org.apache.hadoop.fs.Path hadoopPath = new org.apache.hadoop.fs.Path(filePath.toUri());
-        ParquetMetadata footer =
-                readFooter(
-                        hadoopConfig.conf(),
-                        hadoopPath,
-                        range(splitOffset, splitOffset + splitLength));
-        MessageType fileSchema = footer.getFileMetaData().getSchema();
-        List<BlockMetaData> blocks = footer.getBlocks();
+        ParquetReadOptions.Builder builder =
+                ParquetReadOptions.builder().withRange(splitOffset, splitOffset + splitLength);
+        setReadOptions(builder);
 
-        MessageType requestedSchema = clipParquetSchema(fileSchema);
         ParquetFileReader reader =
-                new ParquetFileReader(
-                        hadoopConfig.conf(),
-                        footer.getFileMetaData(),
-                        hadoopPath,
-                        blocks,
-                        requestedSchema.getColumns());
-
-        long totalRowCount = 0;
-        for (BlockMetaData block : blocks) {
-            totalRowCount += block.getRowCount();
-        }
+                new ParquetFileReader(ParquetInputFile.fromPath(filePath), builder.build());
+        MessageType fileSchema = reader.getFileMetaData().getSchema();
+        MessageType requestedSchema = clipParquetSchema(fileSchema);
+        reader.setRequestedSchema(requestedSchema);
 
         checkSchema(fileSchema, requestedSchema);
 
-        final Pool<ParquetReaderBatch> poolOfBatches = createPoolOfBatches(requestedSchema);
+        Pool<ParquetReaderBatch> poolOfBatches = createPoolOfBatches(requestedSchema);
 
-        return new ParquetReader(reader, requestedSchema, totalRowCount, poolOfBatches);
+        return new ParquetReader(reader, requestedSchema, reader.getRecordCount(), poolOfBatches);
+    }
+
+    private void setReadOptions(ParquetReadOptions.Builder builder) {
+        builder.useSignedStringMinMax(
+                conf.getBoolean("parquet.strings.signed-min-max.enabled", false));
+        builder.useDictionaryFilter(
+                conf.getBoolean(ParquetInputFormat.DICTIONARY_FILTERING_ENABLED, true));
+        builder.useStatsFilter(conf.getBoolean(ParquetInputFormat.STATS_FILTERING_ENABLED, true));
+        builder.useRecordFilter(conf.getBoolean(ParquetInputFormat.RECORD_FILTERING_ENABLED, true));
+        builder.useColumnIndexFilter(
+                conf.getBoolean(ParquetInputFormat.COLUMN_INDEX_FILTERING_ENABLED, true));
+        builder.usePageChecksumVerification(
+                conf.getBoolean(ParquetInputFormat.PAGE_VERIFY_CHECKSUM_ENABLED, false));
+        builder.useBloomFilter(conf.getBoolean(ParquetInputFormat.BLOOM_FILTERING_ENABLED, true));
+        builder.withMaxAllocationInBytes(conf.getInteger(ALLOCATION_SIZE, 8388608));
+        String badRecordThresh = conf.getString(BAD_RECORD_THRESHOLD_CONF_KEY, null);
+        if (badRecordThresh != null) {
+            builder.set(BAD_RECORD_THRESHOLD_CONF_KEY, badRecordThresh);
+        }
     }
 
     @Override

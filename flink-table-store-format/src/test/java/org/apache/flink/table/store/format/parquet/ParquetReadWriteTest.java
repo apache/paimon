@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.format.parquet;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.core.fs.FileStatus;
@@ -48,7 +49,6 @@ import org.apache.flink.table.types.logical.TinyIntType;
 import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.util.InstantiationUtil;
 
-import org.apache.hadoop.conf.Configuration;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -294,7 +294,7 @@ public class ParquetReadWriteTest {
         // write data
         Path path = new Path(folder.getPath(), UUID.randomUUID().toString());
         Configuration conf = new Configuration();
-        conf.setInt("parquet.block.size", rowGroupSize);
+        conf.setInteger("parquet.block.size", rowGroupSize);
         ParquetWriterFactory<RowData> factory =
                 new ParquetWriterFactory<>(new RowDataParquetBuilder(ROW_TYPE, conf));
         BulkWriter<RowData> writer =
