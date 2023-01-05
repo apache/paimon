@@ -22,7 +22,6 @@ import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
-import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.DecimalData;
@@ -284,9 +283,13 @@ public class ParquetReadWriteTest {
         List<RowData> rows = records.stream().map(this::newRow).collect(Collectors.toList());
         Path testPath = createTempParquetFile(folder, rows, rowGroupSize);
 
-        // test reading and splitting
-        int recordNumber = testReadingSplit(records, testPath);
-        assertThat(recordNumber).isEqualTo(records.size());
+        long fileLen = testPath.getFileSystem().getFileStatus(testPath).getLen();
+        int len1 = testReadingSplit(subList(records, 0), testPath, 0, fileLen / 3);
+        int len2 = testReadingSplit(subList(records, len1), testPath, fileLen / 3, fileLen * 2 / 3);
+        int len3 =
+                testReadingSplit(
+                        subList(records, len1 + len2), testPath, fileLen * 2 / 3, Long.MAX_VALUE);
+        assertThat(len1 + len2 + len3).isEqualTo(records.size());
     }
 
     private Path createTempParquetFile(File folder, List<RowData> rows, int rowGroupSize)
@@ -308,8 +311,9 @@ public class ParquetReadWriteTest {
         return path;
     }
 
-    private int testReadingSplit(List<Integer> expected, Path path) throws IOException {
-
+    private int testReadingSplit(
+            List<Integer> expected, Path path, long splitStart, long splitLength)
+            throws IOException {
         ParquetReaderFactory format = new ParquetReaderFactory(new Configuration(), ROW_TYPE, 500);
 
         // validate java serialization
@@ -319,11 +323,9 @@ public class ParquetReadWriteTest {
             throw new IOException(e);
         }
 
-        FileStatus fileStatus = path.getFileSystem().getFileStatus(path);
-
         BulkFormat.Reader<RowData> reader =
                 format.createReader(
-                        EMPTY_CONF, new FileSourceSplit("ignore", path, 0, fileStatus.getLen()));
+                        EMPTY_CONF, new FileSourceSplit("ignore", path, splitStart, splitLength));
 
         AtomicInteger cnt = new AtomicInteger(0);
         final AtomicReference<RowData> previousRow = new AtomicReference<>();
@@ -520,5 +522,9 @@ public class ParquetReadWriteTest {
     private LocalDateTime toDateTime(Integer v) {
         v = (v > 0 ? v : -v) % 10000;
         return BASE_TIME.plusNanos(v).plusSeconds(v);
+    }
+
+    private static <T> List<T> subList(List<T> list, int i) {
+        return list.subList(i, list.size());
     }
 }
