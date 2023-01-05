@@ -72,16 +72,20 @@ spark-sql \
 
 {{< tab "Hive" >}}
 
+NOTE: You need to ensure that Hive metastore can access `oss`.
+
 Place `flink-table-store-oss-{{< version >}}.jar` together with `flink-table-store-hive-connector-{{< version >}}.jar` under Hive's auxlib directory, and start like
 
 ```sql
 SET tablestore.fs.oss.endpoint=oss-cn-hangzhou.aliyuncs.com;
 SET tablestore.fs.oss.accessKeyId=xxx;
 SET tablestore.fs.oss.accessKeySecret=yyy;
+```
 
-CREATE EXTERNAL TABLE external_test_table
-STORED BY 'org.apache.flink.table.store.hive.TableStoreHiveStorageHandler'
-LOCATION 'oss://<bucket-name>/<db-name>.db/<table-name>';
+And read table from hive metastore, table can be created by Flink or Spark, see [Catalog with Hive Metastore]({{< ref "docs/how-to/creating-catalogs" >}})
+```sql
+SELECT * FROM test_table;
+SELECT COUNT(1) FROM test_table;
 ```
 
 {{< /tab >}}

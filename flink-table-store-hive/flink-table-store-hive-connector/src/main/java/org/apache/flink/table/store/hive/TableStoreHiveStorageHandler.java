@@ -74,7 +74,7 @@ public class TableStoreHiveStorageHandler
     @Override
     public void configureInputJobProperties(TableDesc tableDesc, Map<String, String> map) {
         Properties properties = tableDesc.getProperties();
-        TableStoreJobConf.configureInputJobProperties(properties, map);
+        TableStoreJobConf.configureInputJobProperties(conf, properties, map);
     }
 
     public void configureInputJobCredentials(TableDesc tableDesc, Map<String, String> map) {}
