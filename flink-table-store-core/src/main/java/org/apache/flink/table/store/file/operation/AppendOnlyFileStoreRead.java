@@ -30,7 +30,8 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.BulkFormatMapping;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.format.FileFormatDiscover;
+import org.apache.flink.table.store.format.FormatKey;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.utils.Projection;
 import org.apache.flink.table.types.logical.RowType;
@@ -51,9 +52,9 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
     private final SchemaManager schemaManager;
     private final long schemaId;
     private final RowType rowType;
-    private final FileFormat fileFormat;
+    private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
-    private final Map<Long, BulkFormatMapping> bulkFormatMappings;
+    private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
 
     private int[][] projection;
 
@@ -63,12 +64,12 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
             SchemaManager schemaManager,
             long schemaId,
             RowType rowType,
-            FileFormat fileFormat,
+            FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory) {
         this.schemaManager = schemaManager;
         this.schemaId = schemaId;
         this.rowType = rowType;
-        this.fileFormat = fileFormat;
+        this.formatDiscover = formatDiscover;
         this.pathFactory = pathFactory;
         this.bulkFormatMappings = new HashMap<>();
 
@@ -92,12 +93,13 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
                 pathFactory.createDataFilePathFactory(split.partition(), split.bucket());
         List<ConcatRecordReader.ReaderSupplier<RowData>> suppliers = new ArrayList<>();
         for (DataFileMeta file : split.files()) {
+            String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
             BulkFormatMapping bulkFormatMapping =
                     bulkFormatMappings.computeIfAbsent(
-                            file.schemaId(),
+                            new FormatKey(file.schemaId(), formatIdentifier),
                             key -> {
                                 TableSchema tableSchema = schemaManager.schema(this.schemaId);
-                                TableSchema dataSchema = schemaManager.schema(key);
+                                TableSchema dataSchema = schemaManager.schema(key.schemaId);
                                 int[][] dataProjection =
                                         SchemaEvolutionUtil.createDataProjection(
                                                 tableSchema.fields(),
@@ -111,7 +113,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
                                                 Projection.of(dataProjection).toTopLevelIndexes(),
                                                 dataSchema.fields());
                                 List<Predicate> dataFilters =
-                                        this.schemaId == key
+                                        this.schemaId == key.schemaId
                                                 ? filters
                                                 : SchemaEvolutionUtil.createDataFilters(
                                                         tableSchema.fields(),
@@ -119,8 +121,10 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
                                                         filters);
                                 return new BulkFormatMapping(
                                         indexMapping,
-                                        fileFormat.createReaderFactory(
-                                                rowType, dataProjection, dataFilters));
+                                        formatDiscover
+                                                .discover(formatIdentifier)
+                                                .createReaderFactory(
+                                                        rowType, dataProjection, dataFilters));
                             });
             suppliers.add(
                     () ->

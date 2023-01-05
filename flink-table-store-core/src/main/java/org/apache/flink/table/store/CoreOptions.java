@@ -405,6 +405,10 @@ public class CoreOptions implements Serializable {
         this.options = options;
     }
 
+    public Configuration toConfiguration() {
+        return options;
+    }
+
     public Map<String, String> toMap() {
         return options.toMap();
     }

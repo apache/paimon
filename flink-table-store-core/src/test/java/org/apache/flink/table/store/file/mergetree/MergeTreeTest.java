@@ -141,7 +141,7 @@ public class MergeTreeTest {
                         0,
                         keyType,
                         valueType,
-                        flushingAvro,
+                        ignore -> flushingAvro,
                         pathFactory,
                         new KeyValueFieldsExtractor() {
                             @Override

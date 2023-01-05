@@ -263,7 +263,7 @@ public class KeyValueFileReadWriteTest {
                         0,
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
-                        new FlushingFileFormat(format),
+                        ignore -> new FlushingFileFormat(format),
                         pathFactory,
                         new TestKeyValueGenerator.TestKeyValueFieldsExtractor());
         if (keyProjection != null) {

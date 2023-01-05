@@ -127,7 +127,7 @@ public class TestChangelogDataReadWrite {
                         VALUE_TYPE,
                         COMPARATOR,
                         DeduplicateMergeFunction.factory(),
-                        avro,
+                        ignore -> avro,
                         pathFactory,
                         EXTRACTOR);
         return new KeyValueTableRead(read) {
