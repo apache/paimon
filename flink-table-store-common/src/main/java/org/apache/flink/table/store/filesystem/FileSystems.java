@@ -23,9 +23,9 @@ import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.FileSystemFactory;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.plugin.PluginManager;
-import org.apache.flink.runtime.security.SecurityConfiguration;
-import org.apache.flink.runtime.security.SecurityUtils;
 import org.apache.flink.table.store.plugin.FileSystemLoader;
+import org.apache.flink.table.store.security.SecurityConfiguration;
+import org.apache.flink.table.store.security.SecurityUtils;
 
 import java.io.IOException;
 import java.util.ArrayList;

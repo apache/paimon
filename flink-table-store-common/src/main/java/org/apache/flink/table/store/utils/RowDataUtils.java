@@ -20,7 +20,6 @@ package org.apache.flink.table.store.utils;
 
 import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.DecimalDataUtils;
 import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.GenericMapData;
 import org.apache.flink.table.data.GenericRowData;
@@ -313,10 +312,7 @@ public class RowDataUtils {
             case DECIMAL:
                 DecimalData xDD = (DecimalData) x;
                 DecimalData yDD = (DecimalData) y;
-                assert xDD.scale() == yDD.scale() : "Inconsistent scale of aggregate DecimalData!";
-                assert xDD.precision() == yDD.precision()
-                        : "Inconsistent precision of aggregate DecimalData!";
-                ret = DecimalDataUtils.compare(xDD, yDD);
+                ret = xDD.compareTo(yDD);
                 break;
             case TINYINT:
                 ret = Byte.compare((byte) x, (byte) y);
