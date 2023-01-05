@@ -17,8 +17,8 @@
  */
 package org.apache.flink.table.store.codegen
 
-import org.apache.flink.table.runtime.typeutils.InternalSerializers
 import org.apache.flink.table.store.codegen.GenerateUtils.{newName, newNames}
+import org.apache.flink.table.store.data.InternalSerializers
 import org.apache.flink.table.types.logical.LogicalType
 import org.apache.flink.util.InstantiationUtil
 

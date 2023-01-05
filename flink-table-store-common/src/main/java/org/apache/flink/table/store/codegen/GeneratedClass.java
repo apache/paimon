@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.codegen;
 
-import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.table.codesplit.JavaCodeSplitter;
 
 import org.slf4j.Logger;
@@ -55,13 +54,7 @@ public final class GeneratedClass<T> implements Serializable {
         checkNotNull(references, "references must not be null");
         this.className = className;
         this.code = code;
-        this.splitCode =
-                code.isEmpty()
-                        ? code
-                        : JavaCodeSplitter.split(
-                                code,
-                                TableConfigOptions.MAX_LENGTH_GENERATED_CODE.defaultValue(),
-                                TableConfigOptions.MAX_MEMBERS_GENERATED_CODE.defaultValue());
+        this.splitCode = code.isEmpty() ? code : JavaCodeSplitter.split(code, 4000, 10000);
         this.references = references;
     }
 

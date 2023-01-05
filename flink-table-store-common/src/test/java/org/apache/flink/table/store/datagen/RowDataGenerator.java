@@ -16,29 +16,40 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.utils;
+package org.apache.flink.table.store.datagen;
 
-import org.apache.flink.streaming.api.functions.source.datagen.DataGenerator;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 
 /** Data generator for Flink's internal {@link RowData} type. */
-public class RowDataGenerator {
+public class RowDataGenerator implements DataGenerator<RowData> {
 
     private final DataGenerator<?>[] fieldGenerators;
-    private final String[] fieldNames;
 
-    public RowDataGenerator(DataGenerator<?>[] fieldGenerators, String[] fieldNames)
-            throws Exception {
+    public RowDataGenerator(DataGenerator<?>[] fieldGenerators) {
         this.fieldGenerators = fieldGenerators;
-        this.fieldNames = fieldNames;
-        for (int i = 0; i < fieldGenerators.length; i++) {
-            fieldGenerators[i].open(fieldNames[i], null, null);
+    }
+
+    @Override
+    public void open() {
+        for (DataGenerator<?> fieldGenerator : fieldGenerators) {
+            fieldGenerator.open();
         }
     }
 
+    @Override
+    public boolean hasNext() {
+        for (DataGenerator<?> generator : fieldGenerators) {
+            if (!generator.hasNext()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    @Override
     public RowData next() {
-        GenericRowData row = new GenericRowData(fieldNames.length);
+        GenericRowData row = new GenericRowData(fieldGenerators.length);
         for (int i = 0; i < fieldGenerators.length; i++) {
             row.setField(i, fieldGenerators[i].next());
         }
