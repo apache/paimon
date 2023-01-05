@@ -63,8 +63,7 @@ public class ParquetFileStatsExtractor implements FileStatsExtractor {
 
     @Override
     public FieldStats[] extract(Path path) throws IOException {
-        org.apache.hadoop.fs.Path hadoopPath = new org.apache.hadoop.fs.Path(path.toUri());
-        Map<String, Statistics> stats = ParquetUtil.extractColumnStats(hadoopPath);
+        Map<String, Statistics> stats = ParquetUtil.extractColumnStats(path);
 
         return IntStream.range(0, rowType.getFieldCount())
                 .mapToObj(
