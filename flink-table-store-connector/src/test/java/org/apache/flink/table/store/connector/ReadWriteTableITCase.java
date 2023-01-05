@@ -25,6 +25,7 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.api.EnvironmentSettings;
+import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -41,6 +42,7 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.types.Row;
+import org.apache.flink.util.CollectionUtil;
 
 import org.junit.Test;
 
@@ -379,6 +381,76 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
                         changelogRow("+I", "Euro"),
                         changelogRow("+I", "Yen"),
                         changelogRow("+I", "US Dollar")));
+    }
+
+    @Test
+    public void testPurgeTableUsingBatchOverWrite() throws Exception {
+        TableEnvironment tEnv =
+                TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
+        tEnv.executeSql(
+                String.format(
+                        "CREATE CATALOG test_catalog WITH ("
+                                + "'type'='table-store', 'warehouse'='%s')",
+                        TEMPORARY_FOLDER.newFolder().toURI()));
+        tEnv.useCatalog("test_catalog");
+        tEnv.executeSql("CREATE TABLE test (k1 INT, k2 STRING, v STRING)");
+
+        validateOverwriteResult(tEnv, "test", "", "*", Collections.emptyList());
+    }
+
+    @Test
+    public void testPurgePartitionUsingBatchOverWrite() throws Exception {
+        TableEnvironment tEnv =
+                TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
+        tEnv.executeSql(
+                String.format(
+                        "CREATE CATALOG test_catalog WITH ("
+                                + "'type'='table-store', 'warehouse'='%s')",
+                        TEMPORARY_FOLDER.newFolder().toURI()));
+        tEnv.useCatalog("test_catalog");
+
+        // single partition key
+        tEnv.executeSql(
+                "CREATE TABLE test_single (k1 INT, k2 STRING, v STRING) PARTITIONED BY (k1)");
+
+        validateOverwriteResult(
+                tEnv,
+                "test_single",
+                "PARTITION (k1 = 0)",
+                "k2, v",
+                Arrays.asList(
+                        changelogRow("+I", 1, "2023-01-01", "flink"),
+                        changelogRow("+I", 1, "2023-01-02", "table"),
+                        changelogRow("+I", 1, "2023-01-02", "store")));
+
+        // multiple partition keys and overwrite one partition key
+        tEnv.executeSql(
+                "CREATE TABLE test_multiple0 (k1 INT, k2 STRING, v STRING) PARTITIONED BY (k1, k2)");
+
+        validateOverwriteResult(
+                tEnv,
+                "test_multiple0",
+                "PARTITION (k1 = 0)",
+                "k2, v",
+                Arrays.asList(
+                        changelogRow("+I", 1, "2023-01-01", "flink"),
+                        changelogRow("+I", 1, "2023-01-02", "table"),
+                        changelogRow("+I", 1, "2023-01-02", "store")));
+
+        // multiple partition keys and overwrite all partition keys
+        tEnv.executeSql(
+                "CREATE TABLE test_multiple1 (k1 INT, k2 STRING, v STRING) PARTITIONED BY (k1, k2)");
+
+        validateOverwriteResult(
+                tEnv,
+                "test_multiple1",
+                "PARTITION (k1 = 0, k2 = '2023-01-01')",
+                "v",
+                Arrays.asList(
+                        changelogRow("+I", 0, "2023-01-02", "world"),
+                        changelogRow("+I", 1, "2023-01-01", "flink"),
+                        changelogRow("+I", 1, "2023-01-02", "table"),
+                        changelogRow("+I", 1, "2023-01-02", "store")));
     }
 
     @Test
@@ -1506,6 +1578,47 @@ public class ReadWriteTableITCase extends ReadWriteTableTestBase {
     }
 
     // ------------------------ Tools ----------------------------------
+
+    private void validateOverwriteResult(
+            TableEnvironment tEnv,
+            String table,
+            String partitionSpec,
+            String selectSpec,
+            List<Row> expected)
+            throws Exception {
+        tEnv.executeSql(
+                        String.format("INSERT INTO %s VALUES ", table)
+                                + "(0, '2023-01-01', 'hi'), "
+                                + "(0, '2023-01-01', 'hello'), "
+                                + "(0, '2023-01-02', 'world'), "
+                                + "(1, '2023-01-01', 'flink'), "
+                                + "(1, '2023-01-02', 'table'), "
+                                + "(1, '2023-01-02', 'store')")
+                .await();
+
+        assertThat(
+                        CollectionUtil.iteratorToList(
+                                tEnv.executeSql("SELECT * FROM " + table).collect()))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(
+                                changelogRow("+I", 0, "2023-01-01", "hi"),
+                                changelogRow("+I", 0, "2023-01-01", "hello"),
+                                changelogRow("+I", 0, "2023-01-02", "world"),
+                                changelogRow("+I", 1, "2023-01-01", "flink"),
+                                changelogRow("+I", 1, "2023-01-02", "table"),
+                                changelogRow("+I", 1, "2023-01-02", "store")));
+
+        tEnv.executeSql(
+                        String.format(
+                                "INSERT OVERWRITE %s %s SELECT %s FROM %s WHERE false",
+                                table, partitionSpec, selectSpec, table))
+                .await();
+
+        assertThat(
+                        CollectionUtil.iteratorToList(
+                                tEnv.executeSql("SELECT * FROM " + table).collect()))
+                .containsExactlyInAnyOrderElementsOf(expected);
+    }
 
     private String collectAndCheckBatchReadWrite(
             boolean partitioned,
