@@ -29,7 +29,7 @@ import org.apache.flink.table.store.data.columnar.writable.WritableColumnVector;
 public class HeapRowVector extends AbstractHeapVector
         implements WritableColumnVector, RowColumnVector {
 
-    private WritableColumnVector[] fields;
+    private final WritableColumnVector[] fields;
 
     public HeapRowVector(int len, WritableColumnVector... fields) {
         super(len);
