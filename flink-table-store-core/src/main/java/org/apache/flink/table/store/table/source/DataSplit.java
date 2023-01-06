@@ -37,24 +37,38 @@ import java.util.Objects;
 /** Input splits. Needed by most batch computation engines. */
 public class DataSplit implements Split {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
+    private long snapshotId;
     private BinaryRowData partition;
     private int bucket;
     private List<DataFileMeta> files;
     private boolean isIncremental;
 
     public DataSplit(
-            BinaryRowData partition, int bucket, List<DataFileMeta> files, boolean isIncremental) {
-        init(partition, bucket, files, isIncremental);
+            long snapshotId,
+            BinaryRowData partition,
+            int bucket,
+            List<DataFileMeta> files,
+            boolean isIncremental) {
+        init(snapshotId, partition, bucket, files, isIncremental);
     }
 
     private void init(
-            BinaryRowData partition, int bucket, List<DataFileMeta> files, boolean isIncremental) {
+            long snapshotId,
+            BinaryRowData partition,
+            int bucket,
+            List<DataFileMeta> files,
+            boolean isIncremental) {
+        this.snapshotId = snapshotId;
         this.partition = partition;
         this.bucket = bucket;
         this.files = files;
         this.isIncremental = isIncremental;
+    }
+
+    public long snapshotId() {
+        return snapshotId;
     }
 
     public BinaryRowData partition() {
@@ -108,10 +122,11 @@ public class DataSplit implements Split {
 
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
         DataSplit split = DataSplit.deserialize(new DataInputViewStreamWrapper(in));
-        init(split.partition, split.bucket, split.files, split.isIncremental);
+        init(split.snapshotId, split.partition, split.bucket, split.files, split.isIncremental);
     }
 
     public void serialize(DataOutputView out) throws IOException {
+        out.writeLong(snapshotId);
         SerializationUtils.serializeBinaryRow(partition, out);
         out.writeInt(bucket);
         out.writeInt(files.size());
@@ -123,6 +138,7 @@ public class DataSplit implements Split {
     }
 
     public static DataSplit deserialize(DataInputView in) throws IOException {
+        long snapshotId = in.readLong();
         BinaryRowData partition = SerializationUtils.deserializeBinaryRow(in);
         int bucket = in.readInt();
         int fileNumber = in.readInt();
@@ -131,6 +147,6 @@ public class DataSplit implements Split {
         for (int i = 0; i < fileNumber; i++) {
             files.add(dataFileSer.deserialize(in));
         }
-        return new DataSplit(partition, bucket, files, in.readBoolean());
+        return new DataSplit(snapshotId, partition, bucket, files, in.readBoolean());
     }
 }

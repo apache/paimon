@@ -23,10 +23,14 @@ import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.store.table.sink.TableWrite;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -34,6 +38,8 @@ import java.util.List;
 
 /** Default implementation of {@link StoreSinkWrite}. This writer does not have states. */
 public class StoreSinkWriteImpl implements StoreSinkWrite {
+
+    private static final Logger LOG = LoggerFactory.getLogger(StoreSinkWriteImpl.class);
 
     protected final FileStoreTable table;
     protected final String commitUser;
@@ -82,6 +88,20 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     public void compact(BinaryRowData partition, int bucket, boolean fullCompaction)
             throws Exception {
         write.compact(partition, bucket, fullCompaction);
+    }
+
+    @Override
+    public void notifyNewFiles(
+            long snapshotId, BinaryRowData partition, int bucket, List<DataFileMeta> files) {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Receive {} new files from snapshot {}, partition {}, bucket {}",
+                    files.size(),
+                    snapshotId,
+                    partition,
+                    bucket);
+        }
+        write.notifyNewFiles(snapshotId, partition, bucket, files);
     }
 
     @Override

@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.operation;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.FileStore;
+import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.SinkRecord;
@@ -64,6 +65,20 @@ public interface FileStoreWrite<T> {
      * @throws Exception the thrown exception when compacting the records
      */
     void compact(BinaryRowData partition, int bucket, boolean fullCompaction) throws Exception;
+
+    /**
+     * Notify that some new files are created at given snapshot in given bucket.
+     *
+     * <p>Most probably, these files are created by another job. Currently this method is only used
+     * by the dedicated compact job to see files created by writer jobs.
+     *
+     * @param snapshotId the snapshot id where new files are created
+     * @param partition the partition where new files are created
+     * @param bucket the bucket where new files are created
+     * @param files the new files themselves
+     */
+    void notifyNewFiles(
+            long snapshotId, BinaryRowData partition, int bucket, List<DataFileMeta> files);
 
     /**
      * Prepare commit in the write.

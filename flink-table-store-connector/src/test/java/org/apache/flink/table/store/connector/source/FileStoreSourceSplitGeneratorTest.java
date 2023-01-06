@@ -78,6 +78,7 @@ public class FileStoreSourceSplitGeneratorTest {
                 };
         List<DataSplit> scanSplits =
                 AbstractDataTableScan.generateSplits(
+                        1L,
                         false,
                         Collections::singletonList,
                         plan.groupByPartFiles(plan.files(FileKind.ADD)));

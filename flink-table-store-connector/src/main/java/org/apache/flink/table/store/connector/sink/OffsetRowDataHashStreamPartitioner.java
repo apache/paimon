@@ -24,28 +24,37 @@ import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
+import org.apache.flink.table.store.file.utils.OffsetRowData;
 import org.apache.flink.table.types.logical.RowType;
 
-/** {@link StreamPartitioner} to partition {@link RowData} according to its hash value. */
-public class HashRowStreamPartitioner extends StreamPartitioner<RowData> {
+/**
+ * {@link StreamPartitioner} to partition {@link RowData} according to its hash value from an {@link
+ * OffsetRowData}.
+ */
+public class OffsetRowDataHashStreamPartitioner extends StreamPartitioner<RowData> {
 
-    private final RowType rowType;
+    private final RowType offsetRowType;
+    private final int offset;
 
+    private transient OffsetRowData offsetRowData;
     private transient RowDataSerializer serializer;
 
-    public HashRowStreamPartitioner(RowType rowType) {
-        this.rowType = rowType;
+    public OffsetRowDataHashStreamPartitioner(RowType offsetRowType, int offset) {
+        this.offsetRowType = offsetRowType;
+        this.offset = offset;
     }
 
     @Override
     public void setup(int numberOfChannels) {
         super.setup(numberOfChannels);
-        serializer = new RowDataSerializer(rowType);
+        this.offsetRowData = new OffsetRowData(offsetRowType.getFieldCount(), offset);
+        serializer = new RowDataSerializer(offsetRowType);
     }
 
     @Override
     public int selectChannel(SerializationDelegate<StreamRecord<RowData>> record) {
-        int hash = serializer.toBinaryRow(record.getInstance().getValue()).hashCode();
+        RowData rowData = record.getInstance().getValue();
+        int hash = serializer.toBinaryRow(offsetRowData.replace(rowData)).hashCode();
         return Math.abs(hash) % numberOfChannels;
     }
 

@@ -81,16 +81,25 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
     }
 
     @Override
-    public RecordWriter<RowData> createWriter(
+    public WriterContainer<RowData> createWriterContainer(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
-        return createWriter(
-                partition, bucket, scanExistingFileMetas(partition, bucket), compactExecutor);
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        RecordWriter<RowData> writer =
+                createWriter(
+                        partition,
+                        bucket,
+                        scanExistingFileMetas(latestSnapshotId, partition, bucket),
+                        compactExecutor);
+        return new WriterContainer<>(writer, latestSnapshotId);
     }
 
     @Override
-    public RecordWriter<RowData> createEmptyWriter(
+    public WriterContainer<RowData> createEmptyWriterContainer(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
-        return createWriter(partition, bucket, Collections.emptyList(), compactExecutor);
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        RecordWriter<RowData> writer =
+                createWriter(partition, bucket, Collections.emptyList(), compactExecutor);
+        return new WriterContainer<>(writer, latestSnapshotId);
     }
 
     private RecordWriter<RowData> createWriter(
@@ -140,7 +149,13 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
                             new LongCounter(toCompact.get(0).minSequenceNumber()));
             rewriter.write(
                     new RecordReaderIterator<>(
-                            read.createReader(new DataSplit(partition, bucket, toCompact, false))));
+                            read.createReader(
+                                    new DataSplit(
+                                            0L /* unused */,
+                                            partition,
+                                            bucket,
+                                            toCompact,
+                                            false))));
             rewriter.close();
             return rewriter.result();
         };
