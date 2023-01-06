@@ -16,9 +16,8 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.format.orc;
+package org.apache.flink.table.store.format.orc.filter;
 
-import org.apache.flink.orc.OrcFilters;
 import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.store.file.predicate.FieldRef;

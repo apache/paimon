@@ -20,15 +20,12 @@ package org.apache.flink.table.store.format.avro;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.configuration.ConfigOption;
+import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.core.fs.FSDataOutputStream;
-import org.apache.flink.formats.avro.AvroBuilder;
-import org.apache.flink.formats.avro.AvroToRowDataConverters;
-import org.apache.flink.formats.avro.AvroWriterFactory;
-import org.apache.flink.formats.avro.RowDataToAvroConverters;
-import org.apache.flink.formats.avro.typeutils.AvroSchemaConverter;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
@@ -53,15 +50,23 @@ import java.io.OutputStream;
 import java.util.List;
 import java.util.function.Function;
 
-import static org.apache.flink.formats.avro.AvroFormatOptions.AVRO_OUTPUT_CODEC;
+import static org.apache.avro.file.DataFileConstants.SNAPPY_CODEC;
 
 /** Avro {@link FileFormat}. The main code is copied from Flink {@code AvroFileFormatFactory}. */
 public class AvroFileFormat extends FileFormat {
 
+    public static final String IDENTIFIER = "avro";
+
+    public static final ConfigOption<String> AVRO_OUTPUT_CODEC =
+            ConfigOptions.key("codec")
+                    .stringType()
+                    .defaultValue(SNAPPY_CODEC)
+                    .withDescription("The compression codec for avro");
+
     private final ReadableConfig formatOptions;
 
     public AvroFileFormat(ReadableConfig formatOptions) {
-        super(org.apache.flink.formats.avro.AvroFileFormatFactory.IDENTIFIER);
+        super(IDENTIFIER);
         this.formatOptions = formatOptions;
     }
 

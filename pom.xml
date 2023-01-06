@@ -120,13 +120,9 @@ under the License.
         <flink.table.api.java.bridge>flink-table-api-java-bridge</flink.table.api.java.bridge>
         <flink.table.runtime>flink-table-runtime</flink.table.runtime>
         <flink.streaming.java>flink-streaming-java</flink.streaming.java>
-        <flink.sql.orc>flink-sql-orc</flink.sql.orc>
-        <flink.orc>flink-orc</flink.orc>
-        <flink.parquet>flink-parquet</flink.parquet>
         <flink.connector.kafka>flink-connector-kafka</flink.connector.kafka>
         <flink.sql.connector.kafka>flink-sql-connector-kafka</flink.sql.connector.kafka>
         <flink.test.utils>flink-test-utils</flink.test.utils>
-        <flink.sql.parquet>flink-sql-parquet</flink.sql.parquet>
         <janino.version>3.0.11</janino.version>
         <mockito.version>3.4.6</mockito.version>
     </properties>
@@ -315,13 +311,9 @@ under the License.
                 <flink.table.api.java.bridge>flink-table-api-java-bridge_${scala.binary.version}</flink.table.api.java.bridge>
                 <flink.table.runtime>flink-table-runtime_${scala.binary.version}</flink.table.runtime>
                 <flink.streaming.java>flink-streaming-java_${scala.binary.version}</flink.streaming.java>
-                <flink.sql.orc>flink-sql-orc_${scala.binary.version}</flink.sql.orc>
-                <flink.orc>flink-orc_${scala.binary.version}</flink.orc>
-                <flink.parquet>flink-parquet_${scala.binary.version}</flink.parquet>
                 <flink.connector.kafka>flink-connector-kafka_${scala.binary.version}</flink.connector.kafka>
                 <flink.sql.connector.kafka>flink-sql-connector-kafka_${scala.binary.version}</flink.sql.connector.kafka>
                 <flink.test.utils>flink-test-utils_${scala.binary.version}</flink.test.utils>
-                <flink.sql.parquet>flink-sql-parquet_${scala.binary.version}</flink.sql.parquet>
             </properties>
         </profile>
 
