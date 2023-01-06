@@ -134,11 +134,11 @@ To skip compactions in writers, set the following table property to `true`.
     </thead>
     <tbody>
     <tr>
-      <td><h5>write.compaction-skip</h5></td>
+      <td><h5>write-only</h5></td>
       <td>No</td>
       <td style="word-wrap: break-word;">false</td>
       <td>Boolean</td>
-      <td>Whether to skip compaction on write.</td>
+      <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs.</td>
     </tr>
     </tbody>
 </table>

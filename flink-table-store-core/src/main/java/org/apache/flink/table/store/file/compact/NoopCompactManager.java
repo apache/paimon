@@ -44,7 +44,7 @@ public class NoopCompactManager implements CompactManager {
                 !fullCompaction,
                 "NoopCompactManager does not support user triggered compaction.\n"
                         + "If you really need a guaranteed compaction, please set "
-                        + CoreOptions.WRITE_COMPACTION_SKIP.key()
+                        + CoreOptions.WRITE_ONLY.key()
                         + " property of this table to false.");
     }
 

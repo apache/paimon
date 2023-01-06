@@ -167,11 +167,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(WriteMode.CHANGE_LOG)
                     .withDescription("Specify the write mode for table.");
 
-    public static final ConfigOption<Boolean> WRITE_COMPACTION_SKIP =
-            ConfigOptions.key("write.compaction-skip")
+    public static final ConfigOption<Boolean> WRITE_ONLY =
+            ConfigOptions.key("write-only")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription("Whether to skip compaction on write.");
+                    .withDeprecatedKeys("write.compaction-skip")
+                    .withDescription(
+                            "If set to true, compactions and snapshot expiration will be skipped. "
+                                    + "This option is used along with dedicated compact jobs.");
 
     public static final ConfigOption<MemorySize> SOURCE_SPLIT_TARGET_SIZE =
             ConfigOptions.key("source.split.target-size")
@@ -590,8 +593,8 @@ public class CoreOptions implements Serializable {
         return options.get(WRITE_MODE);
     }
 
-    public boolean writeCompactionSkip() {
-        return options.get(WRITE_COMPACTION_SKIP);
+    public boolean writeOnly() {
+        return options.get(WRITE_ONLY);
     }
 
     /** Specifies the merge engine for table with primary key. */

@@ -77,7 +77,7 @@ public class FlinkActionsE2eTest extends E2eTestBase {
                         + ") PARTITIONED BY (dt) WITH (\n"
                         + "    'changelog-producer' = 'full-compaction',\n"
                         + "    'changelog-producer.compaction-interval' = '1s',\n"
-                        + "    'write.compaction-skip' = 'true'\n"
+                        + "    'write-only' = 'true'\n"
                         + ");";
 
         // insert data into table store

@@ -106,6 +106,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public TableCommit newCommit(String commitUser) {
-        return new TableCommit(store().newCommit(commitUser), store().newExpire());
+        return new TableCommit(
+                store().newCommit(commitUser), options().writeOnly() ? null : store().newExpire());
     }
 }

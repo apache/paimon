@@ -37,12 +37,12 @@ import java.util.Map;
 public class TableCommit implements AutoCloseable {
 
     private final FileStoreCommit commit;
-    private final FileStoreExpire expire;
+    @Nullable private final FileStoreExpire expire;
 
     @Nullable private Map<String, String> overwritePartition = null;
     @Nullable private Lock lock;
 
-    public TableCommit(FileStoreCommit commit, FileStoreExpire expire) {
+    public TableCommit(FileStoreCommit commit, @Nullable FileStoreExpire expire) {
         this.commit = commit;
         this.expire = expire;
     }
@@ -54,7 +54,11 @@ public class TableCommit implements AutoCloseable {
 
     public TableCommit withLock(Lock lock) {
         commit.withLock(lock);
-        expire.withLock(lock);
+
+        if (expire != null) {
+            expire.withLock(lock);
+        }
+
         this.lock = lock;
         return this;
     }
@@ -97,7 +101,10 @@ public class TableCommit implements AutoCloseable {
             }
             commit.overwrite(overwritePartition, committable, new HashMap<>());
         }
-        expire.expire();
+
+        if (expire != null) {
+            expire.expire();
+        }
     }
 
     @Override

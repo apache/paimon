@@ -86,7 +86,7 @@ public class CompactActionITCase extends AbstractTestBase {
     @Test(timeout = 60000)
     public void testBatchCompact() throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.WRITE_COMPACTION_SKIP.key(), "true");
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
 
         FileStoreTable table = createFileStoreTable(options);
         SnapshotManager snapshotManager = table.snapshotManager();
@@ -138,7 +138,10 @@ public class CompactActionITCase extends AbstractTestBase {
         options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "full-compaction");
         options.put(CoreOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL.key(), "1s");
         options.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
-        options.put(CoreOptions.WRITE_COMPACTION_SKIP.key(), "true");
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        // test that dedicated compact job will expire snapshots
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "3");
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "3");
 
         FileStoreTable table = createFileStoreTable(options);
         SnapshotManager snapshotManager = table.snapshotManager();
@@ -211,6 +214,9 @@ public class CompactActionITCase extends AbstractTestBase {
                         "-U 1|100|15|20221208",
                         "-U 1|100|15|20221209"),
                 actual);
+
+        // assert dedicated compact job will expire snapshots
+        Assert.assertEquals(2L, (long) snapshotManager.earliestSnapshotId());
     }
 
     private List<Map<String, String>> getSpecifiedPartitions() {

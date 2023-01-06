@@ -49,7 +49,7 @@ public class CompactAction {
     CompactAction(Path tablePath) {
         Configuration tableOptions = new Configuration();
         tableOptions.set(CoreOptions.PATH, tablePath.toString());
-        tableOptions.set(CoreOptions.WRITE_COMPACTION_SKIP, false);
+        tableOptions.set(CoreOptions.WRITE_ONLY, false);
         FileStoreTable table = FileStoreTableFactory.create(tableOptions);
 
         sourceBuilder = new CompactorSourceBuilder(tablePath.toString(), table);
