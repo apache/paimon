@@ -86,7 +86,7 @@ public class HiveE2eTest extends E2eReaderTestBase {
     @Test
     public void testFlinkWriteAndHiveRead() throws Exception {
         final String warehouse = HDFS_ROOT + "/" + UUID.randomUUID().toString() + ".warehouse";
-        final String table = "T";
+        final String table = "t";
         runSql(
                 String.join(
                         "\n",
