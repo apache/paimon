@@ -79,7 +79,7 @@ public class ContinuousCompactorFollowUpScannerTest extends SnapshotEnumeratorTe
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(4);
 
-        BucketsTable bucketsTable = new BucketsTable(table);
+        BucketsTable bucketsTable = new BucketsTable(table, true);
         DataTableScan scan = bucketsTable.newScan();
         TableRead read = bucketsTable.newRead();
         ContinuousCompactorFollowUpScanner scanner = new ContinuousCompactorFollowUpScanner();

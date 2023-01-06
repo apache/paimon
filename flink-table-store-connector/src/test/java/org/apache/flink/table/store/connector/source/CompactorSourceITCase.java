@@ -108,9 +108,9 @@ public class CompactorSourceITCase extends AbstractTestBase {
         assertThat(actual)
                 .hasSameElementsAs(
                         Arrays.asList(
-                                "+I 2|20221208|15|0|2",
-                                "+I 2|20221208|16|0|1",
-                                "+I 2|20221209|15|0|1"));
+                                "+I 2|20221208|15|0|0",
+                                "+I 2|20221208|16|0|0",
+                                "+I 2|20221209|15|0|0"));
 
         write.close();
         commit.close();
@@ -195,7 +195,7 @@ public class CompactorSourceITCase extends AbstractTestBase {
         testPartitionSpec(
                 false,
                 getSpecifiedPartitions(),
-                Arrays.asList("+I 3|20221208|16|0|2", "+I 3|20221209|15|0|2"));
+                Arrays.asList("+I 3|20221208|16|0|0", "+I 3|20221209|15|0|0"));
     }
 
     private List<Map<String, String>> getSpecifiedPartitions() {

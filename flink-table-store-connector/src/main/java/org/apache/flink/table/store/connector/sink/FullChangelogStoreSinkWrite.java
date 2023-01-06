@@ -34,7 +34,6 @@ import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.SinkRecord;
@@ -136,27 +135,6 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
     public void compact(BinaryRowData partition, int bucket, boolean fullCompaction)
             throws Exception {
         super.compact(partition, bucket, fullCompaction);
-        touchBucket(partition, bucket);
-    }
-
-    @Override
-    public void compact(
-            long snapshotId,
-            BinaryRowData partition,
-            int bucket,
-            boolean fullCompaction,
-            List<DataFileMeta> extraFiles)
-            throws Exception {
-        if (LOG.isDebugEnabled()) {
-            LOG.debug(
-                    "Receive {} extra files from snapshot {}, partition {}, bucket {}",
-                    extraFiles.size(),
-                    snapshotId,
-                    partition,
-                    bucket);
-        }
-
-        super.compact(snapshotId, partition, bucket, fullCompaction, extraFiles);
         touchBucket(partition, bucket);
     }
 

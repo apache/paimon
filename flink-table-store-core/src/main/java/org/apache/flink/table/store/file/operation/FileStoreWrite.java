@@ -26,8 +26,6 @@ import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 
-import javax.annotation.Nullable;
-
 import java.util.List;
 
 /**
@@ -64,15 +62,23 @@ public interface FileStoreWrite<T> {
      * @param partition the partition to compact
      * @param bucket the bucket to compact
      * @param fullCompaction whether to trigger full compaction or just normal compaction
-     * @param extraCompactFiles extra level 0 files added to the writer before compaction
      * @throws Exception the thrown exception when compacting the records
      */
-    void compact(
-            BinaryRowData partition,
-            int bucket,
-            boolean fullCompaction,
-            @Nullable ExtraCompactFiles extraCompactFiles)
-            throws Exception;
+    void compact(BinaryRowData partition, int bucket, boolean fullCompaction) throws Exception;
+
+    /**
+     * Notify that some new files are created at given snapshot in given bucket.
+     *
+     * <p>Most probably, these files are created by another job. Currently this method is only used
+     * by the dedicated compact job to see files created by writer jobs.
+     *
+     * @param snapshotId the snapshot id where new files are created
+     * @param partition the partition where new files are created
+     * @param bucket the bucket where new files are created
+     * @param files the new files themselves
+     */
+    void notifyNewFiles(
+            long snapshotId, BinaryRowData partition, int bucket, List<DataFileMeta> files);
 
     /**
      * Prepare commit in the write.
@@ -90,23 +96,4 @@ public interface FileStoreWrite<T> {
      * @throws Exception the thrown exception
      */
     void close() throws Exception;
-
-    /** Extra files added to the writer before compaction. */
-    class ExtraCompactFiles {
-        private final long snapshotId;
-        private final List<DataFileMeta> files;
-
-        public ExtraCompactFiles(long snapshotId, List<DataFileMeta> files) {
-            this.snapshotId = snapshotId;
-            this.files = files;
-        }
-
-        public long snapshotId() {
-            return snapshotId;
-        }
-
-        public List<DataFileMeta> files() {
-            return files;
-        }
-    }
 }

@@ -81,28 +81,28 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
     }
 
     @Override
-    public WriterWrapper<RowData> createWriterWrapper(
+    public WriterContainer<RowData> createWriterContainer(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         RecordWriter<RowData> writer =
-                createWriterWrapper(
+                createWriter(
                         partition,
                         bucket,
                         scanExistingFileMetas(latestSnapshotId, partition, bucket),
                         compactExecutor);
-        return new WriterWrapper<>(writer, latestSnapshotId);
+        return new WriterContainer<>(writer, latestSnapshotId);
     }
 
     @Override
-    public WriterWrapper<RowData> createEmptyWriterWrapper(
+    public WriterContainer<RowData> createEmptyWriterContainer(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         RecordWriter<RowData> writer =
-                createWriterWrapper(partition, bucket, Collections.emptyList(), compactExecutor);
-        return new WriterWrapper<>(writer, latestSnapshotId);
+                createWriter(partition, bucket, Collections.emptyList(), compactExecutor);
+        return new WriterContainer<>(writer, latestSnapshotId);
     }
 
-    private RecordWriter<RowData> createWriterWrapper(
+    private RecordWriter<RowData> createWriter(
             BinaryRowData partition,
             int bucket,
             List<DataFileMeta> restoredFiles,

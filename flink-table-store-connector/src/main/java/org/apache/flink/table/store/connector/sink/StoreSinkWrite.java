@@ -40,13 +40,8 @@ interface StoreSinkWrite {
 
     void compact(BinaryRowData partition, int bucket, boolean fullCompaction) throws Exception;
 
-    void compact(
-            long snapshotId,
-            BinaryRowData partition,
-            int bucket,
-            boolean fullCompaction,
-            List<DataFileMeta> extraFiles)
-            throws Exception;
+    void notifyNewFiles(
+            long snapshotId, BinaryRowData partition, int bucket, List<DataFileMeta> files);
 
     List<Committable> prepareCommit(boolean doCompaction, long checkpointId) throws IOException;
 

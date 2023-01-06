@@ -139,9 +139,13 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @Override
-    public void compact(boolean fullCompaction, List<DataFileMeta> extraFiles) throws Exception {
-        extraFiles.forEach(compactManager::addNewFile);
+    public void compact(boolean fullCompaction) throws Exception {
         flushWriteBuffer(true, fullCompaction);
+    }
+
+    @Override
+    public void addNewFiles(List<DataFileMeta> files) {
+        files.forEach(compactManager::addNewFile);
     }
 
     @Override

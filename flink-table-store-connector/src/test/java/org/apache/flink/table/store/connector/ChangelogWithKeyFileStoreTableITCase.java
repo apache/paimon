@@ -360,7 +360,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
                         + "'write.compaction-skip' = 'true'");
 
         // sleep for a random amount of time to check
-        // if stand-alone compactor job can find first snapshot to compact correctly
+        // if dedicated compactor job can find first snapshot to compact correctly
         Thread.sleep(random.nextInt(2500));
 
         for (int i = enableConflicts ? 2 : 1; i > 0; i--) {

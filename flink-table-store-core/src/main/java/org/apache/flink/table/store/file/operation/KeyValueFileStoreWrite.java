@@ -107,7 +107,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     }
 
     @Override
-    public WriterWrapper<KeyValue> createWriterWrapper(
+    public WriterContainer<KeyValue> createWriterContainer(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         RecordWriter<KeyValue> writer =
@@ -116,16 +116,16 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         bucket,
                         scanExistingFileMetas(latestSnapshotId, partition, bucket),
                         compactExecutor);
-        return new WriterWrapper<>(writer, latestSnapshotId);
+        return new WriterContainer<>(writer, latestSnapshotId);
     }
 
     @Override
-    public WriterWrapper<KeyValue> createEmptyWriterWrapper(
+    public WriterContainer<KeyValue> createEmptyWriterContainer(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         RecordWriter<KeyValue> writer =
                 createMergeTreeWriter(partition, bucket, Collections.emptyList(), compactExecutor);
-        return new WriterWrapper<>(writer, latestSnapshotId);
+        return new WriterContainer<>(writer, latestSnapshotId);
     }
 
     private MergeTreeWriter createMergeTreeWriter(

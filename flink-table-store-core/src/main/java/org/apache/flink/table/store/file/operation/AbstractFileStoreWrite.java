@@ -59,7 +59,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Nullable protected IOManager ioManager;
 
-    protected final Map<BinaryRowData, Map<Integer, WriterWrapper<T>>> writers;
+    protected final Map<BinaryRowData, Map<Integer, WriterContainer<T>>> writers;
     private final ExecutorService compactExecutor;
 
     private boolean overwrite = false;
@@ -107,27 +107,27 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     @Override
-    public void compact(
-            BinaryRowData partition,
-            int bucket,
-            boolean fullCompaction,
-            @Nullable ExtraCompactFiles extraCompactFiles)
+    public void compact(BinaryRowData partition, int bucket, boolean fullCompaction)
             throws Exception {
-        WriterWrapper<T> writerWrapper = getWriterWrapper(partition, bucket);
-        if (extraCompactFiles != null && LOG.isDebugEnabled()) {
-            LOG.debug(
-                    "Get extra compact files {}\nExtra snapshot {}, base snapshot {}",
-                    extraCompactFiles.files(),
-                    extraCompactFiles.snapshotId(),
-                    writerWrapper.baseSnapshotId);
-        }
+        getWriterWrapper(partition, bucket).writer.compact(fullCompaction);
+    }
 
-        List<DataFileMeta> extraFiles = Collections.emptyList();
-        if (extraCompactFiles != null
-                && extraCompactFiles.snapshotId() > writerWrapper.baseSnapshotId) {
-            extraFiles = extraCompactFiles.files();
+    @Override
+    public void notifyNewFiles(
+            long snapshotId, BinaryRowData partition, int bucket, List<DataFileMeta> files) {
+        WriterContainer<T> writerContainer = getWriterWrapper(partition, bucket);
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Get extra compact files for partition {}, bucket {}. Extra snapshot {}, base snapshot {}.\nFiles: {}",
+                    partition,
+                    bucket,
+                    snapshotId,
+                    writerContainer.baseSnapshotId,
+                    files);
         }
-        writerWrapper.writer.compact(fullCompaction, extraFiles);
+        if (snapshotId > writerContainer.baseSnapshotId) {
+            writerContainer.writer.addNewFiles(files);
+        }
     }
 
     @Override
@@ -159,20 +159,20 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
         List<FileCommittable> result = new ArrayList<>();
 
-        Iterator<Map.Entry<BinaryRowData, Map<Integer, WriterWrapper<T>>>> partIter =
+        Iterator<Map.Entry<BinaryRowData, Map<Integer, WriterContainer<T>>>> partIter =
                 writers.entrySet().iterator();
         while (partIter.hasNext()) {
-            Map.Entry<BinaryRowData, Map<Integer, WriterWrapper<T>>> partEntry = partIter.next();
+            Map.Entry<BinaryRowData, Map<Integer, WriterContainer<T>>> partEntry = partIter.next();
             BinaryRowData partition = partEntry.getKey();
-            Iterator<Map.Entry<Integer, WriterWrapper<T>>> bucketIter =
+            Iterator<Map.Entry<Integer, WriterContainer<T>>> bucketIter =
                     partEntry.getValue().entrySet().iterator();
             while (bucketIter.hasNext()) {
-                Map.Entry<Integer, WriterWrapper<T>> entry = bucketIter.next();
+                Map.Entry<Integer, WriterContainer<T>> entry = bucketIter.next();
                 int bucket = entry.getKey();
-                WriterWrapper<T> writerWrapper = entry.getValue();
+                WriterContainer<T> writerContainer = entry.getValue();
 
                 RecordWriter.CommitIncrement increment =
-                        writerWrapper.writer.prepareCommit(blocking);
+                        writerContainer.writer.prepareCommit(blocking);
                 FileCommittable committable =
                         new FileCommittable(
                                 partition,
@@ -182,7 +182,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 result.add(committable);
 
                 if (committable.isEmpty()) {
-                    if (writerWrapper.lastModifiedCommitIdentifier <= latestCommittedIdentifier) {
+                    if (writerContainer.lastModifiedCommitIdentifier <= latestCommittedIdentifier) {
                         // Clear writer if no update, and if its latest modification has committed.
                         //
                         // We need a mechanism to clear writers, otherwise there will be more and
@@ -194,14 +194,14 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                             + "while latest committed identifier is {}",
                                     partition,
                                     bucket,
-                                    writerWrapper.lastModifiedCommitIdentifier,
+                                    writerContainer.lastModifiedCommitIdentifier,
                                     latestCommittedIdentifier);
                         }
-                        writerWrapper.writer.close();
+                        writerContainer.writer.close();
                         bucketIter.remove();
                     }
                 } else {
-                    writerWrapper.lastModifiedCommitIdentifier = commitIdentifier;
+                    writerContainer.lastModifiedCommitIdentifier = commitIdentifier;
                 }
             }
 
@@ -215,46 +215,47 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Override
     public void close() throws Exception {
-        for (Map<Integer, WriterWrapper<T>> bucketWriters : writers.values()) {
-            for (WriterWrapper<T> writerWrapper : bucketWriters.values()) {
-                writerWrapper.writer.close();
+        for (Map<Integer, WriterContainer<T>> bucketWriters : writers.values()) {
+            for (WriterContainer<T> writerContainer : bucketWriters.values()) {
+                writerContainer.writer.close();
             }
         }
         writers.clear();
         compactExecutor.shutdownNow();
     }
 
-    private WriterWrapper<T> getWriterWrapper(BinaryRowData partition, int bucket) {
-        Map<Integer, WriterWrapper<T>> buckets = writers.get(partition);
+    private WriterContainer<T> getWriterWrapper(BinaryRowData partition, int bucket) {
+        Map<Integer, WriterContainer<T>> buckets = writers.get(partition);
         if (buckets == null) {
             buckets = new HashMap<>();
             writers.put(partition.copy(), buckets);
         }
-        return buckets.computeIfAbsent(bucket, k -> createWriterWrapper(partition.copy(), bucket));
+        return buckets.computeIfAbsent(
+                bucket, k -> createWriterContainer(partition.copy(), bucket));
     }
 
-    private WriterWrapper<T> createWriterWrapper(BinaryRowData partition, int bucket) {
+    private WriterContainer<T> createWriterContainer(BinaryRowData partition, int bucket) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("Creating writer for partition {}, bucket {}", partition, bucket);
         }
-        WriterWrapper<T> writerWrapper =
+        WriterContainer<T> writerContainer =
                 overwrite
-                        ? createEmptyWriterWrapper(partition.copy(), bucket, compactExecutor)
-                        : createWriterWrapper(partition.copy(), bucket, compactExecutor);
-        notifyNewWriter(writerWrapper.writer);
-        return writerWrapper;
+                        ? createEmptyWriterContainer(partition.copy(), bucket, compactExecutor)
+                        : createWriterContainer(partition.copy(), bucket, compactExecutor);
+        notifyNewWriter(writerContainer.writer);
+        return writerContainer;
     }
 
     protected void notifyNewWriter(RecordWriter<T> writer) {}
 
     /** Create a {@link RecordWriter} from partition and bucket. */
     @VisibleForTesting
-    public abstract WriterWrapper<T> createWriterWrapper(
+    public abstract WriterContainer<T> createWriterContainer(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor);
 
     /** Create an empty {@link RecordWriter} from partition and bucket. */
     @VisibleForTesting
-    public abstract WriterWrapper<T> createEmptyWriterWrapper(
+    public abstract WriterContainer<T> createEmptyWriterContainer(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor);
 
     /**
@@ -262,13 +263,13 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
      * modified commit.
      */
     @VisibleForTesting
-    public static class WriterWrapper<T> {
+    public static class WriterContainer<T> {
 
         public final RecordWriter<T> writer;
         private final long baseSnapshotId;
         private long lastModifiedCommitIdentifier;
 
-        protected WriterWrapper(RecordWriter<T> writer, Long baseSnapshotId) {
+        protected WriterContainer(RecordWriter<T> writer, Long baseSnapshotId) {
             this.writer = writer;
             this.baseSnapshotId =
                     baseSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : baseSnapshotId;

@@ -41,9 +41,15 @@ public interface RecordWriter<T> {
      * not be completed when the method returns.
      *
      * @param fullCompaction whether to trigger full compaction or just normal compaction
-     * @param extraFiles extra files added to the writer before compaction
      */
-    void compact(boolean fullCompaction, List<DataFileMeta> extraFiles) throws Exception;
+    void compact(boolean fullCompaction) throws Exception;
+
+    /**
+     * Add files to the internal {@link org.apache.flink.table.store.file.compact.CompactManager}.
+     *
+     * @param files files to add
+     */
+    void addNewFiles(List<DataFileMeta> files);
 
     /**
      * Prepare for a commit.

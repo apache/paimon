@@ -95,8 +95,13 @@ public class StoreCompactOperator extends PrepareCommitOperator {
         List<DataFileMeta> files = dataFileMetaSerializer.deserializeList(serializedFiles);
 
         if (isStreaming) {
-            write.compact(snapshotId, partition, bucket, false, files);
+            write.notifyNewFiles(snapshotId, partition, bucket, files);
+            write.compact(partition, bucket, false);
         } else {
+            Preconditions.checkArgument(
+                    files.isEmpty(),
+                    "Batch compact job does not concern what files are compacted. "
+                            + "They only need to know what buckets are compacted.");
             write.compact(partition, bucket, true);
         }
     }

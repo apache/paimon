@@ -62,7 +62,7 @@ public class ContinuousCompactorStartingScannerTest extends SnapshotEnumeratorTe
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(5);
 
-        BucketsTable bucketsTable = new BucketsTable(table);
+        BucketsTable bucketsTable = new BucketsTable(table, true);
         ContinuousCompactorStartingScanner scanner = new ContinuousCompactorStartingScanner();
         DataTableScan.DataFilePlan plan = scanner.getPlan(snapshotManager, bucketsTable.newScan());
         assertThat(plan.snapshotId).isEqualTo(3);
@@ -76,7 +76,7 @@ public class ContinuousCompactorStartingScannerTest extends SnapshotEnumeratorTe
     public void testNoSnapshot() throws Exception {
         FileStoreTable table = createFileStoreTable();
         SnapshotManager snapshotManager = table.snapshotManager();
-        BucketsTable bucketsTable = new BucketsTable(table);
+        BucketsTable bucketsTable = new BucketsTable(table, true);
         ContinuousCompactorStartingScanner scanner = new ContinuousCompactorStartingScanner();
         assertThat(scanner.getPlan(snapshotManager, bucketsTable.newScan())).isNull();
     }

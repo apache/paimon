@@ -23,6 +23,7 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.utils.JoinedRowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.IteratorRecordReader;
@@ -49,20 +50,18 @@ import java.util.Map;
 /**
  * A table to produce modified partitions and buckets for each snapshot.
  *
- * <p>Only used internally by stand-alone compact job sources.
+ * <p>Only used internally by dedicated compact job sources.
  */
 public class BucketsTable implements DataTable {
 
     private static final long serialVersionUID = 1L;
 
     private final FileStoreTable wrapped;
+    private final boolean isContinuous;
 
-    public BucketsTable(FileStoreTable wrapped) {
+    public BucketsTable(FileStoreTable wrapped, boolean isContinuous) {
         this.wrapped = wrapped;
-    }
-
-    public FileStoreTable wrapped() {
-        return wrapped;
+        this.isContinuous = isContinuous;
     }
 
     @Override
@@ -117,10 +116,10 @@ public class BucketsTable implements DataTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new BucketsTable(wrapped.copy(dynamicOptions));
+        return new BucketsTable(wrapped.copy(dynamicOptions), isContinuous);
     }
 
-    private static class BucketsRead implements TableRead {
+    private class BucketsRead implements TableRead {
 
         private final DataFileMetaSerializer dataFileMetaSerializer = new DataFileMetaSerializer();
 
@@ -147,13 +146,19 @@ public class BucketsTable implements DataTable {
                     new JoinedRowData(
                             GenericRowData.of(dataSplit.snapshotId()), dataSplit.partition());
             row = new JoinedRowData(row, GenericRowData.of(dataSplit.bucket()));
+
+            List<DataFileMeta> files = Collections.emptyList();
+            if (isContinuous) {
+                // Serialized files are only useful in streaming jobs.
+                // Batch compact jobs only run once, so they only need to know what buckets should
+                // be compacted and don't need to concern incremental new files.
+                files = dataSplit.files();
+            }
             row =
                     new JoinedRowData(
                             row,
                             GenericRowData.of(
-                                    (Object)
-                                            dataFileMetaSerializer.serializeList(
-                                                    dataSplit.files())));
+                                    (Object) dataFileMetaSerializer.serializeList(files)));
 
             return new IteratorRecordReader<>(Collections.singletonList(row).iterator());
         }

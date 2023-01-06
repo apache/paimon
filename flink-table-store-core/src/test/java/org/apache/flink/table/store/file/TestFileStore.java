@@ -193,10 +193,10 @@ public class TestFileStore extends KeyValueFileStore {
                                     ExecutorService service = Executors.newSingleThreadExecutor();
                                     RecordWriter<KeyValue> writer =
                                             emptyWriter
-                                                    ? write.createEmptyWriterWrapper(
+                                                    ? write.createEmptyWriterContainer(
                                                                     partition, bucket, service)
                                                             .writer
-                                                    : write.createWriterWrapper(
+                                                    : write.createWriterContainer(
                                                                     partition, bucket, service)
                                                             .writer;
                                     ((MemoryOwner) writer)
