@@ -61,6 +61,10 @@ public class BucketsTable implements DataTable {
         this.wrapped = wrapped;
     }
 
+    public FileStoreTable wrapped() {
+        return wrapped;
+    }
+
     @Override
     public Path location() {
         return wrapped.location();
@@ -122,6 +126,7 @@ public class BucketsTable implements DataTable {
 
         @Override
         public TableRead withFilter(Predicate predicate) {
+            // filter is done by scan
             return this;
         }
 

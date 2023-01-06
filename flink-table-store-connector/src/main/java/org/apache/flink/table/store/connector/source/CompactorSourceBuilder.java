@@ -82,10 +82,16 @@ public class CompactorSourceBuilder {
     private Source<RowData, ?, ?> buildSource() {
         Predicate partitionPredicate = null;
         if (specifiedPartitions != null) {
+            // This predicate is based on the row type of the original table, not bucket table.
+            // Because TableScan in BucketsTable is the same with FileStoreTable,
+            // and partition filter is done by scan.
             partitionPredicate =
                     PredicateBuilder.or(
                             specifiedPartitions.stream()
-                                    .map(p -> PredicateConverter.fromMap(p, bucketsTable.rowType()))
+                                    .map(
+                                            p ->
+                                                    PredicateConverter.fromMap(
+                                                            p, bucketsTable.wrapped().rowType()))
                                     .toArray(Predicate[]::new));
         }
 
