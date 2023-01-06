@@ -18,9 +18,10 @@
 
 package org.apache.flink.table.store.format.orc;
 
-import org.apache.flink.orc.OrcFilters;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
+import org.apache.flink.table.store.format.orc.filter.OrcFilters;
+import org.apache.flink.table.store.format.orc.filter.OrcPredicateFunctionVisitor;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.RowType;
 

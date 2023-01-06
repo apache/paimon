@@ -27,7 +27,6 @@ import org.apache.flink.connector.file.src.util.IteratorResultIterator;
 import org.apache.flink.connector.file.src.util.Pool;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.formats.avro.utils.FSDataInputStreamWrapper;
 
 import org.apache.avro.Schema;
 import org.apache.avro.file.DataFileReader;

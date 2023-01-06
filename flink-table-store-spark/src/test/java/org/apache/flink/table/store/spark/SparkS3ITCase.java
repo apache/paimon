@@ -22,17 +22,22 @@ import org.apache.flink.core.fs.Path;
 
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
-import org.junit.AfterClass;
+import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for using S3 in Spark. */
+@RunWith(Parameterized.class)
 public class SparkS3ITCase {
 
     @ClassRule public static final MinioTestContainer MINIO_CONTAINER = new MinioTestContainer();
@@ -54,16 +59,29 @@ public class SparkS3ITCase {
         spark.sql("USE tablestore.db");
     }
 
-    @AfterClass
-    public static void afterEach() {
+    @Parameterized.Parameters(name = "{0}")
+    public static Collection<String> parameters() {
+        return Arrays.asList("avro", "orc", "parquet");
+    }
+
+    private final String format;
+
+    public SparkS3ITCase(String format) {
+        this.format = format;
+    }
+
+    @After
+    public void afterEach() {
         spark.sql("DROP TABLE T");
     }
 
     @Test
     public void testWriteRead() {
         spark.sql(
-                "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES"
-                        + " ('primary-key'='a', 'bucket'='4', 'file.format'='avro')");
+                String.format(
+                        "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES"
+                                + " ('primary-key'='a', 'bucket'='4', 'file.format'='%s')",
+                        format));
         spark.sql("INSERT INTO T VALUES (1, 2, '3')").collectAsList();
         List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
         assertThat(rows.toString()).isEqualTo("[[1,2,3]]");

@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.format.orc;
+package org.apache.flink.table.store.format.orc.filter;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.DecimalData;
@@ -24,6 +24,7 @@ import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.format.FileStatsExtractor;
+import org.apache.flink.table.store.format.orc.OrcReaderFactory;
 import org.apache.flink.table.store.utils.DateTimeUtils;
 import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -57,7 +58,7 @@ public class OrcFileStatsExtractor implements FileStatsExtractor {
 
     @Override
     public FieldStats[] extract(Path path) throws IOException {
-        try (Reader reader = OrcShimImpl.createReader(new Configuration(), path)) {
+        try (Reader reader = OrcReaderFactory.createReader(new Configuration(), path)) {
             long rowCount = reader.getNumberOfRows();
             ColumnStatistics[] columnStatistics = reader.getStatistics();
             TypeDescription schema = reader.getSchema();
