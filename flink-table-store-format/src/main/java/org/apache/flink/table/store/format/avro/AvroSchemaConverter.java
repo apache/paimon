@@ -23,7 +23,7 @@ import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.LogicalTypeFamily;
+import org.apache.flink.table.types.logical.LogicalTypeRoot;
 import org.apache.flink.table.types.logical.MapType;
 import org.apache.flink.table.types.logical.MultisetType;
 import org.apache.flink.table.types.logical.RowType;
@@ -197,7 +197,8 @@ public class AvroSchemaConverter {
             keyType = multisetType.getElementType();
             valueType = new IntType();
         }
-        if (!keyType.is(LogicalTypeFamily.CHARACTER_STRING)) {
+        if (keyType.getTypeRoot() != LogicalTypeRoot.VARCHAR
+                && keyType.getTypeRoot() != LogicalTypeRoot.CHAR) {
             throw new UnsupportedOperationException(
                     "Avro format doesn't support non-string as key type of map. "
                             + "The key type is: "

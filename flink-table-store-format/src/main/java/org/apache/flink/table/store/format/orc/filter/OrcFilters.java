@@ -24,11 +24,10 @@ import org.apache.flink.table.expressions.FieldReferenceExpression;
 import org.apache.flink.table.expressions.ValueLiteralExpression;
 import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
 import org.apache.flink.table.functions.FunctionDefinition;
+import org.apache.flink.table.store.utils.MapBuilder;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalTypeRoot;
 import org.apache.flink.util.function.TriFunction;
-
-import org.apache.flink.shaded.curator5.com.google.common.collect.ImmutableMap;
 
 import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
@@ -44,6 +43,7 @@ import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 
@@ -52,59 +52,55 @@ public class OrcFilters {
 
     private static final Logger LOG = LoggerFactory.getLogger(OrcFilters.class);
 
-    private static final ImmutableMap<FunctionDefinition, Function<CallExpression, Predicate>>
-            FILTERS =
-                    new ImmutableMap.Builder<
-                                    FunctionDefinition, Function<CallExpression, Predicate>>()
-                            .put(BuiltInFunctionDefinitions.IS_NULL, OrcFilters::convertIsNull)
-                            .put(
-                                    BuiltInFunctionDefinitions.IS_NOT_NULL,
-                                    OrcFilters::convertIsNotNull)
-                            .put(BuiltInFunctionDefinitions.NOT, OrcFilters::convertNot)
-                            .put(BuiltInFunctionDefinitions.OR, OrcFilters::convertOr)
-                            .put(
-                                    BuiltInFunctionDefinitions.EQUALS,
-                                    call ->
-                                            convertBinary(
-                                                    call,
-                                                    OrcFilters::convertEquals,
-                                                    OrcFilters::convertEquals))
-                            .put(
-                                    BuiltInFunctionDefinitions.NOT_EQUALS,
-                                    call ->
-                                            convertBinary(
-                                                    call,
-                                                    OrcFilters::convertNotEquals,
-                                                    OrcFilters::convertNotEquals))
-                            .put(
-                                    BuiltInFunctionDefinitions.GREATER_THAN,
-                                    call ->
-                                            convertBinary(
-                                                    call,
-                                                    OrcFilters::convertGreaterThan,
-                                                    OrcFilters::convertLessThanEquals))
-                            .put(
-                                    BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL,
-                                    call ->
-                                            convertBinary(
-                                                    call,
-                                                    OrcFilters::convertGreaterThanEquals,
-                                                    OrcFilters::convertLessThan))
-                            .put(
-                                    BuiltInFunctionDefinitions.LESS_THAN,
-                                    call ->
-                                            convertBinary(
-                                                    call,
-                                                    OrcFilters::convertLessThan,
-                                                    OrcFilters::convertGreaterThanEquals))
-                            .put(
-                                    BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL,
-                                    call ->
-                                            convertBinary(
-                                                    call,
-                                                    OrcFilters::convertLessThanEquals,
-                                                    OrcFilters::convertGreaterThan))
-                            .build();
+    private static final Map<FunctionDefinition, Function<CallExpression, Predicate>> FILTERS =
+            new MapBuilder<FunctionDefinition, Function<CallExpression, Predicate>>()
+                    .put(BuiltInFunctionDefinitions.IS_NULL, OrcFilters::convertIsNull)
+                    .put(BuiltInFunctionDefinitions.IS_NOT_NULL, OrcFilters::convertIsNotNull)
+                    .put(BuiltInFunctionDefinitions.NOT, OrcFilters::convertNot)
+                    .put(BuiltInFunctionDefinitions.OR, OrcFilters::convertOr)
+                    .put(
+                            BuiltInFunctionDefinitions.EQUALS,
+                            call ->
+                                    convertBinary(
+                                            call,
+                                            OrcFilters::convertEquals,
+                                            OrcFilters::convertEquals))
+                    .put(
+                            BuiltInFunctionDefinitions.NOT_EQUALS,
+                            call ->
+                                    convertBinary(
+                                            call,
+                                            OrcFilters::convertNotEquals,
+                                            OrcFilters::convertNotEquals))
+                    .put(
+                            BuiltInFunctionDefinitions.GREATER_THAN,
+                            call ->
+                                    convertBinary(
+                                            call,
+                                            OrcFilters::convertGreaterThan,
+                                            OrcFilters::convertLessThanEquals))
+                    .put(
+                            BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL,
+                            call ->
+                                    convertBinary(
+                                            call,
+                                            OrcFilters::convertGreaterThanEquals,
+                                            OrcFilters::convertLessThan))
+                    .put(
+                            BuiltInFunctionDefinitions.LESS_THAN,
+                            call ->
+                                    convertBinary(
+                                            call,
+                                            OrcFilters::convertLessThan,
+                                            OrcFilters::convertGreaterThanEquals))
+                    .put(
+                            BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL,
+                            call ->
+                                    convertBinary(
+                                            call,
+                                            OrcFilters::convertLessThanEquals,
+                                            OrcFilters::convertGreaterThan))
+                    .unmodifiable();
 
     private static boolean isRef(Expression expression) {
         return expression instanceof FieldReferenceExpression;

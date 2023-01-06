@@ -20,7 +20,6 @@ package org.apache.flink.table.store.format.avro;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.core.fs.FSDataOutputStream;
-import org.apache.flink.util.CloseShieldOutputStream;
 
 import org.apache.avro.file.DataFileWriter;
 
