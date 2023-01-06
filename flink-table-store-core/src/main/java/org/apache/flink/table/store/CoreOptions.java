@@ -29,6 +29,7 @@ import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.configuration.description.Description;
 import org.apache.flink.configuration.description.InlineElement;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.format.FileFormat;
@@ -45,11 +46,13 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
 import static org.apache.flink.configuration.description.TextElement.text;
+import static org.apache.flink.table.store.file.WriteMode.APPEND_ONLY;
 import static org.apache.flink.table.store.file.schema.TableSchema.KEY_FIELD_PREFIX;
 import static org.apache.flink.table.store.file.schema.TableSchema.SYSTEM_FIELD_NAMES;
 import static org.apache.flink.util.Preconditions.checkState;
@@ -838,6 +841,13 @@ public class CoreOptions implements Serializable {
                                             "Field name[%s] in schema cannot start with [%s]",
                                             f, KEY_FIELD_PREFIX));
                         });
+
+        // Cannot define any primary key in an append-only table.
+        if (!schema.primaryKeys().isEmpty() && Objects.equals(APPEND_ONLY, options.writeMode())) {
+            throw new TableException(
+                    "Cannot define any primary key in an append-only table. Set 'write-mode'='change-log' if "
+                            + "still want to keep the primary key definition.");
+        }
     }
 
     private static void checkOptionExistInMode(
