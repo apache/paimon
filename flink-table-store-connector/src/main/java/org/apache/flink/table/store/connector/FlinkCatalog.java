@@ -203,10 +203,6 @@ public class FlinkCatalog extends AbstractCatalog {
         // remove table path
         String specific = options.remove(PATH.key());
         if (specific != null) {
-            if (!catalog.getTableLocation(tablePath).equals(new Path(specific))) {
-                throw new IllegalArgumentException(
-                        "Illegal table path in table options: " + specific);
-            }
             catalogTable = catalogTable.copy(options);
         }
 

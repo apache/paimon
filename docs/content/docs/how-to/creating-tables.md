@@ -112,6 +112,30 @@ Partition keys must be a subset of primary keys if primary keys are defined.
 
 {{< /hint >}}
 
+### Create Table Like
+
+{{< tabs "create-table-like" >}}
+
+{{< tab "Flink" >}}
+
+To create a table with the same schema, partition, and table properties as another table, use CREATE TABLE LIKE.
+
+```sql
+CREATE TABLE MyTable (
+    user_id BIGINT,
+    item_id BIGINT,
+    behavior STRING,
+    dt STRING,
+    hh STRING,
+    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
+) ;
+
+CREATE TABLE MyTableLike LIKE MyTable;
+```
+
+{{< /tab >}}
+
+
 ### Table Properties
 
 Users can specify table properties to enable features or improve performance of Table Store. For a complete list of such properties, see [configurations]({{< ref "docs/maintenance/configurations" >}}).
