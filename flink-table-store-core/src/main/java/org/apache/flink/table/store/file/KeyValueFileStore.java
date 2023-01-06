@@ -27,6 +27,7 @@ import org.apache.flink.table.store.file.operation.KeyValueFileStoreWrite;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.KeyComparatorSupplier;
+import org.apache.flink.table.store.format.FileFormatDiscover;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.Comparator;
@@ -77,7 +78,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 valueType,
                 newKeyComparator(),
                 mfFactory,
-                options.fileFormat(),
+                FileFormatDiscover.of(options),
                 pathFactory(),
                 keyValueFieldsExtractor);
     }

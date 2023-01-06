@@ -37,7 +37,7 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderUtils;
-import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.format.FileFormatDiscover;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.utils.ProjectedRowData;
 import org.apache.flink.table.types.logical.RowType;
@@ -83,7 +83,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             RowType valueType,
             Comparator<RowData> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
-            FileFormat fileFormat,
+            FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
             KeyValueFieldsExtractor extractor) {
         this.tableSchema = schemaManager.schema(schemaId);
@@ -93,7 +93,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                         schemaId,
                         keyType,
                         valueType,
-                        fileFormat,
+                        formatDiscover,
                         pathFactory,
                         extractor);
         this.keyComparator = keyComparator;

@@ -27,7 +27,8 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.BulkFormatMapping;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.format.FileFormatDiscover;
+import org.apache.flink.table.store.format.FormatKey;
 import org.apache.flink.table.store.utils.Projection;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -48,7 +49,7 @@ public class KeyValueFileReaderFactory {
     private final RowType valueType;
 
     private final BulkFormatMapping.BulkFormatMappingBuilder bulkFormatMappingBuilder;
-    private final Map<Long, BulkFormatMapping> bulkFormatMappings;
+    private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
     private final DataFilePathFactory pathFactory;
 
     private KeyValueFileReaderFactory(
@@ -69,13 +70,15 @@ public class KeyValueFileReaderFactory {
 
     public RecordReader<KeyValue> createRecordReader(long schemaId, String fileName, int level)
             throws IOException {
+        String formatIdentifier = DataFilePathFactory.formatIdentifier(fileName);
         BulkFormatMapping bulkFormatMapping =
                 bulkFormatMappings.computeIfAbsent(
-                        schemaId,
+                        new FormatKey(schemaId, formatIdentifier),
                         key -> {
                             TableSchema tableSchema = schemaManager.schema(this.schemaId);
-                            TableSchema dataSchema = schemaManager.schema(key);
-                            return bulkFormatMappingBuilder.build(tableSchema, dataSchema);
+                            TableSchema dataSchema = schemaManager.schema(key.schemaId);
+                            return bulkFormatMappingBuilder.build(
+                                    formatIdentifier, tableSchema, dataSchema);
                         });
         return new KeyValueDataFileRecordReader(
                 bulkFormatMapping.getReaderFactory(),
@@ -91,11 +94,17 @@ public class KeyValueFileReaderFactory {
             long schemaId,
             RowType keyType,
             RowType valueType,
-            FileFormat fileFormat,
+            FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
             KeyValueFieldsExtractor extractor) {
         return new Builder(
-                schemaManager, schemaId, keyType, valueType, fileFormat, pathFactory, extractor);
+                schemaManager,
+                schemaId,
+                keyType,
+                valueType,
+                formatDiscover,
+                pathFactory,
+                extractor);
     }
 
     /** Builder for {@link KeyValueFileReaderFactory}. */
@@ -105,7 +114,7 @@ public class KeyValueFileReaderFactory {
         private final long schemaId;
         private final RowType keyType;
         private final RowType valueType;
-        private final FileFormat fileFormat;
+        private final FileFormatDiscover formatDiscover;
         private final FileStorePathFactory pathFactory;
         private final KeyValueFieldsExtractor extractor;
 
@@ -120,14 +129,14 @@ public class KeyValueFileReaderFactory {
                 long schemaId,
                 RowType keyType,
                 RowType valueType,
-                FileFormat fileFormat,
+                FileFormatDiscover formatDiscover,
                 FileStorePathFactory pathFactory,
                 KeyValueFieldsExtractor extractor) {
             this.schemaManager = schemaManager;
             this.schemaId = schemaId;
             this.keyType = keyType;
             this.valueType = valueType;
-            this.fileFormat = fileFormat;
+            this.formatDiscover = formatDiscover;
             this.pathFactory = pathFactory;
             this.extractor = extractor;
 
@@ -167,7 +176,7 @@ public class KeyValueFileReaderFactory {
                     projectedKeyType,
                     projectedValueType,
                     BulkFormatMapping.newBuilder(
-                            fileFormat, extractor, keyProjection, valueProjection, filters),
+                            formatDiscover, extractor, keyProjection, valueProjection, filters),
                     pathFactory.createDataFilePathFactory(partition, bucket));
         }
 

@@ -144,7 +144,7 @@ public class MergeTreeBenchmark {
                         0,
                         keyType,
                         valueType,
-                        flushingFormat,
+                        ignore -> flushingFormat,
                         pathFactory,
                         new KeyValueFieldsExtractor() {
                             @Override
