@@ -31,11 +31,11 @@ public class LargeDataITCase extends CatalogITCaseBase {
 
     @Test
     public void testSpillableWriteBuffer() throws Exception {
-        sql(
+        batchSql(
                 "CREATE TABLE T1 (a INT PRIMARY KEY NOT ENFORCED, b INT) WITH ("
                         + "'write-buffer-size'='256 kb', 'write-buffer-spillable'='true')");
-        sql("CREATE TABLE T2 (a INT PRIMARY KEY NOT ENFORCED, b INT)");
-        sql(
+        batchSql("CREATE TABLE T2 (a INT PRIMARY KEY NOT ENFORCED, b INT)");
+        batchSql(
                 "CREATE TEMPORARY TABLE datagen (a INT, B INT) WITH ('connector'='datagen', 'number-of-rows'='10000')");
 
         tEnv.createStatementSet()
@@ -44,19 +44,19 @@ public class LargeDataITCase extends CatalogITCaseBase {
                 .execute()
                 .await();
 
-        List<Row> result1 = sql("SELECT * FROM T1");
-        List<Row> result2 = sql("SELECT * FROM T2");
+        List<Row> result1 = batchSql("SELECT * FROM T1");
+        List<Row> result2 = batchSql("SELECT * FROM T2");
         assertThat(result1).containsExactlyElementsOf(result2);
     }
 
     @Test
     public void testPartitionedSpillableWriteBuffer() throws Exception {
-        sql(
+        batchSql(
                 "CREATE TABLE T1 (a INT, b INT, c INT, PRIMARY KEY (a, b) NOT ENFORCED) PARTITIONED BY (b) WITH ("
                         + "'write-buffer-size'='1 mb', 'write-buffer-spillable'='true')");
-        sql(
+        batchSql(
                 "CREATE TABLE T2 (a INT, b INT, c INT, PRIMARY KEY (a, b) NOT ENFORCED) PARTITIONED BY (b)");
-        sql(
+        batchSql(
                 "CREATE TEMPORARY TABLE datagen (a INT, b INT, c INT) WITH ("
                         + "'connector'='datagen', 'number-of-rows'='10000', 'fields.b.min'='1', 'fields.b.max'='10')");
 
@@ -66,8 +66,8 @@ public class LargeDataITCase extends CatalogITCaseBase {
                 .execute()
                 .await();
 
-        List<Row> result1 = sql("SELECT * FROM T1");
-        List<Row> result2 = sql("SELECT * FROM T2");
+        List<Row> result1 = batchSql("SELECT * FROM T1");
+        List<Row> result2 = batchSql("SELECT * FROM T2");
         assertThat(result1).containsExactlyInAnyOrderElementsOf(result2);
     }
 }

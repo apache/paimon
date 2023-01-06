@@ -34,38 +34,41 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testNotExistMetadataTable() {
-        assertThatThrownBy(() -> sql("SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots"))
+        assertThatThrownBy(
+                        () ->
+                                batchSql(
+                                        "SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots"))
                 .hasMessageContaining("Object 'T$snapshots' not found");
     }
 
     @Test
     public void testSnapshotsTable() throws Exception {
-        sql("CREATE TABLE T (a INT, b INT)");
-        sql("INSERT INTO T VALUES (1, 2)");
-        sql("INSERT INTO T VALUES (3, 4)");
+        batchSql("CREATE TABLE T (a INT, b INT)");
+        batchSql("INSERT INTO T VALUES (1, 2)");
+        batchSql("INSERT INTO T VALUES (3, 4)");
 
-        List<Row> result = sql("SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots");
+        List<Row> result = batchSql("SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots");
         assertThat(result)
                 .containsExactlyInAnyOrder(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
     }
 
     @Test
     public void testOptionsTable() throws Exception {
-        sql("CREATE TABLE T (a INT, b INT)");
-        sql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");
+        batchSql("CREATE TABLE T (a INT, b INT)");
+        batchSql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");
 
-        List<Row> result = sql("SELECT * FROM T$options");
+        List<Row> result = batchSql("SELECT * FROM T$options");
         assertThat(result).containsExactly(Row.of("snapshot.time-retained", "5 h"));
     }
 
     @Test
     public void testCreateMetaTable() {
-        assertThatThrownBy(() -> sql("CREATE TABLE T$snapshots (a INT, b INT)"))
+        assertThatThrownBy(() -> batchSql("CREATE TABLE T$snapshots (a INT, b INT)"))
                 .hasRootCauseMessage(
                         String.format(
                                 "Table name[%s] cannot contain '%s' separator",
                                 "T$snapshots", SYSTEM_TABLE_SPLITTER));
-        assertThatThrownBy(() -> sql("CREATE TABLE T$aa$bb (a INT, b INT)"))
+        assertThatThrownBy(() -> batchSql("CREATE TABLE T$aa$bb (a INT, b INT)"))
                 .hasRootCauseMessage(
                         String.format(
                                 "Table name[%s] cannot contain '%s' separator",
@@ -74,11 +77,11 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testSchemasTable() throws Exception {
-        sql(
+        batchSql(
                 "CREATE TABLE T(a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED) with ('a.aa.aaa'='val1', 'b.bb.bbb'='val2')");
-        sql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");
+        batchSql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");
 
-        assertThat(sql("SHOW CREATE TABLE T$schemas").toString())
+        assertThat(batchSql("SHOW CREATE TABLE T$schemas").toString())
                 .isEqualTo(
                         "[+I[CREATE TABLE `TABLE_STORE`.`default`.`T$schemas` (\n"
                                 + "  `schema_id` BIGINT NOT NULL,\n"
@@ -89,7 +92,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 + "  `comment` VARCHAR(2147483647)\n"
                                 + ") ]]");
 
-        List<Row> result = sql("SELECT * FROM T$schemas order by schema_id");
+        List<Row> result = batchSql("SELECT * FROM T$schemas order by schema_id");
 
         assertThat(result.toString())
                 .isEqualTo(
@@ -105,15 +108,15 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testSnapshotsSchemasTable() throws Exception {
-        sql("CREATE TABLE T (a INT, b INT)");
-        sql("INSERT INTO T VALUES (1, 2)");
-        sql("INSERT INTO T VALUES (3, 4)");
-        sql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");
-        sql("INSERT INTO T VALUES (5, 6)");
-        sql("INSERT INTO T VALUES (7, 8)");
+        batchSql("CREATE TABLE T (a INT, b INT)");
+        batchSql("INSERT INTO T VALUES (1, 2)");
+        batchSql("INSERT INTO T VALUES (3, 4)");
+        batchSql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");
+        batchSql("INSERT INTO T VALUES (5, 6)");
+        batchSql("INSERT INTO T VALUES (7, 8)");
 
         List<Row> result =
-                sql(
+                batchSql(
                         "SELECT s.snapshot_id, s.schema_id, t.fields FROM "
                                 + "T$snapshots s JOIN T$schemas t ON s.schema_id=t.schema_id");
         assertThat(result.stream().map(Row::toString).collect(Collectors.toList()))

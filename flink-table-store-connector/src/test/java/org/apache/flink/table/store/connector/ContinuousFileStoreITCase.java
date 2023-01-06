@@ -42,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** SQL ITCase for continuous file store. */
 @RunWith(Parameterized.class)
-public class ContinuousFileStoreITCase extends FileStoreTableITCase {
+public class ContinuousFileStoreITCase extends CatalogITCaseBase {
 
     private final boolean changelogFile;
 

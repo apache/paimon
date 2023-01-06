@@ -38,7 +38,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for auto-enabling commit.force-compact under batch mode. */
-public class ForceCompactionITCase extends FileStoreTableITCase {
+public class ForceCompactionITCase extends CatalogITCaseBase {
 
     private final FileFormat avro = FileFormat.fromIdentifier("avro", new Configuration());
 
@@ -210,7 +210,7 @@ public class ForceCompactionITCase extends FileStoreTableITCase {
 
     private void assertAppend(String sql, String tableName, long expectSnapshotId) {
         batchSql(sql);
-        Snapshot snapshot = findLatestSnapshot(tableName, true);
+        Snapshot snapshot = findLatestSnapshot(tableName);
         assertThat(snapshot.id()).isEqualTo(expectSnapshotId);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
     }
@@ -218,7 +218,7 @@ public class ForceCompactionITCase extends FileStoreTableITCase {
     private void assertCompact(
             String sql, String tableName, long expectSnapshotId, String... expectPartMinMax) {
         batchSql(sql);
-        Snapshot snapshot = findLatestSnapshot(tableName, true);
+        Snapshot snapshot = findLatestSnapshot(tableName);
         assertThat(snapshot.id()).isEqualTo(expectSnapshotId);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
         RowType partType =
@@ -227,7 +227,7 @@ public class ForceCompactionITCase extends FileStoreTableITCase {
                         : RowType.of();
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
-                        getTableDirectory(tableName, true),
+                        getTableDirectory(tableName),
                         partType,
                         "default",
                         CoreOptions.FILE_FORMAT.defaultValue());

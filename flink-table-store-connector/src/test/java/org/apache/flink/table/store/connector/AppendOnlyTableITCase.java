@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test case for append-only managed table. */
-public class AppendOnlyTableITCase extends FileStoreTableITCase {
+public class AppendOnlyTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testCreateTableWithPrimaryKey() {
@@ -225,7 +225,7 @@ public class AppendOnlyTableITCase extends FileStoreTableITCase {
     private void assertAutoCompaction(
             String sql, long expectedSnapshotId, Snapshot.CommitKind expectedCommitKind) {
         batchSql(sql);
-        Snapshot snapshot = findLatestSnapshot("append_table", true);
+        Snapshot snapshot = findLatestSnapshot("append_table");
         assertThat(snapshot.id()).isEqualTo(expectedSnapshotId);
         assertThat(snapshot.commitKind()).isEqualTo(expectedCommitKind);
     }

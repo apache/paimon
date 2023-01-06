@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** ITCase for pre-aggregation. */
 public class PreAggregationITCase {
     /** ITCase for bool_or/bool_and aggregate function. */
-    public static class BoolOrAndAggregation extends FileStoreTableITCase {
+    public static class BoolOrAndAggregation extends CatalogITCaseBase {
         @Override
         protected List<String> ddl() {
             return Collections.singletonList(
@@ -105,7 +105,7 @@ public class PreAggregationITCase {
     }
 
     /** ITCase for listagg aggregate function. */
-    public static class ListAggAggregation extends FileStoreTableITCase {
+    public static class ListAggAggregation extends CatalogITCaseBase {
         @Override
         protected int defaultParallelism() {
             // set parallelism to 1 so that the order of input data is determined
@@ -181,7 +181,7 @@ public class PreAggregationITCase {
     }
 
     /** ITCase for last value aggregate function. */
-    public static class LastValueAggregation extends FileStoreTableITCase {
+    public static class LastValueAggregation extends CatalogITCaseBase {
         @Override
         protected int defaultParallelism() {
             // set parallelism to 1 so that the order of input data is determined
@@ -259,7 +259,7 @@ public class PreAggregationITCase {
     }
 
     /** ITCase for last non-null value aggregate function. */
-    public static class LastNonNullValueAggregation extends FileStoreTableITCase {
+    public static class LastNonNullValueAggregation extends CatalogITCaseBase {
         @Override
         protected int defaultParallelism() {
             // set parallelism to 1 so that the order of input data is determined
@@ -338,7 +338,7 @@ public class PreAggregationITCase {
     }
 
     /** ITCase for min aggregate function. */
-    public static class MinAggregation extends FileStoreTableITCase {
+    public static class MinAggregation extends CatalogITCaseBase {
         @Override
         protected List<String> ddl() {
             return Collections.singletonList(
@@ -499,7 +499,7 @@ public class PreAggregationITCase {
     }
 
     /** ITCase for max aggregate function. */
-    public static class MaxAggregation extends FileStoreTableITCase {
+    public static class MaxAggregation extends CatalogITCaseBase {
         @Override
         protected List<String> ddl() {
             return Collections.singletonList(
@@ -663,7 +663,7 @@ public class PreAggregationITCase {
     }
 
     /** ITCase for sum aggregate function. */
-    public static class SumAggregation extends FileStoreTableITCase {
+    public static class SumAggregation extends CatalogITCaseBase {
         @Override
         protected List<String> ddl() {
             return Collections.singletonList(
