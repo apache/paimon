@@ -131,12 +131,6 @@ under the License.
             <version>${project.version}</version>
         </dependency>
 
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>${flink.sql.parquet}</artifactId>
-            <version>${flink.version}</version>
-        </dependency>
-
     </dependencies>
 
     <!-- This is copied from flink-benchmarks and updated for flink-table-store-micro-benchmarks. -->
