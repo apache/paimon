@@ -31,6 +31,11 @@ under the License.
     <artifactId>flink-table-store-format</artifactId>
     <name>Flink Table Store : Format</name>
 
+    <properties>
+        <parquet.version>1.12.3</parquet.version>
+        <orc.version>1.5.6</orc.version>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>org.apache.flink</groupId>
@@ -55,53 +60,13 @@ under the License.
             <scope>provided</scope>
         </dependency>
 
-        <!-- format dependencies -->
-
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-connector-files</artifactId>
             <version>${flink.version}</version>
         </dependency>
 
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-avro</artifactId>
-            <version>${flink.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-sql-avro</artifactId>
-            <version>${flink.version}</version>
-            <scope>runtime</scope>
-            <optional>true</optional>
-            <exclusions>
-                <exclusion>
-                    <groupId>*</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>${flink.orc}</artifactId>
-            <version>${flink.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>${flink.sql.orc}</artifactId>
-            <version>${flink.version}</version>
-            <scope>runtime</scope>
-            <optional>true</optional>
-            <exclusions>
-                <exclusion>
-                    <groupId>*</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
+        <!-- Hadoop -->
 
         <dependency>
             <groupId>org.apache.hadoop</groupId>
@@ -122,6 +87,115 @@ under the License.
                 </exclusion>
             </exclusions>
         </dependency>
+
+        <!-- Orc Start -->
+
+        <dependency>
+            <groupId>org.apache.orc</groupId>
+            <artifactId>orc-core</artifactId>
+            <version>${orc.version}</version>
+            <exclusions>
+                <!-- Exclude ORC's Hadoop dependency and pull in provided vanilla hadoop. -->
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-common</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-hdfs</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>javax.activation</groupId>
+                    <artifactId>javax.activation-api</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>javax.xml.bind</groupId>
+                    <artifactId>jaxb-api</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+            <version>3.12.0</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Orc End -->
+
+        <!-- Avro Start -->
+
+        <dependency>
+            <groupId>org.apache.avro</groupId>
+            <artifactId>avro</artifactId>
+            <version>1.11.1</version>
+        </dependency>
+
+        <dependency>
+            <groupId>joda-time</groupId>
+            <artifactId>joda-time</artifactId>
+            <scope>provided</scope>
+            <!-- Avro records can contain JodaTime fields when using logical fields.
+                In order to handle them, we need to add an optional dependency.
+                Users with those Avro records need to add this dependency themselves. -->
+            <optional>true</optional>
+            <version>2.5</version>
+        </dependency>
+
+        <!-- Avro End -->
+
+        <!-- Parquet Start -->
+
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-avro</artifactId>
+            <version>${parquet.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-hadoop</artifactId>
+            <version>${parquet.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-column</artifactId>
+            <version>${parquet.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-common</artifactId>
+            <version>${parquet.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-encoding</artifactId>
+            <version>${parquet.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-format-structures</artifactId>
+            <version>${parquet.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-jackson</artifactId>
+            <version>${parquet.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>commons-pool</groupId>
+            <artifactId>commons-pool</artifactId>
+            <version>1.6</version>
+        </dependency>
+
+        <!-- Parquet End -->
 
         <!-- test dependencies -->
 
@@ -151,27 +225,6 @@ under the License.
             <artifactId>flink-csv</artifactId>
             <version>${flink.version}</version>
             <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>${flink.parquet}</artifactId>
-            <version>${flink.version}</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>${flink.sql.parquet}</artifactId>
-            <version>${flink.version}</version>
-            <scope>runtime</scope>
-            <optional>true</optional>
-            <exclusions>
-                <exclusion>
-                    <groupId>*</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
 
         <dependency>
@@ -219,35 +272,34 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes combine.children="append">
-                                    <include>org.apache.flink:flink-sql-avro</include>
-                                    <include>org.apache.flink:${flink.sql.orc}</include>
-                                    <include>org.apache.flink:${flink.sql.parquet}</include>
+                                    <!-- Orc -->
+                                    <include>org.apache.orc:orc-core</include>
+                                    <include>org.apache.orc:orc-shims</include>
+                                    <include>org.apache.hive:hive-storage-api</include>
+                                    <include>io.airlift:aircompressor</include>
+                                    <include>commons-lang:commons-lang</include>
+                                    <include>com.google.protobuf:protobuf-java</include>
+
+                                    <!-- Avro -->
+                                    <include>org.apache.avro:avro</include>
+                                    <include>com.fasterxml.jackson.core:jackson-core</include>
+                                    <include>com.fasterxml.jackson.core:jackson-databind</include>
+                                    <include>com.fasterxml.jackson.core:jackson-annotations</include>
+                                    <include>org.apache.commons:commons-compress</include>
+
+                                    <!-- Parquet -->
+                                    <include>org.apache.parquet:parquet-avro</include>
+                                    <include>org.apache.parquet:parquet-hadoop</include>
+                                    <include>org.apache.parquet:parquet-format</include>
+                                    <include>org.apache.parquet:parquet-column</include>
+                                    <include>org.apache.parquet:parquet-common</include>
+                                    <include>org.apache.parquet:parquet-encoding</include>
+                                    <include>org.apache.parquet:parquet-format-structures</include>
+                                    <include>org.apache.parquet:parquet-jackson</include>
+                                    <include>commons-pool:commons-pool</include>
                                 </includes>
                             </artifactSet>
                             <filters>
-                                <!--
-                                Throw away all META-INF/services,
-                                otherwise if user has the same format/connector jar in the classpath,
-                                FactoryUtil will complain about multiple matching factories.
-                                -->
-                                <filter>
-                                    <artifact>org.apache.flink:flink-sql-avro</artifact>
-                                    <excludes>
-                                        <exclude>META-INF/services/**</exclude>
-                                    </excludes>
-                                </filter>
-                                <filter>
-                                    <artifact>org.apache.flink:${flink.sql.orc}</artifact>
-                                    <excludes>
-                                        <exclude>META-INF/services/**</exclude>
-                                    </excludes>
-                                </filter>
-                                <filter>
-                                    <artifact>org.apache.flink:${flink.sql.parquet}</artifact>
-                                    <excludes>
-                                        <exclude>META-INF/services/**</exclude>
-                                    </excludes>
-                                </filter>
                                 <!-- Another copy of the Apache license, which we don't need. -->
                                 <filter>
                                     <artifact>*</artifact>
@@ -257,30 +309,7 @@ under the License.
                                 </filter>
                             </filters>
                             <relocations>
-                                <relocation>
-                                    <pattern>org.apache.avro</pattern>
-                                    <shadedPattern>org.apache.flink.avro.shaded.org.apache.avro</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.apache.flink.formats.avro</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.flink.formats.avro</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.apache.parquet</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.parquet</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.apache.flink.formats.parquet</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.flink.formats.parquet</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.apache.flink.orc</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.flink.orc</shadedPattern>
-                                </relocation>
-                                <!--
-                                flink-sql-orc module does not shade its dependencies, so we shade here.
-                                See maven-shade-plugin usage of flink-sql-orc for detailed dependency list.
-                                -->
+                                <!-- Relocate Orc -->
                                 <relocation>
                                     <pattern>org.apache.orc</pattern>
                                     <shadedPattern>org.apache.flink.table.store.shaded.org.apache.orc</shadedPattern>
@@ -298,12 +327,34 @@ under the License.
                                     <shadedPattern>org.apache.flink.table.store.shaded.io.airlift</shadedPattern>
                                 </relocation>
                                 <relocation>
-                                    <pattern>org.apache.commons</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.commons</shadedPattern>
-                                </relocation>
-                                <relocation>
                                     <pattern>com.google.protobuf</pattern>
                                     <shadedPattern>org.apache.flink.table.store.shaded.com.google.protobuf</shadedPattern>
+                                </relocation>
+
+                                <!-- Relocate Avro. -->
+                                <relocation>
+                                    <pattern>org.apache.avro</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.avro</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>com.fasterxml.jackson</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.com.fasterxml.jackson</shadedPattern>
+                                </relocation>
+
+                                <!-- Relocate parquet. -->
+                                <relocation>
+                                    <pattern>org.apache.parquet</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.parquet</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>shaded.parquet</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.parquet</shadedPattern>
+                                </relocation>
+
+                                <!-- Relocate Common. -->
+                                <relocation>
+                                    <pattern>org.apache.commons</pattern>
+                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.commons</shadedPattern>
                                 </relocation>
                             </relocations>
                         </configuration>

@@ -24,7 +24,7 @@ import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.util.function.SerializableFunction;
 
-/** {@link FlinkSink} for stand-alone compact jobs. */
+/** {@link FlinkSink} for dedicated compact jobs. */
 public class CompactorSink extends FlinkSink {
 
     private static final long serialVersionUID = 1L;

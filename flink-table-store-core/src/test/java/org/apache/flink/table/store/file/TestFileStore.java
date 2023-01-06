@@ -193,10 +193,12 @@ public class TestFileStore extends KeyValueFileStore {
                                     ExecutorService service = Executors.newSingleThreadExecutor();
                                     RecordWriter<KeyValue> writer =
                                             emptyWriter
-                                                    ? write.createEmptyWriter(
-                                                            partition, bucket, service)
-                                                    : write.createWriter(
-                                                            partition, bucket, service);
+                                                    ? write.createEmptyWriterContainer(
+                                                                    partition, bucket, service)
+                                                            .writer
+                                                    : write.createWriterContainer(
+                                                                    partition, bucket, service)
+                                                            .writer;
                                     ((MemoryOwner) writer)
                                             .setMemoryPool(
                                                     new HeapMemorySegmentPool(
@@ -312,6 +314,7 @@ public class TestFileStore extends KeyValueFileStore {
                         new RecordReaderIterator<>(
                                 read.createReader(
                                         new DataSplit(
+                                                0L /* unused */,
                                                 entryWithPartition.getKey(),
                                                 entryWithBucket.getKey(),
                                                 entryWithBucket.getValue(),

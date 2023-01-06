@@ -22,6 +22,7 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.file.casting.CastExecutors;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.schema.SchemaChange.AddColumn;
 import org.apache.flink.table.store.file.schema.SchemaChange.DropColumn;
@@ -255,13 +256,24 @@ public class SchemaManager implements Serializable {
                     }
                 } else if (change instanceof UpdateColumnType) {
                     UpdateColumnType update = (UpdateColumnType) change;
+                    if (schema.partitionKeys().contains(update.fieldName())) {
+                        throw new IllegalArgumentException(
+                                String.format(
+                                        "Cannot update partition column [%s] type in the table[%s].",
+                                        update.fieldName(), tableRoot));
+                    }
                     updateColumn(
                             newFields,
                             update.fieldName(),
                             (field) -> {
                                 checkState(
                                         LogicalTypeCasts.supportsImplicitCast(
-                                                field.type().logicalType, update.newLogicalType()),
+                                                        field.type().logicalType,
+                                                        update.newLogicalType())
+                                                && CastExecutors.resolve(
+                                                                field.type().logicalType,
+                                                                update.newLogicalType())
+                                                        != null,
                                         String.format(
                                                 "Column type %s[%s] cannot be converted to %s without loosing information.",
                                                 field.name(),

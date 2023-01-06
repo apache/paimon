@@ -23,6 +23,7 @@ import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 
@@ -38,6 +39,9 @@ interface StoreSinkWrite {
     SinkRecord toLogRecord(SinkRecord record);
 
     void compact(BinaryRowData partition, int bucket, boolean fullCompaction) throws Exception;
+
+    void notifyNewFiles(
+            long snapshotId, BinaryRowData partition, int bucket, List<DataFileMeta> files);
 
     List<Committable> prepareCommit(boolean doCompaction, long checkpointId) throws IOException;
 

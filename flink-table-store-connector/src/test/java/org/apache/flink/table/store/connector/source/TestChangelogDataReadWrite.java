@@ -127,7 +127,7 @@ public class TestChangelogDataReadWrite {
                         VALUE_TYPE,
                         COMPARATOR,
                         DeduplicateMergeFunction.factory(),
-                        avro,
+                        ignore -> avro,
                         pathFactory,
                         EXTRACTOR);
         return new KeyValueTableRead(read) {
@@ -184,7 +184,8 @@ public class TestChangelogDataReadWrite {
                                 null, // not used, we only create an empty writer
                                 options,
                                 EXTRACTOR)
-                        .createEmptyWriter(partition, bucket, service);
+                        .createEmptyWriterContainer(partition, bucket, service)
+                        .writer;
         ((MemoryOwner) writer)
                 .setMemoryPool(
                         new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));

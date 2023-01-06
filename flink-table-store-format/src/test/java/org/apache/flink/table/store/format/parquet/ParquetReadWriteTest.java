@@ -1,0 +1,530 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.flink.table.store.format.parquet;
+
+import org.apache.flink.api.common.serialization.BulkWriter;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.connector.file.src.FileSourceSplit;
+import org.apache.flink.connector.file.src.reader.BulkFormat;
+import org.apache.flink.core.fs.FileSystem;
+import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.data.DecimalData;
+import org.apache.flink.table.data.GenericArrayData;
+import org.apache.flink.table.data.GenericMapData;
+import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.format.parquet.writer.RowDataParquetBuilder;
+import org.apache.flink.table.types.logical.ArrayType;
+import org.apache.flink.table.types.logical.BigIntType;
+import org.apache.flink.table.types.logical.BooleanType;
+import org.apache.flink.table.types.logical.DecimalType;
+import org.apache.flink.table.types.logical.DoubleType;
+import org.apache.flink.table.types.logical.FloatType;
+import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.MapType;
+import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.logical.SmallIntType;
+import org.apache.flink.table.types.logical.TimestampType;
+import org.apache.flink.table.types.logical.TinyIntType;
+import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.util.InstantiationUtil;
+
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+
+import java.io.File;
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+
+import static org.apache.flink.connector.file.src.util.Utils.forEachRemaining;
+import static org.assertj.core.api.Assertions.assertThat;
+
+/** Test for {@link ParquetReaderFactory}. */
+public class ParquetReadWriteTest {
+
+    private static final LocalDateTime BASE_TIME = LocalDateTime.now();
+    private static final org.apache.flink.configuration.Configuration EMPTY_CONF =
+            new org.apache.flink.configuration.Configuration();
+
+    private static final RowType ROW_TYPE =
+            RowType.of(
+                    new VarCharType(VarCharType.MAX_LENGTH),
+                    new BooleanType(),
+                    new TinyIntType(),
+                    new SmallIntType(),
+                    new IntType(),
+                    new BigIntType(),
+                    new FloatType(),
+                    new DoubleType(),
+                    new TimestampType(9),
+                    new DecimalType(5, 0),
+                    new DecimalType(15, 2),
+                    new DecimalType(20, 0),
+                    new DecimalType(5, 0),
+                    new DecimalType(15, 0),
+                    new DecimalType(20, 0),
+                    new ArrayType(new VarCharType(VarCharType.MAX_LENGTH)),
+                    new ArrayType(new BooleanType()),
+                    new ArrayType(new TinyIntType()),
+                    new ArrayType(new SmallIntType()),
+                    new ArrayType(new IntType()),
+                    new ArrayType(new BigIntType()),
+                    new ArrayType(new FloatType()),
+                    new ArrayType(new DoubleType()),
+                    new ArrayType(new TimestampType(9)),
+                    new ArrayType(new DecimalType(5, 0)),
+                    new ArrayType(new DecimalType(15, 0)),
+                    new ArrayType(new DecimalType(20, 0)),
+                    new ArrayType(new DecimalType(5, 0)),
+                    new ArrayType(new DecimalType(15, 0)),
+                    new ArrayType(new DecimalType(20, 0)),
+                    new MapType(
+                            new VarCharType(VarCharType.MAX_LENGTH),
+                            new VarCharType(VarCharType.MAX_LENGTH)),
+                    new MapType(new IntType(), new BooleanType()),
+                    RowType.of(new VarCharType(VarCharType.MAX_LENGTH), new IntType()));
+
+    @TempDir public File folder;
+
+    public static Collection<Integer> parameters() {
+        return Arrays.asList(10, 1000);
+    }
+
+    @ParameterizedTest
+    @MethodSource("parameters")
+    void testTypesReadWithSplits(int rowGroupSize) throws IOException {
+        int number = 10000;
+        List<Integer> values = new ArrayList<>(number);
+        Random random = new Random();
+        for (int i = 0; i < number; i++) {
+            int v = random.nextInt(number / 2);
+            values.add(v % 10 == 0 ? null : v);
+        }
+
+        innerTestTypes(folder, values, rowGroupSize);
+    }
+
+    @ParameterizedTest
+    @MethodSource("parameters")
+    void testDictionary(int rowGroupSize) throws IOException {
+        int number = 10000;
+        List<Integer> values = new ArrayList<>(number);
+        Random random = new Random();
+        int[] intValues = new int[10];
+        // test large values in dictionary
+        for (int i = 0; i < intValues.length; i++) {
+            intValues[i] = random.nextInt();
+        }
+        for (int i = 0; i < number; i++) {
+            int v = intValues[random.nextInt(10)];
+            values.add(v == 0 ? null : v);
+        }
+
+        innerTestTypes(folder, values, rowGroupSize);
+    }
+
+    @ParameterizedTest
+    @MethodSource("parameters")
+    void testPartialDictionary(int rowGroupSize) throws IOException {
+        // prepare parquet file
+        int number = 10000;
+        List<Integer> values = new ArrayList<>(number);
+        Random random = new Random();
+        int[] intValues = new int[10];
+        // test large values in dictionary
+        for (int i = 0; i < intValues.length; i++) {
+            intValues[i] = random.nextInt();
+        }
+        for (int i = 0; i < number; i++) {
+            int v = i < 5000 ? intValues[random.nextInt(10)] : i;
+            values.add(v == 0 ? null : v);
+        }
+
+        innerTestTypes(folder, values, rowGroupSize);
+    }
+
+    @ParameterizedTest
+    @MethodSource("parameters")
+    void testContinuousRepetition(int rowGroupSize) throws IOException {
+        int number = 10000;
+        List<Integer> values = new ArrayList<>(number);
+        Random random = new Random();
+        for (int i = 0; i < 100; i++) {
+            int v = random.nextInt(10);
+            for (int j = 0; j < 100; j++) {
+                values.add(v == 0 ? null : v);
+            }
+        }
+
+        innerTestTypes(folder, values, rowGroupSize);
+    }
+
+    @ParameterizedTest
+    @MethodSource("parameters")
+    void testLargeValue(int rowGroupSize) throws IOException {
+        int number = 10000;
+        List<Integer> values = new ArrayList<>(number);
+        Random random = new Random();
+        for (int i = 0; i < number; i++) {
+            int v = random.nextInt();
+            values.add(v % 10 == 0 ? null : v);
+        }
+
+        innerTestTypes(folder, values, rowGroupSize);
+    }
+
+    @ParameterizedTest
+    @MethodSource("parameters")
+    void testProjection(int rowGroupSize) throws IOException {
+        int number = 1000;
+        List<RowData> records = new ArrayList<>(number);
+        for (int i = 0; i < number; i++) {
+            Integer v = i;
+            records.add(newRow(v));
+        }
+
+        Path testPath = createTempParquetFile(folder, records, rowGroupSize);
+        // test reader
+        LogicalType[] fieldTypes =
+                new LogicalType[] {new DoubleType(), new TinyIntType(), new IntType()};
+        ParquetReaderFactory format =
+                new ParquetReaderFactory(
+                        new Configuration(),
+                        RowType.of(fieldTypes, new String[] {"f7", "f2", "f4"}),
+                        500);
+
+        AtomicInteger cnt = new AtomicInteger(0);
+        forEachRemaining(
+                format.createReader(
+                        EMPTY_CONF,
+                        new FileSourceSplit("id", testPath, 0, Long.MAX_VALUE, 0, Long.MAX_VALUE)),
+                row -> {
+                    int i = cnt.get();
+                    assertThat(row.getDouble(0)).isEqualTo(i);
+                    assertThat(row.getByte(1)).isEqualTo((byte) i);
+                    assertThat(row.getInt(2)).isEqualTo(i);
+                    cnt.incrementAndGet();
+                });
+    }
+
+    @ParameterizedTest
+    @MethodSource("parameters")
+    void testProjectionReadUnknownField(int rowGroupSize) throws IOException {
+        int number = 1000;
+        List<RowData> records = new ArrayList<>(number);
+        for (int i = 0; i < number; i++) {
+            Integer v = i;
+            records.add(newRow(v));
+        }
+
+        Path testPath = createTempParquetFile(folder, records, rowGroupSize);
+
+        // test reader
+        LogicalType[] fieldTypes =
+                new LogicalType[] {
+                    new DoubleType(), new TinyIntType(), new IntType(), new VarCharType()
+                };
+        ParquetReaderFactory format =
+                new ParquetReaderFactory(
+                        new Configuration(),
+                        // f99 not exist in parquet file.
+                        RowType.of(fieldTypes, new String[] {"f7", "f2", "f4", "f99"}),
+                        500);
+
+        AtomicInteger cnt = new AtomicInteger(0);
+        forEachRemaining(
+                format.createReader(
+                        EMPTY_CONF,
+                        new FileSourceSplit("id", testPath, 0, Long.MAX_VALUE, 0, Long.MAX_VALUE)),
+                row -> {
+                    int i = cnt.get();
+                    assertThat(row.getDouble(0)).isEqualTo(i);
+                    assertThat(row.getByte(1)).isEqualTo((byte) i);
+                    assertThat(row.getInt(2)).isEqualTo(i);
+                    assertThat(row.isNullAt(3)).isTrue();
+                    cnt.incrementAndGet();
+                });
+    }
+
+    private void innerTestTypes(File folder, List<Integer> records, int rowGroupSize)
+            throws IOException {
+        List<RowData> rows = records.stream().map(this::newRow).collect(Collectors.toList());
+        Path testPath = createTempParquetFile(folder, rows, rowGroupSize);
+
+        long fileLen = testPath.getFileSystem().getFileStatus(testPath).getLen();
+        int len1 = testReadingSplit(subList(records, 0), testPath, 0, fileLen / 3);
+        int len2 = testReadingSplit(subList(records, len1), testPath, fileLen / 3, fileLen * 2 / 3);
+        int len3 =
+                testReadingSplit(
+                        subList(records, len1 + len2), testPath, fileLen * 2 / 3, Long.MAX_VALUE);
+        assertThat(len1 + len2 + len3).isEqualTo(records.size());
+    }
+
+    private Path createTempParquetFile(File folder, List<RowData> rows, int rowGroupSize)
+            throws IOException {
+        // write data
+        Path path = new Path(folder.getPath(), UUID.randomUUID().toString());
+        Configuration conf = new Configuration();
+        conf.setInteger("parquet.block.size", rowGroupSize);
+        ParquetWriterFactory<RowData> factory =
+                new ParquetWriterFactory<>(new RowDataParquetBuilder(ROW_TYPE, conf));
+        BulkWriter<RowData> writer =
+                factory.create(path.getFileSystem().create(path, FileSystem.WriteMode.OVERWRITE));
+        for (RowData row : rows) {
+            writer.addElement(row);
+        }
+
+        writer.flush();
+        writer.finish();
+        return path;
+    }
+
+    private int testReadingSplit(
+            List<Integer> expected, Path path, long splitStart, long splitLength)
+            throws IOException {
+        ParquetReaderFactory format = new ParquetReaderFactory(new Configuration(), ROW_TYPE, 500);
+
+        // validate java serialization
+        try {
+            InstantiationUtil.clone(format);
+        } catch (ClassNotFoundException e) {
+            throw new IOException(e);
+        }
+
+        BulkFormat.Reader<RowData> reader =
+                format.createReader(
+                        EMPTY_CONF, new FileSourceSplit("ignore", path, splitStart, splitLength));
+
+        AtomicInteger cnt = new AtomicInteger(0);
+        final AtomicReference<RowData> previousRow = new AtomicReference<>();
+        forEachRemaining(
+                reader,
+                row -> {
+                    if (previousRow.get() == null) {
+                        previousRow.set(row);
+                    } else {
+                        // ParquetColumnarRowInputFormat should only have one row instance.
+                        assertThat(row).isSameAs(previousRow.get());
+                    }
+                    Integer v = expected.get(cnt.get());
+                    if (v == null) {
+                        assertThat(row.isNullAt(0)).isTrue();
+                        assertThat(row.isNullAt(1)).isTrue();
+                        assertThat(row.isNullAt(2)).isTrue();
+                        assertThat(row.isNullAt(3)).isTrue();
+                        assertThat(row.isNullAt(4)).isTrue();
+                        assertThat(row.isNullAt(5)).isTrue();
+                        assertThat(row.isNullAt(6)).isTrue();
+                        assertThat(row.isNullAt(7)).isTrue();
+                        assertThat(row.isNullAt(8)).isTrue();
+                        assertThat(row.isNullAt(9)).isTrue();
+                        assertThat(row.isNullAt(10)).isTrue();
+                        assertThat(row.isNullAt(11)).isTrue();
+                        assertThat(row.isNullAt(12)).isTrue();
+                        assertThat(row.isNullAt(13)).isTrue();
+                        assertThat(row.isNullAt(14)).isTrue();
+                        assertThat(row.isNullAt(15)).isTrue();
+                        assertThat(row.isNullAt(16)).isTrue();
+                        assertThat(row.isNullAt(17)).isTrue();
+                        assertThat(row.isNullAt(18)).isTrue();
+                        assertThat(row.isNullAt(19)).isTrue();
+                        assertThat(row.isNullAt(20)).isTrue();
+                        assertThat(row.isNullAt(21)).isTrue();
+                        assertThat(row.isNullAt(22)).isTrue();
+                        assertThat(row.isNullAt(23)).isTrue();
+                        assertThat(row.isNullAt(24)).isTrue();
+                        assertThat(row.isNullAt(25)).isTrue();
+                        assertThat(row.isNullAt(26)).isTrue();
+                        assertThat(row.isNullAt(27)).isTrue();
+                        assertThat(row.isNullAt(28)).isTrue();
+                        assertThat(row.isNullAt(29)).isTrue();
+                        assertThat(row.isNullAt(30)).isTrue();
+                        assertThat(row.isNullAt(31)).isTrue();
+                        assertThat(row.isNullAt(32)).isTrue();
+                    } else {
+                        assertThat(row.getString(0)).hasToString("" + v);
+                        assertThat(row.getBoolean(1)).isEqualTo(v % 2 == 0);
+                        assertThat(row.getByte(2)).isEqualTo(v.byteValue());
+                        assertThat(row.getShort(3)).isEqualTo(v.shortValue());
+                        assertThat(row.getInt(4)).isEqualTo(v.intValue());
+                        assertThat(row.getLong(5)).isEqualTo(v.longValue());
+                        assertThat(row.getFloat(6)).isEqualTo(v.floatValue());
+                        assertThat(row.getDouble(7)).isEqualTo(v.doubleValue());
+                        assertThat(row.getTimestamp(8, 9).toLocalDateTime())
+                                .isEqualTo(toDateTime(v));
+                        if (DecimalData.fromBigDecimal(BigDecimal.valueOf(v), 5, 0) == null) {
+                            assertThat(row.isNullAt(9)).isTrue();
+                            assertThat(row.isNullAt(12)).isTrue();
+                            assertThat(row.isNullAt(24)).isTrue();
+                            assertThat(row.isNullAt(27)).isTrue();
+                        } else {
+                            assertThat(row.getDecimal(9, 5, 0))
+                                    .isEqualTo(
+                                            DecimalData.fromBigDecimal(
+                                                    BigDecimal.valueOf(v), 5, 0));
+                            assertThat(row.getDecimal(12, 5, 0))
+                                    .isEqualTo(
+                                            DecimalData.fromBigDecimal(
+                                                    BigDecimal.valueOf(v), 5, 0));
+                            assertThat(row.getArray(24).getDecimal(0, 5, 0))
+                                    .isEqualTo(
+                                            DecimalData.fromBigDecimal(
+                                                    BigDecimal.valueOf(v), 5, 0));
+                            assertThat(row.getArray(27).getDecimal(0, 5, 0))
+                                    .isEqualTo(
+                                            DecimalData.fromBigDecimal(
+                                                    BigDecimal.valueOf(v), 5, 0));
+                        }
+                        assertThat(row.getDecimal(10, 15, 2))
+                                .isEqualTo(DecimalData.fromUnscaledLong(v.longValue(), 15, 2));
+                        assertThat(row.getDecimal(11, 20, 0).toBigDecimal())
+                                .isEqualTo(BigDecimal.valueOf(v));
+                        assertThat(row.getDecimal(13, 15, 0).toBigDecimal())
+                                .isEqualTo(BigDecimal.valueOf(v));
+                        assertThat(row.getDecimal(14, 20, 0).toBigDecimal())
+                                .isEqualTo(BigDecimal.valueOf(v));
+                        assertThat(row.getArray(15).getString(0)).hasToString("" + v);
+                        assertThat(row.getArray(16).getBoolean(0)).isEqualTo(v % 2 == 0);
+                        assertThat(row.getArray(17).getByte(0)).isEqualTo(v.byteValue());
+                        assertThat(row.getArray(18).getShort(0)).isEqualTo(v.shortValue());
+                        assertThat(row.getArray(19).getInt(0)).isEqualTo(v.intValue());
+                        assertThat(row.getArray(20).getLong(0)).isEqualTo(v.longValue());
+                        assertThat(row.getArray(21).getFloat(0)).isEqualTo(v.floatValue());
+                        assertThat(row.getArray(22).getDouble(0)).isEqualTo(v.doubleValue());
+                        assertThat(row.getArray(23).getTimestamp(0, 9).toLocalDateTime())
+                                .isEqualTo(toDateTime(v));
+
+                        assertThat(row.getArray(25).getDecimal(0, 15, 0))
+                                .isEqualTo(
+                                        DecimalData.fromBigDecimal(BigDecimal.valueOf(v), 15, 0));
+                        assertThat(row.getArray(26).getDecimal(0, 20, 0))
+                                .isEqualTo(
+                                        DecimalData.fromBigDecimal(BigDecimal.valueOf(v), 20, 0));
+                        assertThat(row.getArray(28).getDecimal(0, 15, 0))
+                                .isEqualTo(
+                                        DecimalData.fromBigDecimal(BigDecimal.valueOf(v), 15, 0));
+                        assertThat(row.getArray(29).getDecimal(0, 20, 0))
+                                .isEqualTo(
+                                        DecimalData.fromBigDecimal(BigDecimal.valueOf(v), 20, 0));
+                        assertThat(row.getMap(30).valueArray().getString(0)).hasToString("" + v);
+                        assertThat(row.getMap(31).valueArray().getBoolean(0)).isEqualTo(v % 2 == 0);
+                        assertThat(row.getRow(32, 2).getString(0)).hasToString("" + v);
+                        assertThat(row.getRow(32, 2).getInt(1)).isEqualTo(v.intValue());
+                    }
+                    cnt.incrementAndGet();
+                });
+
+        return cnt.get();
+    }
+
+    private RowData newRow(Integer v) {
+        if (v == null) {
+            return new GenericRowData(ROW_TYPE.getFieldCount());
+        }
+
+        Map<StringData, StringData> f30 = new HashMap<>();
+        f30.put(StringData.fromString("" + v), StringData.fromString("" + v));
+
+        Map<Integer, Boolean> f31 = new HashMap<>();
+        f31.put(v, v % 2 == 0);
+
+        return GenericRowData.of(
+                StringData.fromString("" + v),
+                v % 2 == 0,
+                v.byteValue(),
+                v.shortValue(),
+                v,
+                v.longValue(),
+                v.floatValue(),
+                v.doubleValue(),
+                TimestampData.fromLocalDateTime(toDateTime(v)),
+                DecimalData.fromBigDecimal(BigDecimal.valueOf(v), 5, 0),
+                DecimalData.fromUnscaledLong(v.longValue(), 15, 2),
+                DecimalData.fromBigDecimal(BigDecimal.valueOf(v), 20, 0),
+                DecimalData.fromBigDecimal(BigDecimal.valueOf(v), 5, 0),
+                DecimalData.fromBigDecimal(BigDecimal.valueOf(v), 15, 0),
+                DecimalData.fromBigDecimal(BigDecimal.valueOf(v), 20, 0),
+                new GenericArrayData(new Object[] {StringData.fromString("" + v), null}),
+                new GenericArrayData(new Object[] {v % 2 == 0, null}),
+                new GenericArrayData(new Object[] {v.byteValue(), null}),
+                new GenericArrayData(new Object[] {v.shortValue(), null}),
+                new GenericArrayData(new Object[] {v, null}),
+                new GenericArrayData(new Object[] {v.longValue(), null}),
+                new GenericArrayData(new Object[] {v.floatValue(), null}),
+                new GenericArrayData(new Object[] {v.doubleValue(), null}),
+                new GenericArrayData(
+                        new Object[] {TimestampData.fromLocalDateTime(toDateTime(v)), null}),
+                DecimalData.fromBigDecimal(BigDecimal.valueOf(v), 5, 0) == null
+                        ? null
+                        : new GenericArrayData(
+                                new Object[] {
+                                    DecimalData.fromBigDecimal(BigDecimal.valueOf(v), 5, 0), null
+                                }),
+                new GenericArrayData(
+                        new Object[] {
+                            DecimalData.fromBigDecimal(BigDecimal.valueOf(v), 15, 0), null
+                        }),
+                new GenericArrayData(
+                        new Object[] {
+                            DecimalData.fromBigDecimal(BigDecimal.valueOf(v), 20, 0), null
+                        }),
+                DecimalData.fromBigDecimal(BigDecimal.valueOf(v), 5, 0) == null
+                        ? null
+                        : new GenericArrayData(
+                                new Object[] {
+                                    DecimalData.fromBigDecimal(BigDecimal.valueOf(v), 5, 0), null
+                                }),
+                new GenericArrayData(
+                        new Object[] {
+                            DecimalData.fromBigDecimal(BigDecimal.valueOf(v), 15, 0), null
+                        }),
+                new GenericArrayData(
+                        new Object[] {
+                            DecimalData.fromBigDecimal(BigDecimal.valueOf(v), 20, 0), null
+                        }),
+                new GenericMapData(f30),
+                new GenericMapData(f31),
+                GenericRowData.of(StringData.fromString("" + v), v));
+    }
+
+    private LocalDateTime toDateTime(Integer v) {
+        v = (v > 0 ? v : -v) % 10000;
+        return BASE_TIME.plusNanos(v).plusSeconds(v);
+    }
+
+    private static <T> List<T> subList(List<T> list, int i) {
+        return list.subList(i, list.size());
+    }
+}

@@ -44,7 +44,13 @@ public class SplitTest {
         for (int i = 0; i < ThreadLocalRandom.current().nextInt(10); i++) {
             files.add(gen.next().meta);
         }
-        DataSplit split = new DataSplit(data.partition, data.bucket, files, false);
+        DataSplit split =
+                new DataSplit(
+                        ThreadLocalRandom.current().nextLong(100),
+                        data.partition,
+                        data.bucket,
+                        files,
+                        false);
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         split.serialize(new DataOutputViewStreamWrapper(out));

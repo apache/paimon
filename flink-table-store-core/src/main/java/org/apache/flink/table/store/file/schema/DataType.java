@@ -21,6 +21,8 @@ package org.apache.flink.table.store.file.schema;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.util.Preconditions;
 
+import javax.annotation.Nonnull;
+
 import java.io.Serializable;
 import java.util.Objects;
 
@@ -52,6 +54,17 @@ public abstract class DataType implements Serializable {
      * @return a copied {@link DataType}
      */
     public abstract DataType copy(boolean isNullable);
+
+    /**
+     * Compare two data types without nullable.
+     *
+     * @param o the target data type
+     */
+    public boolean equalsIgnoreNullable(@Nonnull DataType o) {
+        LogicalType sourceType = logicalType.copy(true);
+        LogicalType targetType = o.logicalType.copy(true);
+        return Objects.equals(sourceType, targetType);
+    }
 
     @Override
     public boolean equals(Object o) {

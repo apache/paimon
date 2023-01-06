@@ -68,7 +68,7 @@ public class KeyValueFileReadWriteTest {
     public void testReadNonExistentFile() {
         KeyValueFileReaderFactory readerFactory =
                 createReaderFactory(tempDir.toString(), "avro", null, null);
-        assertThatThrownBy(() -> readerFactory.createRecordReader(0, "dummy_file", 0))
+        assertThatThrownBy(() -> readerFactory.createRecordReader(0, "dummy_file.avro", 0))
                 .hasMessageContaining(
                         "you can configure 'snapshot.time-retained' option with a larger value.");
     }
@@ -263,7 +263,7 @@ public class KeyValueFileReadWriteTest {
                         0,
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
-                        new FlushingFileFormat(format),
+                        ignore -> new FlushingFileFormat(format),
                         pathFactory,
                         new TestKeyValueGenerator.TestKeyValueFieldsExtractor());
         if (keyProjection != null) {

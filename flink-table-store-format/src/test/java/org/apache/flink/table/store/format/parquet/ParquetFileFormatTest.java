@@ -69,6 +69,6 @@ public class ParquetFileFormatTest {
         DelegatingConfiguration formatOptions = new DelegatingConfiguration(conf, IDENTIFIER + ".");
         ParquetFileFormat parquet = new ParquetFileFormatFactory().create(formatOptions);
         return getParquetConfiguration(parquet.formatOptions())
-                .get(ParquetOutputFormat.COMPRESSION);
+                .getString(ParquetOutputFormat.COMPRESSION, null);
     }
 }

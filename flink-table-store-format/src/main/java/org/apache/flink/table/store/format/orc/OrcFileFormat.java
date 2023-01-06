@@ -24,17 +24,17 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
-import org.apache.flink.orc.OrcFilters;
-import org.apache.flink.orc.OrcSplitReaderUtil;
-import org.apache.flink.orc.vector.RowDataVectorizer;
-import org.apache.flink.orc.vector.Vectorizer;
-import org.apache.flink.orc.writer.OrcBulkWriterFactory;
-import org.apache.flink.orc.writer.ThreadLocalClassLoaderConfiguration;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
+import org.apache.flink.table.store.format.orc.filter.OrcFileStatsExtractor;
+import org.apache.flink.table.store.format.orc.filter.OrcFilters;
+import org.apache.flink.table.store.format.orc.filter.OrcPredicateFunctionVisitor;
+import org.apache.flink.table.store.format.orc.reader.OrcSplitReaderUtil;
+import org.apache.flink.table.store.format.orc.writer.RowDataVectorizer;
+import org.apache.flink.table.store.format.orc.writer.Vectorizer;
 import org.apache.flink.table.store.utils.Projection;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.IntType;
@@ -53,17 +53,17 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.format.orc.OrcFileFormatFactory.IDENTIFIER;
-
 /** Orc {@link FileFormat}. The main code is copied from Flink {@code OrcFileFormatFactory}. */
 public class OrcFileFormat extends FileFormat {
+
+    public static final String IDENTIFIER = "orc";
 
     private final Properties orcProperties;
     private final org.apache.hadoop.conf.Configuration readerConf;
     private final org.apache.hadoop.conf.Configuration writerConf;
 
     public OrcFileFormat(Configuration formatOptions) {
-        super(org.apache.flink.orc.OrcFileFormatFactory.IDENTIFIER);
+        super(IDENTIFIER);
         this.orcProperties = getOrcProperties(formatOptions);
         this.readerConf = new org.apache.hadoop.conf.Configuration();
         this.orcProperties.forEach((k, v) -> readerConf.set(k.toString(), v.toString()));
@@ -93,19 +93,20 @@ public class OrcFileFormat extends FileFormat {
             }
         }
 
-        return OrcInputFormatFactory.create(
+        return new OrcReaderFactory(
                 readerConf,
                 (RowType) refineLogicalType(type),
                 Projection.of(projection).toTopLevelIndexes(),
-                orcPredicates);
+                orcPredicates,
+                2048);
     }
 
     /**
-     * The {@link OrcBulkWriterFactory} will create {@link ThreadLocalClassLoaderConfiguration} from
-     * the input writer config to avoid classloader leaks.
+     * The {@link OrcWriterFactory} will create {@link ThreadLocalClassLoaderConfiguration} from the
+     * input writer config to avoid classloader leaks.
      *
-     * <p>TODO: The {@link ThreadLocalClassLoaderConfiguration} in {@link OrcBulkWriterFactory}
-     * should be removed after https://issues.apache.org/jira/browse/ORC-653 is fixed.
+     * <p>TODO: The {@link ThreadLocalClassLoaderConfiguration} in {@link OrcWriterFactory} should
+     * be removed after https://issues.apache.org/jira/browse/ORC-653 is fixed.
      *
      * @param type The data type for the {@link BulkWriter}
      * @return The factory of the {@link BulkWriter}
@@ -119,7 +120,7 @@ public class OrcFileFormat extends FileFormat {
         Vectorizer<RowData> vectorizer =
                 new RowDataVectorizer(typeDescription.toString(), orcTypes);
 
-        return new OrcBulkWriterFactory<>(vectorizer, orcProperties, writerConf);
+        return new OrcWriterFactory<>(vectorizer, orcProperties, writerConf);
     }
 
     private static Properties getOrcProperties(ReadableConfig options) {

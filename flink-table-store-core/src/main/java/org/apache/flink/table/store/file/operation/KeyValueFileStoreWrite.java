@@ -42,6 +42,7 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.format.FileFormatDiscover;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.slf4j.Logger;
@@ -89,7 +90,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         schemaId,
                         keyType,
                         valueType,
-                        options.fileFormat(),
+                        FileFormatDiscover.of(options),
                         pathFactory,
                         extractor);
         this.writerFactoryBuilder =
@@ -107,16 +108,25 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     }
 
     @Override
-    public RecordWriter<KeyValue> createWriter(
+    public WriterContainer<KeyValue> createWriterContainer(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
-        return createMergeTreeWriter(
-                partition, bucket, scanExistingFileMetas(partition, bucket), compactExecutor);
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        RecordWriter<KeyValue> writer =
+                createMergeTreeWriter(
+                        partition,
+                        bucket,
+                        scanExistingFileMetas(latestSnapshotId, partition, bucket),
+                        compactExecutor);
+        return new WriterContainer<>(writer, latestSnapshotId);
     }
 
     @Override
-    public RecordWriter<KeyValue> createEmptyWriter(
+    public WriterContainer<KeyValue> createEmptyWriterContainer(
             BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
-        return createMergeTreeWriter(partition, bucket, Collections.emptyList(), compactExecutor);
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        RecordWriter<KeyValue> writer =
+                createMergeTreeWriter(partition, bucket, Collections.emptyList(), compactExecutor);
+        return new WriterContainer<>(writer, latestSnapshotId);
     }
 
     private MergeTreeWriter createMergeTreeWriter(
@@ -130,7 +140,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     partition,
                     bucket,
                     restoreFiles);
-            new RuntimeException().printStackTrace();
         }
 
         KeyValueFileWriterFactory writerFactory = writerFactoryBuilder.build(partition, bucket);

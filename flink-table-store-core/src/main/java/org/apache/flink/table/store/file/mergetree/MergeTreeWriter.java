@@ -144,6 +144,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @Override
+    public void addNewFiles(List<DataFileMeta> files) {
+        files.forEach(compactManager::addNewFile);
+    }
+
+    @Override
     public long memoryOccupancy() {
         return writeBuffer.memoryOccupancy();
     }
