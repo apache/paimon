@@ -18,9 +18,11 @@
 
 package org.apache.flink.table.store.table.sink;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.io.DataFileMeta;
 
 import java.util.List;
 
@@ -40,6 +42,16 @@ public interface TableWrite extends AutoCloseable {
     SinkRecord toLogRecord(SinkRecord record);
 
     void compact(BinaryRowData partition, int bucket, boolean fullCompaction) throws Exception;
+
+    /**
+     * Notify that some new files are created at given snapshot in given bucket.
+     *
+     * <p>Most probably, these files are created by another job. Currently this method is only used
+     * by the dedicated compact job to see files created by writer jobs.
+     */
+    @Internal
+    void notifyNewFiles(
+            long snapshotId, BinaryRowData partition, int bucket, List<DataFileMeta> files);
 
     List<FileCommittable> prepareCommit(boolean blocking, long commitIdentifier) throws Exception;
 

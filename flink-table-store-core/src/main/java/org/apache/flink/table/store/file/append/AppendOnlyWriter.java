@@ -99,6 +99,11 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     }
 
     @Override
+    public void addNewFiles(List<DataFileMeta> files) {
+        files.forEach(compactManager::addNewFile);
+    }
+
+    @Override
     public CommitIncrement prepareCommit(boolean blocking) throws Exception {
         flushWriter(false, false);
         trySyncLatestCompaction(blocking || forceCompact);

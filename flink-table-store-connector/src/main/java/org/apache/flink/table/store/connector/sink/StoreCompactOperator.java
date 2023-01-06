@@ -24,6 +24,8 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.OffsetRowData;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.util.Preconditions;
@@ -47,6 +49,7 @@ public class StoreCompactOperator extends PrepareCommitOperator {
     private transient StoreSinkWrite write;
     private transient RowDataSerializer partitionSerializer;
     private transient OffsetRowData reusedPartition;
+    private transient DataFileMetaSerializer dataFileMetaSerializer;
 
     public StoreCompactOperator(
             FileStoreTable table,
@@ -73,17 +76,34 @@ public class StoreCompactOperator extends PrepareCommitOperator {
     public void open() throws Exception {
         super.open();
         partitionSerializer = new RowDataSerializer(table.schema().logicalPartitionType());
-        reusedPartition = new OffsetRowData(partitionSerializer.getArity(), 0);
+        reusedPartition = new OffsetRowData(partitionSerializer.getArity(), 1);
+        dataFileMetaSerializer = new DataFileMetaSerializer();
     }
 
     @Override
     public void processElement(StreamRecord<RowData> element) throws Exception {
-        RowData partitionAndBucket = element.getValue();
-        reusedPartition.replace(partitionAndBucket);
-        BinaryRowData partition = partitionSerializer.toBinaryRow(reusedPartition).copy();
-        int bucket = partitionAndBucket.getInt(partitionSerializer.getArity());
+        RowData record = element.getValue();
 
-        write.compact(partition, bucket, !isStreaming);
+        long snapshotId = record.getLong(0);
+
+        reusedPartition.replace(record);
+        BinaryRowData partition = partitionSerializer.toBinaryRow(reusedPartition).copy();
+
+        int bucket = record.getInt(partitionSerializer.getArity() + 1);
+
+        byte[] serializedFiles = record.getBinary(partitionSerializer.getArity() + 2);
+        List<DataFileMeta> files = dataFileMetaSerializer.deserializeList(serializedFiles);
+
+        if (isStreaming) {
+            write.notifyNewFiles(snapshotId, partition, bucket, files);
+            write.compact(partition, bucket, false);
+        } else {
+            Preconditions.checkArgument(
+                    files.isEmpty(),
+                    "Batch compact job does not concern what files are compacted. "
+                            + "They only need to know what buckets are compacted.");
+            write.compact(partition, bucket, true);
+        }
     }
 
     @Override

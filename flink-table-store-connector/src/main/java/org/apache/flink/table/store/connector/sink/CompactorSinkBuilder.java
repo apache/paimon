@@ -50,9 +50,11 @@ public class CompactorSinkBuilder {
     }
 
     public DataStreamSink<?> build() {
-        HashRowStreamPartitioner partitioner =
-                new HashRowStreamPartitioner(
-                        BucketsTable.rowType(table.schema().logicalPartitionType()));
+        OffsetRowDataHashStreamPartitioner partitioner =
+                new OffsetRowDataHashStreamPartitioner(
+                        BucketsTable.partitionWithBucketRowType(
+                                table.schema().logicalPartitionType()),
+                        1);
         PartitionTransformation<RowData> partitioned =
                 new PartitionTransformation<>(input.getTransformation(), partitioner);
 
