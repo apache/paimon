@@ -24,6 +24,7 @@ import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreRead;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreScan;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreWrite;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.format.FileFormatDiscover;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.Comparator;
@@ -54,7 +55,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
     @Override
     public AppendOnlyFileStoreRead newRead() {
         return new AppendOnlyFileStoreRead(
-                schemaManager, schemaId, rowType, options.fileFormat(), pathFactory());
+                schemaManager, schemaId, rowType, FileFormatDiscover.of(options), pathFactory());
     }
 
     @Override

@@ -28,7 +28,7 @@ import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.format.FileFormatDiscover;
 import org.apache.flink.table.store.utils.Projection;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -56,37 +56,38 @@ public class BulkFormatMapping {
     }
 
     public static BulkFormatMappingBuilder newBuilder(
-            FileFormat fileFormat,
+            FileFormatDiscover formatDiscover,
             KeyValueFieldsExtractor extractor,
             int[][] keyProjection,
             int[][] valueProjection,
             @Nullable List<Predicate> filters) {
         return new BulkFormatMappingBuilder(
-                fileFormat, extractor, keyProjection, valueProjection, filters);
+                formatDiscover, extractor, keyProjection, valueProjection, filters);
     }
 
     /** Builder to build {@link BulkFormatMapping}. */
     public static class BulkFormatMappingBuilder {
-        private final FileFormat fileFormat;
+        private final FileFormatDiscover formatDiscover;
         private final KeyValueFieldsExtractor extractor;
         private final int[][] keyProjection;
         private final int[][] valueProjection;
         @Nullable private final List<Predicate> filters;
 
         private BulkFormatMappingBuilder(
-                FileFormat fileFormat,
+                FileFormatDiscover formatDiscover,
                 KeyValueFieldsExtractor extractor,
                 int[][] keyProjection,
                 int[][] valueProjection,
                 @Nullable List<Predicate> filters) {
-            this.fileFormat = fileFormat;
+            this.formatDiscover = formatDiscover;
             this.extractor = extractor;
             this.keyProjection = keyProjection;
             this.valueProjection = valueProjection;
             this.filters = filters;
         }
 
-        public BulkFormatMapping build(TableSchema tableSchema, TableSchema dataSchema) {
+        public BulkFormatMapping build(
+                String formatIdentifier, TableSchema tableSchema, TableSchema dataSchema) {
             List<DataField> tableKeyFields = extractor.keyFields(tableSchema);
             List<DataField> tableValueFields = extractor.valueFields(tableSchema);
             int[][] tableProjection =
@@ -146,7 +147,9 @@ public class BulkFormatMapping {
                                     tableSchema.fields(), dataSchema.fields(), filters);
             return new BulkFormatMapping(
                     indexMapping,
-                    fileFormat.createReaderFactory(dataRecordType, dataProjection, dataFilters));
+                    formatDiscover
+                            .discover(formatIdentifier)
+                            .createReaderFactory(dataRecordType, dataProjection, dataFilters));
         }
     }
 }

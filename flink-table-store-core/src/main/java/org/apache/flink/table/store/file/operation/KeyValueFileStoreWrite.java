@@ -42,6 +42,7 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.format.FileFormatDiscover;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.slf4j.Logger;
@@ -89,7 +90,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         schemaId,
                         keyType,
                         valueType,
-                        options.fileFormat(),
+                        FileFormatDiscover.of(options),
                         pathFactory,
                         extractor);
         this.writerFactoryBuilder =

@@ -73,4 +73,13 @@ public class DataFilePathFactory {
     public static Path bucketPath(Path tablePath, String partition, int bucket) {
         return new Path(tablePath + "/" + partition + "/bucket-" + bucket);
     }
+
+    public static String formatIdentifier(String fileName) {
+        int index = fileName.lastIndexOf('.');
+        if (index == -1) {
+            throw new IllegalArgumentException(fileName + " is not a legal file name.");
+        }
+
+        return fileName.substring(index + 1);
+    }
 }
