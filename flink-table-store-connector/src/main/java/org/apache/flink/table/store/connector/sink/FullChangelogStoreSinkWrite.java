@@ -215,7 +215,17 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
                     && snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
                 long commitIdentifier = snapshot.commitIdentifier();
                 if (commitIdentifiersToCheck.contains(commitIdentifier)) {
-                    // we found a full compaction snapshot
+                    // We found a full compaction snapshot triggered by `submitFullCompaction`
+                    // method.
+                    //
+                    // Because `submitFullCompaction` will compact all buckets in `writtenBuckets`,
+                    // thus a successful commit indicates that all previous buckets have been
+                    // compacted.
+                    //
+                    // We must make sure that the compact snapshot is triggered by
+                    // `submitFullCompaction`, because normal compaction may also trigger full
+                    // compaction, but that only compacts a specific bucket, not all buckets
+                    // recorded in `writtenBuckets`.
                     if (LOG.isDebugEnabled()) {
                         LOG.debug(
                                 "Found full compaction snapshot #{} with identifier {}",
@@ -233,19 +243,20 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
 
     private void submitFullCompaction() {
         Set<Tuple2<BinaryRowData, Integer>> compactedBuckets = new HashSet<>();
-        for (Set<Tuple2<BinaryRowData, Integer>> buckets : writtenBuckets.values()) {
-            for (Tuple2<BinaryRowData, Integer> bucket : buckets) {
-                if (compactedBuckets.contains(bucket)) {
-                    continue;
-                }
-                compactedBuckets.add(bucket);
-                try {
-                    write.compact(bucket.f0, bucket.f1, true);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            }
-        }
+        writtenBuckets.forEach(
+                (checkpointId, buckets) -> {
+                    for (Tuple2<BinaryRowData, Integer> bucket : buckets) {
+                        if (compactedBuckets.contains(bucket)) {
+                            continue;
+                        }
+                        compactedBuckets.add(bucket);
+                        try {
+                            write.compact(bucket.f0, bucket.f1, true);
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                });
     }
 
     @Override
