@@ -21,6 +21,7 @@ package org.apache.flink.table.store.table.sink;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
 
 import java.util.List;
@@ -73,6 +74,12 @@ public class TableWriteImpl<T> implements TableWrite {
     public void compact(BinaryRowData partition, int bucket, boolean fullCompaction)
             throws Exception {
         write.compact(partition, bucket, fullCompaction);
+    }
+
+    @Override
+    public void notifyNewFiles(
+            long snapshotId, BinaryRowData partition, int bucket, List<DataFileMeta> files) {
+        write.notifyNewFiles(snapshotId, partition, bucket, files);
     }
 
     @Override

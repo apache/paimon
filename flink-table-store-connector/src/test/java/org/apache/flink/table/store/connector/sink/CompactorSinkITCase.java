@@ -25,6 +25,8 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.connector.source.CompactorSourceBuilder;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -47,6 +49,9 @@ import org.junit.Test;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** IT cases for {@link CompactorSinkBuilder} and {@link CompactorSink}. */
@@ -58,9 +63,9 @@ public class CompactorSinkITCase extends AbstractTestBase {
                         DataTypes.INT().getLogicalType(),
                         DataTypes.INT().getLogicalType(),
                         DataTypes.INT().getLogicalType(),
-                        DataTypes.INT().getLogicalType()
+                        DataTypes.STRING().getLogicalType()
                     },
-                    new String[] {"dt", "hh", "k", "v"});
+                    new String[] {"k", "v", "hh", "dt"});
 
     private Path tablePath;
     private String commitUser;
@@ -78,14 +83,14 @@ public class CompactorSinkITCase extends AbstractTestBase {
         TableWrite write = table.newWrite(commitUser);
         TableCommit commit = table.newCommit(commitUser);
 
-        write.write(rowData(20221208, 15, 1, 100));
-        write.write(rowData(20221208, 16, 1, 100));
-        write.write(rowData(20221209, 15, 1, 100));
+        write.write(rowData(1, 100, 15, StringData.fromString("20221208")));
+        write.write(rowData(1, 100, 16, StringData.fromString("20221208")));
+        write.write(rowData(1, 100, 15, StringData.fromString("20221209")));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        write.write(rowData(20221208, 15, 2, 200));
-        write.write(rowData(20221208, 16, 2, 200));
-        write.write(rowData(20221209, 15, 2, 200));
+        write.write(rowData(2, 200, 15, StringData.fromString("20221208")));
+        write.write(rowData(2, 200, 16, StringData.fromString("20221208")));
+        write.write(rowData(2, 200, 15, StringData.fromString("20221209")));
         commit.commit(1, write.prepareCommit(true, 1));
 
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
@@ -97,8 +102,14 @@ public class CompactorSinkITCase extends AbstractTestBase {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
+        CompactorSourceBuilder sourceBuilder =
+                new CompactorSourceBuilder(tablePath.toString(), table);
         DataStreamSource<RowData> source =
-                env.fromElements(rowData(20221208, 15, 0), rowData(20221209, 15, 0));
+                sourceBuilder
+                        .withEnv(env)
+                        .withContinuousMode(false)
+                        .withPartitions(getSpecifiedPartitions())
+                        .build();
         new CompactorSinkBuilder(table).withInput(source).build();
         env.execute();
 
@@ -117,6 +128,18 @@ public class CompactorSinkITCase extends AbstractTestBase {
                 Assert.assertEquals(2, split.files().size());
             }
         }
+    }
+
+    private List<Map<String, String>> getSpecifiedPartitions() {
+        Map<String, String> partition1 = new HashMap<>();
+        partition1.put("dt", "20221208");
+        partition1.put("hh", "15");
+
+        Map<String, String> partition2 = new HashMap<>();
+        partition2.put("dt", "20221209");
+        partition2.put("hh", "15");
+
+        return Arrays.asList(partition1, partition2);
     }
 
     private GenericRowData rowData(Object... values) {

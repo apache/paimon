@@ -25,6 +25,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
@@ -69,9 +70,9 @@ public class CompactActionITCase extends AbstractTestBase {
                         DataTypes.INT().getLogicalType(),
                         DataTypes.INT().getLogicalType(),
                         DataTypes.INT().getLogicalType(),
-                        DataTypes.INT().getLogicalType()
+                        DataTypes.STRING().getLogicalType()
                     },
-                    new String[] {"dt", "hh", "k", "v"});
+                    new String[] {"k", "v", "hh", "dt"});
 
     private Path tablePath;
     private String commitUser;
@@ -92,14 +93,14 @@ public class CompactActionITCase extends AbstractTestBase {
         TableWrite write = table.newWrite(commitUser);
         TableCommit commit = table.newCommit(commitUser);
 
-        write.write(rowData(20221208, 15, 1, 100));
-        write.write(rowData(20221208, 16, 1, 100));
-        write.write(rowData(20221209, 15, 1, 100));
+        write.write(rowData(1, 100, 15, StringData.fromString("20221208")));
+        write.write(rowData(1, 100, 16, StringData.fromString("20221208")));
+        write.write(rowData(1, 100, 15, StringData.fromString("20221209")));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        write.write(rowData(20221208, 15, 2, 200));
-        write.write(rowData(20221208, 16, 2, 200));
-        write.write(rowData(20221209, 15, 2, 200));
+        write.write(rowData(2, 200, 15, StringData.fromString("20221208")));
+        write.write(rowData(2, 200, 16, StringData.fromString("20221208")));
+        write.write(rowData(2, 200, 15, StringData.fromString("20221209")));
         commit.commit(1, write.prepareCommit(true, 1));
 
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
@@ -145,9 +146,9 @@ public class CompactActionITCase extends AbstractTestBase {
         TableCommit commit = table.newCommit(commitUser);
 
         // base records
-        write.write(rowData(20221208, 15, 1, 100));
-        write.write(rowData(20221208, 16, 1, 100));
-        write.write(rowData(20221209, 15, 1, 100));
+        write.write(rowData(1, 100, 15, StringData.fromString("20221208")));
+        write.write(rowData(1, 100, 16, StringData.fromString("20221208")));
+        write.write(rowData(1, 100, 15, StringData.fromString("20221209")));
         commit.commit(0, write.prepareCommit(true, 0));
 
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
@@ -180,12 +181,12 @@ public class CompactActionITCase extends AbstractTestBase {
         Assert.assertEquals(2, (long) plan.snapshotId);
         List<String> actual = getResult(table.newRead(), plan.splits());
         actual.sort(String::compareTo);
-        Assert.assertEquals(Arrays.asList("+I 20221208|15|1|100", "+I 20221209|15|1|100"), actual);
+        Assert.assertEquals(Arrays.asList("+I 1|100|15|20221208", "+I 1|100|15|20221209"), actual);
 
         // incremental records
-        write.write(rowData(20221208, 15, 1, 101));
-        write.write(rowData(20221208, 16, 1, 101));
-        write.write(rowData(20221209, 15, 1, 101));
+        write.write(rowData(1, 101, 15, StringData.fromString("20221208")));
+        write.write(rowData(1, 101, 16, StringData.fromString("20221208")));
+        write.write(rowData(1, 101, 15, StringData.fromString("20221209")));
         commit.commit(1, write.prepareCommit(true, 1));
 
         write.close();
@@ -205,10 +206,10 @@ public class CompactActionITCase extends AbstractTestBase {
         actual.sort(String::compareTo);
         Assert.assertEquals(
                 Arrays.asList(
-                        "+U 20221208|15|1|101",
-                        "+U 20221209|15|1|101",
-                        "-U 20221208|15|1|100",
-                        "-U 20221209|15|1|100"),
+                        "+U 1|101|15|20221208",
+                        "+U 1|101|15|20221209",
+                        "-U 1|100|15|20221208",
+                        "-U 1|100|15|20221209"),
                 actual);
     }
 
@@ -246,12 +247,12 @@ public class CompactActionITCase extends AbstractTestBase {
 
     private String rowDataToString(RowData rowData) {
         return String.format(
-                "%s %d|%d|%d|%d",
+                "%s %d|%d|%d|%s",
                 rowData.getRowKind().shortString(),
                 rowData.getInt(0),
                 rowData.getInt(1),
                 rowData.getInt(2),
-                rowData.getInt(3));
+                rowData.getString(3).toString());
     }
 
     private FileStoreTable createFileStoreTable(Map<String, String> options) throws Exception {

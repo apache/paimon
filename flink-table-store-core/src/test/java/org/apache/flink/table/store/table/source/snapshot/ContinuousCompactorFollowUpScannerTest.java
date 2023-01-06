@@ -20,6 +20,7 @@ package org.apache.flink.table.store.table.source.snapshot;
 
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.TableCommit;
@@ -31,6 +32,8 @@ import org.apache.flink.types.RowKind;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -40,6 +43,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ContinuousCompactorFollowUpScanner}. */
 public class ContinuousCompactorFollowUpScannerTest extends SnapshotEnumeratorTestBase {
+
+    private final DataFileMetaSerializer dataFileMetaSerializer = new DataFileMetaSerializer();
 
     @Test
     public void testGetPlan() throws Exception {
@@ -74,7 +79,7 @@ public class ContinuousCompactorFollowUpScannerTest extends SnapshotEnumeratorTe
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(4);
 
-        BucketsTable bucketsTable = new BucketsTable(table);
+        BucketsTable bucketsTable = new BucketsTable(table, true);
         DataTableScan scan = bucketsTable.newScan();
         TableRead read = bucketsTable.newRead();
         ContinuousCompactorFollowUpScanner scanner = new ContinuousCompactorFollowUpScanner();
@@ -85,7 +90,7 @@ public class ContinuousCompactorFollowUpScannerTest extends SnapshotEnumeratorTe
         DataTableScan.DataFilePlan plan = scanner.getPlan(1, scan);
         assertThat(plan.snapshotId).isEqualTo(1);
         assertThat(getResult(read, plan.splits()))
-                .hasSameElementsAs(Arrays.asList("+I 1|0", "+I 2|0"));
+                .hasSameElementsAs(Arrays.asList("+I 1|1|0|1", "+I 1|2|0|1"));
 
         snapshot = snapshotManager.snapshot(2);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
@@ -93,7 +98,7 @@ public class ContinuousCompactorFollowUpScannerTest extends SnapshotEnumeratorTe
         plan = scanner.getPlan(2, scan);
         assertThat(plan.snapshotId).isEqualTo(2);
         assertThat(getResult(read, plan.splits()))
-                .hasSameElementsAs(Collections.singletonList("+I 2|0"));
+                .hasSameElementsAs(Collections.singletonList("+I 2|2|0|1"));
 
         snapshot = snapshotManager.snapshot(3);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
@@ -101,17 +106,24 @@ public class ContinuousCompactorFollowUpScannerTest extends SnapshotEnumeratorTe
 
         snapshot = snapshotManager.snapshot(4);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
-        assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        plan = scanner.getPlan(4, scan);
-        assertThat(plan.snapshotId).isEqualTo(4);
-        assertThat(getResult(read, plan.splits()))
-                .hasSameElementsAs(Collections.singletonList("+I 1|0"));
+        assertThat(scanner.shouldScanSnapshot(snapshot)).isFalse();
     }
 
     @Override
     protected String rowDataToString(RowData rowData) {
+        int numFiles;
+        try {
+            numFiles = dataFileMetaSerializer.deserializeList(rowData.getBinary(3)).size();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+
         return String.format(
-                "%s %d|%d",
-                rowData.getRowKind().shortString(), rowData.getInt(0), rowData.getInt(1));
+                "%s %d|%d|%d|%d",
+                rowData.getRowKind().shortString(),
+                rowData.getLong(0),
+                rowData.getInt(1),
+                rowData.getInt(2),
+                numFiles);
     }
 }

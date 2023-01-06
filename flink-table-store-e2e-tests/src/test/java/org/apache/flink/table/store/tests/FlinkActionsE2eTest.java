@@ -89,7 +89,7 @@ public class FlinkActionsE2eTest extends E2eTestBase {
                 tableDdl,
                 testDataSourceDdl);
 
-        // run stand-alone compact job
+        // run dedicated compact job
         Container.ExecResult execResult =
                 jobManager.execInContainer(
                         "bin/flink",

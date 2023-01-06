@@ -44,12 +44,12 @@ import java.util.Map;
 
 /**
  * Source builder to build a Flink {@link StaticFileStoreSource} or {@link
- * ContinuousFileStoreSource}. This is for stand-alone compactor jobs.
+ * ContinuousFileStoreSource}. This is for dedicated compactor jobs.
  */
 public class CompactorSourceBuilder {
 
     private final String tableIdentifier;
-    private final BucketsTable bucketsTable;
+    private final FileStoreTable table;
 
     private boolean isContinuous = false;
     private StreamExecutionEnvironment env;
@@ -57,7 +57,7 @@ public class CompactorSourceBuilder {
 
     public CompactorSourceBuilder(String tableIdentifier, FileStoreTable table) {
         this.tableIdentifier = tableIdentifier;
-        this.bucketsTable = new BucketsTable(table);
+        this.table = table;
     }
 
     public CompactorSourceBuilder withContinuousMode(boolean isContinuous) {
@@ -79,13 +79,16 @@ public class CompactorSourceBuilder {
         return this;
     }
 
-    private Source<RowData, ?, ?> buildSource() {
+    private Source<RowData, ?, ?> buildSource(BucketsTable bucketsTable) {
         Predicate partitionPredicate = null;
         if (specifiedPartitions != null) {
+            // This predicate is based on the row type of the original table, not bucket table.
+            // Because TableScan in BucketsTable is the same with FileStoreTable,
+            // and partition filter is done by scan.
             partitionPredicate =
                     PredicateBuilder.or(
                             specifiedPartitions.stream()
-                                    .map(p -> PredicateConverter.fromMap(p, bucketsTable.rowType()))
+                                    .map(p -> PredicateConverter.fromMap(p, table.rowType()))
                                     .toArray(Predicate[]::new));
         }
 
@@ -122,9 +125,10 @@ public class CompactorSourceBuilder {
             throw new IllegalArgumentException("StreamExecutionEnvironment should not be null.");
         }
 
+        BucketsTable bucketsTable = new BucketsTable(table, isContinuous);
         LogicalType produceType = bucketsTable.rowType();
         return env.fromSource(
-                buildSource(),
+                buildSource(bucketsTable),
                 WatermarkStrategy.noWatermarks(),
                 tableIdentifier + "-compact-source",
                 InternalTypeInfo.of(produceType));

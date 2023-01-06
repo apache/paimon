@@ -51,7 +51,7 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
     }
 
     private Iterator<MemoryOwner> memoryOwners() {
-        Iterator<Map<Integer, WriterWithCommit<T>>> iterator = writers.values().iterator();
+        Iterator<Map<Integer, WriterContainer<T>>> iterator = writers.values().iterator();
         return Iterators.concat(
                 new Iterator<Iterator<MemoryOwner>>() {
                     @Override
@@ -63,10 +63,10 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
                     public Iterator<MemoryOwner> next() {
                         return Iterators.transform(
                                 iterator.next().values().iterator(),
-                                writerWithCommit ->
-                                        writerWithCommit == null
+                                writerContainer ->
+                                        writerContainer == null
                                                 ? null
-                                                : (MemoryOwner) (writerWithCommit.writer));
+                                                : (MemoryOwner) (writerContainer.writer));
                     }
                 });
     }

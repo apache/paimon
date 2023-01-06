@@ -19,12 +19,16 @@
 package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.core.memory.DataInputView;
+import org.apache.flink.core.memory.DataInputViewStreamWrapper;
 import org.apache.flink.core.memory.DataOutputView;
+import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalSerializers;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.types.logical.RowType;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -80,6 +84,13 @@ public abstract class ObjectSerializer<T> implements Serializable {
         }
     }
 
+    public final byte[] serializeList(List<T> records) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(baos);
+        serializeList(records, view);
+        return baos.toByteArray();
+    }
+
     /** De-serializes a record list from the given source input view. */
     public final List<T> deserializeList(DataInputView source) throws IOException {
         int size = source.readInt();
@@ -88,6 +99,12 @@ public abstract class ObjectSerializer<T> implements Serializable {
             records.add(deserialize(source));
         }
         return records;
+    }
+
+    public final List<T> deserializeList(byte[] bytes) throws IOException {
+        ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
+        DataInputViewStreamWrapper view = new DataInputViewStreamWrapper(bais);
+        return deserializeList(view);
     }
 
     /** Convert a {@link T} to {@link RowData}. */
