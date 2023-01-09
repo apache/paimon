@@ -57,6 +57,7 @@ import static org.apache.flink.table.store.connector.FlinkConnectorOptions.relat
 import static org.junit.jupiter.api.Assertions.fail;
 
 /** ITCase for file store table api. */
+@Deprecated
 public abstract class FileStoreTableITCase extends AbstractTestBase {
 
     protected TableEnvironment bEnv;
