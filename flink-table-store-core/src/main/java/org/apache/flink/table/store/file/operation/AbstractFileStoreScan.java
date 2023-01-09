@@ -183,7 +183,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 manifests = Collections.emptyList();
             } else {
                 Snapshot snapshot = snapshotManager.snapshot(snapshotId);
-                manifests = readManiests(snapshot);
+                manifests = readManifests(snapshot);
             }
         }
 
@@ -250,7 +250,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         };
     }
 
-    private List<ManifestFileMeta> readManiests(Snapshot snapshot) {
+    private List<ManifestFileMeta> readManifests(Snapshot snapshot) {
         switch (scanKind) {
             case ALL:
                 return snapshot.readAllDataManifests(manifestList);
