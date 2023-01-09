@@ -19,7 +19,9 @@
 package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.DoubleType;
@@ -261,5 +263,32 @@ public class SchemaManagerTest {
         final UpdateSchema schemaWithPrimaryKeys =
                 new UpdateSchema(rowType, partitionKeys, primaryKeys, options, "");
         retryArtificialException(() -> manager.commitNewVersion(schemaWithPrimaryKeys));
+    }
+
+    @Test
+    public void testAppendOnlyTableWithPrimaryKey() throws Exception {
+        RowType newType = RowType.of(new IntType(), new BigIntType());
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
+        UpdateSchema changeLogSchema =
+                new UpdateSchema(newType, partitionKeys, primaryKeys, options, "change-log table");
+        retryArtificialException(() -> manager.commitNewVersion(changeLogSchema));
+
+        options.put(CoreOptions.WRITE_MODE.key(), WriteMode.APPEND_ONLY.toString());
+        UpdateSchema updateSchema =
+                new UpdateSchema(
+                        newType,
+                        partitionKeys,
+                        primaryKeys,
+                        options,
+                        "append-only table with primary key");
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () -> manager.commitNewVersion(updateSchema)))
+                .isInstanceOf(TableException.class)
+                .hasMessage(
+                        "Cannot define any primary key in an append-only table. "
+                                + "Set 'write-mode'='change-log' if still want to keep the primary key definition.");
     }
 }
