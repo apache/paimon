@@ -37,6 +37,7 @@ import org.junit.Before;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
@@ -64,6 +65,10 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
 
         prepareConfiguration(tEnv);
         prepareConfiguration(sEnv);
+
+        for (String ddl : ddl()) {
+            tEnv.executeSql(ddl);
+        }
     }
 
     private void prepareConfiguration(TableEnvironment env) {
@@ -77,9 +82,19 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
         return 2;
     }
 
-    protected List<Row> sql(String query, Object... args) throws Exception {
+    protected List<String> ddl() {
+        return Collections.emptyList();
+    }
+
+    protected List<Row> batchSql(String query, Object... args) {
+        return sql(query, args);
+    }
+
+    protected List<Row> sql(String query, Object... args) {
         try (CloseableIterator<Row> iter = tEnv.executeSql(String.format(query, args)).collect()) {
             return ImmutableList.copyOf(iter);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 

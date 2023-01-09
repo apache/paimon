@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.AbstractCatalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogDatabase;
@@ -203,10 +202,6 @@ public class FlinkCatalog extends AbstractCatalog {
         // remove table path
         String specific = options.remove(PATH.key());
         if (specific != null) {
-            if (!catalog.getTableLocation(tablePath).equals(new Path(specific))) {
-                throw new IllegalArgumentException(
-                        "Illegal table path in table options: " + specific);
-            }
             catalogTable = catalogTable.copy(options);
         }
 

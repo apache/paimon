@@ -228,7 +228,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
                         + "  'bucket' = '1',"
                         + "  'changelog-producer' = 'full-compaction',"
                         + "  'changelog-producer.compaction-interval' = '2s',"
-                        + "  'write.compaction-skip' = 'true'"
+                        + "  'write-only' = 'true'"
                         + ")");
 
         // run select job
@@ -357,7 +357,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
                                 random.nextBoolean() ? "512kb" : "1mb")
                         + "'changelog-producer' = 'full-compaction',"
                         + "'changelog-producer.compaction-interval' = '2s',"
-                        + "'write.compaction-skip' = 'true'");
+                        + "'write-only' = 'true'");
 
         // sleep for a random amount of time to check
         // if dedicated compactor job can find first snapshot to compact correctly

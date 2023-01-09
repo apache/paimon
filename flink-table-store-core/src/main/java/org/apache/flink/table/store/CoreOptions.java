@@ -29,6 +29,7 @@ import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.configuration.description.Description;
 import org.apache.flink.configuration.description.InlineElement;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.format.FileFormat;
@@ -45,11 +46,13 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
 import static org.apache.flink.configuration.description.TextElement.text;
+import static org.apache.flink.table.store.file.WriteMode.APPEND_ONLY;
 import static org.apache.flink.table.store.file.schema.TableSchema.KEY_FIELD_PREFIX;
 import static org.apache.flink.table.store.file.schema.TableSchema.SYSTEM_FIELD_NAMES;
 import static org.apache.flink.util.Preconditions.checkState;
@@ -167,11 +170,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(WriteMode.CHANGE_LOG)
                     .withDescription("Specify the write mode for table.");
 
-    public static final ConfigOption<Boolean> WRITE_COMPACTION_SKIP =
-            ConfigOptions.key("write.compaction-skip")
+    public static final ConfigOption<Boolean> WRITE_ONLY =
+            ConfigOptions.key("write-only")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription("Whether to skip compaction on write.");
+                    .withDeprecatedKeys("write.compaction-skip")
+                    .withDescription(
+                            "If set to true, compactions and snapshot expiration will be skipped. "
+                                    + "This option is used along with dedicated compact jobs.");
 
     public static final ConfigOption<MemorySize> SOURCE_SPLIT_TARGET_SIZE =
             ConfigOptions.key("source.split.target-size")
@@ -590,8 +596,8 @@ public class CoreOptions implements Serializable {
         return options.get(WRITE_MODE);
     }
 
-    public boolean writeCompactionSkip() {
-        return options.get(WRITE_COMPACTION_SKIP);
+    public boolean writeOnly() {
+        return options.get(WRITE_ONLY);
     }
 
     /** Specifies the merge engine for table with primary key. */
@@ -838,6 +844,13 @@ public class CoreOptions implements Serializable {
                                             "Field name[%s] in schema cannot start with [%s]",
                                             f, KEY_FIELD_PREFIX));
                         });
+
+        // Cannot define any primary key in an append-only table.
+        if (!schema.primaryKeys().isEmpty() && Objects.equals(APPEND_ONLY, options.writeMode())) {
+            throw new TableException(
+                    "Cannot define any primary key in an append-only table. Set 'write-mode'='change-log' if "
+                            + "still want to keep the primary key definition.");
+        }
     }
 
     private static void checkOptionExistInMode(

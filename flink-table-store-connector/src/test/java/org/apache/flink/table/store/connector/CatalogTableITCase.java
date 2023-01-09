@@ -123,4 +123,14 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         "+I[3, 1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"}]]",
                         "+I[4, 1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"}]]");
     }
+
+    @Test
+    public void testCreateTableLike() throws Exception {
+        sql("CREATE TABLE T (a INT)");
+        sql("CREATE TABLE T1 LIKE T");
+        List<Row> result = sql("SELECT * FROM T1$schemas s");
+        System.out.println(result);
+        assertThat(result.toString())
+                .isEqualTo("[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"}], [], [], {}, ]]");
+    }
 }
