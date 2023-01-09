@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for partial update. */
-public class PartialUpdateITCase extends FileStoreTableITCase {
+public class PartialUpdateITCase extends CatalogITCaseBase {
 
     @Override
     protected List<String> ddl() {
