@@ -16,3 +16,4 @@
 org.apache.flink.table.store.connector.TableStoreManagedFactory
 org.apache.flink.table.store.connector.TableStoreConnectorFactory
 org.apache.flink.table.store.connector.FlinkCatalogFactory
+org.apache.flink.table.store.kafka.KafkaLogStoreFactory
