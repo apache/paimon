@@ -184,7 +184,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             CompactStrategy compactStrategy,
             ExecutorService compactExecutor,
             Levels levels) {
-        if (options.writeCompactionSkip()) {
+        if (options.writeOnly()) {
             return new NoopCompactManager();
         } else {
             Comparator<RowData> keyComparator = keyComparatorSupplier.get();

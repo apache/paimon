@@ -70,7 +70,9 @@ import static org.apache.flink.table.store.CoreOptions.BUCKET;
 import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
 import static org.apache.flink.table.store.CoreOptions.COMPACTION_MAX_FILE_NUM;
 import static org.apache.flink.table.store.CoreOptions.FILE_FORMAT;
-import static org.apache.flink.table.store.CoreOptions.WRITE_COMPACTION_SKIP;
+import static org.apache.flink.table.store.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
+import static org.apache.flink.table.store.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
+import static org.apache.flink.table.store.CoreOptions.WRITE_ONLY;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base test class for {@link FileStoreTable}. */
@@ -317,12 +319,16 @@ public abstract class FileStoreTableTestBase {
     }
 
     @Test
-    public void testWriteWithoutCompaction() throws Exception {
+    public void testWriteWithoutCompactionAndExpiration() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
-                            conf.set(WRITE_COMPACTION_SKIP, true);
+                            conf.set(WRITE_ONLY, true);
                             conf.set(COMPACTION_MAX_FILE_NUM, 5);
+                            // 'write-only' options will also skip expiration
+                            // these options shouldn't have any effect
+                            conf.set(SNAPSHOT_NUM_RETAINED_MIN, 3);
+                            conf.set(SNAPSHOT_NUM_RETAINED_MAX, 3);
                         });
 
         TableWrite write = table.newWrite(commitUser);

@@ -56,9 +56,8 @@ public class StoreCompactOperator extends PrepareCommitOperator {
             StoreSinkWrite.Provider storeSinkWriteProvider,
             boolean isStreaming) {
         Preconditions.checkArgument(
-                !table.options().writeCompactionSkip(),
-                CoreOptions.WRITE_COMPACTION_SKIP.key()
-                        + " should not be true for StoreCompactOperator.");
+                !table.options().writeOnly(),
+                CoreOptions.WRITE_ONLY.key() + " should not be true for StoreCompactOperator.");
         this.table = table;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
         this.isStreaming = isStreaming;
