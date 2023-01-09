@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test case for append-only managed table. */
-public class AppendOnlyTableITCase extends FileStoreTableITCase {
+public class AppendOnlyTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testCreateTableWithPrimaryKey() {
@@ -103,7 +103,7 @@ public class AppendOnlyTableITCase extends FileStoreTableITCase {
 
         String id = TestValuesTableFactory.registerData(input);
         batchSql(
-                "CREATE TABLE source (id INT, data STRING) WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                "CREATE TEMPORARY TABLE source (id INT, data STRING) WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
                 id);
 
         batchSql("INSERT INTO append_table SELECT * FROM source");
@@ -214,7 +214,7 @@ public class AppendOnlyTableITCase extends FileStoreTableITCase {
 
         String id = TestValuesTableFactory.registerData(input);
         batchSql(
-                "CREATE TABLE source (id INT, data STRING) WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                "CREATE TEMPORARY TABLE source (id INT, data STRING) WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
                 id);
 
         assertThatThrownBy(() -> batchSql("INSERT INTO append_table SELECT * FROM source"))
@@ -225,7 +225,7 @@ public class AppendOnlyTableITCase extends FileStoreTableITCase {
     private void assertAutoCompaction(
             String sql, long expectedSnapshotId, Snapshot.CommitKind expectedCommitKind) {
         batchSql(sql);
-        Snapshot snapshot = findLatestSnapshot("append_table", true);
+        Snapshot snapshot = findLatestSnapshot("append_table");
         assertThat(snapshot.id()).isEqualTo(expectedSnapshotId);
         assertThat(snapshot.commitKind()).isEqualTo(expectedCommitKind);
     }

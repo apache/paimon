@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for batch file store. */
-public class BatchFileStoreITCase extends FileStoreTableITCase {
+public class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @Override
     protected List<String> ddl() {
