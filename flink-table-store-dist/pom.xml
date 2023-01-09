@@ -62,12 +62,6 @@ under the License.
             <version>${project.version}</version>
         </dependency>
 
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-kafka</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
         <!-- used flink connectors -->
 
         <dependency>
@@ -97,7 +91,6 @@ under the License.
                                     <include>org.apache.flink:flink-table-store-connector</include>
                                     <include>org.apache.flink:flink-table-store-core</include>
                                     <include>org.apache.flink:flink-table-store-format</include>
-                                    <include>org.apache.flink:flink-table-store-kafka</include>
                                     <include>org.apache.flink:${flink.connector.kafka}</include>
                                     <include>org.apache.kafka:*</include>
                                 </includes>
