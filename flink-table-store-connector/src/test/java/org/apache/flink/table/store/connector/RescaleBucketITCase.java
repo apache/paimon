@@ -42,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT case for overwrite data layout after changing num of bucket. */
-public class RescaleBucketITCase extends FileStoreTableITCase {
+public class RescaleBucketITCase extends CatalogITCaseBase {
 
     private final String alterTableSql = "ALTER TABLE %s SET ('bucket' = '%d')";
 
@@ -51,7 +51,6 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
     @Override
     protected List<String> ddl() {
         return Arrays.asList(
-                "CREATE TABLE IF NOT EXISTS `default_catalog`.`default_database`.`T0` (f0 INT) WITH ('bucket' = '2')",
                 String.format(
                         "CREATE CATALOG `fs_catalog` WITH ('type' = 'table-store', 'warehouse' = '%s')",
                         path),
@@ -59,32 +58,26 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
     }
 
     @Test
-    public void testRescaleManagedTable() {
-        innerTest("default_catalog", "T0", true);
-    }
-
-    @Test
     public void testRescaleCatalogTable() {
-        innerTest("fs_catalog", "T1", false);
+        innerTest("fs_catalog", "T1");
     }
 
     @Test
     public void testSuspendAndRecoverAfterRescaleOverwrite() throws Exception {
-        sEnv.executeSql(
-                "CREATE TABLE IF NOT EXISTS `default_catalog`.`default_database`.`S0` (f0 INT) WITH ('connector' = 'datagen')");
         // register a companion table T4 for T3
         executeBoth(
                 Arrays.asList(
                         "USE CATALOG fs_catalog",
+                        "CREATE TEMPORARY TABLE IF NOT EXISTS `S0` (f0 INT) WITH ('connector' = 'datagen')",
                         "CREATE TABLE IF NOT EXISTS `T3` (f0 INT) WITH ('bucket' = '2')",
                         "CREATE TABLE IF NOT EXISTS `T4` (f0 INT)"));
-        SchemaManager schemaManager = new SchemaManager(getTableDirectory("T3", false));
+        SchemaManager schemaManager = new SchemaManager(getTableDirectory("T3"));
         assertLatestSchema(schemaManager, 0L, 2);
 
         String streamSql =
                 "EXECUTE STATEMENT SET BEGIN\n "
-                        + "INSERT INTO `T3` SELECT * FROM `default_catalog`.`default_database`.`S0`;\n "
-                        + "INSERT INTO `T4` SELECT * FROM `default_catalog`.`default_database`.`S0`;\n"
+                        + "INSERT INTO `T3` SELECT * FROM `S0`;\n "
+                        + "INSERT INTO `T4` SELECT * FROM `S0`;\n"
                         + "END";
 
         sEnv.getConfig().getConfiguration().set(SavepointConfigOptions.SAVEPOINT_PATH, path);
@@ -96,7 +89,7 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
         // step2: stop with savepoint
         stopJobSafely(client, jobId);
 
-        final Snapshot snapshotBeforeRescale = findLatestSnapshot("T3", false);
+        final Snapshot snapshotBeforeRescale = findLatestSnapshot("T3");
         assertThat(snapshotBeforeRescale).isNotNull();
         assertSnapshotSchema(schemaManager, snapshotBeforeRescale.schemaId(), 0L, 2);
         List<Row> committedData = batchSql("SELECT * FROM T3");
@@ -107,7 +100,7 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
 
         // step4: rescale data layout according to the new bucket num
         batchSql(rescaleOverwriteSql, "T3", "T3");
-        Snapshot snapshotAfterRescale = findLatestSnapshot("T3", false);
+        Snapshot snapshotAfterRescale = findLatestSnapshot("T3");
         assertThat(snapshotAfterRescale).isNotNull();
         assertThat(snapshotAfterRescale.id()).isEqualTo(snapshotBeforeRescale.id() + 1);
         assertThat(snapshotAfterRescale.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
@@ -120,9 +113,9 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
         stopJobSafely(client, resumedJobId);
 
         // check snapshot and schema
-        Snapshot lastSnapshot = findLatestSnapshot("T3", false);
+        Snapshot lastSnapshot = findLatestSnapshot("T3");
         assertThat(lastSnapshot).isNotNull();
-        SnapshotManager snapshotManager = new SnapshotManager(getTableDirectory("T3", false));
+        SnapshotManager snapshotManager = new SnapshotManager(getTableDirectory("T3"));
         for (long snapshotId = lastSnapshot.id();
                 snapshotId > snapshotAfterRescale.id();
                 snapshotId--) {
@@ -135,10 +128,10 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
     }
 
     private void waitForTheNextSnapshot(@Nullable Long initSnapshotId) throws InterruptedException {
-        Snapshot snapshot = findLatestSnapshot("T3", false);
+        Snapshot snapshot = findLatestSnapshot("T3");
         while (snapshot == null || new Long(snapshot.id()).equals(initSnapshotId)) {
             Thread.sleep(2000L);
-            snapshot = findLatestSnapshot("T3", false);
+            snapshot = findLatestSnapshot("T3");
         }
     }
 
@@ -178,25 +171,20 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
                 .containsEntry(BUCKET.key(), String.valueOf(expectedBucketNum));
     }
 
-    private void innerTest(String catalogName, String tableName, boolean managedTable) {
+    private void innerTest(String catalogName, String tableName) {
         String useCatalogSql = "USE CATALOG %s";
         batchSql(useCatalogSql, catalogName);
         String insertSql = "INSERT INTO %s VALUES (1), (2), (3), (4), (5)";
         batchSql(insertSql, tableName);
-        Snapshot snapshot = findLatestSnapshot(tableName, managedTable);
+        Snapshot snapshot = findLatestSnapshot(tableName);
         assertThat(snapshot).isNotNull();
 
-        SchemaManager schemaManager = new SchemaManager(getTableDirectory(tableName, managedTable));
+        SchemaManager schemaManager = new SchemaManager(getTableDirectory(tableName));
         assertSnapshotSchema(schemaManager, snapshot.schemaId(), 0L, 2);
 
         // for managed table schema id remains unchanged, for catalog table id increase from 0 to 1
         batchSql(alterTableSql, tableName, 4);
-        if (managedTable) {
-            // managed table cannot update schema
-            assertLatestSchema(schemaManager, 0L, 2);
-        } else {
-            assertLatestSchema(schemaManager, 1L, 4);
-        }
+        assertLatestSchema(schemaManager, 1L, 4);
 
         // check read is not influenced
         List<Row> expected = Arrays.asList(Row.of(1), Row.of(2), Row.of(3), Row.of(4), Row.of(5));
@@ -212,12 +200,11 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
                                 + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.");
 
         batchSql(rescaleOverwriteSql, tableName, tableName);
-        snapshot = findLatestSnapshot(tableName, managedTable);
+        snapshot = findLatestSnapshot(tableName);
         assertThat(snapshot).isNotNull();
         assertThat(snapshot.id()).isEqualTo(2L);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
-        assertSnapshotSchema(
-                schemaManager, snapshot.schemaId(), managedTable ? 0L : 1L, managedTable ? 2 : 4);
+        assertSnapshotSchema(schemaManager, snapshot.schemaId(), 1L, 4);
         assertThat(batchSql("SELECT * FROM %s", tableName))
                 .containsExactlyInAnyOrderElementsOf(expected);
 
@@ -232,7 +219,7 @@ public class RescaleBucketITCase extends FileStoreTableITCase {
         sqlList.forEach(
                 sql -> {
                     sEnv.executeSql(sql);
-                    bEnv.executeSql(sql);
+                    tEnv.executeSql(sql);
                 });
     }
 }
