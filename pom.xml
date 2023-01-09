@@ -31,7 +31,7 @@ under the License.
     <artifactId>flink-table-store-parent</artifactId>
     <groupId>org.apache.flink</groupId>
     <name>Flink Table Store</name>
-    <version>0.3-SNAPSHOT</version>
+    <version>0.3.0</version>
     <packaging>pom</packaging>
 
     <url>http://flink.apache.org</url>
