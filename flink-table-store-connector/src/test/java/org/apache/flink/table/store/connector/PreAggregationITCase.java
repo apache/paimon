@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** ITCase for pre-aggregation. */
 public class PreAggregationITCase {
     /** ITCase for bool_or/bool_and aggregate function. */
-    public static class BoolOrAndAggregation extends FileStoreTableITCase {
+    public static class BoolOrAndAggregation extends CatalogITCaseBase {
         @Override
         protected List<String> ddl() {
             return Collections.singletonList(
@@ -105,7 +105,7 @@ public class PreAggregationITCase {
     }
 
     /** ITCase for listagg aggregate function. */
-    public static class ListAggAggregation extends FileStoreTableITCase {
+    public static class ListAggAggregation extends CatalogITCaseBase {
         @Override
         protected int defaultParallelism() {
             // set parallelism to 1 so that the order of input data is determined
@@ -129,7 +129,7 @@ public class PreAggregationITCase {
             // VALUES does not guarantee order, but order is important for list aggregations.
             // So we need to sort the input data.
             batchSql(
-                    "CREATE VIEW myView AS "
+                    "CREATE TABLE myTable AS "
                             + "SELECT b, c, d FROM "
                             + "(VALUES "
                             + "  (1, 1, 2, 'first line'),"
@@ -137,7 +137,7 @@ public class PreAggregationITCase {
                             + "  (3, 1, 2, 'second line')"
                             + ") AS V(a, b, c, d) "
                             + "ORDER BY a");
-            batchSql("INSERT INTO T6 SELECT * FROM myView");
+            batchSql("INSERT INTO T6 SELECT * FROM myTable");
             List<Row> result = batchSql("SELECT * FROM T6");
             assertThat(result).containsExactlyInAnyOrder(Row.of(1, 2, "first line,second line"));
         }
@@ -181,7 +181,7 @@ public class PreAggregationITCase {
     }
 
     /** ITCase for last value aggregate function. */
-    public static class LastValueAggregation extends FileStoreTableITCase {
+    public static class LastValueAggregation extends CatalogITCaseBase {
         @Override
         protected int defaultParallelism() {
             // set parallelism to 1 so that the order of input data is determined
@@ -207,7 +207,7 @@ public class PreAggregationITCase {
             // VALUES does not guarantee order, but order is important for last value aggregations.
             // So we need to sort the input data.
             batchSql(
-                    "CREATE VIEW myView AS "
+                    "CREATE TABLE myTable AS "
                             + "SELECT b, c, d, e FROM "
                             + "(VALUES "
                             + "  (1, 1, 2, CAST(NULL AS INT), CAST('2020-01-01' AS DATE)),"
@@ -215,7 +215,7 @@ public class PreAggregationITCase {
                             + "  (3, 1, 2, 3, CAST(NULL AS DATE))"
                             + ") AS V(a, b, c, d, e) "
                             + "ORDER BY a");
-            batchSql("INSERT INTO T5 SELECT * FROM myView");
+            batchSql("INSERT INTO T5 SELECT * FROM myTable");
             List<Row> result = batchSql("SELECT * FROM T5");
             assertThat(result).containsExactlyInAnyOrder(Row.of(1, 2, 3, null));
         }
@@ -259,7 +259,7 @@ public class PreAggregationITCase {
     }
 
     /** ITCase for last non-null value aggregate function. */
-    public static class LastNonNullValueAggregation extends FileStoreTableITCase {
+    public static class LastNonNullValueAggregation extends CatalogITCaseBase {
         @Override
         protected int defaultParallelism() {
             // set parallelism to 1 so that the order of input data is determined
@@ -285,7 +285,7 @@ public class PreAggregationITCase {
             // VALUES does not guarantee order, but order is important for last value aggregations.
             // So we need to sort the input data.
             batchSql(
-                    "CREATE VIEW myView AS "
+                    "CREATE TABLE myTable AS "
                             + "SELECT b, c, d, e FROM "
                             + "(VALUES "
                             + "  (1, 1, 2, CAST(NULL AS INT), CAST('2020-01-01' AS DATE)),"
@@ -293,7 +293,7 @@ public class PreAggregationITCase {
                             + "  (3, 1, 2, 3, CAST(NULL AS DATE))"
                             + ") AS V(a, b, c, d, e) "
                             + "ORDER BY a");
-            batchSql("INSERT INTO T4 SELECT * FROM myView");
+            batchSql("INSERT INTO T4 SELECT * FROM myTable");
             List<Row> result = batchSql("SELECT * FROM T4");
             assertThat(result).containsExactlyInAnyOrder(Row.of(1, 2, 3, LocalDate.of(2020, 1, 2)));
         }
@@ -338,7 +338,7 @@ public class PreAggregationITCase {
     }
 
     /** ITCase for min aggregate function. */
-    public static class MinAggregation extends FileStoreTableITCase {
+    public static class MinAggregation extends CatalogITCaseBase {
         @Override
         protected List<String> ddl() {
             return Collections.singletonList(
@@ -499,7 +499,7 @@ public class PreAggregationITCase {
     }
 
     /** ITCase for max aggregate function. */
-    public static class MaxAggregation extends FileStoreTableITCase {
+    public static class MaxAggregation extends CatalogITCaseBase {
         @Override
         protected List<String> ddl() {
             return Collections.singletonList(
@@ -663,7 +663,7 @@ public class PreAggregationITCase {
     }
 
     /** ITCase for sum aggregate function. */
-    public static class SumAggregation extends FileStoreTableITCase {
+    public static class SumAggregation extends CatalogITCaseBase {
         @Override
         protected List<String> ddl() {
             return Collections.singletonList(
