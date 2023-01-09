@@ -26,6 +26,17 @@ under the License.
 
 # OSS
 
+{{< stable >}}
+
+## Download
+
+[Download](https://repo.maven.apache.org/maven2/org/apache/flink/flink-table-store-oss/{{< version >}}/flink-table-store-oss-{{< version >}}.jar)
+flink table store shaded jar for Spark, Hive and Trino.
+
+{{< /stable >}}
+
+{{< unstable >}}
+
 ## Build
 
 To build from source code, either [download the source of a release](https://flink.apache.org/downloads.html) or [clone the git repository]({{< github_repo >}}).
@@ -38,6 +49,8 @@ mvn clean install -DskipTests
 
 You can find the shaded jars under
 `./flink-table-store-filesystems/flink-table-store-oss/target/flink-table-store-oss-{{< version >}}.jar`.
+
+{{< /unstable >}}
 
 ## Usage
 
@@ -86,6 +99,19 @@ And read table from hive metastore, table can be created by Flink or Spark, see 
 ```sql
 SELECT * FROM test_table;
 SELECT COUNT(1) FROM test_table;
+```
+
+{{< /tab >}}
+
+{{< tab "Trino" >}}
+
+Place `flink-table-store-oss-{{< version >}}.jar` together with `flink-table-store-trino-{{< version >}}.jar` under `plugin/tablestore` directory.
+
+Add options in `etc/catalog/tablestore.properties`.
+```shell
+fs.oss.endpoint=oss-cn-hangzhou.aliyuncs.com
+fs.oss.accessKeyId=xxx
+fs.oss.accessKeySecret=yyy
 ```
 
 {{< /tab >}}
