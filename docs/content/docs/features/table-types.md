@@ -50,9 +50,20 @@ Specifically, if the latest record is a `DELETE` record, all records with the sa
 
 By specifying `'merge-engine' = 'partial-update'`, users can set columns of a record across multiple updates and finally get a complete record. Specifically, value fields are updated to the latest data one by one under the same primary key, but null values are not overwritten.
 
-For example, let's say Table Store receives three records `<1, 23.0, 10, NULL>`, `<1, NULL, NULL, 'This is a book'>` and `<1, 25.2, NULL, NULL>`, where the first column is the primary key. The final result will be `<1, 25.2, 10, 'This is a book'>`.
+For example, let's say Table Store receives three records:
+- `<1, 23.0, 10, NULL>`-
+- `<1, NULL, NULL, 'This is a book'>`
+- `<1, 25.2, NULL, NULL>`
 
-NOTE: For streaming queries, `partial-update` merge engine must be used together with `full-compaction` [changelog producer]({{< ref "docs/features/table-types#changelog-producers" >}}).
+If the first column is the primary key. The final result will be `<1, 25.2, 10, 'This is a book'>`.
+
+{{< hint info >}}
+For streaming queries, `partial-update` merge engine must be used together with `full-compaction` [changelog producer]({{< ref "docs/features/table-types#changelog-producers" >}}).
+{{< /hint >}}
+
+{{< hint info >}}
+Partial cannot receive `DELETE` messages because the behavior cannot be defined. You can configure `partial-update.ignore-delete` to ignore `DELETE` messages.
+{{< /hint >}}
 
 #### Aggregation
 
@@ -90,6 +101,10 @@ Current supported aggregate functions and data types are:
 * `last_value` / `last_non_null_value`: support all data types.
 * `listagg`: supports STRING data type.
 * `bool_and` / `bool_or`: support BOOLEAN data type.
+
+{{< hint info >}}
+For streaming queries, `aggregation` merge engine must be used together with `full-compaction` [changelog producer]({{< ref "docs/features/table-types#changelog-producers" >}}).
+{{< /hint >}}
 
 ### Changelog Producers
 
