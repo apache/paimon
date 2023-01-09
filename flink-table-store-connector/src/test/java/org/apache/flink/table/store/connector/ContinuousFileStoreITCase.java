@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -42,7 +41,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** SQL ITCase for continuous file store. */
 @RunWith(Parameterized.class)
-public class ContinuousFileStoreITCase extends FileStoreTableITCase {
+public class ContinuousFileStoreITCase extends CatalogITCaseBase {
 
     private final boolean changelogFile;
 
@@ -134,9 +133,7 @@ public class ContinuousFileStoreITCase extends FileStoreTableITCase {
                 .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
         iterator.close();
 
-        SnapshotManager snapshotManager =
-                new SnapshotManager(
-                        new Path(path, "default_catalog.catalog/default_database.db/T1"));
+        SnapshotManager snapshotManager = new SnapshotManager(getTableDirectory("T1"));
         List<Snapshot> snapshots =
                 new ArrayList<>(ImmutableList.copyOf(snapshotManager.snapshots()));
         snapshots.sort(Comparator.comparingLong(Snapshot::timeMillis));
