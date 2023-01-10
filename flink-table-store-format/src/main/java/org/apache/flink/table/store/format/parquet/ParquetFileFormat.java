@@ -21,12 +21,11 @@ package org.apache.flink.table.store.format.parquet;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.connector.file.src.FileSourceSplit;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
+import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.flink.table.store.utils.Projection;
 import org.apache.flink.table.types.logical.RowType;
@@ -52,7 +51,7 @@ public class ParquetFileFormat extends FileFormat {
     }
 
     @Override
-    public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
+    public FormatReaderFactory createReaderFactory(
             RowType type, int[][] projection, List<Predicate> filters) {
         return new ParquetReaderFactory(
                 getParquetConfiguration(formatOptions),

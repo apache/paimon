@@ -35,9 +35,6 @@ public abstract class AbstractPagedInputView implements DataInputView {
 
     private MemorySegment currentSegment;
 
-    protected final int
-            headerLength; // the number of bytes to skip at the beginning of each segment
-
     private int positionInSegment; // the offset in the current segment
 
     private int limitInSegment; // the limit in the current segment before switching to the next
@@ -57,14 +54,10 @@ public abstract class AbstractPagedInputView implements DataInputView {
      *
      * @param initialSegment The memory segment to start reading from.
      * @param initialLimit The position one after the last valid byte in the initial segment.
-     * @param headerLength The number of bytes to skip at the beginning of each segment for the
-     *     header. This length must be the same for all memory segments.
      */
-    protected AbstractPagedInputView(
-            MemorySegment initialSegment, int initialLimit, int headerLength) {
-        this.headerLength = headerLength;
-        this.positionInSegment = headerLength;
-        seekInput(initialSegment, headerLength, initialLimit);
+    protected AbstractPagedInputView(MemorySegment initialSegment, int initialLimit) {
+        this.positionInSegment = 0;
+        seekInput(initialSegment, 0, initialLimit);
     }
 
     /**
@@ -73,13 +66,8 @@ public abstract class AbstractPagedInputView implements DataInputView {
      *
      * <p>WARNING: The view is not readable until the first call to either {@link #advance()}, or to
      * {@link #seekInput(MemorySegment, int, int)}.
-     *
-     * @param headerLength The number of bytes to skip at the beginning of each segment for the
-     *     header.
      */
-    protected AbstractPagedInputView(int headerLength) {
-        this.headerLength = headerLength;
-    }
+    protected AbstractPagedInputView() {}
 
     // --------------------------------------------------------------------------------------------
     //                                  Page Management
@@ -164,12 +152,7 @@ public abstract class AbstractPagedInputView implements DataInputView {
         // EOF is reproducible (if nextSegment throws a reproducible EOFException)
         this.currentSegment = nextSegment(this.currentSegment);
         this.limitInSegment = getLimitForSegment(this.currentSegment);
-        this.positionInSegment = this.headerLength;
-    }
-
-    /** @return header length. */
-    public int getHeaderLength() {
-        return headerLength;
+        this.positionInSegment = 0;
     }
 
     /**
@@ -195,8 +178,8 @@ public abstract class AbstractPagedInputView implements DataInputView {
      */
     protected void clear() {
         this.currentSegment = null;
-        this.positionInSegment = this.headerLength;
-        this.limitInSegment = headerLength;
+        this.positionInSegment = 0;
+        this.limitInSegment = 0;
     }
 
     // --------------------------------------------------------------------------------------------

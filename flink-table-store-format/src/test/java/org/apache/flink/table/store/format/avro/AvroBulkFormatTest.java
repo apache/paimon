@@ -18,20 +18,15 @@
 
 package org.apache.flink.table.store.format.avro;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.connector.file.src.FileSourceSplit;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
-import org.apache.flink.connector.file.src.util.CheckpointedPosition;
-import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.util.FileUtils;
-import org.apache.flink.util.StringUtils;
 
 import org.apache.avro.Schema;
-import org.apache.avro.file.DataFileConstants;
 import org.apache.avro.file.DataFileWriter;
 import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.GenericRecord;
@@ -44,11 +39,9 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
-import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.flink.table.store.format.avro.AvroBulkFormatTestUtils.ROW_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -128,157 +121,10 @@ class AvroBulkFormatTest {
     void testReadWholeFileWithOneSplit() throws IOException {
         AvroBulkFormatTestUtils.TestingAvroBulkFormat bulkFormat =
                 new AvroBulkFormatTestUtils.TestingAvroBulkFormat();
-        assertSplit(
-                bulkFormat,
-                Collections.singletonList(
-                        new SplitInfo(
-                                0,
-                                tmpFile.length(),
-                                Arrays.asList(
-                                        new BatchInfo(0, 3),
-                                        new BatchInfo(3, 5),
-                                        new BatchInfo(5, 6)))));
-    }
-
-    @Test
-    void testReadWholeFileWithMultipleSplits() throws IOException {
-        AvroBulkFormatTestUtils.TestingAvroBulkFormat bulkFormat =
-                new AvroBulkFormatTestUtils.TestingAvroBulkFormat();
-        long splitLength = tmpFile.length() / 3;
-        assertSplit(
-                bulkFormat,
-                Arrays.asList(
-                        new SplitInfo(
-                                0, splitLength, Collections.singletonList(new BatchInfo(0, 3))),
-                        new SplitInfo(splitLength, splitLength * 2, Collections.emptyList()),
-                        new SplitInfo(
-                                splitLength * 2,
-                                tmpFile.length(),
-                                Arrays.asList(new BatchInfo(3, 5), new BatchInfo(5, 6)))));
-    }
-
-    @Test
-    void testSplitsAtCriticalLocations() throws IOException {
-        AvroBulkFormatTestUtils.TestingAvroBulkFormat bulkFormat =
-                new AvroBulkFormatTestUtils.TestingAvroBulkFormat();
-        assertSplit(
-                bulkFormat,
-                Arrays.asList(
-                        // ends just before the new block
-                        new SplitInfo(
-                                BLOCK_STARTS.get(0) - DataFileConstants.SYNC_SIZE,
-                                BLOCK_STARTS.get(1) - DataFileConstants.SYNC_SIZE,
-                                Collections.singletonList(new BatchInfo(0, 3))),
-                        // ends just at the beginning of new block
-                        new SplitInfo(
-                                BLOCK_STARTS.get(1) - DataFileConstants.SYNC_SIZE,
-                                BLOCK_STARTS.get(2) - DataFileConstants.SYNC_SIZE + 1,
-                                Arrays.asList(new BatchInfo(3, 5), new BatchInfo(5, 6)))));
-    }
-
-    @Test
-    void testRestoreReader() throws IOException {
-        AvroBulkFormatTestUtils.TestingAvroBulkFormat bulkFormat =
-                new AvroBulkFormatTestUtils.TestingAvroBulkFormat();
-        long splitLength = tmpFile.length() / 3;
-        String splitId = UUID.randomUUID().toString();
-
-        FileSourceSplit split =
-                new FileSourceSplit(
-                        splitId, new Path(tmpFile.toString()), splitLength * 2, tmpFile.length());
-        BulkFormat.Reader<RowData> reader = bulkFormat.createReader(new Configuration(), split);
-        long offset1 = assertBatch(reader, new BatchInfo(3, 5));
-        assertBatch(reader, new BatchInfo(5, 6));
-        assertThat(reader.readBatch()).isNull();
-        reader.close();
-
-        split =
-                new FileSourceSplit(
-                        splitId,
-                        new Path(tmpFile.toString()),
-                        splitLength * 2,
-                        tmpFile.length(),
-                        StringUtils.EMPTY_STRING_ARRAY,
-                        new CheckpointedPosition(offset1, 1));
-        reader = bulkFormat.restoreReader(new Configuration(), split);
-        long offset2 = assertBatch(reader, new BatchInfo(3, 5), 1);
-        assertBatch(reader, new BatchInfo(5, 6));
-        assertThat(reader.readBatch()).isNull();
-        reader.close();
-
-        assertThat(offset2).isEqualTo(offset1);
-    }
-
-    private void assertSplit(
-            AvroBulkFormatTestUtils.TestingAvroBulkFormat bulkFormat, List<SplitInfo> splitInfos)
-            throws IOException {
-        for (SplitInfo splitInfo : splitInfos) {
-            FileSourceSplit split =
-                    new FileSourceSplit(
-                            UUID.randomUUID().toString(),
-                            new Path(tmpFile.toString()),
-                            splitInfo.start,
-                            splitInfo.end - splitInfo.start);
-            BulkFormat.Reader<RowData> reader = bulkFormat.createReader(new Configuration(), split);
-            List<Long> offsets = new ArrayList<>();
-            for (BatchInfo batch : splitInfo.batches) {
-                offsets.add(assertBatch(reader, batch));
-            }
-            assertThat(reader.readBatch()).isNull();
-            for (int j = 1; j < offsets.size(); j++) {
-                assertThat(offsets.get(j - 1) < offsets.get(j)).isTrue();
-            }
-            reader.close();
-        }
-    }
-
-    private long assertBatch(BulkFormat.Reader<RowData> reader, BatchInfo batchInfo)
-            throws IOException {
-        return assertBatch(reader, batchInfo, 0);
-    }
-
-    private long assertBatch(
-            BulkFormat.Reader<RowData> reader, BatchInfo batchInfo, int initialSkipCount)
-            throws IOException {
-        long ret = -1;
-        int skipCount = initialSkipCount;
-        BulkFormat.RecordIterator<RowData> iterator = reader.readBatch();
-        for (RecordAndPosition<RowData> recordAndPos = iterator.next();
-                recordAndPos != null;
-                recordAndPos = iterator.next()) {
-            if (ret == -1) {
-                ret = recordAndPos.getOffset();
-            }
-            assertThat(recordAndPos.getRecord())
-                    .isEqualTo(TEST_DATA.get(batchInfo.start + skipCount));
-            assertThat(recordAndPos.getOffset()).isEqualTo(ret);
-            skipCount++;
-            assertThat(recordAndPos.getRecordSkipCount()).isEqualTo(skipCount);
-        }
-        assertThat(skipCount).isEqualTo(batchInfo.end - batchInfo.start);
-        iterator.releaseBatch();
-        return ret;
-    }
-
-    private static class SplitInfo {
-        private final long start;
-        private final long end;
-        private final List<BatchInfo> batches;
-
-        private SplitInfo(long start, long end, List<BatchInfo> batches) {
-            this.start = start;
-            this.end = end;
-            this.batches = batches;
-        }
-    }
-
-    private static class BatchInfo {
-        private final int start;
-        private final int end;
-
-        private BatchInfo(int start, int end) {
-            this.start = start;
-            this.end = end;
-        }
+        RecordReader<RowData> reader = bulkFormat.createReader(new Path(tmpFile.toString()));
+        AtomicInteger i = new AtomicInteger(0);
+        RecordReaderUtils.forEachRemaining(
+                reader,
+                rowData -> assertThat(rowData).isEqualTo(TEST_DATA.get(i.getAndIncrement())));
     }
 }

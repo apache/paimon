@@ -18,16 +18,14 @@
 
 package org.apache.flink.table.store.file.sort;
 
-import org.apache.flink.runtime.io.compression.BlockCompressionFactory;
-import org.apache.flink.runtime.io.disk.ChannelReaderInputViewIterator;
-import org.apache.flink.runtime.io.disk.iomanager.AbstractChannelReaderInputView;
-import org.apache.flink.runtime.io.disk.iomanager.IOManager;
-import org.apache.flink.runtime.memory.AbstractPagedOutputView;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.runtime.operators.sort.AbstractBinaryExternalMerger;
-import org.apache.flink.table.runtime.operators.sort.SpillChannelManager;
-import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.store.codegen.RecordComparator;
+import org.apache.flink.table.store.data.AbstractPagedOutputView;
+import org.apache.flink.table.store.data.BinaryRowDataSerializer;
+import org.apache.flink.table.store.file.compression.BlockCompressionFactory;
+import org.apache.flink.table.store.file.disk.ChannelReaderInputView;
+import org.apache.flink.table.store.file.disk.ChannelReaderInputViewIterator;
+import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.util.MutableObjectIterator;
 
 import java.io.IOException;
@@ -48,7 +46,6 @@ public class BinaryExternalMerger extends AbstractBinaryExternalMerger<BinaryRow
             SpillChannelManager channelManager,
             BinaryRowDataSerializer serializer,
             RecordComparator comparator,
-            boolean compressionEnable,
             BlockCompressionFactory compressionCodecFactory,
             int compressionBlockSize) {
         super(
@@ -56,7 +53,6 @@ public class BinaryExternalMerger extends AbstractBinaryExternalMerger<BinaryRow
                 pageSize,
                 maxFanIn,
                 channelManager,
-                compressionEnable,
                 compressionCodecFactory,
                 compressionBlockSize);
         this.serializer = serializer;
@@ -65,7 +61,7 @@ public class BinaryExternalMerger extends AbstractBinaryExternalMerger<BinaryRow
 
     @Override
     protected MutableObjectIterator<BinaryRowData> channelReaderInputViewIterator(
-            AbstractChannelReaderInputView inView) {
+            ChannelReaderInputView inView) {
         return new ChannelReaderInputViewIterator<>(inView, null, serializer.duplicate());
     }
 

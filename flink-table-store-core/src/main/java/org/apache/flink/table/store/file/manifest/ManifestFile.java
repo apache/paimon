@@ -20,8 +20,6 @@ package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.connector.file.src.FileSourceSplit;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.io.RollingFileWriter;
@@ -33,6 +31,7 @@ import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
 import org.apache.flink.table.store.format.FieldStatsCollector;
 import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.io.IOException;
@@ -48,7 +47,7 @@ public class ManifestFile {
     private final long schemaId;
     private final RowType partitionType;
     private final ManifestEntrySerializer serializer;
-    private final BulkFormat<RowData, FileSourceSplit> readerFactory;
+    private final FormatReaderFactory readerFactory;
     private final BulkWriter.Factory<RowData> writerFactory;
     private final FileStorePathFactory pathFactory;
     private final long suggestedFileSize;
@@ -58,7 +57,7 @@ public class ManifestFile {
             long schemaId,
             RowType partitionType,
             ManifestEntrySerializer serializer,
-            BulkFormat<RowData, FileSourceSplit> readerFactory,
+            FormatReaderFactory readerFactory,
             BulkWriter.Factory<RowData> writerFactory,
             FileStorePathFactory pathFactory,
             long suggestedFileSize) {

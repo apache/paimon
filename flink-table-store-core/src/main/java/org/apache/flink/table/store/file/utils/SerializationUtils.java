@@ -22,7 +22,6 @@ import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.core.memory.MemorySegmentFactory;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.types.logical.VarBinaryType;
 import org.apache.flink.table.types.logical.VarCharType;
 
@@ -70,7 +69,7 @@ public class SerializationUtils {
     }
 
     /**
-     * Serialize {@link BinaryRowData}, the difference between this and {@link
+     * Serialize {@link BinaryRowData}, the difference between this and {@code
      * BinaryRowDataSerializer} is that arity is also serialized here, so the deserialization is
      * schemaless.
      */

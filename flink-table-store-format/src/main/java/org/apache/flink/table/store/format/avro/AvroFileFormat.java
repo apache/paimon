@@ -19,18 +19,15 @@
 package org.apache.flink.table.store.format.avro;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.connector.file.src.FileSourceSplit;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.utils.Projection;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -71,7 +68,7 @@ public class AvroFileFormat extends FileFormat {
     }
 
     @Override
-    public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
+    public FormatReaderFactory createReaderFactory(
             RowType type, int[][] projection, @Nullable List<Predicate> filters) {
         // avro is a file format that keeps schemas in file headers,
         // if the schema given to the reader is not equal to the schema in header,
@@ -80,8 +77,7 @@ public class AvroFileFormat extends FileFormat {
         //
         // for detailed discussion see comments in https://github.com/apache/flink/pull/18657
         LogicalType producedType = Projection.of(projection).project(type);
-        return new AvroGenericRecordBulkFormat(
-                (RowType) producedType.copy(false), InternalTypeInfo.of(producedType));
+        return new AvroGenericRecordBulkFormat((RowType) producedType.copy(false));
     }
 
     @Override
@@ -89,19 +85,15 @@ public class AvroFileFormat extends FileFormat {
         return new RowDataAvroWriterFactory(type, formatOptions.get(AVRO_OUTPUT_CODEC));
     }
 
-    private static class AvroGenericRecordBulkFormat
-            extends AbstractAvroBulkFormat<GenericRecord, RowData, FileSourceSplit> {
+    private static class AvroGenericRecordBulkFormat extends AbstractAvroBulkFormat<GenericRecord> {
 
         private static final long serialVersionUID = 1L;
 
         private final RowType producedRowType;
-        private final TypeInformation<RowData> producedTypeInfo;
 
-        public AvroGenericRecordBulkFormat(
-                RowType producedRowType, TypeInformation<RowData> producedTypeInfo) {
+        public AvroGenericRecordBulkFormat(RowType producedRowType) {
             super(AvroSchemaConverter.convertToSchema(producedRowType));
             this.producedRowType = producedRowType;
-            this.producedTypeInfo = producedTypeInfo;
         }
 
         @Override
@@ -114,11 +106,6 @@ public class AvroFileFormat extends FileFormat {
             AvroToRowDataConverters.AvroToRowDataConverter converter =
                     AvroToRowDataConverters.createRowConverter(producedRowType);
             return record -> record == null ? null : (GenericRowData) converter.convert(record);
-        }
-
-        @Override
-        public TypeInformation<RowData> getProducedType() {
-            return producedTypeInfo;
         }
     }
 

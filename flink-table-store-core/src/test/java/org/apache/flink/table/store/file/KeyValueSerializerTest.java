@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file;
 
-import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
+import org.apache.flink.table.store.data.RowDataSerializer;
 import org.apache.flink.table.store.file.utils.ObjectSerializer;
 import org.apache.flink.table.store.file.utils.ObjectSerializerTestBase;
 

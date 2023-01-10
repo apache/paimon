@@ -19,24 +19,20 @@
 package org.apache.flink.table.store.data.columnar;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
-import org.apache.flink.connector.file.src.util.CheckpointedPosition;
-import org.apache.flink.connector.file.src.util.MutableRecordAndPosition;
-import org.apache.flink.connector.file.src.util.RecordAndPosition;
-import org.apache.flink.connector.file.src.util.RecyclableIterator;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.file.utils.RecyclableIterator;
 
 import javax.annotation.Nullable;
 
 /**
- * A {@link BulkFormat.RecordIterator} that returns {@link RowData}s. The next row is set by {@link
- * ColumnarRowData#setRowId}.
+ * A {@link RecordReader.RecordIterator} that returns {@link RowData}s. The next row is set by
+ * {@link ColumnarRowData#setRowId}.
  */
 @Internal
 public class ColumnarRowIterator extends RecyclableIterator<RowData> {
 
     private final ColumnarRowData rowData;
-    private final MutableRecordAndPosition<RowData> recordAndPosition;
 
     private int num;
     private int pos;
@@ -44,31 +40,19 @@ public class ColumnarRowIterator extends RecyclableIterator<RowData> {
     public ColumnarRowIterator(ColumnarRowData rowData, @Nullable Runnable recycler) {
         super(recycler);
         this.rowData = rowData;
-        this.recordAndPosition = new MutableRecordAndPosition<>();
     }
 
-    /**
-     * @param num number rows in this batch.
-     * @param recordSkipCount The number of rows that have been returned before this batch.
-     */
-    public void set(final int num, final long recordSkipCount) {
-        set(num, CheckpointedPosition.NO_OFFSET, recordSkipCount);
-    }
-
-    /** Set number rows in this batch and updates the position. */
-    public void set(final int num, final long offset, final long recordSkipCount) {
+    public void set(int num) {
         this.num = num;
         this.pos = 0;
-        this.recordAndPosition.set(null, offset, recordSkipCount);
     }
 
     @Nullable
     @Override
-    public RecordAndPosition<RowData> next() {
+    public RowData next() {
         if (pos < num) {
             rowData.setRowId(pos++);
-            recordAndPosition.setNext(rowData);
-            return recordAndPosition;
+            return rowData;
         } else {
             return null;
         }

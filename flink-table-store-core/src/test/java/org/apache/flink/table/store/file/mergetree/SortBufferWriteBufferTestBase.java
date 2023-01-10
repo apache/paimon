@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree;
 
-import org.apache.flink.table.runtime.generated.RecordComparator;
+import org.apache.flink.table.store.codegen.RecordComparator;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
