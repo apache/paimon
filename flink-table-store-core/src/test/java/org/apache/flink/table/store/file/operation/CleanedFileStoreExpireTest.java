@@ -21,82 +21,29 @@ package org.apache.flink.table.store.file.operation;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.TestFileStore;
-import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.FileKind;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
-import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.flink.table.data.binary.BinaryRowDataUtil.EMPTY_ROW;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link FileStoreExpireImpl}. */
-public class FileStoreExpireTest {
-
-    private TestKeyValueGenerator gen;
-    @TempDir java.nio.file.Path tempDir;
-    private TestFileStore store;
-    private SnapshotManager snapshotManager;
-
-    @BeforeEach
-    public void beforeEach() throws Exception {
-        gen = new TestKeyValueGenerator();
-        store = createStore();
-        snapshotManager = store.snapshotManager();
-        SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
-        schemaManager.commitNewVersion(
-                new UpdateSchema(
-                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
-                        TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
-                        TestKeyValueGenerator.getPrimaryKeys(
-                                TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),
-                        Collections.emptyMap(),
-                        null));
-    }
-
-    private TestFileStore createStore() {
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-
-        CoreOptions.ChangelogProducer changelogProducer;
-        if (random.nextBoolean()) {
-            changelogProducer = CoreOptions.ChangelogProducer.INPUT;
-        } else {
-            changelogProducer = CoreOptions.ChangelogProducer.NONE;
-        }
-
-        return new TestFileStore.Builder(
-                        "avro",
-                        tempDir.toString(),
-                        1,
-                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
-                        TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
-                        DeduplicateMergeFunction.factory())
-                .changelogProducer(changelogProducer)
-                .build();
-    }
+/**
+ * Tests for {@link FileStoreExpireImpl}. After expiration, only useful files should be retained.
+ */
+public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
 
     @AfterEach
     public void afterEach() throws IOException {
@@ -264,34 +211,5 @@ public class FileStoreExpireTest {
                 assertSnapshot(i, allData, snapshotPositions);
             }
         }
-    }
-
-    private void commit(int numCommits, List<KeyValue> allData, List<Integer> snapshotPositions)
-            throws Exception {
-        for (int i = 0; i < numCommits; i++) {
-            int numRecords = ThreadLocalRandom.current().nextInt(100) + 1;
-            List<KeyValue> data = new ArrayList<>();
-            for (int j = 0; j < numRecords; j++) {
-                data.add(gen.next());
-            }
-            allData.addAll(data);
-            List<Snapshot> snapshots = store.commitData(data, gen::getPartition, kv -> 0);
-            for (int j = 0; j < snapshots.size(); j++) {
-                snapshotPositions.add(allData.size());
-            }
-        }
-    }
-
-    private void assertSnapshot(
-            int snapshotId, List<KeyValue> allData, List<Integer> snapshotPositions)
-            throws Exception {
-        Map<BinaryRowData, BinaryRowData> expected =
-                store.toKvMap(allData.subList(0, snapshotPositions.get(snapshotId - 1)));
-        List<KeyValue> actualKvs =
-                store.readKvsFromManifestEntries(
-                        store.newScan().withSnapshot(snapshotId).plan().files(), false);
-        gen.sort(actualKvs);
-        Map<BinaryRowData, BinaryRowData> actual = store.toKvMap(actualKvs);
-        assertThat(actual).isEqualTo(expected);
     }
 }
