@@ -42,7 +42,7 @@ public final class QuickSort implements IndexedSorter {
     }
 
     /** Deepest recursion before giving up and doing a heapsort. Returns 2 * ceil(log(n)). */
-    protected static int getMaxDepth(int x) {
+    private static int getMaxDepth(int x) {
         if (x <= 0) {
             throw new IllegalArgumentException("Undefined for " + x);
         }

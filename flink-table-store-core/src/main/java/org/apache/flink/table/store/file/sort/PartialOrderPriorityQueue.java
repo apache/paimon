@@ -57,7 +57,7 @@ public class PartialOrderPriorityQueue<T> extends AbstractQueue<T> implements Qu
      * @param b The second element.
      * @return True, if a &lt; b, false otherwise.
      */
-    private final boolean lessThan(T a, T b) {
+    private boolean lessThan(T a, T b) {
         return comparator.compare(a, b) < 0;
     }
 
