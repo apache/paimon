@@ -18,16 +18,14 @@
 
 package org.apache.flink.table.store.file.sort;
 
-import org.apache.flink.runtime.io.disk.iomanager.IOManager;
-import org.apache.flink.runtime.io.disk.iomanager.IOManagerAsync;
-import org.apache.flink.runtime.memory.MemoryManager;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.writer.BinaryRowWriter;
-import org.apache.flink.table.runtime.typeutils.AbstractRowDataSerializer;
-import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
-import org.apache.flink.table.runtime.util.MemorySegmentPool;
+import org.apache.flink.table.store.data.AbstractRowDataSerializer;
+import org.apache.flink.table.store.data.BinaryRowDataSerializer;
+import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
+import org.apache.flink.table.store.file.memory.MemorySegmentPool;
 import org.apache.flink.util.MutableObjectIterator;
 
 import org.junit.jupiter.api.AfterEach;
@@ -69,7 +67,7 @@ public class BinaryExternalSortBufferTest {
 
     @BeforeEach
     public void beforeTest() {
-        ioManager = new IOManagerAsync(tempDir.toString());
+        ioManager = IOManager.create(tempDir.toString());
         initMemorySegmentPool(MEMORY_SIZE);
         this.serializer = new BinaryRowDataSerializer(2);
     }
@@ -82,7 +80,7 @@ public class BinaryExternalSortBufferTest {
 
     private void initMemorySegmentPool(long maxMemory) {
         this.memorySegmentPool =
-                new HeapMemorySegmentPool(maxMemory, MemoryManager.DEFAULT_PAGE_SIZE);
+                new HeapMemorySegmentPool(maxMemory, MemorySegmentPool.DEFAULT_PAGE_SIZE);
         this.totalPages = memorySegmentPool.freePages();
     }
 
@@ -279,7 +277,7 @@ public class BinaryExternalSortBufferTest {
         return new BinaryExternalSortBuffer(
                 serializer,
                 IntRecordComparator.INSTANCE,
-                MemoryManager.DEFAULT_PAGE_SIZE,
+                MemorySegmentPool.DEFAULT_PAGE_SIZE,
                 inMemorySortBuffer,
                 ioManager,
                 maxNumFileHandles);

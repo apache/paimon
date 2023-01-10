@@ -19,12 +19,12 @@
 package org.apache.flink.table.store.file.casting;
 
 import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.DecimalDataUtils;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.data.binary.BinaryStringData;
-import org.apache.flink.table.data.binary.BinaryStringDataUtil;
 import org.apache.flink.table.store.utils.DateTimeUtils;
+import org.apache.flink.table.store.utils.DecimalUtils;
+import org.apache.flink.table.store.utils.StringUtils;
 import org.apache.flink.table.types.logical.BinaryType;
 import org.apache.flink.table.types.logical.CharType;
 import org.apache.flink.table.types.logical.DecimalType;
@@ -88,14 +88,14 @@ public class CastExecutors {
                                     case INTEGER:
                                     case BIGINT:
                                         {
-                                            return DecimalDataUtils.castFrom(
+                                            return DecimalUtils.castFrom(
                                                     number.longValue(),
                                                     decimalType.getPrecision(),
                                                     decimalType.getScale());
                                         }
                                     default:
                                         {
-                                            return DecimalDataUtils.castFrom(
+                                            return DecimalUtils.castFrom(
                                                     number.doubleValue(),
                                                     decimalType.getPrecision(),
                                                     decimalType.getScale());
@@ -110,25 +110,22 @@ public class CastExecutors {
                 {
                     switch (outputType.getTypeRoot()) {
                         case TINYINT:
-                            return value ->
-                                    (byte) DecimalDataUtils.castToIntegral((DecimalData) value);
+                            return value -> (byte) DecimalUtils.castToIntegral((DecimalData) value);
                         case SMALLINT:
                             return value ->
-                                    (short) DecimalDataUtils.castToIntegral((DecimalData) value);
+                                    (short) DecimalUtils.castToIntegral((DecimalData) value);
                         case INTEGER:
-                            return value ->
-                                    (int) DecimalDataUtils.castToIntegral((DecimalData) value);
+                            return value -> (int) DecimalUtils.castToIntegral((DecimalData) value);
                         case BIGINT:
-                            return value -> DecimalDataUtils.castToIntegral((DecimalData) value);
+                            return value -> DecimalUtils.castToIntegral((DecimalData) value);
                         case FLOAT:
-                            return value ->
-                                    (float) DecimalDataUtils.doubleValue((DecimalData) value);
+                            return value -> (float) DecimalUtils.doubleValue((DecimalData) value);
                         case DOUBLE:
-                            return value -> DecimalDataUtils.doubleValue((DecimalData) value);
+                            return value -> DecimalUtils.doubleValue((DecimalData) value);
                         case DECIMAL:
                             DecimalType decimalType = (DecimalType) outputType;
                             return value ->
-                                    DecimalDataUtils.castToDecimal(
+                                    DecimalUtils.castToDecimal(
                                             (DecimalData) value,
                                             decimalType.getPrecision(),
                                             decimalType.getScale());
@@ -153,7 +150,7 @@ public class CastExecutors {
                                     int padLength = targetLength - strData.numChars();
                                     BinaryStringData padString =
                                             BinaryStringData.blankString(padLength);
-                                    result = BinaryStringDataUtil.concat(strData, padString);
+                                    result = StringUtils.concat(strData, padString);
                                 } else {
                                     result = strData;
                                 }

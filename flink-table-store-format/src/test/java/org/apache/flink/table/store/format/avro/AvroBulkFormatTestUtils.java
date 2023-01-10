@@ -18,11 +18,8 @@
 
 package org.apache.flink.table.store.format.avro;
 
-import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -43,8 +40,7 @@ public class AvroBulkFormatTestUtils {
                     new String[] {"a", "b"});
 
     /** {@link AbstractAvroBulkFormat} for tests. */
-    public static class TestingAvroBulkFormat
-            extends AbstractAvroBulkFormat<GenericRecord, RowData, FileSourceSplit> {
+    public static class TestingAvroBulkFormat extends AbstractAvroBulkFormat<GenericRecord> {
 
         protected TestingAvroBulkFormat() {
             super(AvroSchemaConverter.convertToSchema(ROW_TYPE));
@@ -60,11 +56,6 @@ public class AvroBulkFormatTestUtils {
             AvroToRowDataConverters.AvroToRowDataConverter converter =
                     AvroToRowDataConverters.createRowConverter(ROW_TYPE);
             return record -> record == null ? null : (RowData) converter.convert(record);
-        }
-
-        @Override
-        public TypeInformation<RowData> getProducedType() {
-            return InternalTypeInfo.of(ROW_TYPE);
         }
     }
 }

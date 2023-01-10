@@ -18,20 +18,18 @@
 
 package org.apache.flink.table.store.format.orc;
 
-import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.connector.base.source.reader.SourceReaderOptions;
-import org.apache.flink.connector.file.src.FileSourceSplit;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
-import org.apache.flink.connector.file.src.util.Pool;
-import org.apache.flink.connector.file.src.util.RecordAndPosition;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.data.columnar.ColumnVector;
 import org.apache.flink.table.store.data.columnar.ColumnarRowData;
 import org.apache.flink.table.store.data.columnar.ColumnarRowIterator;
 import org.apache.flink.table.store.data.columnar.VectorizedColumnBatch;
+import org.apache.flink.table.store.file.utils.RecordReader.RecordIterator;
+import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.format.fs.HadoopReadOnlyFileSystem;
 import org.apache.flink.table.store.format.orc.filter.OrcFilters;
+import org.apache.flink.table.store.utils.Pool;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -54,7 +52,7 @@ import static org.apache.flink.table.store.format.orc.reader.OrcSplitReaderUtil.
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /** An ORC reader that produces a stream of {@link ColumnarRowData} records. */
-public class OrcReaderFactory implements BulkFormat<RowData, FileSourceSplit> {
+public class OrcReaderFactory implements FormatReaderFactory {
 
     private static final long serialVersionUID = 1L;
 
@@ -93,37 +91,19 @@ public class OrcReaderFactory implements BulkFormat<RowData, FileSourceSplit> {
     // ------------------------------------------------------------------------
 
     @Override
-    public OrcVectorizedReader createReader(
-            final org.apache.flink.configuration.Configuration config, final FileSourceSplit split)
-            throws IOException {
-
-        final int numBatchesToCirculate =
-                config.getInteger(SourceReaderOptions.ELEMENT_QUEUE_CAPACITY);
-        final Pool<OrcReaderBatch> poolOfBatches = createPoolOfBatches(numBatchesToCirculate);
-
-        final RecordReader orcReader =
+    public OrcVectorizedReader createReader(Path file) throws IOException {
+        Pool<OrcReaderBatch> poolOfBatches = createPoolOfBatches(1);
+        RecordReader orcReader =
                 createRecordReader(
                         hadoopConfigWrapper.getHadoopConfig(),
                         schema,
                         selectedFields,
                         conjunctPredicates,
-                        split.path(),
-                        split.offset(),
-                        split.length());
+                        file,
+                        0,
+                        file.getFileSystem().getFileStatus(file).getLen());
 
         return new OrcVectorizedReader(orcReader, poolOfBatches);
-    }
-
-    @Override
-    public OrcVectorizedReader restoreReader(
-            final org.apache.flink.configuration.Configuration config,
-            final FileSourceSplit split) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public boolean isSplittable() {
-        return true;
     }
 
     /**
@@ -147,12 +127,6 @@ public class OrcReaderFactory implements BulkFormat<RowData, FileSourceSplit> {
         return new OrcReaderBatch(orcBatch, flinkColumnBatch, recycler);
     }
 
-    /** Gets the type produced by this format. */
-    @Override
-    public TypeInformation<RowData> getProducedType() {
-        throw new UnsupportedOperationException();
-    }
-
     // ------------------------------------------------------------------------
 
     private Pool<OrcReaderBatch> createPoolOfBatches(int numBatches) {
@@ -169,16 +143,7 @@ public class OrcReaderFactory implements BulkFormat<RowData, FileSourceSplit> {
 
     // ------------------------------------------------------------------------
 
-    /**
-     * The {@code OrcReaderBatch} class holds the data structures containing the batch data (column
-     * vectors, row arrays, ...) and performs the batch conversion from the ORC representation to
-     * the result format.
-     *
-     * <p>This base class only holds the ORC Column Vectors, subclasses hold additionally the result
-     * structures and implement the conversion in {@link
-     * OrcReaderBatch#convertAndGetIterator(VectorizedRowBatch, long)}.
-     */
-    protected static class OrcReaderBatch {
+    private static class OrcReaderBatch {
 
         private final VectorizedRowBatch orcVectorizedRowBatch;
         private final Pool.Recycler<OrcReaderBatch> recycler;
@@ -210,26 +175,12 @@ public class OrcReaderFactory implements BulkFormat<RowData, FileSourceSplit> {
             return orcVectorizedRowBatch;
         }
 
-        /**
-         * Converts the ORC VectorizedRowBatch into the result structure and returns an iterator
-         * over the entries.
-         *
-         * <p>This method may, for example, return a single element iterator that returns the entire
-         * batch as one, or (as another example) return an iterator over the rows projected from
-         * this column batch.
-         *
-         * <p>The position information in the result needs to be constructed as follows: The value
-         * of {@code startingOffset} is the offset value ({@link RecordAndPosition#getOffset()}) for
-         * all rows in the batch. Each row then increments the records-to-skip value ({@link
-         * RecordAndPosition#getRecordSkipCount()}).
-         */
-        private RecordIterator<RowData> convertAndGetIterator(
-                final VectorizedRowBatch orcBatch, final long startingOffset) {
+        private RecordIterator<RowData> convertAndGetIterator(VectorizedRowBatch orcBatch) {
             // no copying from the ORC column vectors to the Flink columns vectors necessary,
             // because they point to the same data arrays internally design
             int batchSize = orcBatch.size;
             flinkColumnBatch.setNumRows(batchSize);
-            result.set(batchSize, startingOffset, 0);
+            result.set(batchSize);
             return result;
         }
     }
@@ -249,7 +200,8 @@ public class OrcReaderFactory implements BulkFormat<RowData, FileSourceSplit> {
      * batch is addressed by the starting row number of the batch, plus the number of records to be
      * skipped before.
      */
-    private static final class OrcVectorizedReader implements BulkFormat.Reader<RowData> {
+    private static final class OrcVectorizedReader
+            implements org.apache.flink.table.store.file.utils.RecordReader<RowData> {
 
         private final RecordReader orcReader;
         private final Pool<OrcReaderBatch> pool;
@@ -265,13 +217,12 @@ public class OrcReaderFactory implements BulkFormat<RowData, FileSourceSplit> {
             final OrcReaderBatch batch = getCachedEntry();
             final VectorizedRowBatch orcVectorBatch = batch.orcVectorizedRowBatch();
 
-            final long orcRowNumber = orcReader.getRowNumber();
             if (!nextBatch(orcReader, orcVectorBatch)) {
                 batch.recycle();
                 return null;
             }
 
-            return batch.convertAndGetIterator(orcVectorBatch, orcRowNumber);
+            return batch.convertAndGetIterator(orcVectorBatch);
         }
 
         @Override

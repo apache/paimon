@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.memory;
 
-import org.apache.flink.table.runtime.util.MemorySegmentPool;
-
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;

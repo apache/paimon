@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryStringData;
-import org.apache.flink.table.data.binary.BinaryStringDataUtil;
+import org.apache.flink.table.store.utils.StringUtils;
 import org.apache.flink.table.types.logical.LogicalType;
 
 /** listagg aggregate a field of a row. */
@@ -46,7 +46,7 @@ public class FieldListaggAgg extends FieldAggregator {
                     StringData mergeFieldSD = (StringData) accumulator;
                     StringData inFieldSD = (StringData) inputField;
                     concatenate =
-                            BinaryStringDataUtil.concat(
+                            StringUtils.concat(
                                     (BinaryStringData) mergeFieldSD,
                                     new BinaryStringData(DELIMITER),
                                     (BinaryStringData) inFieldSD);

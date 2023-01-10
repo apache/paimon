@@ -20,8 +20,6 @@ package org.apache.flink.table.store.format.parquet;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.connector.file.src.FileSourceSplit;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.DecimalData;
@@ -31,6 +29,7 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
@@ -68,7 +67,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.connector.file.src.util.Utils.forEachRemaining;
+import static org.apache.flink.table.store.file.utils.RecordReaderUtils.forEachRemaining;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ParquetReaderFactory}. */
@@ -227,9 +226,7 @@ public class ParquetReadWriteTest {
 
         AtomicInteger cnt = new AtomicInteger(0);
         forEachRemaining(
-                format.createReader(
-                        EMPTY_CONF,
-                        new FileSourceSplit("id", testPath, 0, Long.MAX_VALUE, 0, Long.MAX_VALUE)),
+                format.createReader(testPath),
                 row -> {
                     int i = cnt.get();
                     assertThat(row.getDouble(0)).isEqualTo(i);
@@ -265,9 +262,7 @@ public class ParquetReadWriteTest {
 
         AtomicInteger cnt = new AtomicInteger(0);
         forEachRemaining(
-                format.createReader(
-                        EMPTY_CONF,
-                        new FileSourceSplit("id", testPath, 0, Long.MAX_VALUE, 0, Long.MAX_VALUE)),
+                format.createReader(testPath),
                 row -> {
                     int i = cnt.get();
                     assertThat(row.getDouble(0)).isEqualTo(i);
@@ -282,14 +277,8 @@ public class ParquetReadWriteTest {
             throws IOException {
         List<RowData> rows = records.stream().map(this::newRow).collect(Collectors.toList());
         Path testPath = createTempParquetFile(folder, rows, rowGroupSize);
-
-        long fileLen = testPath.getFileSystem().getFileStatus(testPath).getLen();
-        int len1 = testReadingSplit(subList(records, 0), testPath, 0, fileLen / 3);
-        int len2 = testReadingSplit(subList(records, len1), testPath, fileLen / 3, fileLen * 2 / 3);
-        int len3 =
-                testReadingSplit(
-                        subList(records, len1 + len2), testPath, fileLen * 2 / 3, Long.MAX_VALUE);
-        assertThat(len1 + len2 + len3).isEqualTo(records.size());
+        int len = testReadingFile(subList(records, 0), testPath);
+        assertThat(len).isEqualTo(records.size());
     }
 
     private Path createTempParquetFile(File folder, List<RowData> rows, int rowGroupSize)
@@ -311,9 +300,7 @@ public class ParquetReadWriteTest {
         return path;
     }
 
-    private int testReadingSplit(
-            List<Integer> expected, Path path, long splitStart, long splitLength)
-            throws IOException {
+    private int testReadingFile(List<Integer> expected, Path path) throws IOException {
         ParquetReaderFactory format = new ParquetReaderFactory(new Configuration(), ROW_TYPE, 500);
 
         // validate java serialization
@@ -323,9 +310,7 @@ public class ParquetReadWriteTest {
             throw new IOException(e);
         }
 
-        BulkFormat.Reader<RowData> reader =
-                format.createReader(
-                        EMPTY_CONF, new FileSourceSplit("ignore", path, splitStart, splitLength));
+        RecordReader<RowData> reader = format.createReader(path);
 
         AtomicInteger cnt = new AtomicInteger(0);
         final AtomicReference<RowData> previousRow = new AtomicReference<>();

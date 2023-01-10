@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.predicate;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
+import org.apache.flink.table.store.data.RowDataSerializer;
 import org.apache.flink.table.store.table.sink.BucketComputer;
 import org.apache.flink.table.types.logical.RowType;
 

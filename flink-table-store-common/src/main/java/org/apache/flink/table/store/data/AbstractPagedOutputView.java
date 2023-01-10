@@ -36,12 +36,9 @@ import java.io.UTFDataFormatException;
  */
 public abstract class AbstractPagedOutputView implements DataOutputView, MemorySegmentWritable {
 
-    private MemorySegment currentSegment; // the current memory segment to write to
+    protected MemorySegment currentSegment; // the current memory segment to write to
 
     protected final int segmentSize; // the size of the memory segments
-
-    protected final int
-            headerLength; // the number of bytes to skip at the beginning of each segment
 
     private int positionInSegment; // the offset in the current segment
 
@@ -58,28 +55,14 @@ public abstract class AbstractPagedOutputView implements DataOutputView, MemoryS
      *
      * @param initialSegment The segment that the view starts writing to.
      * @param segmentSize The size of the memory segments.
-     * @param headerLength The number of bytes to skip at the beginning of each segment for the
-     *     header.
      */
-    protected AbstractPagedOutputView(
-            MemorySegment initialSegment, int segmentSize, int headerLength) {
+    protected AbstractPagedOutputView(MemorySegment initialSegment, int segmentSize) {
         if (initialSegment == null) {
             throw new NullPointerException("Initial Segment may not be null");
         }
         this.segmentSize = segmentSize;
-        this.headerLength = headerLength;
         this.currentSegment = initialSegment;
-        this.positionInSegment = headerLength;
-    }
-
-    /**
-     * @param segmentSize The size of the memory segments.
-     * @param headerLength The number of bytes to skip at the beginning of each segment for the
-     *     header.
-     */
-    protected AbstractPagedOutputView(int segmentSize, int headerLength) {
-        this.segmentSize = segmentSize;
-        this.headerLength = headerLength;
+        this.positionInSegment = 0;
     }
 
     // --------------------------------------------------------------------------------------------
@@ -137,12 +120,7 @@ public abstract class AbstractPagedOutputView implements DataOutputView, MemoryS
      */
     public void advance() throws IOException {
         this.currentSegment = nextSegment(this.currentSegment, this.positionInSegment);
-        this.positionInSegment = this.headerLength;
-    }
-
-    /** @return header length. */
-    public int getHeaderLength() {
-        return headerLength;
+        this.positionInSegment = 0;
     }
 
     /**
@@ -166,7 +144,7 @@ public abstract class AbstractPagedOutputView implements DataOutputView, MemoryS
      */
     protected void clear() {
         this.currentSegment = null;
-        this.positionInSegment = this.headerLength;
+        this.positionInSegment = 0;
     }
 
     // --------------------------------------------------------------------------------------------
