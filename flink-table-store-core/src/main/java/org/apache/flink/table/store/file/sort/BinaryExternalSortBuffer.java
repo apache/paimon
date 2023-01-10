@@ -20,20 +20,17 @@ package org.apache.flink.table.store.file.sort;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.configuration.MemorySize;
-import org.apache.flink.runtime.io.compression.BlockCompressionFactory;
-import org.apache.flink.runtime.io.compression.Lz4BlockCompressionFactory;
-import org.apache.flink.runtime.io.disk.iomanager.AbstractChannelWriterOutputView;
-import org.apache.flink.runtime.io.disk.iomanager.FileIOChannel;
-import org.apache.flink.runtime.io.disk.iomanager.IOManager;
-import org.apache.flink.runtime.operators.sort.QuickSort;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.runtime.io.ChannelWithMeta;
-import org.apache.flink.table.runtime.operators.sort.BinaryMergeIterator;
-import org.apache.flink.table.runtime.operators.sort.SpillChannelManager;
-import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
-import org.apache.flink.table.runtime.util.FileChannelUtil;
 import org.apache.flink.table.store.codegen.RecordComparator;
+import org.apache.flink.table.store.data.BinaryRowDataSerializer;
+import org.apache.flink.table.store.file.compression.BlockCompressionFactory;
+import org.apache.flink.table.store.file.compression.Lz4BlockCompressionFactory;
+import org.apache.flink.table.store.file.disk.ChannelWithMeta;
+import org.apache.flink.table.store.file.disk.ChannelWriterOutputView;
+import org.apache.flink.table.store.file.disk.FileChannelUtil;
+import org.apache.flink.table.store.file.disk.FileIOChannel;
+import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.util.MutableObjectIterator;
 
 import java.io.IOException;
@@ -44,12 +41,10 @@ import java.util.List;
 public class BinaryExternalSortBuffer implements SortBuffer {
 
     private final BinaryRowDataSerializer serializer;
-    private final int pageSize;
     private final BinaryInMemorySortBuffer inMemorySortBuffer;
     private final IOManager ioManager;
     private SpillChannelManager channelManager;
     private final int maxNumFileHandles;
-    private final boolean compressionEnable;
     private final BlockCompressionFactory compressionCodecFactory;
     private final int compressionBlockSize;
     private final BinaryExternalMerger merger;
@@ -67,12 +62,10 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             IOManager ioManager,
             int maxNumFileHandles) {
         this.serializer = serializer;
-        this.pageSize = pageSize;
         this.inMemorySortBuffer = inMemorySortBuffer;
         this.ioManager = ioManager;
         this.channelManager = new SpillChannelManager();
         this.maxNumFileHandles = maxNumFileHandles;
-        this.compressionEnable = true;
         this.compressionCodecFactory = new Lz4BlockCompressionFactory();
         this.compressionBlockSize = (int) MemorySize.parse("64 kb").getBytes();
         this.merger =
@@ -83,7 +76,6 @@ public class BinaryExternalSortBuffer implements SortBuffer {
                         channelManager,
                         (BinaryRowDataSerializer) serializer.duplicate(),
                         comparator,
-                        compressionEnable,
                         compressionCodecFactory,
                         compressionBlockSize);
         this.enumerator = ioManager.createChannelEnumerator();
@@ -189,19 +181,14 @@ public class BinaryExternalSortBuffer implements SortBuffer {
         FileIOChannel.ID channel = enumerator.next();
         channelManager.addChannel(channel);
 
-        AbstractChannelWriterOutputView output = null;
+        ChannelWriterOutputView output = null;
         int bytesInLastBuffer;
         int blockCount;
 
         try {
             output =
                     FileChannelUtil.createOutputView(
-                            ioManager,
-                            channel,
-                            compressionEnable,
-                            compressionCodecFactory,
-                            compressionBlockSize,
-                            pageSize);
+                            ioManager, channel, compressionCodecFactory, compressionBlockSize);
             new QuickSort().sort(inMemorySortBuffer);
             inMemorySortBuffer.writeToOutput(output);
             bytesInLastBuffer = output.close();

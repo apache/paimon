@@ -19,9 +19,9 @@
 package org.apache.flink.table.store.table.sink;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 
 import java.util.List;

@@ -18,9 +18,6 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.connector.file.src.FileSourceSplit;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.DataField;
@@ -29,6 +26,7 @@ import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.format.FileFormatDiscover;
+import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.utils.Projection;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -39,9 +37,9 @@ import java.util.List;
 /** Class with index mapping and bulk format. */
 public class BulkFormatMapping {
     @Nullable private final int[] indexMapping;
-    private final BulkFormat<RowData, FileSourceSplit> bulkFormat;
+    private final FormatReaderFactory bulkFormat;
 
-    public BulkFormatMapping(int[] indexMapping, BulkFormat<RowData, FileSourceSplit> bulkFormat) {
+    public BulkFormatMapping(int[] indexMapping, FormatReaderFactory bulkFormat) {
         this.indexMapping = indexMapping;
         this.bulkFormat = bulkFormat;
     }
@@ -51,7 +49,7 @@ public class BulkFormatMapping {
         return indexMapping;
     }
 
-    public BulkFormat<RowData, FileSourceSplit> getReaderFactory() {
+    public FormatReaderFactory getReaderFactory() {
         return bulkFormat;
     }
 

@@ -19,8 +19,6 @@
 package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.connector.file.src.FileSourceSplit;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
@@ -29,6 +27,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
 import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.io.IOException;
@@ -41,13 +40,13 @@ import java.util.List;
 public class ManifestList {
 
     private final ManifestFileMetaSerializer serializer;
-    private final BulkFormat<RowData, FileSourceSplit> readerFactory;
+    private final FormatReaderFactory readerFactory;
     private final BulkWriter.Factory<RowData> writerFactory;
     private final FileStorePathFactory pathFactory;
 
     private ManifestList(
             ManifestFileMetaSerializer serializer,
-            BulkFormat<RowData, FileSourceSplit> readerFactory,
+            FormatReaderFactory readerFactory,
             BulkWriter.Factory<RowData> writerFactory,
             FileStorePathFactory pathFactory) {
         this.serializer = serializer;
@@ -103,8 +102,8 @@ public class ManifestList {
     }
 
     /**
-     * Creator of {@link ManifestList}. It reueses {@link BulkFormat} and {@link BulkWriter.Factory}
-     * from {@link FileFormat}.
+     * Creator of {@link ManifestList}. It reueses {@link FormatReaderFactory} and {@link
+     * BulkWriter.Factory} from {@link FileFormat}.
      */
     public static class Factory {
 

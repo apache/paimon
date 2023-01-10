@@ -20,8 +20,8 @@ package org.apache.flink.table.store.file.sort;
 
 import org.apache.flink.core.memory.MemorySegment;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.operators.sort.SortUtil;
 import org.apache.flink.table.store.codegen.NormalizedKeyComputer;
+import org.apache.flink.table.store.utils.SortUtil;
 
 /** Example for int {@link NormalizedKeyComputer}. */
 public class IntNormalizedKeyComputer implements NormalizedKeyComputer {

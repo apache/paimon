@@ -49,6 +49,7 @@ public interface RecordReader<T> extends Closeable {
          * Gets the next record from the iterator. Returns null if this iterator has no more
          * elements.
          */
+        @Nullable
         T next() throws IOException;
 
         /**
