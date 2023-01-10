@@ -404,9 +404,6 @@ public class TestFileStore extends KeyValueFileStore {
 
     private Set<Path> getFilesInUse() {
         Set<Path> result = new HashSet<>();
-        FileStorePathFactory pathFactory = pathFactory();
-        ManifestList manifestList = manifestListFactory().create();
-        FileStoreScan scan = newScan();
 
         SchemaManager schemaManager = new SchemaManager(options.path());
         schemaManager.listAllIds().forEach(id -> result.add(schemaManager.toSchemaPath(id)));
@@ -427,35 +424,48 @@ public class TestFileStore extends KeyValueFileStore {
         }
 
         for (long id = firstInUseSnapshotId; id <= latestSnapshotId; id++) {
-            Path snapshotPath = snapshotManager.snapshotPath(id);
-            Snapshot snapshot = Snapshot.fromPath(snapshotPath);
-
-            // snapshot file
-            result.add(snapshotPath);
-
-            // manifest lists
-            result.add(pathFactory.toManifestListPath(snapshot.baseManifestList()));
-            result.add(pathFactory.toManifestListPath(snapshot.deltaManifestList()));
-            if (snapshot.changelogManifestList() != null) {
-                result.add(pathFactory.toManifestListPath(snapshot.changelogManifestList()));
-            }
-
-            // manifests
-            List<ManifestFileMeta> manifests = snapshot.readAllDataManifests(manifestList);
-            if (snapshot.changelogManifestList() != null) {
-                manifests.addAll(manifestList.read(snapshot.changelogManifestList()));
-            }
-            manifests.forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
-
-            // data file
-            List<ManifestEntry> entries = scan.withManifestList(manifests).plan().files();
-            for (ManifestEntry entry : entries) {
-                result.add(
-                        new Path(
-                                pathFactory.bucketPath(entry.partition(), entry.bucket()),
-                                entry.file().fileName()));
-            }
+            result.addAll(getFilesInUse(id));
         }
+        return result;
+    }
+
+    public Set<Path> getFilesInUse(long snapshotId) {
+        Set<Path> result = new HashSet<>();
+
+        SnapshotManager snapshotManager = snapshotManager();
+        FileStorePathFactory pathFactory = pathFactory();
+        ManifestList manifestList = manifestListFactory().create();
+        FileStoreScan scan = newScan();
+
+        Path snapshotPath = snapshotManager.snapshotPath(snapshotId);
+        Snapshot snapshot = Snapshot.fromPath(snapshotPath);
+
+        // snapshot file
+        result.add(snapshotPath);
+
+        // manifest lists
+        result.add(pathFactory.toManifestListPath(snapshot.baseManifestList()));
+        result.add(pathFactory.toManifestListPath(snapshot.deltaManifestList()));
+        if (snapshot.changelogManifestList() != null) {
+            result.add(pathFactory.toManifestListPath(snapshot.changelogManifestList()));
+        }
+
+        // manifests
+        List<ManifestFileMeta> manifests = snapshot.readAllDataManifests(manifestList);
+        if (snapshot.changelogManifestList() != null) {
+            manifests.addAll(manifestList.read(snapshot.changelogManifestList()));
+        }
+        manifests.forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
+
+        // data file
+        List<ManifestEntry> entries = scan.withManifestList(manifests).plan().files();
+        for (ManifestEntry entry : entries) {
+            result.add(
+                    new Path(
+                            pathFactory.bucketPath(entry.partition(), entry.bucket()),
+                            entry.file().fileName()));
+        }
+
         return result;
     }
 
