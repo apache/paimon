@@ -51,8 +51,6 @@ public class AbstractTestBase extends TestLogger {
 
     @TempDir protected static Path temporaryFolder;
 
-    // @ClassRule public static final TemporaryFolder TEMPORARY_FOLDER = new TemporaryFolder();
-
     // ----------------------------------------------------------------------------------------------------------------
     //  Temporary File Utilities
     // ----------------------------------------------------------------------------------------------------------------
