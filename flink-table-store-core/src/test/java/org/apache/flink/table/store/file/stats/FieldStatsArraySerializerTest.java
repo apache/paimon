@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.stats;
 
-import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.casting.CastExecutor;
 import org.apache.flink.table.store.file.schema.DataField;

@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.annotation.PublicEvolving;
-
 /**
  * An enumeration of Data type families for clustering {@link DataTypeRoot}s into categories.
  *

@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
-import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.StringUtils;
@@ -258,7 +257,9 @@ public class TableSchema implements Serializable {
     }
 
     public static List<DataField> newFields(RowType rowType) {
-        return ((org.apache.flink.table.store.file.schema.RowType) toDataType(rowType, new AtomicInteger(-1))).getFields();
+        return ((org.apache.flink.table.store.file.schema.RowType)
+                        toDataType(rowType, new AtomicInteger(-1)))
+                .getFields();
     }
 
     public static int currentHighestFieldId(List<DataField> fields) {

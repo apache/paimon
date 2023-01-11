@@ -18,16 +18,6 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.annotation.PublicEvolving;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.LogicalTypeRoot;
-import org.apache.flink.table.types.logical.LogicalTypeVisitor;
-
-
-import java.util.Collections;
-import java.util.List;
-import java.util.Set;
-
 /**
  * Data type of an 8-byte signed integer with values from -9,223,372,036,854,775,808 to
  * 9,223,372,036,854,775,807.

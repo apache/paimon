@@ -20,7 +20,6 @@ package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.api.ValidationException;
 
-
 import java.util.Objects;
 
 /**

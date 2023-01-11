@@ -172,7 +172,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                 },
                 (files, schemas) -> {
                     PredicateBuilder builder =
-                            new PredicateBuilder(LogicalTypeConversion.toRowType( SCHEMA_1_FIELDS));
+                            new PredicateBuilder(LogicalTypeConversion.toRowType(SCHEMA_1_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits = table.newScan().plan().splits();
 

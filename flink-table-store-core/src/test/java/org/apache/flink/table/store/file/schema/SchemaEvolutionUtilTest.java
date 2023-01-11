@@ -40,8 +40,7 @@ public class SchemaEvolutionUtilTest {
             Arrays.asList(
                     new DataField(0, "key_1", new IntType()),
                     new DataField(1, "key_2", new IntType()),
-                    new DataField(
-                            2, "key_3", new IntType()));
+                    new DataField(2, "key_3", new IntType()));
     private final List<DataField> dataFields =
             Arrays.asList(
                     new DataField(0, "a", new IntType()),

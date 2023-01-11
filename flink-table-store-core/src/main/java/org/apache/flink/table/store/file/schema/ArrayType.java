@@ -18,19 +18,11 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.annotation.PublicEvolving;
-import org.apache.flink.table.data.ArrayData;
-import org.apache.flink.table.store.file.schema.DataType;
-import org.apache.flink.table.store.file.schema.DataTypeRoot;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
-
 import java.io.IOException;
-import java.lang.reflect.Array;
-import java.util.Collections;
-import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
@@ -74,8 +66,7 @@ public final class ArrayType extends DataType {
     @Override
     public void serializeJson(JsonGenerator generator) throws IOException {
         generator.writeStartObject();
-        generator.writeStringField(
-                "type", isNullable() ? "ARRAY" : "ARRAY NOT NULL");
+        generator.writeStringField("type", isNullable() ? "ARRAY" : "ARRAY NOT NULL");
         generator.writeFieldName("element");
         elementType.serializeJson(generator);
         generator.writeEndObject();

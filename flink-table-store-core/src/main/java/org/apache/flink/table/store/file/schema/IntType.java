@@ -18,9 +18,7 @@
 
 package org.apache.flink.table.store.file.schema;
 
-/**
- * Data type of a 4-byte signed integer with values from -2,147,483,648 to 2,147,483,647.
- */
+/** Data type of a 4-byte signed integer with values from -2,147,483,648 to 2,147,483,647. */
 public class IntType extends DataType {
 
     private static final long serialVersionUID = 1L;

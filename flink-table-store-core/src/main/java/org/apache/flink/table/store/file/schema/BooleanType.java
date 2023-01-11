@@ -18,9 +18,7 @@
 
 package org.apache.flink.table.store.file.schema;
 
-/**
- * Data type of a boolean with a (possibly) three-valued logic of {@code TRUE, FALSE, UNKNOWN}.
- */
+/** Data type of a boolean with a (possibly) three-valued logic of {@code TRUE, FALSE, UNKNOWN}. */
 public class BooleanType extends DataType {
 
     private static final long serialVersionUID = 1L;

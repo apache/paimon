@@ -18,15 +18,9 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.annotation.PublicEvolving;
-import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
-import org.apache.flink.table.data.StringData;
 
-import java.util.Collections;
-import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * Data type of a variable-length character string.

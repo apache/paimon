@@ -18,12 +18,9 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.types.logical.LogicalTypeVisitor;
-import org.apache.flink.table.types.logical.utils.LogicalTypeParser;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
-
 
 import javax.annotation.Nonnull;
 
@@ -140,7 +137,8 @@ public abstract class DataType implements Serializable {
     }
 
     /**
-     * Returns a string that summarizes this type as SQL standard string for printing to a console. An implementation might shorten long names or skips very specific properties.
+     * Returns a string that summarizes this type as SQL standard string for printing to a console.
+     * An implementation might shorten long names or skips very specific properties.
      */
     public abstract String asSQLString();
 

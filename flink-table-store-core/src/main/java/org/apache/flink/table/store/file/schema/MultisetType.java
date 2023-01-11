@@ -20,9 +20,7 @@ package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.util.Preconditions;
 
-
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
-
 
 import java.io.IOException;
 import java.util.Objects;
@@ -72,8 +70,7 @@ public class MultisetType extends DataType {
     @Override
     public void serializeJson(JsonGenerator generator) throws IOException {
         generator.writeStartObject();
-        generator.writeStringField(
-                "type", isNullable() ? "MULTISET" : "MULTISET NOT NULL");
+        generator.writeStringField("type", isNullable() ? "MULTISET" : "MULTISET NOT NULL");
         generator.writeFieldName("element");
         elementType.serializeJson(generator);
         generator.writeEndObject();

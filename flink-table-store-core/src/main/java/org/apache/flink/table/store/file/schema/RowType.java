@@ -24,7 +24,6 @@ import org.apache.flink.util.StringUtils;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -34,11 +33,11 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Data type of a sequence of fields. A field consists of a field name, field type, and an
- * optional description. The most specific type of a row of a table is a row type. In this case,
- * each column of the row corresponds to the field of the row type that has the same ordinal
- * position as the column. Compared to the SQL standard, an optional field description simplifies
- * the handling with complex structures.
+ * Data type of a sequence of fields. A field consists of a field name, field type, and an optional
+ * description. The most specific type of a row of a table is a row type. In this case, each column
+ * of the row corresponds to the field of the row type that has the same ordinal position as the
+ * column. Compared to the SQL standard, an optional field description simplifies the handling with
+ * complex structures.
  */
 public final class RowType extends DataType {
 
@@ -97,16 +96,13 @@ public final class RowType extends DataType {
     public String asSQLString() {
         return withNullability(
                 FORMAT,
-                fields.stream()
-                        .map(DataField::asSQLString)
-                        .collect(Collectors.joining(", ")));
+                fields.stream().map(DataField::asSQLString).collect(Collectors.joining(", ")));
     }
 
     @Override
     public void serializeJson(JsonGenerator generator) throws IOException {
         generator.writeStartObject();
-        generator.writeStringField(
-                "type", isNullable() ? "ROW" : "ROW NOT NULL");
+        generator.writeStringField("type", isNullable() ? "ROW" : "ROW NOT NULL");
         generator.writeArrayFieldStart("fields");
         for (DataField field : getFields()) {
             field.serializeJson(generator);

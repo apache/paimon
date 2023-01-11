@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.file.schema;
 
 /**
- * The visitor definition of {@link DataType}. The visitor transforms a data type into
- * instances of {@code R}.
+ * The visitor definition of {@link DataType}. The visitor transforms a data type into instances of
+ * {@code R}.
  *
  * @param <R> result type
  */

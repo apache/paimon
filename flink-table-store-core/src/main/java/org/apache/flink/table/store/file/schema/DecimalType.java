@@ -19,14 +19,10 @@
 package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.api.ValidationException;
-import org.apache.flink.table.types.logical.LogicalTypeRoot;
-
 
 import java.util.Objects;
 
-/**
- * Data type of a decimal number with fixed precision and scale.
- */
+/** Data type of a decimal number with fixed precision and scale. */
 public class DecimalType extends DataType {
 
     private static final long serialVersionUID = 1L;

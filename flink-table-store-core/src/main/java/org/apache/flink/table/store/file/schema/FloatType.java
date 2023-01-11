@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.file.schema;
 
 /**
- * Data type of a 4-byte single precision floating point number. Compared to the SQL standard,
- * the type does not take parameters.
+ * Data type of a 4-byte single precision floating point number. Compared to the SQL standard, the
+ * type does not take parameters.
  */
 public class FloatType extends DataType {
 

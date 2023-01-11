@@ -80,14 +80,23 @@ public class JsonSerdeUtil {
 
     private static Module createTableStoreJacksonModule() {
         SimpleModule module = new SimpleModule("Table store");
-        registerJsonObjects(module, TableSchema.class, SchemaSerializer.INSTANCE, SchemaSerializer.INSTANCE);
-        registerJsonObjects(module, DataField.class, DataField::serializeJson, DataTypeJsonParser::parseDataField);
-        registerJsonObjects(module, DataType.class, DataType::serializeJson, DataTypeJsonParser::parseDataType);
+        registerJsonObjects(
+                module, TableSchema.class, SchemaSerializer.INSTANCE, SchemaSerializer.INSTANCE);
+        registerJsonObjects(
+                module,
+                DataField.class,
+                DataField::serializeJson,
+                DataTypeJsonParser::parseDataField);
+        registerJsonObjects(
+                module, DataType.class, DataType::serializeJson, DataTypeJsonParser::parseDataType);
         return module;
     }
 
     private static <T> void registerJsonObjects(
-            SimpleModule module, Class<T> clazz, JsonSerializer<T> serializer, JsonDeserializer<T> deserializer) {
+            SimpleModule module,
+            Class<T> clazz,
+            JsonSerializer<T> serializer,
+            JsonDeserializer<T> deserializer) {
         module.addSerializer(
                 new StdSerializer<T>(clazz) {
                     @Override

@@ -21,7 +21,6 @@ package org.apache.flink.table.store.table;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
@@ -98,21 +97,16 @@ public abstract class SchemaEvolutionTableTestBase {
             Arrays.asList(
                     new DataField(0, "a", new IntType()),
                     new DataField(1, "b", new CharType(10)),
-                    new DataField(
-                            2, "c", new VarCharType(10)),
-                    new DataField(
-                            3, "d", new DecimalType(10, 2)),
-                    new DataField(
-                            4, "e", new SmallIntType()),
+                    new DataField(2, "c", new VarCharType(10)),
+                    new DataField(3, "d", new DecimalType(10, 2)),
+                    new DataField(4, "e", new SmallIntType()),
                     new DataField(5, "f", new IntType()),
                     new DataField(6, "g", new BigIntType()),
                     new DataField(7, "h", new FloatType()),
                     new DataField(8, "i", new DoubleType()),
                     new DataField(9, "j", new DateType()),
-                    new DataField(
-                            10, "k", new TimestampType(2)),
-                    new DataField(
-                            11, "l", new BinaryType(100)));
+                    new DataField(10, "k", new TimestampType(2)),
+                    new DataField(11, "l", new BinaryType(100)));
     protected static final List<String> SCHEMA_PARTITION_NAMES = Collections.singletonList("a");
     protected static final List<String> SCHEMA_PRIMARY_KEYS =
             Arrays.asList("a", "b", "c", "d", "e");
@@ -322,31 +316,15 @@ public abstract class SchemaEvolutionTableTestBase {
          */
         //
         List<DataField> evolutionFields = new ArrayList<>(SCHEMA_FIELDS);
-        evolutionFields.set(
-                1,
-                new DataField(1, "b", new VarCharType(10)));
-        evolutionFields.set(
-                3, new DataField(3, "d", new DoubleType()));
-        evolutionFields.set(
-                4, new DataField(4, "e", new IntType()));
-        evolutionFields.set(
-                5,
-                new DataField(
-                        5, "f", new DecimalType(10, 2)));
-        evolutionFields.set(
-                6, new DataField(6, "g", new FloatType()));
-        evolutionFields.set(
-                7, new DataField(7, "h", new DoubleType()));
-        evolutionFields.set(
-                8,
-                new DataField(
-                        8, "i", new DecimalType(10, 2)));
-        evolutionFields.set(
-                10, new DataField(10, "k", new DateType()));
-        evolutionFields.set(
-                11,
-                new DataField(
-                        11, "l", new VarBinaryType(100)));
+        evolutionFields.set(1, new DataField(1, "b", new VarCharType(10)));
+        evolutionFields.set(3, new DataField(3, "d", new DoubleType()));
+        evolutionFields.set(4, new DataField(4, "e", new IntType()));
+        evolutionFields.set(5, new DataField(5, "f", new DecimalType(10, 2)));
+        evolutionFields.set(6, new DataField(6, "g", new FloatType()));
+        evolutionFields.set(7, new DataField(7, "h", new DoubleType()));
+        evolutionFields.set(8, new DataField(8, "i", new DecimalType(10, 2)));
+        evolutionFields.set(10, new DataField(10, "k", new DateType()));
+        evolutionFields.set(11, new DataField(11, "l", new VarBinaryType(100)));
         tableSchemas.put(
                 1L,
                 new TableSchema(

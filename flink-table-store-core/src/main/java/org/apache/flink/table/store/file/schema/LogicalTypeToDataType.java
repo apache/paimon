@@ -45,9 +45,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * Convert {@link LogicalType} to {@link DataType}.
- */
+/** Convert {@link LogicalType} to {@link DataType}. */
 public class LogicalTypeToDataType extends LogicalTypeDefaultVisitor<DataType> {
 
     private final AtomicInteger currentHighestFieldId;
@@ -58,12 +56,14 @@ public class LogicalTypeToDataType extends LogicalTypeDefaultVisitor<DataType> {
 
     @Override
     public DataType visit(CharType charType) {
-        return new org.apache.flink.table.store.file.schema.CharType(charType.isNullable(), charType.getLength());
+        return new org.apache.flink.table.store.file.schema.CharType(
+                charType.isNullable(), charType.getLength());
     }
 
     @Override
     public DataType visit(VarCharType varCharType) {
-        return new org.apache.flink.table.store.file.schema.VarCharType(varCharType.isNullable(), varCharType.getLength());
+        return new org.apache.flink.table.store.file.schema.VarCharType(
+                varCharType.isNullable(), varCharType.getLength());
     }
 
     @Override
@@ -73,17 +73,20 @@ public class LogicalTypeToDataType extends LogicalTypeDefaultVisitor<DataType> {
 
     @Override
     public DataType visit(BinaryType binaryType) {
-        return new org.apache.flink.table.store.file.schema.BinaryType(binaryType.isNullable(), binaryType.getLength());
+        return new org.apache.flink.table.store.file.schema.BinaryType(
+                binaryType.isNullable(), binaryType.getLength());
     }
 
     @Override
     public DataType visit(VarBinaryType varBinaryType) {
-        return new org.apache.flink.table.store.file.schema.VarBinaryType(varBinaryType.isNullable(), varBinaryType.getLength());
+        return new org.apache.flink.table.store.file.schema.VarBinaryType(
+                varBinaryType.isNullable(), varBinaryType.getLength());
     }
 
     @Override
     public DataType visit(DecimalType decimalType) {
-        return new org.apache.flink.table.store.file.schema.DecimalType(decimalType.isNullable(), decimalType.getPrecision(), decimalType.getScale());
+        return new org.apache.flink.table.store.file.schema.DecimalType(
+                decimalType.isNullable(), decimalType.getPrecision(), decimalType.getScale());
     }
 
     @Override
@@ -123,32 +126,40 @@ public class LogicalTypeToDataType extends LogicalTypeDefaultVisitor<DataType> {
 
     @Override
     public DataType visit(TimeType timeType) {
-        return new org.apache.flink.table.store.file.schema.TimeType(timeType.isNullable(), timeType.getPrecision());
+        return new org.apache.flink.table.store.file.schema.TimeType(
+                timeType.isNullable(), timeType.getPrecision());
     }
 
     @Override
     public DataType visit(TimestampType timestampType) {
-        return new org.apache.flink.table.store.file.schema.TimestampType(timestampType.isNullable(), timestampType.getPrecision());
+        return new org.apache.flink.table.store.file.schema.TimestampType(
+                timestampType.isNullable(), timestampType.getPrecision());
     }
 
     @Override
     public DataType visit(LocalZonedTimestampType localZonedTimestampType) {
-        return new org.apache.flink.table.store.file.schema.LocalZonedTimestampType(localZonedTimestampType.isNullable(), localZonedTimestampType.getPrecision());
+        return new org.apache.flink.table.store.file.schema.LocalZonedTimestampType(
+                localZonedTimestampType.isNullable(), localZonedTimestampType.getPrecision());
     }
 
     @Override
     public DataType visit(ArrayType arrayType) {
-        return new org.apache.flink.table.store.file.schema.ArrayType(arrayType.isNullable(), arrayType.getElementType().accept(this));
+        return new org.apache.flink.table.store.file.schema.ArrayType(
+                arrayType.isNullable(), arrayType.getElementType().accept(this));
     }
 
     @Override
     public DataType visit(MultisetType multisetType) {
-        return new org.apache.flink.table.store.file.schema.MultisetType(multisetType.isNullable(), multisetType.getElementType().accept(this));
+        return new org.apache.flink.table.store.file.schema.MultisetType(
+                multisetType.isNullable(), multisetType.getElementType().accept(this));
     }
 
     @Override
     public DataType visit(MapType mapType) {
-        return new org.apache.flink.table.store.file.schema.MapType(mapType.isNullable(), mapType.getKeyType().accept(this), mapType.getValueType().accept(this));
+        return new org.apache.flink.table.store.file.schema.MapType(
+                mapType.isNullable(),
+                mapType.getKeyType().accept(this),
+                mapType.getValueType().accept(this));
     }
 
     @Override
@@ -159,13 +170,11 @@ public class LogicalTypeToDataType extends LogicalTypeDefaultVisitor<DataType> {
             DataType fieldType = field.getType().accept(this);
             dataFields.add(
                     new DataField(
-                            id,
-                            field.getName(),
-                            fieldType,
-                            field.getDescription().orElse(null)));
+                            id, field.getName(), fieldType, field.getDescription().orElse(null)));
         }
 
-        return new org.apache.flink.table.store.file.schema.RowType(rowType.isNullable(), dataFields);
+        return new org.apache.flink.table.store.file.schema.RowType(
+                rowType.isNullable(), dataFields);
     }
 
     @Override

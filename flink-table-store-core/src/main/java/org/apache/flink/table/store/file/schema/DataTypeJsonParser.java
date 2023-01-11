@@ -22,7 +22,6 @@ import org.apache.flink.table.api.ValidationException;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
-
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
@@ -60,7 +59,8 @@ public final class DataTypeJsonParser {
                 return new ArrayType(!typeString.contains("NOT NULL"), element);
             } else if (typeString.startsWith("MULTISET")) {
                 DataType element = parseDataType(json.get("element"));
-                return new org.apache.flink.table.store.file.schema.MultisetType(!typeString.contains("NOT NULL"), element);
+                return new org.apache.flink.table.store.file.schema.MultisetType(
+                        !typeString.contains("NOT NULL"), element);
             } else if (typeString.startsWith("MAP")) {
                 DataType key = parseDataType(json.get("key"));
                 DataType value = parseDataType(json.get("value"));

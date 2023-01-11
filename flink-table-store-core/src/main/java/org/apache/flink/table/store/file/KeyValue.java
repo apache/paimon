@@ -137,10 +137,14 @@ public class KeyValue {
         fields.addAll(keyFields);
         fields.add(
                 new DataField(
-                        maxKeyId + 1, SEQUENCE_NUMBER, new org.apache.flink.table.store.file.schema.BigIntType(false)));
+                        maxKeyId + 1,
+                        SEQUENCE_NUMBER,
+                        new org.apache.flink.table.store.file.schema.BigIntType(false)));
         fields.add(
                 new DataField(
-                        maxKeyId + 2, VALUE_KIND, new org.apache.flink.table.store.file.schema.TinyIntType(false)));
+                        maxKeyId + 2,
+                        VALUE_KIND,
+                        new org.apache.flink.table.store.file.schema.TinyIntType(false)));
         for (DataField valueField : valueFields) {
             DataField newValueField =
                     new DataField(

@@ -18,9 +18,7 @@
 
 package org.apache.flink.table.store.file.schema;
 
-/**
- * Data type of a 1-byte signed integer with values from -128 to 127.
- */
+/** Data type of a 1-byte signed integer with values from -128 to 127. */
 public class TinyIntType extends DataType {
 
     private static final long serialVersionUID = 1L;

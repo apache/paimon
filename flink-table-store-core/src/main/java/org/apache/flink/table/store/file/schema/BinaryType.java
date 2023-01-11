@@ -18,15 +18,11 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
-import org.apache.flink.table.types.logical.LogicalTypeRoot;
 
 import java.util.Objects;
 
-/**
- * Data type of a fixed-length binary string (=a sequence of bytes).
- */
+/** Data type of a fixed-length binary string (=a sequence of bytes). */
 public class BinaryType extends DataType {
 
     private static final long serialVersionUID = 1L;

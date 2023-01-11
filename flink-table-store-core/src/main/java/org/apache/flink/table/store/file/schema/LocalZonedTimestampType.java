@@ -18,15 +18,9 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.table.api.ValidationException;
-import org.apache.flink.table.data.TimestampData;
 
-import java.util.Collections;
-import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * Data type of a timestamp WITH LOCAL time zone consisting of {@code year-month-day

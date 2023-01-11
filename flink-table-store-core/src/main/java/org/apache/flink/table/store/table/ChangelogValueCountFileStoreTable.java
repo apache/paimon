@@ -173,8 +173,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
 
         @Override
         public List<DataField> valueFields(TableSchema schema) {
-            return Collections.singletonList(
-                    new DataField(0, VALUE_COUNT, new BigIntType(false)));
+            return Collections.singletonList(new DataField(0, VALUE_COUNT, new BigIntType(false)));
         }
     }
 }

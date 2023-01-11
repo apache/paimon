@@ -33,7 +33,8 @@ import java.util.List;
 import java.util.Map;
 
 /** A {@link JsonSerializer} for {@link TableSchema}. */
-public class SchemaSerializer implements JsonSerializer<TableSchema>, JsonDeserializer<TableSchema> {
+public class SchemaSerializer
+        implements JsonSerializer<TableSchema>, JsonDeserializer<TableSchema> {
 
     public static final SchemaSerializer INSTANCE = new SchemaSerializer();
 

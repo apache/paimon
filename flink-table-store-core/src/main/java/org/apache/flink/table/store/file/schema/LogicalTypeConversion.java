@@ -20,24 +20,24 @@ package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.types.logical.LogicalType;
 
-
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * Conversion between {@link LogicalType} and {@link DataType}.
- */
+/** Conversion between {@link LogicalType} and {@link DataType}. */
 public class LogicalTypeConversion {
 
     public static LogicalType toLogicalType(DataType dataType) {
         return dataType.accept(DataTypeToLogicalType.INSTANCE);
     }
 
-    public static DataType toDataType(LogicalType logicalType, AtomicInteger currentHighestFieldId) {
+    public static DataType toDataType(
+            LogicalType logicalType, AtomicInteger currentHighestFieldId) {
         return logicalType.accept(new LogicalTypeToDataType(currentHighestFieldId));
     }
 
-    public static org.apache.flink.table.types.logical.RowType toRowType(List<DataField> dataFields) {
-        return (org.apache.flink.table.types.logical.RowType) DataTypeToLogicalType.INSTANCE.visit(new RowType(false, dataFields));
+    public static org.apache.flink.table.types.logical.RowType toRowType(
+            List<DataField> dataFields) {
+        return (org.apache.flink.table.types.logical.RowType)
+                DataTypeToLogicalType.INSTANCE.visit(new RowType(false, dataFields));
     }
 }

@@ -18,10 +18,6 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.annotation.PublicEvolving;
-import org.apache.flink.table.types.logical.LogicalTypeFamily;
-
-
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Set;
@@ -56,10 +52,7 @@ public enum DataTypeRoot {
 
     VARBINARY(DataTypeFamily.PREDEFINED, DataTypeFamily.BINARY_STRING),
 
-    DECIMAL(
-            DataTypeFamily.PREDEFINED,
-            DataTypeFamily.NUMERIC,
-            DataTypeFamily.EXACT_NUMERIC),
+    DECIMAL(DataTypeFamily.PREDEFINED, DataTypeFamily.NUMERIC, DataTypeFamily.EXACT_NUMERIC),
 
     TINYINT(
             DataTypeFamily.PREDEFINED,
@@ -85,20 +78,13 @@ public enum DataTypeRoot {
             DataTypeFamily.INTEGER_NUMERIC,
             DataTypeFamily.EXACT_NUMERIC),
 
-    FLOAT(
-            DataTypeFamily.PREDEFINED,
-            DataTypeFamily.NUMERIC,
-            DataTypeFamily.APPROXIMATE_NUMERIC),
+    FLOAT(DataTypeFamily.PREDEFINED, DataTypeFamily.NUMERIC, DataTypeFamily.APPROXIMATE_NUMERIC),
 
-    DOUBLE(
-            DataTypeFamily.PREDEFINED,
-            DataTypeFamily.NUMERIC,
-            DataTypeFamily.APPROXIMATE_NUMERIC),
+    DOUBLE(DataTypeFamily.PREDEFINED, DataTypeFamily.NUMERIC, DataTypeFamily.APPROXIMATE_NUMERIC),
 
     DATE(DataTypeFamily.PREDEFINED, DataTypeFamily.DATETIME),
 
-    TIME_WITHOUT_TIME_ZONE(
-            DataTypeFamily.PREDEFINED, DataTypeFamily.DATETIME, DataTypeFamily.TIME),
+    TIME_WITHOUT_TIME_ZONE(DataTypeFamily.PREDEFINED, DataTypeFamily.DATETIME, DataTypeFamily.TIME),
 
     TIMESTAMP_WITHOUT_TIME_ZONE(
             DataTypeFamily.PREDEFINED, DataTypeFamily.DATETIME, DataTypeFamily.TIMESTAMP),

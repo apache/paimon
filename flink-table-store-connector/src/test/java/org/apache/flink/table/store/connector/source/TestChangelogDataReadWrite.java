@@ -76,13 +76,21 @@ public class TestChangelogDataReadWrite {
                 @Override
                 public List<DataField> keyFields(TableSchema schema) {
                     return Collections.singletonList(
-                            new DataField(0, "k", new org.apache.flink.table.store.file.schema.BigIntType(false)));
+                            new DataField(
+                                    0,
+                                    "k",
+                                    new org.apache.flink.table.store.file.schema.BigIntType(
+                                            false)));
                 }
 
                 @Override
                 public List<DataField> valueFields(TableSchema schema) {
                     return Collections.singletonList(
-                            new DataField(0, "v", new org.apache.flink.table.store.file.schema.BigIntType(false)));
+                            new DataField(
+                                    0,
+                                    "v",
+                                    new org.apache.flink.table.store.file.schema.BigIntType(
+                                            false)));
                 }
             };
 

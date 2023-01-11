@@ -128,7 +128,8 @@ public class KeyValueFileStoreReadTest {
                                         new DataField(
                                                 0,
                                                 "count",
-                                                new org.apache.flink.table.store.file.schema.BigIntType()));
+                                                new org.apache.flink.table.store.file.schema
+                                                        .BigIntType()));
                             }
                         },
                         ValueCountMergeFunction.factory());

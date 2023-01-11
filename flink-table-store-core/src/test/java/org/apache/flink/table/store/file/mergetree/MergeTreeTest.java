@@ -147,14 +147,20 @@ public class MergeTreeTest {
                             public List<DataField> keyFields(TableSchema schema) {
                                 return Collections.singletonList(
                                         new DataField(
-                                                0, "k", new org.apache.flink.table.store.file.schema.IntType(false)));
+                                                0,
+                                                "k",
+                                                new org.apache.flink.table.store.file.schema
+                                                        .IntType(false)));
                             }
 
                             @Override
                             public List<DataField> valueFields(TableSchema schema) {
                                 return Collections.singletonList(
                                         new DataField(
-                                                0, "v", new org.apache.flink.table.store.file.schema.IntType(false)));
+                                                0,
+                                                "v",
+                                                new org.apache.flink.table.store.file.schema
+                                                        .IntType(false)));
                             }
                         });
         readerFactory = readerFactoryBuilder.build(BinaryRowDataUtil.EMPTY_ROW, 0);

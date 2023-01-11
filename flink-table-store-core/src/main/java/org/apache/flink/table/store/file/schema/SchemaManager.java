@@ -241,7 +241,8 @@ public class SchemaManager implements Serializable {
                             "ADD COLUMN cannot specify NOT NULL.");
                     int id = highestFieldId.incrementAndGet();
                     DataType dataType =
-                            LogicalTypeConversion.toDataType(addColumn.logicalType(), highestFieldId);
+                            LogicalTypeConversion.toDataType(
+                                    addColumn.logicalType(), highestFieldId);
                     newFields.add(
                             new DataField(
                                     id, addColumn.fieldName(), dataType, addColumn.description()));
@@ -292,10 +293,10 @@ public class SchemaManager implements Serializable {
                             (field) -> {
                                 checkState(
                                         LogicalTypeCasts.supportsImplicitCast(
-                                                toLogicalType(field.type()),
+                                                        toLogicalType(field.type()),
                                                         update.newLogicalType())
                                                 && CastExecutors.resolve(
-                                                toLogicalType(field.type()),
+                                                                toLogicalType(field.type()),
                                                                 update.newLogicalType())
                                                         != null,
                                         String.format(
@@ -395,7 +396,8 @@ public class SchemaManager implements Serializable {
                     break;
                 } else {
                     updateNestedColumn(
-                            ((org.apache.flink.table.store.file.schema.RowType) field.type()).getFields(),
+                            ((org.apache.flink.table.store.file.schema.RowType) field.type())
+                                    .getFields(),
                             updateFieldNames,
                             index + 1,
                             updateFunc);

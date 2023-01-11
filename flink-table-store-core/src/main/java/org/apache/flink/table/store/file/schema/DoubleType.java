@@ -18,9 +18,7 @@
 
 package org.apache.flink.table.store.file.schema;
 
-/**
- * Data type of an 8-byte double precision floating point number.
- */
+/** Data type of an 8-byte double precision floating point number. */
 public class DoubleType extends DataType {
 
     private static final long serialVersionUID = 1L;

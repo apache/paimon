@@ -18,17 +18,11 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.annotation.PublicEvolving;
-import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
 
-import java.util.Collections;
-import java.util.List;
 import java.util.Objects;
 
-/**
- * Data type of a variable-length binary string (=a sequence of bytes).
- */
+/** Data type of a variable-length binary string (=a sequence of bytes). */
 public final class VarBinaryType extends DataType {
 
     private static final long serialVersionUID = 1L;

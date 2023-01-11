@@ -22,7 +22,6 @@ import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
-
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -87,8 +86,7 @@ public final class DataField implements Serializable {
 
     private String formatString(String typeString) {
         if (description == null) {
-            return String.format(
-                    FIELD_FORMAT_NO_DESCRIPTION, escapeIdentifier(name), typeString);
+            return String.format(FIELD_FORMAT_NO_DESCRIPTION, escapeIdentifier(name), typeString);
         } else {
             return String.format(
                     FIELD_FORMAT_WITH_DESCRIPTION,
