@@ -21,8 +21,6 @@ package org.apache.flink.table.store.hive;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
-import org.apache.flink.table.store.file.catalog.UGIWrappedCatalog;
-import org.apache.flink.table.store.security.SecurityConfiguration;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -50,11 +48,6 @@ public class HiveCatalogFactory implements CatalogFactory {
         options.toMap().forEach(hadoopConfig::set);
         hadoopConfig.set(HiveConf.ConfVars.METASTOREURIS.varname, uri);
         hadoopConfig.set(HiveConf.ConfVars.METASTOREWAREHOUSE.varname, warehouse);
-
-        if (new SecurityConfiguration(options).getKeytab() != null) {
-            return new UGIWrappedCatalog(() -> new HiveCatalog(hadoopConfig));
-        } else {
-            return new HiveCatalog(hadoopConfig);
-        }
+        return new HiveCatalog(hadoopConfig);
     }
 }

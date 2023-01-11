@@ -39,6 +39,7 @@ import org.apache.hadoop.hive.metastore.RetryingMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.AlreadyExistsException;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
+import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
@@ -413,7 +414,7 @@ public class HiveCatalog extends AbstractCatalog {
             client =
                     RetryingMetaStoreClient.getProxy(
                             hiveConf, tbl -> null, HiveMetaStoreClient.class.getName());
-        } catch (Exception e) {
+        } catch (MetaException e) {
             throw new RuntimeException(e);
         }
         return StringUtils.isNullOrWhitespaceOnly(
