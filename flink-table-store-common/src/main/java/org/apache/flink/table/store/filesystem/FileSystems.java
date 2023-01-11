@@ -44,6 +44,16 @@ import java.util.ServiceLoader;
 public class FileSystems {
 
     public static void initialize(Path path, Configuration configuration) {
+        // install if there is kerberos keytab
+        SecurityConfiguration securityConf = new SecurityConfiguration(configuration);
+        if (securityConf.getKeytab() != null) {
+            try {
+                SecurityUtils.install(securityConf);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+
         // 1. Try to load file system
         try {
             // check can obtain
@@ -63,12 +73,6 @@ public class FileSystems {
                         return (Iterator<P>) discoverFactories().iterator();
                     }
                 });
-
-        try {
-            SecurityUtils.install(new SecurityConfiguration(configuration));
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
     }
 
     private static List<FileSystemFactory> discoverFactories() {
