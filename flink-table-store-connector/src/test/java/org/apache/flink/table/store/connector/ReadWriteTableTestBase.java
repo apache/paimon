@@ -50,7 +50,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.CoreOptions.SCAN_MODE;
-import static org.apache.flink.table.store.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.ROOT_PATH;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.relativeTablePath;
@@ -245,33 +244,6 @@ public class ReadWriteTableTestBase extends KafkaTableTestBase {
                         hints,
                         filter,
                         projection,
-                        expected)
-                .f1
-                .close();
-    }
-
-    protected void collectChangelogFromTimestampAndCheck(
-            boolean insertOnly,
-            List<String> partitionKeys,
-            List<String> primaryKeys,
-            long timestamp,
-            List<Row> expected)
-            throws Exception {
-        Map<String, String> hints = new HashMap<>();
-        hints.put(SCAN_MODE.key(), "from-timestamp");
-        hints.put(SCAN_TIMESTAMP_MILLIS.key(), String.valueOf(timestamp));
-        collectAndCheckUnderSameEnv(
-                        true,
-                        true,
-                        insertOnly,
-                        partitionKeys,
-                        primaryKeys,
-                        Collections.emptyList(),
-                        null,
-                        true,
-                        hints,
-                        null,
-                        Collections.emptyList(),
                         expected)
                 .f1
                 .close();
