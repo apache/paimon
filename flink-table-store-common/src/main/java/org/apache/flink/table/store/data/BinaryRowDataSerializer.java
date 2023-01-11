@@ -131,7 +131,6 @@ public class BinaryRowDataSerializer extends AbstractRowDataSerializer<BinaryRow
     @Override
     public int serializeToPages(BinaryRowData record, AbstractPagedOutputView headerLessView)
             throws IOException {
-        checkArgument(headerLessView.getHeaderLength() == 0);
         int skip = checkSkipWriteForFixLengthPart(headerLessView);
         headerLessView.writeInt(record.getSizeInBytes());
         serializeWithoutLength(record, headerLessView);
@@ -176,7 +175,6 @@ public class BinaryRowDataSerializer extends AbstractRowDataSerializer<BinaryRow
     @Override
     public BinaryRowData deserializeFromPages(
             BinaryRowData reuse, AbstractPagedInputView headerLessView) throws IOException {
-        checkArgument(headerLessView.getHeaderLength() == 0);
         checkSkipReadForFixLengthPart(headerLessView);
         return deserialize(reuse, headerLessView);
     }
@@ -184,7 +182,6 @@ public class BinaryRowDataSerializer extends AbstractRowDataSerializer<BinaryRow
     @Override
     public BinaryRowData mapFromPages(BinaryRowData reuse, AbstractPagedInputView headerLessView)
             throws IOException {
-        checkArgument(headerLessView.getHeaderLength() == 0);
         checkSkipReadForFixLengthPart(headerLessView);
         pointTo(headerLessView.readInt(), reuse, headerLessView);
         return reuse;
@@ -192,7 +189,6 @@ public class BinaryRowDataSerializer extends AbstractRowDataSerializer<BinaryRow
 
     @Override
     public void skipRecordFromPages(AbstractPagedInputView headerLessView) throws IOException {
-        checkArgument(headerLessView.getHeaderLength() == 0);
         checkSkipReadForFixLengthPart(headerLessView);
         headerLessView.skipBytes(headerLessView.readInt());
     }
@@ -220,7 +216,6 @@ public class BinaryRowDataSerializer extends AbstractRowDataSerializer<BinaryRow
      */
     public void pointTo(int length, BinaryRowData reuse, AbstractPagedInputView headerLessView)
             throws IOException {
-        checkArgument(headerLessView.getHeaderLength() == 0);
         if (length < 0) {
             throw new IOException(
                     String.format(

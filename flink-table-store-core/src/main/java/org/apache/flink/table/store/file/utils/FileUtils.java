@@ -18,17 +18,13 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.connector.base.source.reader.SourceReaderOptions;
-import org.apache.flink.connector.file.src.FileSourceSplit;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
-import org.apache.flink.connector.file.src.util.Utils;
 import org.apache.flink.core.fs.FSDataInputStream;
 import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.format.FormatReaderFactory;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,12 +50,6 @@ public class FileUtils {
     private static final Logger LOG = LoggerFactory.getLogger(FileUtils.class);
     private static final int LIST_MAX_RETRY = 30;
 
-    private static final Configuration DEFAULT_READER_CONFIG = new Configuration();
-
-    static {
-        DEFAULT_READER_CONFIG.setInteger(SourceReaderOptions.ELEMENT_QUEUE_CAPACITY, 1);
-    }
-
     public static final ForkJoinPool COMMON_IO_FORK_JOIN_POOL;
 
     // if we want to name threads in the fork join pool we need all these
@@ -77,12 +67,10 @@ public class FileUtils {
     }
 
     public static <T> List<T> readListFromFile(
-            Path path,
-            ObjectSerializer<T> serializer,
-            BulkFormat<RowData, FileSourceSplit> readerFactory)
+            Path path, ObjectSerializer<T> serializer, FormatReaderFactory readerFactory)
             throws IOException {
         List<T> result = new ArrayList<>();
-        Utils.forEachRemaining(
+        RecordReaderUtils.forEachRemaining(
                 createFormatReader(readerFactory, path),
                 row -> result.add(serializer.fromRow(row)));
         return result;
@@ -181,8 +169,8 @@ public class FileUtils {
                 .map(name -> Long.parseLong(name.substring(prefix.length())));
     }
 
-    public static BulkFormat.Reader<RowData> createFormatReader(
-            BulkFormat<RowData, FileSourceSplit> format, Path file) throws IOException {
+    public static RecordReader<RowData> createFormatReader(FormatReaderFactory format, Path file)
+            throws IOException {
         if (!file.getFileSystem().exists(file)) {
             throw new FileNotFoundException(
                     String.format(
@@ -194,8 +182,6 @@ public class FileUtils {
                             file));
         }
 
-        long fileSize = FileUtils.getFileSize(file);
-        FileSourceSplit split = new FileSourceSplit("ignore", file, 0, fileSize);
-        return format.createReader(FileUtils.DEFAULT_READER_CONFIG, split);
+        return format.createReader(file);
     }
 }

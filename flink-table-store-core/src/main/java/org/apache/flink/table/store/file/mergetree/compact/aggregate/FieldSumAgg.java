@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
 import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.DecimalDataUtils;
+import org.apache.flink.table.store.utils.DecimalUtils;
 import org.apache.flink.table.types.logical.LogicalType;
 
 /** sum aggregate a field of a row. */
@@ -45,7 +45,7 @@ public class FieldSumAgg extends FieldAggregator {
                     assert mergeFieldDD.precision() == inFieldDD.precision()
                             : "Inconsistent precision of aggregate DecimalData!";
                     sum =
-                            DecimalDataUtils.add(
+                            DecimalUtils.add(
                                     mergeFieldDD,
                                     inFieldDD,
                                     mergeFieldDD.precision(),

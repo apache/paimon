@@ -29,14 +29,20 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 
+import org.apache.flink.shaded.guava30.com.google.common.collect.Iterables;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
@@ -184,9 +190,14 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             }
 
             Snapshot toExpire = snapshotManager.snapshot(id);
+            // cannot call `toExpire.readAllDataManifests` directly, it is possible that a job is
+            // killed during expiration, so some manifest files may have been deleted
+            List<ManifestFileMeta> toExpireManifests = new ArrayList<>();
+            toExpireManifests.addAll(tryReadManifestList(toExpire.baseManifestList()));
+            toExpireManifests.addAll(tryReadManifestList(toExpire.deltaManifestList()));
 
             // delete manifest
-            for (ManifestFileMeta manifest : toExpire.readAllDataManifests(manifestList)) {
+            for (ManifestFileMeta manifest : toExpireManifests) {
                 if (!manifestsInUse.contains(manifest) && !deletedManifests.contains(manifest)) {
                     manifestFile.delete(manifest.fileName());
                     deletedManifests.add(manifest);
@@ -194,7 +205,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             }
             if (toExpire.changelogManifestList() != null) {
                 for (ManifestFileMeta manifest :
-                        manifestList.read(toExpire.changelogManifestList())) {
+                        tryReadManifestList(toExpire.changelogManifestList())) {
                     manifestFile.delete(manifest.fileName());
                 }
             }
@@ -260,10 +271,39 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
     private Iterable<ManifestEntry> getManifestEntriesFromManifestList(String manifestListName) {
         List<String> manifestFiles =
-                manifestList.read(manifestListName).stream()
+                tryReadManifestList(manifestListName).stream()
                         .map(ManifestFileMeta::fileName)
                         .collect(Collectors.toList());
-        return manifestFile.readManifestFiles(manifestFiles);
+        Queue<String> files = new LinkedList<>(manifestFiles);
+        return Iterables.concat(
+                (Iterable<Iterable<ManifestEntry>>)
+                        () ->
+                                new Iterator<Iterable<ManifestEntry>>() {
+                                    @Override
+                                    public boolean hasNext() {
+                                        return files.size() > 0;
+                                    }
+
+                                    @Override
+                                    public Iterable<ManifestEntry> next() {
+                                        String file = files.poll();
+                                        try {
+                                            return manifestFile.read(file);
+                                        } catch (Exception e) {
+                                            LOG.warn("Failed to read manifest file " + file, e);
+                                            return Collections.emptyList();
+                                        }
+                                    }
+                                });
+    }
+
+    private List<ManifestFileMeta> tryReadManifestList(String manifestListName) {
+        try {
+            return manifestList.read(manifestListName);
+        } catch (Exception e) {
+            LOG.warn("Failed to read manifest list file " + manifestListName, e);
+            return Collections.emptyList();
+        }
     }
 
     private void writeEarliestHint(long earliest) {

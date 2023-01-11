@@ -20,15 +20,14 @@ package org.apache.flink.table.store.file;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.connector.file.src.FileSourceSplit;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
-import org.apache.flink.connector.file.src.util.Utils;
 import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -69,13 +68,9 @@ public class FileFormatTest {
         out.close();
 
         // read
-        BulkFormat.Reader<RowData> reader =
-                avro.createReaderFactory(rowType)
-                        .createReader(
-                                new Configuration(),
-                                new FileSourceSplit("", path, 0, fs.getFileStatus(path).getLen()));
+        RecordReader<RowData> reader = avro.createReaderFactory(rowType).createReader(path);
         List<RowData> result = new ArrayList<>();
-        Utils.forEachRemaining(
+        RecordReaderUtils.forEachRemaining(
                 reader,
                 rowData -> result.add(GenericRowData.of(rowData.getInt(0), rowData.getInt(1))));
 

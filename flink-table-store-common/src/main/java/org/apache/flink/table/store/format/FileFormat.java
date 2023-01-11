@@ -22,8 +22,6 @@ import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.DelegatingConfiguration;
-import org.apache.flink.connector.file.src.FileSourceSplit;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -54,19 +52,19 @@ public abstract class FileFormat {
     }
 
     /**
-     * Create a {@link BulkFormat} from the type, with projection pushed down.
+     * Create a {@link FormatReaderFactory} from the type, with projection pushed down.
      *
      * @param type Type without projection.
      * @param projection See {@link org.apache.flink.table.connector.Projection#toNestedIndexes()}.
      * @param filters A list of filters in conjunctive form for filtering on a best-effort basis.
      */
-    public abstract BulkFormat<RowData, FileSourceSplit> createReaderFactory(
+    public abstract FormatReaderFactory createReaderFactory(
             RowType type, int[][] projection, @Nullable List<Predicate> filters);
 
     /** Create a {@link BulkWriter.Factory} from the type. */
     public abstract BulkWriter.Factory<RowData> createWriterFactory(RowType type);
 
-    public BulkFormat<RowData, FileSourceSplit> createReaderFactory(RowType rowType) {
+    public FormatReaderFactory createReaderFactory(RowType rowType) {
         int[][] projection = new int[rowType.getFieldCount()][];
         for (int i = 0; i < projection.length; i++) {
             projection[i] = new int[] {i};
@@ -74,8 +72,7 @@ public abstract class FileFormat {
         return createReaderFactory(rowType, projection);
     }
 
-    public BulkFormat<RowData, FileSourceSplit> createReaderFactory(
-            RowType rowType, int[][] projection) {
+    public FormatReaderFactory createReaderFactory(RowType rowType, int[][] projection) {
         return createReaderFactory(rowType, projection, new ArrayList<>());
     }
 

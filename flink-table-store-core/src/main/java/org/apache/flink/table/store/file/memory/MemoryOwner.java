@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.memory;
 
-import org.apache.flink.table.runtime.util.MemorySegmentPool;
-
 /** A class provides memory related methods. */
 public interface MemoryOwner {
 

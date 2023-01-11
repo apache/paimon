@@ -23,6 +23,7 @@ import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.file.disk.IOManagerImpl;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.FileCommittable;
@@ -70,7 +71,11 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         if (commitUser == null) {
             write = null;
         } else {
-            write = table.newWrite(commitUser).withIOManager(ioManager).withOverwrite(isOverwrite);
+            write =
+                    table.newWrite(commitUser)
+                            .withIOManager(
+                                    new IOManagerImpl(ioManager.getSpillingDirectoriesPaths()))
+                            .withOverwrite(isOverwrite);
         }
     }
 

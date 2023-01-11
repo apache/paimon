@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.stats;
 
-import org.apache.flink.connector.file.src.FileSourceSplit;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.utils.FileUtils;
@@ -28,6 +26,7 @@ import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.format.FieldStatsCollector;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
+import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.io.IOException;
@@ -50,7 +49,7 @@ public class TestFileStatsExtractor implements FileStatsExtractor {
     @Override
     public FieldStats[] extract(Path path) throws IOException {
         IdentityObjectSerializer serializer = new IdentityObjectSerializer(rowType);
-        BulkFormat<RowData, FileSourceSplit> readerFactory = format.createReaderFactory(rowType);
+        FormatReaderFactory readerFactory = format.createReaderFactory(rowType);
         List<RowData> records = FileUtils.readListFromFile(path, serializer, readerFactory);
         FieldStatsCollector statsCollector = new FieldStatsCollector(rowType);
         for (RowData record : records) {

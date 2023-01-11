@@ -237,7 +237,6 @@ under the License.
                                     <include>org.apache.flink:flink-core</include>
                                     <include>org.apache.flink:flink-runtime</include>
                                     <include>org.apache.flink:${flink.streaming.java}</include>
-                                    <include>org.apache.flink:flink-connector-files</include>
                                     <include>org.apache.flink:flink-hadoop-fs</include>
                                     <include>org.apache.flink:flink-shaded-jackson</include>
                                     <include>org.apache.flink:flink-shaded-guava</include>
@@ -263,17 +262,6 @@ under the License.
                                 </includes>
                             </artifactSet>
                             <filters>
-                                <!--
-                                Throw away all META-INF/services,
-                                otherwise if user has the same format/connector jar in the classpath,
-                                FactoryUtil will complain about multiple matching factories.
-                                -->
-                                <filter>
-                                    <artifact>org.apache.flink:flink-connector-files</artifact>
-                                    <excludes>
-                                        <exclude>META-INF/services/**</exclude>
-                                    </excludes>
-                                </filter>
                                 <!-- Another copy of the Apache license, which we don't need. -->
                                 <filter>
                                     <artifact>*</artifact>

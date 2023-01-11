@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.file.memory;
 
 import org.apache.flink.core.memory.MemorySegment;
-import org.apache.flink.table.runtime.util.MemorySegmentPool;
 
 import java.util.List;
 

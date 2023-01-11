@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.connector.file.table.FileSystemConnectorOptions;
 import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
+import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.RowDataSerializer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializerTest;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
@@ -238,7 +238,7 @@ public class KeyValueFileReadWriteTest {
                 new FileStorePathFactory(
                         new Path(path),
                         RowType.of(),
-                        FileSystemConnectorOptions.PARTITION_DEFAULT_NAME.defaultValue(),
+                        CoreOptions.PARTITION_DEFAULT_NAME.defaultValue(),
                         format);
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         return KeyValueFileWriterFactory.builder(
