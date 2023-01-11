@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.file.catalog;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.SecurityOptions;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.filesystem.FileSystems;
@@ -29,6 +30,7 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.ServiceLoader;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.CatalogOptions.METASTORE;
@@ -109,6 +111,11 @@ public interface CatalogFactory {
             throw new UncheckedIOException(e);
         }
 
-        return factories.get(0).create(warehouse, options);
+        Supplier<Catalog> supplier = () -> factories.get(0).create(warehouse, options);
+        if (options.contains(SecurityOptions.KERBEROS_LOGIN_KEYTAB)) {
+            return new UGIWrappedCatalog(supplier);
+        } else {
+            return supplier.get();
+        }
     }
 }
