@@ -42,7 +42,6 @@ import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
-import org.apache.flink.table.store.file.schema.AtomicDataType;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -150,13 +149,21 @@ public class MergeTreeBenchmark {
                             @Override
                             public List<DataField> keyFields(TableSchema schema) {
                                 return Collections.singletonList(
-                                        new DataField(0, "k", new AtomicDataType(new IntType())));
+                                        new DataField(
+                                                0,
+                                                "k",
+                                                new org.apache.flink.table.store.file.schema
+                                                        .IntType()));
                             }
 
                             @Override
                             public List<DataField> valueFields(TableSchema schema) {
                                 return Collections.singletonList(
-                                        new DataField(0, "v", new AtomicDataType(new IntType())));
+                                        new DataField(
+                                                0,
+                                                "v",
+                                                new org.apache.flink.table.store.file.schema
+                                                        .IntType()));
                             }
                         });
         readerFactory = readerBuilder.build(BinaryRowDataUtil.EMPTY_ROW, 0);
