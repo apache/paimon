@@ -21,7 +21,6 @@ package org.apache.flink.table.store.file.stats;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.file.casting.CastExecutor;
-import org.apache.flink.table.store.file.schema.AtomicDataType;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -46,19 +45,19 @@ public class FieldStatsArraySerializerTest {
                                 new DataField(
                                         0,
                                         "a",
-                                        new AtomicDataType(DataTypes.INT().getLogicalType())),
+                                        new org.apache.flink.table.store.file.schema.IntType()),
                                 new DataField(
                                         1,
                                         "b",
-                                        new AtomicDataType(DataTypes.INT().getLogicalType())),
+                                        new org.apache.flink.table.store.file.schema.IntType()),
                                 new DataField(
                                         2,
                                         "c",
-                                        new AtomicDataType(DataTypes.INT().getLogicalType())),
+                                        new org.apache.flink.table.store.file.schema.IntType()),
                                 new DataField(
                                         3,
                                         "d",
-                                        new AtomicDataType(DataTypes.INT().getLogicalType()))),
+                                        new org.apache.flink.table.store.file.schema.IntType())),
                         3,
                         Collections.EMPTY_LIST,
                         Collections.EMPTY_LIST,
@@ -71,23 +70,23 @@ public class FieldStatsArraySerializerTest {
                                 new DataField(
                                         1,
                                         "c",
-                                        new AtomicDataType(DataTypes.INT().getLogicalType())),
+                                        new org.apache.flink.table.store.file.schema.IntType()),
                                 new DataField(
                                         3,
                                         "a",
-                                        new AtomicDataType(DataTypes.INT().getLogicalType())),
+                                        new org.apache.flink.table.store.file.schema.IntType()),
                                 new DataField(
                                         5,
                                         "d",
-                                        new AtomicDataType(DataTypes.INT().getLogicalType())),
+                                        new org.apache.flink.table.store.file.schema.IntType()),
                                 new DataField(
                                         6,
                                         "e",
-                                        new AtomicDataType(DataTypes.INT().getLogicalType())),
+                                        new org.apache.flink.table.store.file.schema.IntType()),
                                 new DataField(
                                         7,
                                         "b",
-                                        new AtomicDataType(DataTypes.INT().getLogicalType()))),
+                                        new org.apache.flink.table.store.file.schema.IntType())),
                         7,
                         Collections.EMPTY_LIST,
                         Collections.EMPTY_LIST,

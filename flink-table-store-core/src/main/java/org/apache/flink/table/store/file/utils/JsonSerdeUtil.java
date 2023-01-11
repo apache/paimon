@@ -20,7 +20,8 @@ package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.file.schema.DataField;
-import org.apache.flink.table.store.file.schema.DataFieldSerializer;
+import org.apache.flink.table.store.file.schema.DataType;
+import org.apache.flink.table.store.file.schema.DataTypeJsonParser;
 import org.apache.flink.table.store.file.schema.SchemaSerializer;
 import org.apache.flink.table.store.file.schema.TableSchema;
 
@@ -79,13 +80,14 @@ public class JsonSerdeUtil {
 
     private static Module createTableStoreJacksonModule() {
         SimpleModule module = new SimpleModule("Table store");
-        registerJsonObjects(module, TableSchema.class, SchemaSerializer.INSTANCE);
-        registerJsonObjects(module, DataField.class, DataFieldSerializer.INSTANCE);
+        registerJsonObjects(module, TableSchema.class, SchemaSerializer.INSTANCE, SchemaSerializer.INSTANCE);
+        registerJsonObjects(module, DataField.class, DataField::serializeJson, DataTypeJsonParser::parseDataField);
+        registerJsonObjects(module, DataType.class, DataType::serializeJson, DataTypeJsonParser::parseDataType);
         return module;
     }
 
     private static <T> void registerJsonObjects(
-            SimpleModule module, Class<T> clazz, JsonSerializer<T> serializer) {
+            SimpleModule module, Class<T> clazz, JsonSerializer<T> serializer, JsonDeserializer<T> deserializer) {
         module.addSerializer(
                 new StdSerializer<T>(clazz) {
                     @Override
@@ -100,7 +102,7 @@ public class JsonSerdeUtil {
                     @Override
                     public T deserialize(JsonParser parser, DeserializationContext context)
                             throws IOException {
-                        return serializer.deserialize(parser.readValueAsTree());
+                        return deserializer.deserialize(parser.readValueAsTree());
                     }
                 });
     }

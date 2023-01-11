@@ -16,15 +16,37 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.utils;
+package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
+/**
+ * Data type of an 8-byte double precision floating point number.
+ */
+public class DoubleType extends DataType {
 
-import java.io.IOException;
+    private static final long serialVersionUID = 1L;
 
-/** Json serializer for jackson. */
-public interface JsonSerializer<T> {
+    private static final String FORMAT = "DOUBLE";
 
-    void serialize(T t, JsonGenerator generator) throws IOException;
+    public DoubleType(boolean isNullable) {
+        super(isNullable, DataTypeRoot.DOUBLE);
+    }
+
+    public DoubleType() {
+        this(true);
+    }
+
+    @Override
+    public DataType copy(boolean isNullable) {
+        return new DoubleType(isNullable);
+    }
+
+    @Override
+    public String asSQLString() {
+        return withNullability(FORMAT);
+    }
+
+    @Override
+    public <R> R accept(DataTypeVisitor<R> visitor) {
+        return visitor.visit(this);
+    }
 }

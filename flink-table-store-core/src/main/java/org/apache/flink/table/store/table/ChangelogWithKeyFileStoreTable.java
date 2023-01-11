@@ -33,7 +33,7 @@ import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
-import org.apache.flink.table.store.file.schema.RowDataType;
+import org.apache.flink.table.store.file.schema.LogicalTypeConversion;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
@@ -112,7 +112,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                             options,
                             tableSchema.logicalPartitionType(),
                             addKeyNamePrefix(tableSchema.logicalBucketKeyType()),
-                            RowDataType.toRowType(false, extractor.keyFields(tableSchema)),
+                            LogicalTypeConversion.toRowType(extractor.keyFields(tableSchema)),
                             rowType,
                             extractor,
                             mfFactory);

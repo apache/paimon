@@ -18,48 +18,35 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.types.logical.MultisetType;
-
-import java.util.Objects;
-
-/** A data type for multiset. */
-public class MultisetDataType extends DataType {
+/**
+ * Data type of a 4-byte signed integer with values from -2,147,483,648 to 2,147,483,647.
+ */
+public class IntType extends DataType {
 
     private static final long serialVersionUID = 1L;
 
-    private final DataType elementType;
+    private static final String FORMAT = "INT";
 
-    public MultisetDataType(boolean isNullable, DataType elementType) {
-        super(new MultisetType(isNullable, elementType.logicalType));
-        this.elementType = elementType;
+    public IntType(boolean isNullable) {
+        super(isNullable, DataTypeRoot.INTEGER);
     }
 
-    public DataType elementType() {
-        return elementType;
+    public IntType() {
+        this(true);
     }
 
     @Override
     public DataType copy(boolean isNullable) {
-        return new MultisetDataType(isNullable, elementType);
+        return new IntType(isNullable);
     }
 
     @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        if (!super.equals(o)) {
-            return false;
-        }
-        MultisetDataType that = (MultisetDataType) o;
-        return Objects.equals(elementType, that.elementType);
+    public String asSQLString() {
+        return withNullability(FORMAT);
     }
 
     @Override
-    public int hashCode() {
-        return Objects.hash(super.hashCode(), elementType);
+    public <R> R accept(DataTypeVisitor<R> visitor) {
+        return visitor.visit(this);
     }
 }

@@ -18,48 +18,36 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.types.logical.ArrayType;
-
-import java.util.Objects;
-
-/** A data type for array. */
-public class ArrayDataType extends DataType {
+/**
+ * Data type of a 4-byte single precision floating point number. Compared to the SQL standard,
+ * the type does not take parameters.
+ */
+public class FloatType extends DataType {
 
     private static final long serialVersionUID = 1L;
 
-    private final DataType elementType;
+    private static final String FORMAT = "FLOAT";
 
-    public ArrayDataType(boolean isNullable, DataType elementType) {
-        super(new ArrayType(isNullable, elementType.logicalType));
-        this.elementType = elementType;
+    public FloatType(boolean isNullable) {
+        super(isNullable, DataTypeRoot.FLOAT);
     }
 
-    public DataType elementType() {
-        return elementType;
+    public FloatType() {
+        this(true);
     }
 
     @Override
     public DataType copy(boolean isNullable) {
-        return new ArrayDataType(isNullable, elementType);
+        return new FloatType(isNullable);
     }
 
     @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        if (!super.equals(o)) {
-            return false;
-        }
-        ArrayDataType that = (ArrayDataType) o;
-        return Objects.equals(elementType, that.elementType);
+    public String asSQLString() {
+        return withNullability(FORMAT);
     }
 
     @Override
-    public int hashCode() {
-        return Objects.hash(super.hashCode(), elementType);
+    public <R> R accept(DataTypeVisitor<R> visitor) {
+        return visitor.visit(this);
     }
 }

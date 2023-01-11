@@ -21,7 +21,6 @@ package org.apache.flink.table.store.file;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.data.RowDataSerializer;
-import org.apache.flink.table.store.file.schema.AtomicDataType;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.utils.RowDataUtils;
 import org.apache.flink.table.types.logical.BigIntType;
@@ -138,10 +137,10 @@ public class KeyValue {
         fields.addAll(keyFields);
         fields.add(
                 new DataField(
-                        maxKeyId + 1, SEQUENCE_NUMBER, new AtomicDataType(new BigIntType(false))));
+                        maxKeyId + 1, SEQUENCE_NUMBER, new org.apache.flink.table.store.file.schema.BigIntType(false)));
         fields.add(
                 new DataField(
-                        maxKeyId + 2, VALUE_KIND, new AtomicDataType(new TinyIntType(false))));
+                        maxKeyId + 2, VALUE_KIND, new org.apache.flink.table.store.file.schema.TinyIntType(false)));
         for (DataField valueField : valueFields) {
             DataField newValueField =
                     new DataField(

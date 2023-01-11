@@ -22,7 +22,6 @@ import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.MapType;
-import org.apache.flink.table.types.logical.MultisetType;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.junit.jupiter.api.Assertions;
@@ -43,9 +42,9 @@ public class TableSchemaTest {
     public void testInvalidPrimaryKeys() {
         List<DataField> fields =
                 Arrays.asList(
-                        new DataField(0, "f0", new AtomicDataType(new IntType())),
-                        new DataField(1, "f1", new AtomicDataType(new IntType())),
-                        new DataField(2, "f2", new AtomicDataType(new IntType())));
+                        new DataField(0, "f0", new org.apache.flink.table.store.file.schema.IntType()),
+                        new DataField(1, "f1", new org.apache.flink.table.store.file.schema.IntType()),
+                        new DataField(2, "f2", new org.apache.flink.table.store.file.schema.IntType()));
         List<String> partitionKeys = Collections.singletonList("f0");
         List<String> primaryKeys = Collections.singletonList("f1");
         Map<String, String> options = new HashMap<>();
@@ -59,8 +58,8 @@ public class TableSchemaTest {
     public void testInvalidFieldIds() {
         List<DataField> fields =
                 Arrays.asList(
-                        new DataField(0, "f0", new AtomicDataType(new IntType())),
-                        new DataField(0, "f1", new AtomicDataType(new IntType())));
+                        new DataField(0, "f0", new org.apache.flink.table.store.file.schema.IntType()),
+                        new DataField(0, "f1", new org.apache.flink.table.store.file.schema.IntType()));
         Assertions.assertThrows(
                 RuntimeException.class, () -> TableSchema.currentHighestFieldId(fields));
     }
@@ -69,8 +68,8 @@ public class TableSchemaTest {
     public void testHighestFieldId() {
         List<DataField> fields =
                 Arrays.asList(
-                        new DataField(0, "f0", new AtomicDataType(new IntType())),
-                        new DataField(20, "f1", new AtomicDataType(new IntType())));
+                        new DataField(0, "f0", new org.apache.flink.table.store.file.schema.IntType()),
+                        new DataField(20, "f1", new org.apache.flink.table.store.file.schema.IntType()));
         assertThat(TableSchema.currentHighestFieldId(fields)).isEqualTo(20);
     }
 
@@ -82,21 +81,21 @@ public class TableSchemaTest {
                             new IntType(),
                             newLogicalRowType(true),
                             new ArrayType(false, newLogicalRowType(false)),
-                            new MultisetType(true, newLogicalRowType(false)),
+                            new org.apache.flink.table.types.logical.MultisetType(true, newLogicalRowType(false)),
                             new MapType(false, newLogicalRowType(true), newLogicalRowType(false))
                         },
                         new String[] {"f0", "f1", "f2", "f3", "f4"});
 
         List<DataField> fields =
                 Arrays.asList(
-                        new DataField(0, "f0", new AtomicDataType(new IntType())),
+                        new DataField(0, "f0", new org.apache.flink.table.store.file.schema.IntType()),
                         new DataField(1, "f1", newRowType(true, 2)),
-                        new DataField(3, "f2", new ArrayDataType(false, newRowType(false, 4))),
-                        new DataField(5, "f3", new MultisetDataType(true, newRowType(false, 6))),
+                        new DataField(3, "f2", new org.apache.flink.table.store.file.schema.ArrayType(false, newRowType(false, 4))),
+                        new DataField(5, "f3", new MultisetType(true, newRowType(false, 6))),
                         new DataField(
                                 7,
                                 "f4",
-                                new MapDataType(false, newRowType(true, 8), newRowType(false, 9))));
+                                new org.apache.flink.table.store.file.schema.MapType(false, newRowType(true, 8), newRowType(false, 9))));
 
         assertThat(TableSchema.newFields(type)).isEqualTo(fields);
     }
@@ -107,10 +106,10 @@ public class TableSchemaTest {
                 Collections.singletonList(new RowType.RowField("nestedField", new IntType())));
     }
 
-    static RowDataType newRowType(boolean isNullable, int fieldId) {
-        return new RowDataType(
+    static org.apache.flink.table.store.file.schema.RowType newRowType(boolean isNullable, int fieldId) {
+        return new org.apache.flink.table.store.file.schema.RowType(
                 isNullable,
                 Collections.singletonList(
-                        new DataField(fieldId, "nestedField", new AtomicDataType(new IntType()))));
+                        new DataField(fieldId, "nestedField", new org.apache.flink.table.store.file.schema.IntType())));
     }
 }

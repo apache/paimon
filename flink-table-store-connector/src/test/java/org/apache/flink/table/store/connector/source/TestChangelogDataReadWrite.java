@@ -33,7 +33,6 @@ import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunct
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreRead;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreWrite;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.schema.AtomicDataType;
 import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -77,13 +76,13 @@ public class TestChangelogDataReadWrite {
                 @Override
                 public List<DataField> keyFields(TableSchema schema) {
                     return Collections.singletonList(
-                            new DataField(0, "k", new AtomicDataType(new BigIntType(false))));
+                            new DataField(0, "k", new org.apache.flink.table.store.file.schema.BigIntType(false)));
                 }
 
                 @Override
                 public List<DataField> valueFields(TableSchema schema) {
                     return Collections.singletonList(
-                            new DataField(0, "v", new AtomicDataType(new BigIntType(false))));
+                            new DataField(0, "v", new org.apache.flink.table.store.file.schema.BigIntType(false)));
                 }
             };
 

@@ -38,6 +38,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.table.store.file.schema.LogicalTypeConversion.toLogicalType;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.apache.flink.util.Preconditions.checkState;
 
@@ -345,14 +346,13 @@ public class SchemaEvolutionUtil {
                 } else {
                     // TODO support column type evolution in nested type
                     checkState(
-                            tableField.type() instanceof AtomicDataType
-                                    && dataField.type() instanceof AtomicDataType,
+                            !tableField.type().is(DataTypeFamily.CONSTRUCTED),
                             "Only support column type evolution in atomic data type.");
                     converterMapping[i] =
                             checkNotNull(
                                     CastExecutors.resolve(
-                                            dataField.type().logicalType(),
-                                            tableField.type().logicalType()));
+                                            toLogicalType(dataField.type()),
+                                            toLogicalType(tableField.type())));
                     castExist = true;
                 }
             }

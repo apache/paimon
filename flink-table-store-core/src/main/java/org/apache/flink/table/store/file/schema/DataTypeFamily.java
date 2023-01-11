@@ -18,19 +18,39 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.annotation.PublicEvolving;
 
-/** A data type that does not contain further data types (e.g. {@code INT} or {@code BOOLEAN}). */
-public final class AtomicDataType extends DataType {
+/**
+ * An enumeration of Data type families for clustering {@link DataTypeRoot}s into categories.
+ *
+ * <p>The enumeration is very close to the SQL standard in terms of naming and completeness.
+ * However, it reflects just a subset of the evolving standard and contains some extensions
+ * (indicated by {@code EXTENSION}).
+ */
+public enum DataTypeFamily {
+    PREDEFINED,
 
-    private static final long serialVersionUID = 1L;
+    CONSTRUCTED,
 
-    public AtomicDataType(LogicalType logicalType) {
-        super(logicalType);
-    }
+    CHARACTER_STRING,
 
-    @Override
-    public DataType copy(boolean isNullable) {
-        return new AtomicDataType(logicalType.copy(isNullable));
-    }
+    BINARY_STRING,
+
+    NUMERIC,
+
+    INTEGER_NUMERIC,
+
+    EXACT_NUMERIC,
+
+    APPROXIMATE_NUMERIC,
+
+    DATETIME,
+
+    TIME,
+
+    TIMESTAMP,
+
+    COLLECTION,
+
+    EXTENSION
 }

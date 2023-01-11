@@ -16,15 +16,37 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.utils;
+package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
+/**
+ * Data type of a 1-byte signed integer with values from -128 to 127.
+ */
+public class TinyIntType extends DataType {
 
-import java.io.IOException;
+    private static final long serialVersionUID = 1L;
 
-/** Json serializer for jackson. */
-public interface JsonSerializer<T> {
+    private static final String FORMAT = "TINYINT";
 
-    void serialize(T t, JsonGenerator generator) throws IOException;
+    public TinyIntType(boolean isNullable) {
+        super(isNullable, DataTypeRoot.TINYINT);
+    }
+
+    public TinyIntType() {
+        this(true);
+    }
+
+    @Override
+    public DataType copy(boolean isNullable) {
+        return new TinyIntType(isNullable);
+    }
+
+    @Override
+    public String asSQLString() {
+        return withNullability(FORMAT);
+    }
+
+    @Override
+    public <R> R accept(DataTypeVisitor<R> visitor) {
+        return visitor.visit(this);
+    }
 }

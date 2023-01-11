@@ -16,15 +16,37 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.utils;
+package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
+/**
+ * Data type of a boolean with a (possibly) three-valued logic of {@code TRUE, FALSE, UNKNOWN}.
+ */
+public class BooleanType extends DataType {
 
-import java.io.IOException;
+    private static final long serialVersionUID = 1L;
 
-/** Json serializer for jackson. */
-public interface JsonSerializer<T> {
+    private static final String FORMAT = "BOOLEAN";
 
-    void serialize(T t, JsonGenerator generator) throws IOException;
+    public BooleanType(boolean isNullable) {
+        super(isNullable, DataTypeRoot.INTEGER);
+    }
+
+    public BooleanType() {
+        this(true);
+    }
+
+    @Override
+    public DataType copy(boolean isNullable) {
+        return new BooleanType(isNullable);
+    }
+
+    @Override
+    public String asSQLString() {
+        return withNullability(FORMAT);
+    }
+
+    @Override
+    public <R> R accept(DataTypeVisitor<R> visitor) {
+        return visitor.visit(this);
+    }
 }

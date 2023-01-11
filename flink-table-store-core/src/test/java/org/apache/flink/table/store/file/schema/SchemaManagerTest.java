@@ -99,9 +99,9 @@ public class SchemaManagerTest {
 
         List<DataField> fields =
                 Arrays.asList(
-                        new DataField(0, "f0", new AtomicDataType(new IntType(false))),
-                        new DataField(1, "f1", new AtomicDataType(new BigIntType(false))),
-                        new DataField(2, "f2", new AtomicDataType(new VarCharType())));
+                        new DataField(0, "f0", new org.apache.flink.table.store.file.schema.IntType(false)),
+                        new DataField(1, "f1", new org.apache.flink.table.store.file.schema.BigIntType(false)),
+                        new DataField(2, "f2", new org.apache.flink.table.store.file.schema.VarCharType()));
 
         assertThat(latest.isPresent()).isTrue();
         assertThat(tableSchema).isEqualTo(latest.get());
@@ -233,9 +233,9 @@ public class SchemaManagerTest {
 
         List<DataField> fields =
                 Arrays.asList(
-                        new DataField(0, "f0", new AtomicDataType(new DoubleType(false))),
-                        new DataField(1, "f1", new AtomicDataType(new BigIntType(false))),
-                        new DataField(2, "f2", new AtomicDataType(new VarCharType())));
+                        new DataField(0, "f0", new org.apache.flink.table.store.file.schema.DoubleType(false)),
+                        new DataField(1, "f1", new org.apache.flink.table.store.file.schema.BigIntType(false)),
+                        new DataField(2, "f2", new org.apache.flink.table.store.file.schema.VarCharType()));
 
         assertThat(latest.isPresent()).isTrue();
         assertThat(tableSchema).isEqualTo(latest.get());
