@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.catalog;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.table.TableType;
 
@@ -42,6 +43,17 @@ public class CatalogFactoryTest {
         Configuration options = new Configuration();
         options.set(WAREHOUSE, new Path(root, "warehouse").toString());
         assertThat(CatalogFactory.createCatalog(options).listDatabases()).isEmpty();
+    }
+
+    @Test
+    public void testUGIWrapped(@TempDir java.nio.file.Path path) {
+        Path root = new Path(path.toUri().toString());
+        Configuration options = new Configuration();
+        options.set(WAREHOUSE, new Path(root, "warehouse").toString());
+        UGIWrappedCatalog catalog =
+                new UGIWrappedCatalog(() -> CatalogFactory.createCatalog(options));
+        assertThatThrownBy(() -> catalog.getTable(new ObjectPath("dummy", "dummy")))
+                .isInstanceOf(Catalog.TableNotExistException.class);
     }
 
     @Test

@@ -45,11 +45,8 @@ import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.metastore.api.UnknownDBException;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
-import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.thrift.TException;
 
-import java.io.IOException;
-import java.security.PrivilegedExceptionAction;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -264,12 +261,8 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void close() throws Exception {
-        doAsUgi(
-                () -> {
-                    client.close();
-                    return null;
-                });
+    public void close() {
+        client.close();
     }
 
     @Override
@@ -418,12 +411,8 @@ public class HiveCatalog extends AbstractCatalog {
         IMetaStoreClient client;
         try {
             client =
-                    doAsUgi(
-                            () ->
-                                    RetryingMetaStoreClient.getProxy(
-                                            hiveConf,
-                                            tbl -> null,
-                                            HiveMetaStoreClient.class.getName()));
+                    RetryingMetaStoreClient.getProxy(
+                            hiveConf, tbl -> null, HiveMetaStoreClient.class.getName());
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -431,10 +420,5 @@ public class HiveCatalog extends AbstractCatalog {
                         hiveConf.get(HiveConf.ConfVars.METASTOREURIS.varname))
                 ? client
                 : HiveMetaStoreClient.newSynchronizedClient(client);
-    }
-
-    private static <T> T doAsUgi(PrivilegedExceptionAction<T> action)
-            throws IOException, InterruptedException {
-        return UserGroupInformation.getLoginUser().doAs(action);
     }
 }
