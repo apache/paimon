@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.catalog;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.filesystem.FileSystems;
 import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
@@ -87,8 +88,13 @@ public interface CatalogFactory {
                                     .collect(Collectors.joining("\n")));
         }
 
+        Path warehousePath = new Path(warehouse);
+
+        // initialize to ensure filesystem and kerberos, kerberos is not only for filesystem, but
+        // also for HiveCatalog.
+        FileSystems.initialize(warehousePath, options);
+
         try {
-            Path warehousePath = new Path(warehouse);
             FileSystem fs = warehousePath.getFileSystem();
             if (fs.exists(warehousePath)) {
                 checkArgument(

@@ -33,14 +33,7 @@ public class HadoopModuleFactory implements SecurityModuleFactory {
     private static final Logger LOG = LoggerFactory.getLogger(HadoopModuleFactory.class);
 
     @Override
-    public SecurityModule createModule(SecurityConfiguration securityConfig) {
-        // First check if we have Hadoop in the ClassPath. If not, we simply don't do anything.
-        if (!isHadoopCommonOnClasspath(HadoopModule.class.getClassLoader())) {
-            LOG.info(
-                    "Cannot create Hadoop Security Module because Hadoop cannot be found in the Classpath.");
-            return null;
-        }
-
+    public HadoopModule createModule(SecurityConfiguration securityConfig) {
         try {
             Configuration hadoopConfiguration =
                     HadoopUtils.getHadoopConfiguration(securityConfig.getFlinkConfig());
@@ -50,19 +43,6 @@ public class HadoopModuleFactory implements SecurityModuleFactory {
                     "Cannot create Hadoop Security Module due to an error that happened while instantiating the module. No security module will be loaded.",
                     e);
             return null;
-        }
-    }
-
-    public static boolean isHadoopCommonOnClasspath(ClassLoader classLoader) {
-        try {
-            LOG.debug("Checking whether hadoop common dependency in on classpath.");
-            Class.forName("org.apache.hadoop.conf.Configuration", false, classLoader);
-            Class.forName("org.apache.hadoop.security.UserGroupInformation", false, classLoader);
-            LOG.debug("Hadoop common dependency found on classpath.");
-            return true;
-        } catch (ClassNotFoundException e) {
-            LOG.debug("Hadoop common dependency cannot be found on classpath.");
-            return false;
         }
     }
 }

@@ -24,7 +24,6 @@ import org.apache.flink.core.fs.FileSystemFactory;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.plugin.PluginManager;
 import org.apache.flink.table.store.plugin.FileSystemLoader;
-import org.apache.flink.table.store.security.SecurityConfiguration;
 import org.apache.flink.table.store.security.SecurityUtils;
 
 import java.io.IOException;
@@ -44,6 +43,9 @@ import java.util.ServiceLoader;
 public class FileSystems {
 
     public static void initialize(Path path, Configuration configuration) {
+        // install if there is kerberos keytab
+        SecurityUtils.install(configuration);
+
         // 1. Try to load file system
         try {
             // check can obtain
@@ -63,12 +65,6 @@ public class FileSystems {
                         return (Iterator<P>) discoverFactories().iterator();
                     }
                 });
-
-        try {
-            SecurityUtils.install(new SecurityConfiguration(configuration));
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
     }
 
     private static List<FileSystemFactory> discoverFactories() {

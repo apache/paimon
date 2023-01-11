@@ -18,15 +18,20 @@
 
 package org.apache.flink.table.store.security;
 
+import org.apache.flink.configuration.Configuration;
+
 /** Install security module. */
 public class SecurityUtils {
 
-    public static void install(SecurityConfiguration config) throws Exception {
-        SecurityModuleFactory moduleFactory = new HadoopModuleFactory();
-        SecurityModule module = moduleFactory.createModule(config);
-        // can be null if a SecurityModule is not supported in the current environment
-        if (module != null) {
-            module.install();
+    public static void install(Configuration config) {
+        SecurityConfiguration securityConf = new SecurityConfiguration(config);
+        if (securityConf.getKeytab() != null) {
+            HadoopModuleFactory moduleFactory = new HadoopModuleFactory();
+            try {
+                moduleFactory.createModule(securityConf).install();
+            } catch (SecurityModule.SecurityInstallException e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 }
