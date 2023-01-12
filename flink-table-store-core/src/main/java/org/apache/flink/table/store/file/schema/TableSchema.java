@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
+import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.StringUtils;
@@ -35,8 +36,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
-import static org.apache.flink.table.store.file.schema.LogicalTypeConversion.toDataType;
-import static org.apache.flink.table.store.file.schema.LogicalTypeConversion.toRowType;
+import static org.apache.flink.table.store.types.LogicalTypeConversion.toDataType;
+import static org.apache.flink.table.store.types.LogicalTypeConversion.toRowType;
 
 /** Schema of a table. */
 public class TableSchema implements Serializable {
@@ -257,14 +258,14 @@ public class TableSchema implements Serializable {
     }
 
     public static List<DataField> newFields(RowType rowType) {
-        return ((org.apache.flink.table.store.file.schema.RowType)
+        return ((org.apache.flink.table.store.types.RowType)
                         toDataType(rowType, new AtomicInteger(-1)))
                 .getFields();
     }
 
     public static int currentHighestFieldId(List<DataField> fields) {
         Set<Integer> fieldIds = new HashSet<>();
-        new org.apache.flink.table.store.file.schema.RowType(fields).collectFieldIds(fieldIds);
+        new org.apache.flink.table.store.types.RowType(fields).collectFieldIds(fieldIds);
         return fieldIds.stream().max(Integer::compareTo).orElse(-1);
     }
 }

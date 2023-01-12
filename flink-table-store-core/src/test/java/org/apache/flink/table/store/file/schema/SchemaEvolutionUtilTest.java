@@ -23,6 +23,8 @@ import org.apache.flink.table.store.file.predicate.IsNotNull;
 import org.apache.flink.table.store.file.predicate.IsNull;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.utils.Projection;
 
 import org.junit.jupiter.api.Test;

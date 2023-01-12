@@ -42,7 +42,6 @@ import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
-import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -50,6 +49,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.utils.BinaryRowDataUtil;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -152,8 +152,7 @@ public class MergeTreeBenchmark {
                                         new DataField(
                                                 0,
                                                 "k",
-                                                new org.apache.flink.table.store.file.schema
-                                                        .IntType()));
+                                                new org.apache.flink.table.store.types.IntType()));
                             }
 
                             @Override
@@ -162,8 +161,7 @@ public class MergeTreeBenchmark {
                                         new DataField(
                                                 0,
                                                 "v",
-                                                new org.apache.flink.table.store.file.schema
-                                                        .IntType()));
+                                                new org.apache.flink.table.store.types.IntType()));
                             }
                         });
         readerFactory = readerBuilder.build(BinaryRowDataUtil.EMPTY_ROW, 0);

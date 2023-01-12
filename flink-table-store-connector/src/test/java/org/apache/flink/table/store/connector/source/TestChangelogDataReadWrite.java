@@ -33,7 +33,6 @@ import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunct
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreRead;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreWrite;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -46,6 +45,7 @@ import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
 import org.apache.flink.table.store.table.source.ValueCountRowDataRecordIterator;
+import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -79,8 +79,7 @@ public class TestChangelogDataReadWrite {
                             new DataField(
                                     0,
                                     "k",
-                                    new org.apache.flink.table.store.file.schema.BigIntType(
-                                            false)));
+                                    new org.apache.flink.table.store.types.BigIntType(false)));
                 }
 
                 @Override
@@ -89,8 +88,7 @@ public class TestChangelogDataReadWrite {
                             new DataField(
                                     0,
                                     "v",
-                                    new org.apache.flink.table.store.file.schema.BigIntType(
-                                            false)));
+                                    new org.apache.flink.table.store.types.BigIntType(false)));
                 }
             };
 

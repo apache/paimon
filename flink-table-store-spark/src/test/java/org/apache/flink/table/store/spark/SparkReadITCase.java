@@ -22,10 +22,14 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.binary.BinaryStringData;
-import org.apache.flink.table.store.file.schema.DataField;
-import org.apache.flink.table.store.file.schema.DataType;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DoubleType;
+import org.apache.flink.table.store.types.VarCharType;
 
 import org.apache.spark.sql.AnalysisException;
 import org.apache.spark.sql.Dataset;
@@ -243,14 +247,12 @@ public class SparkReadITCase extends SparkReadTestBase {
                 Arrays.asList("order_id", "buyer_id", "coupon_info", "order_amount", "dt", "hh");
         List<DataType> types =
                 Arrays.asList(
-                        new org.apache.flink.table.store.file.schema.BigIntType(false),
-                        new org.apache.flink.table.store.file.schema.BigIntType(false),
-                        new org.apache.flink.table.store.file.schema.ArrayType(
-                                false,
-                                org.apache.flink.table.store.file.schema.VarCharType.STRING_TYPE),
-                        new org.apache.flink.table.store.file.schema.DoubleType(false),
-                        org.apache.flink.table.store.file.schema.VarCharType.stringType(false),
-                        org.apache.flink.table.store.file.schema.VarCharType.stringType(false));
+                        new BigIntType(false),
+                        new BigIntType(false),
+                        new ArrayType(false, VarCharType.STRING_TYPE),
+                        new DoubleType(false),
+                        VarCharType.stringType(false),
+                        VarCharType.stringType(false));
         List<DataField> fields =
                 IntStream.range(0, columns.size())
                         .boxed()

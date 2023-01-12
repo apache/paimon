@@ -25,6 +25,8 @@ import org.apache.flink.table.store.file.casting.CastExecutors;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateReplaceVisitor;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataTypeFamily;
 import org.apache.flink.table.store.utils.ProjectedRowData;
 
 import javax.annotation.Nullable;
@@ -38,7 +40,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.file.schema.LogicalTypeConversion.toLogicalType;
+import static org.apache.flink.table.store.types.LogicalTypeConversion.toLogicalType;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.apache.flink.util.Preconditions.checkState;
 

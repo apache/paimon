@@ -23,6 +23,7 @@ import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
+import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.DoubleType;
 import org.apache.flink.table.types.logical.IntType;
@@ -100,17 +101,11 @@ public class SchemaManagerTest {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(
-                                0,
-                                "f0",
-                                new org.apache.flink.table.store.file.schema.IntType(false)),
+                                0, "f0", new org.apache.flink.table.store.types.IntType(false)),
                         new DataField(
-                                1,
-                                "f1",
-                                new org.apache.flink.table.store.file.schema.BigIntType(false)),
+                                1, "f1", new org.apache.flink.table.store.types.BigIntType(false)),
                         new DataField(
-                                2,
-                                "f2",
-                                new org.apache.flink.table.store.file.schema.VarCharType()));
+                                2, "f2", new org.apache.flink.table.store.types.VarCharType()));
 
         assertThat(latest.isPresent()).isTrue();
         assertThat(tableSchema).isEqualTo(latest.get());
@@ -243,17 +238,11 @@ public class SchemaManagerTest {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(
-                                0,
-                                "f0",
-                                new org.apache.flink.table.store.file.schema.DoubleType(false)),
+                                0, "f0", new org.apache.flink.table.store.types.DoubleType(false)),
                         new DataField(
-                                1,
-                                "f1",
-                                new org.apache.flink.table.store.file.schema.BigIntType(false)),
+                                1, "f1", new org.apache.flink.table.store.types.BigIntType(false)),
                         new DataField(
-                                2,
-                                "f2",
-                                new org.apache.flink.table.store.file.schema.VarCharType()));
+                                2, "f2", new org.apache.flink.table.store.types.VarCharType()));
 
         assertThat(latest.isPresent()).isTrue();
         assertThat(tableSchema).isEqualTo(latest.get());

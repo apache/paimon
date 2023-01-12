@@ -35,6 +35,10 @@ import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnType;
 import org.apache.flink.table.store.file.utils.AtomicFileWriter;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypeVisitor;
+import org.apache.flink.table.store.types.LogicalTypeConversion;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.DistinctType;
 import org.apache.flink.table.types.logical.LegacyTypeInformationType;
@@ -65,8 +69,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.file.schema.LogicalTypeConversion.toLogicalType;
 import static org.apache.flink.table.store.file.utils.FileUtils.listVersionedFiles;
+import static org.apache.flink.table.store.types.LogicalTypeConversion.toLogicalType;
 import static org.apache.flink.util.Preconditions.checkState;
 
 /** Schema Manager to manage schema versions. */
@@ -398,8 +402,7 @@ public class SchemaManager implements Serializable {
                 } else {
                     List<DataField> nestedFields =
                             new ArrayList<>(
-                                    ((org.apache.flink.table.store.file.schema.RowType)
-                                                    field.type())
+                                    ((org.apache.flink.table.store.types.RowType) field.type())
                                             .getFields());
                     updateNestedColumn(nestedFields, updateFieldNames, index + 1, updateFunc);
                     newFields.set(
@@ -407,7 +410,7 @@ public class SchemaManager implements Serializable {
                             new DataField(
                                     field.id(),
                                     field.name(),
-                                    new org.apache.flink.table.store.file.schema.RowType(
+                                    new org.apache.flink.table.store.types.RowType(
                                             field.type().isNullable(), nestedFields),
                                     field.description()));
                 }
