@@ -16,21 +16,35 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.schema;
+package org.apache.flink.table.store.types;
 
-import org.apache.flink.table.types.logical.LogicalType;
-
-/** A data type that does not contain further data types (e.g. {@code INT} or {@code BOOLEAN}). */
-public final class AtomicDataType extends DataType {
+/** Data type of a 1-byte signed integer with values from -128 to 127. */
+public class TinyIntType extends DataType {
 
     private static final long serialVersionUID = 1L;
 
-    public AtomicDataType(LogicalType logicalType) {
-        super(logicalType);
+    private static final String FORMAT = "TINYINT";
+
+    public TinyIntType(boolean isNullable) {
+        super(isNullable, DataTypeRoot.TINYINT);
+    }
+
+    public TinyIntType() {
+        this(true);
     }
 
     @Override
     public DataType copy(boolean isNullable) {
-        return new AtomicDataType(logicalType.copy(isNullable));
+        return new TinyIntType(isNullable);
+    }
+
+    @Override
+    public String asSQLString() {
+        return withNullability(FORMAT);
+    }
+
+    @Override
+    public <R> R accept(DataTypeVisitor<R> visitor) {
+        return visitor.visit(this);
     }
 }

@@ -16,19 +16,27 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.schema;
+package org.apache.flink.table.store.types;
 
-import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.util.Objects;
+
+import static org.apache.flink.table.utils.EncodingUtils.escapeIdentifier;
+import static org.apache.flink.table.utils.EncodingUtils.escapeSingleQuotes;
 
 /** Defines the field of a row type. */
 public final class DataField implements Serializable {
 
     private static final long serialVersionUID = 1L;
+
+    public static final String FIELD_FORMAT_WITH_DESCRIPTION = "%s %s '%s'";
+
+    public static final String FIELD_FORMAT_NO_DESCRIPTION = "%s %s";
 
     private final int id;
 
@@ -66,6 +74,38 @@ public final class DataField implements Serializable {
         return description;
     }
 
+    public DataField copy() {
+        return new DataField(id, name, type.copy(), description);
+    }
+
+    public String asSQLString() {
+        return formatString(type.asSQLString());
+    }
+
+    private String formatString(String typeString) {
+        if (description == null) {
+            return String.format(FIELD_FORMAT_NO_DESCRIPTION, escapeIdentifier(name), typeString);
+        } else {
+            return String.format(
+                    FIELD_FORMAT_WITH_DESCRIPTION,
+                    escapeIdentifier(name),
+                    typeString,
+                    escapeSingleQuotes(description));
+        }
+    }
+
+    public void serializeJson(JsonGenerator generator) throws IOException {
+        generator.writeStartObject();
+        generator.writeNumberField("id", id());
+        generator.writeStringField("name", name());
+        generator.writeFieldName("type");
+        type.serializeJson(generator);
+        if (description() != null) {
+            generator.writeStringField("description", description());
+        }
+        generator.writeEndObject();
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -88,6 +128,6 @@ public final class DataField implements Serializable {
 
     @Override
     public String toString() {
-        return JsonSerdeUtil.toJson(this);
+        return asSQLString();
     }
 }

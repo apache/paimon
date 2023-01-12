@@ -19,10 +19,10 @@
 package org.apache.flink.table.store.hive;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.filesystem.FileSystems;
+import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.types.logical.LogicalType;
 
 import org.apache.hadoop.conf.Configuration;

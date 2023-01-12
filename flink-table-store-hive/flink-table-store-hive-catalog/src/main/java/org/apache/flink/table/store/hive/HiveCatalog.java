@@ -23,12 +23,13 @@ import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.catalog.AbstractCatalog;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.file.operation.Lock;
-import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.table.TableType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.LogicalTypeConversion;
 import org.apache.flink.util.StringUtils;
 
 import org.apache.hadoop.conf.Configuration;
@@ -354,7 +355,9 @@ public class HiveCatalog extends AbstractCatalog {
     private FieldSchema convertToFieldSchema(DataField dataField) {
         return new FieldSchema(
                 dataField.name(),
-                HiveTypeUtils.logicalTypeToTypeInfo(dataField.type().logicalType()).getTypeName(),
+                HiveTypeUtils.logicalTypeToTypeInfo(
+                                LogicalTypeConversion.toLogicalType(dataField.type()))
+                        .getTypeName(),
                 dataField.description());
     }
 

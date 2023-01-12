@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.file.schema;
 
+import org.apache.flink.table.store.types.DataField;
+
 import java.io.Serializable;
 import java.util.List;
 
