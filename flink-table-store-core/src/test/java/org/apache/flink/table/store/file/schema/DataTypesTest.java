@@ -20,17 +20,15 @@ package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.api.ValidationException;
 
+import org.assertj.core.api.Assertions;
+import org.assertj.core.api.ObjectAssert;
+import org.assertj.core.api.ThrowingConsumer;
+import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
-
-import org.assertj.core.api.Assertions;
-import org.assertj.core.api.ObjectAssert;
-import org.assertj.core.api.ThrowingConsumer;
-import org.junit.jupiter.api.Test;
 
 /** Test for subclasses of {@link DataType}. */
 public class DataTypesTest {
@@ -38,154 +36,94 @@ public class DataTypesTest {
     @Test
     void testCharType() {
         assertThat(new CharType(33))
-                .satisfies(
-                        baseAssertions(
-                                "CHAR(33)",
-                                new CharType(Integer.MAX_VALUE)));
+                .satisfies(baseAssertions("CHAR(33)", new CharType(Integer.MAX_VALUE)));
     }
 
     @Test
     void testVarCharType() {
         assertThat(new VarCharType(33))
-                .satisfies(
-                        baseAssertions(
-                                "VARCHAR(33)",
-                                new VarCharType(12)));
+                .satisfies(baseAssertions("VARCHAR(33)", new VarCharType(12)));
     }
 
     @Test
     void testVarCharTypeWithMaximumLength() {
         assertThat(new VarCharType(Integer.MAX_VALUE))
-                .satisfies(
-                        baseAssertions(
-                                "STRING",
-                                new VarCharType(12)));
+                .satisfies(baseAssertions("STRING", new VarCharType(12)));
     }
 
     @Test
     void testBooleanType() {
-        assertThat(new BooleanType())
-                .satisfies(
-                        baseAssertions(
-                                "BOOLEAN",
-                                new BooleanType(false)));
+        assertThat(new BooleanType()).satisfies(baseAssertions("BOOLEAN", new BooleanType(false)));
     }
 
     @Test
     void testBinaryType() {
-        assertThat(new BinaryType(22))
-                .satisfies(
-                        baseAssertions(
-                                "BINARY(22)",
-                                new BinaryType()));
+        assertThat(new BinaryType(22)).satisfies(baseAssertions("BINARY(22)", new BinaryType()));
     }
 
     @Test
     void testVarBinaryType() {
         assertThat(new VarBinaryType(22))
-                .satisfies(
-                        baseAssertions(
-                                "VARBINARY(22)",
-                                new VarBinaryType()));
+                .satisfies(baseAssertions("VARBINARY(22)", new VarBinaryType()));
     }
 
     @Test
     void testVarBinaryTypeWithMaximumLength() {
         assertThat(new VarBinaryType(Integer.MAX_VALUE))
-                .satisfies(
-                        baseAssertions(
-                                "BYTES",
-                                new VarBinaryType(12)));
+                .satisfies(baseAssertions("BYTES", new VarBinaryType(12)));
     }
 
     @Test
     void testDecimalType() {
         assertThat(new DecimalType(10, 2))
-                .satisfies(
-                        baseAssertions(
-                                "DECIMAL(10, 2)",
-                                new DecimalType()));
+                .satisfies(baseAssertions("DECIMAL(10, 2)", new DecimalType()));
     }
 
     @Test
     void testTinyIntType() {
-        assertThat(new TinyIntType())
-                .satisfies(
-                        baseAssertions(
-                                "TINYINT",
-                                new TinyIntType(false)));
+        assertThat(new TinyIntType()).satisfies(baseAssertions("TINYINT", new TinyIntType(false)));
     }
 
     @Test
     void testSmallIntType() {
         assertThat(new SmallIntType())
-                .satisfies(
-                        baseAssertions(
-                                "SMALLINT",
-                                new SmallIntType(false)));
+                .satisfies(baseAssertions("SMALLINT", new SmallIntType(false)));
     }
 
     @Test
     void testIntType() {
-        assertThat(new IntType())
-                .satisfies(
-                        baseAssertions(
-                                "INT",
-                                new IntType(false)));
+        assertThat(new IntType()).satisfies(baseAssertions("INT", new IntType(false)));
     }
 
     @Test
     void testBigIntType() {
-        assertThat(new BigIntType())
-                .satisfies(
-                        baseAssertions(
-                                "BIGINT",
-                                new BigIntType(false)));
+        assertThat(new BigIntType()).satisfies(baseAssertions("BIGINT", new BigIntType(false)));
     }
 
     @Test
     void testFloatType() {
-        assertThat(new FloatType())
-                .satisfies(
-                        baseAssertions(
-                                "FLOAT",
-                                new FloatType(false)));
+        assertThat(new FloatType()).satisfies(baseAssertions("FLOAT", new FloatType(false)));
     }
 
     @Test
     void testDoubleType() {
-        assertThat(new DoubleType())
-                .satisfies(
-                        baseAssertions(
-                                "DOUBLE",
-                                new DoubleType(false)));
+        assertThat(new DoubleType()).satisfies(baseAssertions("DOUBLE", new DoubleType(false)));
     }
 
     @Test
     void testDateType() {
-        assertThat(new DateType())
-                .satisfies(
-                        baseAssertions(
-                                "DATE",
-                                new DateType(false)));
+        assertThat(new DateType()).satisfies(baseAssertions("DATE", new DateType(false)));
     }
 
     @Test
     void testTimeType() {
-        assertThat(new TimeType(9))
-                .satisfies(
-                        baseAssertions(
-                                "TIME(9)",
-                                new TimeType()));
+        assertThat(new TimeType(9)).satisfies(baseAssertions("TIME(9)", new TimeType()));
     }
 
     @Test
     void testTimestampType() {
         assertThat(new TimestampType(9))
-                .satisfies(
-                        baseAssertions(
-                                "TIMESTAMP(9)",
-                                new TimestampType(3)));
+                .satisfies(baseAssertions("TIMESTAMP(9)", new TimestampType(3)));
     }
 
     @Test
@@ -201,15 +139,12 @@ public class DataTypesTest {
     void testArrayType() {
         assertThat(new ArrayType(new TimestampType()))
                 .satisfies(
-                        baseAssertions(
-                                "ARRAY<TIMESTAMP(6)>",
-                                new ArrayType(new SmallIntType())));
+                        baseAssertions("ARRAY<TIMESTAMP(6)>", new ArrayType(new SmallIntType())));
 
         assertThat(new ArrayType(new ArrayType(new TimestampType())))
                 .satisfies(
                         baseAssertions(
                                 "ARRAY<ARRAY<TIMESTAMP(6)>>",
-
                                 new ArrayType(new ArrayType(new SmallIntType()))));
     }
 
@@ -218,15 +153,12 @@ public class DataTypesTest {
         assertThat(new MultisetType(new TimestampType()))
                 .satisfies(
                         baseAssertions(
-                                "MULTISET<TIMESTAMP(6)>",
-
-                                new MultisetType(new SmallIntType())));
+                                "MULTISET<TIMESTAMP(6)>", new MultisetType(new SmallIntType())));
 
         assertThat(new MultisetType(new MultisetType(new TimestampType())))
                 .satisfies(
                         baseAssertions(
                                 "MULTISET<MULTISET<TIMESTAMP(6)>>",
-
                                 new MultisetType(new MultisetType(new SmallIntType()))));
     }
 
@@ -244,8 +176,7 @@ public class DataTypesTest {
         assertThat(
                         new RowType(
                                 Arrays.asList(
-                                        new DataField(
-                                                0, "a", new VarCharType(), "Someone's desc."),
+                                        new DataField(0, "a", new VarCharType(), "Someone's desc."),
                                         new DataField(1, "b`", new TimestampType()))))
                 .satisfies(
                         baseAssertions(
@@ -254,17 +185,19 @@ public class DataTypesTest {
                                         Arrays.asList(
                                                 new DataField(
                                                         0,
-                                                        "a", new VarCharType(), "Different desc."),
+                                                        "a",
+                                                        new VarCharType(),
+                                                        "Different desc."),
                                                 new DataField(1, "b`", new TimestampType())))));
 
         assertThatThrownBy(
                         () ->
                                 new RowType(
                                         Arrays.asList(
-                                                new DataField(0,"b", new VarCharType()),
-                                                new DataField(1,"b", new VarCharType()),
-                                                new DataField(2,"a", new VarCharType()),
-                                                new DataField(3,"a", new TimestampType()))))
+                                                new DataField(0, "b", new VarCharType()),
+                                                new DataField(1, "b", new VarCharType()),
+                                                new DataField(2, "a", new VarCharType()),
+                                                new DataField(3, "a", new TimestampType()))))
                 .isInstanceOf(ValidationException.class);
 
         assertThatThrownBy(
@@ -277,9 +210,7 @@ public class DataTypesTest {
 
     // --------------------------------------------------------------------------------------------
 
-    private static ThrowingConsumer<DataType> baseAssertions(
-            String sqlString,
-            DataType otherType) {
+    private static ThrowingConsumer<DataType> baseAssertions(String sqlString, DataType otherType) {
         return nullableType ->
                 assertThat(nullableType)
                         .satisfies(nonEqualityCheckWithOtherType(otherType))
@@ -288,8 +219,7 @@ public class DataTypesTest {
                         .hasSQLString(sqlString);
     }
 
-    private static ThrowingConsumer<DataType> nonEqualityCheckWithOtherType(
-            DataType otherType) {
+    private static ThrowingConsumer<DataType> nonEqualityCheckWithOtherType(DataType otherType) {
         return nullableType -> {
             assertThat(nullableType)
                     .isNullable()

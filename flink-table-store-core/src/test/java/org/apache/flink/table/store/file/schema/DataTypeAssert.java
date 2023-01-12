@@ -24,7 +24,6 @@ import org.apache.flink.util.InstantiationUtil;
 import org.assertj.core.api.AbstractAssert;
 import org.assertj.core.api.Condition;
 
-
 import java.io.IOException;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -53,9 +52,9 @@ public class DataTypeAssert extends AbstractAssert<DataTypeAssert, DataType> {
         isNotNull();
         try {
             assertThat(
-                    InstantiationUtil.<DataType>deserializeObject(
-                            InstantiationUtil.serializeObject(this.actual),
-                            DataTypesTest.class.getClassLoader()))
+                            InstantiationUtil.<DataType>deserializeObject(
+                                    InstantiationUtil.serializeObject(this.actual),
+                                    DataTypesTest.class.getClassLoader()))
                     .isEqualTo(this.actual);
         } catch (IOException | ClassNotFoundException e) {
             fail(

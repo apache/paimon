@@ -24,9 +24,6 @@ import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.TextNode;
-
-
 import javax.annotation.Nullable;
 
 import java.util.Arrays;
@@ -88,81 +85,77 @@ public class DataTypeJsonParserTest {
                 TestSpec.forString("TIMESTAMP(3) WITH LOCAL TIME ZONE")
                         .expectType(new LocalZonedTimestampType(3)),
                 TestSpec.forString("TIMESTAMP_LTZ(3)").expectType(new LocalZonedTimestampType(3)),
-                TestSpec.forString("ARRAY<TIMESTAMP(3) WITH LOCAL TIME ZONE>")
-                        .expectType(new ArrayType(new LocalZonedTimestampType(3))),
-                TestSpec.forString("ARRAY<INT NOT NULL>")
-                        .expectType(new ArrayType(new IntType(false))),
-                TestSpec.forString("INT ARRAY").expectType(new ArrayType(new IntType())),
-                TestSpec.forString("INT NOT NULL ARRAY")
-                        .expectType(new ArrayType(new IntType(false))),
-                TestSpec.forString("INT ARRAY NOT NULL")
-                        .expectType(new ArrayType(false, new IntType())),
-                TestSpec.forString("MULTISET<INT NOT NULL>")
-                        .expectType(new MultisetType(new IntType(false))),
-                TestSpec.forString("INT MULTISET").expectType(new MultisetType(new IntType())),
-                TestSpec.forString("INT NOT NULL MULTISET")
-                        .expectType(new MultisetType(new IntType(false))),
-                TestSpec.forString("INT MULTISET NOT NULL")
-                        .expectType(new MultisetType(false, new IntType())),
-                TestSpec.forString("MAP<BIGINT, BOOLEAN>")
-                        .expectType(new MapType(new BigIntType(), new BooleanType())),
-                TestSpec.forString("ROW<f0 INT NOT NULL, f1 BOOLEAN>")
-                        .expectType(
-                                new RowType(
-                                        Arrays.asList(
-                                                new DataField(0,"f0", new IntType(false)),
-                                                new DataField(1,"f1", new BooleanType())))),
-                TestSpec.forString("ROW(f0 INT NOT NULL, f1 BOOLEAN)")
-                        .expectType(
-                                new RowType(
-                                        Arrays.asList(
-                                                new DataField(0,"f0", new IntType(false)),
-                                                new DataField(1,"f1", new BooleanType())))),
-                TestSpec.forString("ROW<`f0` INT>")
-                        .expectType(
-                                new RowType(
-                                        Collections.singletonList(
-                                                new DataField(0,"f0", new IntType())))),
-                TestSpec.forString("ROW(`f0` INT)")
-                        .expectType(
-                                new RowType(
-                                        Collections.singletonList(
-                                                new DataField(0,"f0", new IntType())))),
-                TestSpec.forString("ROW<>").expectType(new RowType(Collections.emptyList())),
-                TestSpec.forString("ROW()").expectType(new RowType(Collections.emptyList())),
                 TestSpec.forString(
-                                "ROW<f0 INT NOT NULL 'This is a comment.', f1 BOOLEAN 'This as well.'>")
+                                "{\"type\":\"ARRAY\",\"element\":\"TIMESTAMP(3) WITH LOCAL TIME ZONE\"}")
+                        .expectType(new ArrayType(new LocalZonedTimestampType(3))),
+                TestSpec.forString("{\"type\":\"ARRAY\",\"element\":\"INT NOT NULL\"}")
+                        .expectType(new ArrayType(new IntType(false))),
+                TestSpec.forString("{\"type\":\"ARRAY\",\"element\":\"INT\"}")
+                        .expectType(new ArrayType(new IntType())),
+                TestSpec.forString("{\"type\":\"ARRAY\",\"element\":\"INT NOT NULL\"}")
+                        .expectType(new ArrayType(new IntType(false))),
+                TestSpec.forString("{\"type\":\"ARRAY NOT NULL\",\"element\":\"INT\"}")
+                        .expectType(new ArrayType(false, new IntType())),
+                TestSpec.forString("{\"type\":\"MULTISET\",\"element\":\"INT NOT NULL\"}")
+                        .expectType(new MultisetType(new IntType(false))),
+                TestSpec.forString("{\"type\":\"MULTISET\",\"element\":\"INT\"}")
+                        .expectType(new MultisetType(new IntType())),
+                TestSpec.forString("{\"type\":\"MULTISET\",\"element\":\"INT NOT NULL\"}")
+                        .expectType(new MultisetType(new IntType(false))),
+                TestSpec.forString("{\"type\":\"MULTISET NOT NULL\",\"element\":\"INT\"}")
+                        .expectType(new MultisetType(false, new IntType())),
+                TestSpec.forString("{\"type\":\"MAP\",\"key\":\"BIGINT\",\"value\":\"BOOLEAN\"}")
+                        .expectType(new MapType(new BigIntType(), new BooleanType())),
+                TestSpec.forString(
+                                "{\"type\":\"ROW\",\"fields\":[{\"id\":0,\"name\":\"f0\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"f1\",\"type\":\"BOOLEAN\"}]}")
                         .expectType(
                                 new RowType(
                                         Arrays.asList(
-                                                new DataField(0,
+                                                new DataField(0, "f0", new IntType(false)),
+                                                new DataField(1, "f1", new BooleanType())))),
+                TestSpec.forString(
+                                "{\"type\":\"ROW\",\"fields\":[{\"id\":0,\"name\":\"f0\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"f1\",\"type\":\"BOOLEAN\"}]}")
+                        .expectType(
+                                new RowType(
+                                        Arrays.asList(
+                                                new DataField(0, "f0", new IntType(false)),
+                                                new DataField(1, "f1", new BooleanType())))),
+                TestSpec.forString(
+                                "{\"type\":\"ROW\",\"fields\":[{\"id\":0,\"name\":\"f0\",\"type\":\"INT\"}]}")
+                        .expectType(
+                                new RowType(
+                                        Collections.singletonList(
+                                                new DataField(0, "f0", new IntType())))),
+                TestSpec.forString("{\"type\":\"ROW\",\"fields\":[]}")
+                        .expectType(new RowType(Collections.emptyList())),
+                TestSpec.forString(
+                                "{\"type\":\"ROW\",\"fields\":[{\"id\":0,\"name\":\"f0\",\"type\":\"INT NOT NULL\",\"description\":\"This is a comment.\"},{\"id\":1,\"name\":\"f1\",\"type\":\"BOOLEAN\",\"description\":\"This as well.\"}]}")
+                        .expectType(
+                                new RowType(
+                                        Arrays.asList(
+                                                new DataField(
+                                                        0,
                                                         "f0",
                                                         new IntType(false),
                                                         "This is a comment."),
-                                                new DataField(1,
+                                                new DataField(
+                                                        1,
                                                         "f1",
                                                         new BooleanType(),
                                                         "This as well.")))),
 
                 // error message testing
 
-                TestSpec.forString("ROW<`f0").expectErrorMessage("Unexpected end"),
-                TestSpec.forString("ROW<`f0`").expectErrorMessage("Unexpected end"),
                 TestSpec.forString("VARCHAR(test)").expectErrorMessage("<LITERAL_INT> expected"),
                 TestSpec.forString("VARCHAR(33333333333)")
-                        .expectErrorMessage("Invalid integer value"),
-                TestSpec.forString("ROW<field INT, field2>")
-                        .expectErrorMessage("<KEYWORD> expected"),
-                TestSpec.forString("RAW('unknown.class', '')")
-                        .expectErrorMessage("Unable to restore the RAW type"));
+                        .expectErrorMessage("Invalid integer value"));
     }
 
     @ParameterizedTest(name = "{index}: [From: {0}, To: {1}]")
     @MethodSource("testData")
     void testParsing(TestSpec testSpec) {
         if (testSpec.expectedType != null) {
-            assertThat(parse(testSpec.jsonString))
-                    .isEqualTo(testSpec.expectedType);
+            assertThat(parse(testSpec.jsonString)).isEqualTo(testSpec.expectedType);
         }
     }
 
@@ -170,8 +163,7 @@ public class DataTypeJsonParserTest {
     @MethodSource("testData")
     void testJsonParsing(TestSpec testSpec) {
         if (testSpec.expectedType != null) {
-            assertThat(parse(toJson(testSpec.expectedType)))
-                    .isEqualTo(testSpec.expectedType);
+            assertThat(parse(toJson(testSpec.expectedType))).isEqualTo(testSpec.expectedType);
         }
     }
 
@@ -186,14 +178,17 @@ public class DataTypeJsonParserTest {
     }
 
     private static String toJson(DataType type) {
-        return JsonSerdeUtil.toJson(type);
+        String json = JsonSerdeUtil.toFlatJson(type);
+        System.out.println(json);
+        return json;
     }
 
     private static DataType parse(String json) {
         if (!json.startsWith("\"") && !json.startsWith("{")) {
             json = "\"" + json + "\"";
         }
-        String dataFieldJson = String.format("{\"id\": 0, \"name\": \"dummy\", \"type\": %s}", json);
+        String dataFieldJson =
+                String.format("{\"id\": 0, \"name\": \"dummy\", \"type\": %s}", json);
         return JsonSerdeUtil.fromJson(dataFieldJson, DataField.class).type();
     }
 

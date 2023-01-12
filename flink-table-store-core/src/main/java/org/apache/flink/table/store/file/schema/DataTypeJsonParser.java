@@ -612,6 +612,14 @@ public final class DataTypeJsonParser {
                 nextToken(Keyword.WITHOUT);
                 nextToken(Keyword.TIME);
                 nextToken(Keyword.ZONE);
+            } else if (hasNextToken(Keyword.WITH)) {
+                nextToken(Keyword.WITH);
+                if (hasNextToken(Keyword.LOCAL)) {
+                    nextToken(Keyword.LOCAL);
+                    nextToken(Keyword.TIME);
+                    nextToken(Keyword.ZONE);
+                    return new LocalZonedTimestampType(precision);
+                }
             }
             return new TimestampType(precision);
         }
