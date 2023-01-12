@@ -178,9 +178,7 @@ public class DataTypeJsonParserTest {
     }
 
     private static String toJson(DataType type) {
-        String json = JsonSerdeUtil.toFlatJson(type);
-        System.out.println(json);
-        return json;
+        return JsonSerdeUtil.toFlatJson(type);
     }
 
     private static DataType parse(String json) {
