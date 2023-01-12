@@ -28,10 +28,7 @@ import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.schema.AtomicDataType;
-import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
-import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
@@ -44,7 +41,9 @@ import org.apache.flink.table.store.table.source.MergeTreeSplitGenerator;
 import org.apache.flink.table.store.table.source.SplitGenerator;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.ValueCountRowDataRecordIterator;
-import org.apache.flink.table.types.logical.BigIntType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.LogicalTypeConversion;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 
@@ -73,7 +72,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     public KeyValueFileStore store() {
         if (lazyStore == null) {
             KeyValueFieldsExtractor extractor = ValueCountTableKeyValueFieldsExtractor.EXTRACTOR;
-            RowType countType = RowDataType.toRowType(false, extractor.valueFields(tableSchema));
+            RowType countType = LogicalTypeConversion.toRowType(extractor.valueFields(tableSchema));
             lazyStore =
                     new KeyValueFileStore(
                             schemaManager(),
@@ -81,7 +80,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                             new CoreOptions(tableSchema.options()),
                             tableSchema.logicalPartitionType(),
                             tableSchema.logicalBucketKeyType(),
-                            RowDataType.toRowType(false, extractor.keyFields(tableSchema)),
+                            LogicalTypeConversion.toRowType(extractor.keyFields(tableSchema)),
                             countType,
                             extractor,
                             ValueCountMergeFunction.factory());
@@ -174,8 +173,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
 
         @Override
         public List<DataField> valueFields(TableSchema schema) {
-            return Collections.singletonList(
-                    new DataField(0, VALUE_COUNT, new AtomicDataType(new BigIntType(false))));
+            return Collections.singletonList(new DataField(0, VALUE_COUNT, new BigIntType(false)));
         }
     }
 }

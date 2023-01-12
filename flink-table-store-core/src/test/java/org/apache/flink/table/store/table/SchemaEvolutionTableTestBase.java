@@ -21,7 +21,6 @@ package org.apache.flink.table.store.table;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
@@ -29,8 +28,6 @@ import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.schema.AtomicDataType;
-import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -40,6 +37,19 @@ import org.apache.flink.table.store.file.utils.TraceableFileSystem;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.BinaryType;
+import org.apache.flink.table.store.types.CharType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DateType;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.DoubleType;
+import org.apache.flink.table.store.types.FloatType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.SmallIntType;
+import org.apache.flink.table.store.types.TimestampType;
+import org.apache.flink.table.store.types.VarBinaryType;
+import org.apache.flink.table.store.types.VarCharType;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -66,42 +76,37 @@ import static org.assertj.core.api.Assertions.assertThat;
 public abstract class SchemaEvolutionTableTestBase {
     protected static final List<DataField> SCHEMA_0_FIELDS =
             Arrays.asList(
-                    new DataField(0, "a", new AtomicDataType(DataTypes.STRING().getLogicalType())),
-                    new DataField(1, "pt", new AtomicDataType(DataTypes.INT().getLogicalType())),
-                    new DataField(2, "b", new AtomicDataType(DataTypes.INT().getLogicalType())),
-                    new DataField(3, "c", new AtomicDataType(DataTypes.STRING().getLogicalType())),
-                    new DataField(4, "kt", new AtomicDataType(DataTypes.BIGINT().getLogicalType())),
-                    new DataField(5, "d", new AtomicDataType(DataTypes.STRING().getLogicalType())));
+                    new DataField(0, "a", VarCharType.STRING_TYPE),
+                    new DataField(1, "pt", new IntType()),
+                    new DataField(2, "b", new IntType()),
+                    new DataField(3, "c", VarCharType.STRING_TYPE),
+                    new DataField(4, "kt", new BigIntType()),
+                    new DataField(5, "d", VarCharType.STRING_TYPE));
     protected static final List<DataField> SCHEMA_1_FIELDS =
             Arrays.asList(
-                    new DataField(1, "pt", new AtomicDataType(DataTypes.INT().getLogicalType())),
-                    new DataField(2, "d", new AtomicDataType(DataTypes.INT().getLogicalType())),
-                    new DataField(4, "kt", new AtomicDataType(DataTypes.BIGINT().getLogicalType())),
-                    new DataField(6, "a", new AtomicDataType(DataTypes.INT().getLogicalType())),
-                    new DataField(7, "f", new AtomicDataType(DataTypes.STRING().getLogicalType())),
-                    new DataField(8, "b", new AtomicDataType(DataTypes.STRING().getLogicalType())));
+                    new DataField(1, "pt", new IntType()),
+                    new DataField(2, "d", new IntType()),
+                    new DataField(4, "kt", new BigIntType()),
+                    new DataField(6, "a", new IntType()),
+                    new DataField(7, "f", VarCharType.STRING_TYPE),
+                    new DataField(8, "b", VarCharType.STRING_TYPE));
     protected static final List<String> PARTITION_NAMES = Collections.singletonList("pt");
     protected static final List<String> PRIMARY_KEY_NAMES = Arrays.asList("pt", "kt");
 
     protected static final List<DataField> SCHEMA_FIELDS =
             Arrays.asList(
-                    new DataField(0, "a", new AtomicDataType(DataTypes.INT().getLogicalType())),
-                    new DataField(1, "b", new AtomicDataType(DataTypes.CHAR(10).getLogicalType())),
-                    new DataField(
-                            2, "c", new AtomicDataType(DataTypes.VARCHAR(10).getLogicalType())),
-                    new DataField(
-                            3, "d", new AtomicDataType(DataTypes.DECIMAL(10, 2).getLogicalType())),
-                    new DataField(
-                            4, "e", new AtomicDataType(DataTypes.SMALLINT().getLogicalType())),
-                    new DataField(5, "f", new AtomicDataType(DataTypes.INT().getLogicalType())),
-                    new DataField(6, "g", new AtomicDataType(DataTypes.BIGINT().getLogicalType())),
-                    new DataField(7, "h", new AtomicDataType(DataTypes.FLOAT().getLogicalType())),
-                    new DataField(8, "i", new AtomicDataType(DataTypes.DOUBLE().getLogicalType())),
-                    new DataField(9, "j", new AtomicDataType(DataTypes.DATE().getLogicalType())),
-                    new DataField(
-                            10, "k", new AtomicDataType(DataTypes.TIMESTAMP(2).getLogicalType())),
-                    new DataField(
-                            11, "l", new AtomicDataType(DataTypes.BINARY(100).getLogicalType())));
+                    new DataField(0, "a", new IntType()),
+                    new DataField(1, "b", new CharType(10)),
+                    new DataField(2, "c", new VarCharType(10)),
+                    new DataField(3, "d", new DecimalType(10, 2)),
+                    new DataField(4, "e", new SmallIntType()),
+                    new DataField(5, "f", new IntType()),
+                    new DataField(6, "g", new BigIntType()),
+                    new DataField(7, "h", new FloatType()),
+                    new DataField(8, "i", new DoubleType()),
+                    new DataField(9, "j", new DateType()),
+                    new DataField(10, "k", new TimestampType(2)),
+                    new DataField(11, "l", new BinaryType(100)));
     protected static final List<String> SCHEMA_PARTITION_NAMES = Collections.singletonList("a");
     protected static final List<String> SCHEMA_PRIMARY_KEYS =
             Arrays.asList("a", "b", "c", "d", "e");
@@ -311,31 +316,15 @@ public abstract class SchemaEvolutionTableTestBase {
          */
         //
         List<DataField> evolutionFields = new ArrayList<>(SCHEMA_FIELDS);
-        evolutionFields.set(
-                1,
-                new DataField(1, "b", new AtomicDataType(DataTypes.VARCHAR(10).getLogicalType())));
-        evolutionFields.set(
-                3, new DataField(3, "d", new AtomicDataType(DataTypes.DOUBLE().getLogicalType())));
-        evolutionFields.set(
-                4, new DataField(4, "e", new AtomicDataType(DataTypes.INT().getLogicalType())));
-        evolutionFields.set(
-                5,
-                new DataField(
-                        5, "f", new AtomicDataType(DataTypes.DECIMAL(10, 2).getLogicalType())));
-        evolutionFields.set(
-                6, new DataField(6, "g", new AtomicDataType(DataTypes.FLOAT().getLogicalType())));
-        evolutionFields.set(
-                7, new DataField(7, "h", new AtomicDataType(DataTypes.DOUBLE().getLogicalType())));
-        evolutionFields.set(
-                8,
-                new DataField(
-                        8, "i", new AtomicDataType(DataTypes.DECIMAL(10, 2).getLogicalType())));
-        evolutionFields.set(
-                10, new DataField(10, "k", new AtomicDataType(DataTypes.DATE().getLogicalType())));
-        evolutionFields.set(
-                11,
-                new DataField(
-                        11, "l", new AtomicDataType(DataTypes.VARBINARY(100).getLogicalType())));
+        evolutionFields.set(1, new DataField(1, "b", new VarCharType(10)));
+        evolutionFields.set(3, new DataField(3, "d", new DoubleType()));
+        evolutionFields.set(4, new DataField(4, "e", new IntType()));
+        evolutionFields.set(5, new DataField(5, "f", new DecimalType(10, 2)));
+        evolutionFields.set(6, new DataField(6, "g", new FloatType()));
+        evolutionFields.set(7, new DataField(7, "h", new DoubleType()));
+        evolutionFields.set(8, new DataField(8, "i", new DecimalType(10, 2)));
+        evolutionFields.set(10, new DataField(10, "k", new DateType()));
+        evolutionFields.set(11, new DataField(11, "l", new VarBinaryType(100)));
         tableSchemas.put(
                 1L,
                 new TableSchema(

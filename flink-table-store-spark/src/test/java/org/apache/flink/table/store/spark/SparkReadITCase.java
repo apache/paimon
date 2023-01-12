@@ -22,15 +22,14 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.binary.BinaryStringData;
-import org.apache.flink.table.store.file.schema.ArrayDataType;
-import org.apache.flink.table.store.file.schema.AtomicDataType;
-import org.apache.flink.table.store.file.schema.DataField;
-import org.apache.flink.table.store.file.schema.DataType;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.DoubleType;
-import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DoubleType;
+import org.apache.flink.table.store.types.VarCharType;
 
 import org.apache.spark.sql.AnalysisException;
 import org.apache.spark.sql.Dataset;
@@ -99,10 +98,10 @@ public class SparkReadITCase extends SparkReadTestBase {
         assertThat(fieldsList.stream().map(Object::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
                         "[{\"id\":0,\"name\":\"a\",\"type\":\"BIGINT NOT NULL\"},"
-                                + "{\"id\":1,\"name\":\"b\",\"type\":\"VARCHAR(2147483647)\"}]",
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"STRING\"}]",
                         "[{\"id\":0,\"name\":\"a\",\"type\":\"BIGINT NOT NULL\"},"
-                                + "{\"id\":1,\"name\":\"b\",\"type\":\"VARCHAR(2147483647)\"},"
-                                + "{\"id\":2,\"name\":\"c\",\"type\":\"VARCHAR(2147483647)\"}]");
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"STRING\"},"
+                                + "{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}]");
     }
 
     @Test
@@ -248,14 +247,12 @@ public class SparkReadITCase extends SparkReadTestBase {
                 Arrays.asList("order_id", "buyer_id", "coupon_info", "order_amount", "dt", "hh");
         List<DataType> types =
                 Arrays.asList(
-                        new AtomicDataType(new BigIntType(false)),
-                        new AtomicDataType(new BigIntType(false)),
-                        new ArrayDataType(
-                                false,
-                                new AtomicDataType(new VarCharType(true, VarCharType.MAX_LENGTH))),
-                        new AtomicDataType(new DoubleType(false)),
-                        new AtomicDataType(new VarCharType(false, VarCharType.MAX_LENGTH)),
-                        new AtomicDataType(new VarCharType(false, VarCharType.MAX_LENGTH)));
+                        new BigIntType(false),
+                        new BigIntType(false),
+                        new ArrayType(false, VarCharType.STRING_TYPE),
+                        new DoubleType(false),
+                        VarCharType.stringType(false),
+                        VarCharType.stringType(false));
         List<DataField> fields =
                 IntStream.range(0, columns.size())
                         .boxed()
