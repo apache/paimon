@@ -26,12 +26,15 @@ import org.apache.flink.table.store.data.InternalSerializers;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.types.DataType;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 
 /** Leaf node of a {@link Predicate} tree. Compares a field in the row with literals. */
 public class LeafPredicate implements Predicate {
@@ -42,6 +45,7 @@ public class LeafPredicate implements Predicate {
     private final DataType type;
     private final int fieldIndex;
     private final String fieldName;
+    @Nullable private final Function<Object, Object> castFunction;
 
     private transient List<Object> literals;
 
@@ -51,11 +55,22 @@ public class LeafPredicate implements Predicate {
             int fieldIndex,
             String fieldName,
             List<Object> literals) {
+        this(function, type, fieldIndex, fieldName, literals, null);
+    }
+
+    public LeafPredicate(
+            LeafFunction function,
+            LogicalType type,
+            int fieldIndex,
+            String fieldName,
+            List<Object> literals,
+            Function<Object, Object> castFunction) {
         this.function = function;
         this.type = type;
         this.fieldIndex = fieldIndex;
         this.fieldName = fieldName;
         this.literals = literals;
+        this.castFunction = castFunction;
     }
 
     public LeafFunction function() {
@@ -84,7 +99,10 @@ public class LeafPredicate implements Predicate {
 
     @Override
     public boolean test(Object[] values) {
-        return function.test(type, values[fieldIndex], literals);
+        return function.test(
+                type,
+                castFunction == null ? values[fieldIndex] : castFunction.apply(values[fieldIndex]),
+                literals);
     }
 
     @Override
