@@ -381,6 +381,7 @@ public class SchemaManager implements Serializable {
         }
     }
 
+    /** This method is hacky, newFields may be immutable. We should use {@link DataTypeVisitor}. */
     private void updateNestedColumn(
             List<DataField> newFields,
             String[] updateFieldNames,
@@ -395,12 +396,20 @@ public class SchemaManager implements Serializable {
                     newFields.set(i, updateFunc.apply(field));
                     break;
                 } else {
-                    updateNestedColumn(
-                            ((org.apache.flink.table.store.file.schema.RowType) field.type())
-                                    .getFields(),
-                            updateFieldNames,
-                            index + 1,
-                            updateFunc);
+                    List<DataField> nestedFields =
+                            new ArrayList<>(
+                                    ((org.apache.flink.table.store.file.schema.RowType)
+                                                    field.type())
+                                            .getFields());
+                    updateNestedColumn(nestedFields, updateFieldNames, index + 1, updateFunc);
+                    newFields.set(
+                            i,
+                            new DataField(
+                                    field.id(),
+                                    field.name(),
+                                    new org.apache.flink.table.store.file.schema.RowType(
+                                            field.type().isNullable(), nestedFields),
+                                    field.description()));
                 }
             }
         }

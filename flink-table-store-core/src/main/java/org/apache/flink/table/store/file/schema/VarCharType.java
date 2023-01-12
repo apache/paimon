@@ -105,4 +105,8 @@ public final class VarCharType extends DataType {
     public <R> R accept(DataTypeVisitor<R> visitor) {
         return visitor.visit(this);
     }
+
+    public static VarCharType stringType(boolean isNullable) {
+        return new VarCharType(isNullable, MAX_LENGTH);
+    }
 }

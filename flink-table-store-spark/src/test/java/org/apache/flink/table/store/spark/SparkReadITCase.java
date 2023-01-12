@@ -94,10 +94,10 @@ public class SparkReadITCase extends SparkReadTestBase {
         assertThat(fieldsList.stream().map(Object::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
                         "[{\"id\":0,\"name\":\"a\",\"type\":\"BIGINT NOT NULL\"},"
-                                + "{\"id\":1,\"name\":\"b\",\"type\":\"VARCHAR(2147483647)\"}]",
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"STRING\"}]",
                         "[{\"id\":0,\"name\":\"a\",\"type\":\"BIGINT NOT NULL\"},"
-                                + "{\"id\":1,\"name\":\"b\",\"type\":\"VARCHAR(2147483647)\"},"
-                                + "{\"id\":2,\"name\":\"c\",\"type\":\"VARCHAR(2147483647)\"}]");
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"STRING\"},"
+                                + "{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}]");
     }
 
     @Test
@@ -249,8 +249,8 @@ public class SparkReadITCase extends SparkReadTestBase {
                                 false,
                                 org.apache.flink.table.store.file.schema.VarCharType.STRING_TYPE),
                         new org.apache.flink.table.store.file.schema.DoubleType(false),
-                        org.apache.flink.table.store.file.schema.VarCharType.STRING_TYPE,
-                        org.apache.flink.table.store.file.schema.VarCharType.STRING_TYPE);
+                        org.apache.flink.table.store.file.schema.VarCharType.stringType(false),
+                        org.apache.flink.table.store.file.schema.VarCharType.stringType(false));
         List<DataField> fields =
                 IntStream.range(0, columns.size())
                         .boxed()
