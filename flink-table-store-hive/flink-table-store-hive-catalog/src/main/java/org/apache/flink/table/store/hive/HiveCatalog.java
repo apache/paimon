@@ -52,6 +52,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.CatalogOptions.LOCK_ENABLED;
@@ -75,17 +76,19 @@ public class HiveCatalog extends AbstractCatalog {
             "org.apache.flink.table.store.hive.TableStoreHiveStorageHandler";
 
     private final HiveConf hiveConf;
+    private final String clientClassName;
     private final IMetaStoreClient client;
 
-    public HiveCatalog(Configuration hadoopConfig) {
+    public HiveCatalog(Configuration hadoopConfig, String clientClassName) {
         this.hiveConf = new HiveConf(hadoopConfig, HiveConf.class);
-        this.client = createClient(hiveConf);
+        this.clientClassName = clientClassName;
+        this.client = createClient(hiveConf, clientClassName);
     }
 
     @Override
     public Optional<CatalogLock.Factory> lockFactory() {
         return lockEnabled()
-                ? Optional.of(HiveCatalogLock.createFactory(hiveConf))
+                ? Optional.of(HiveCatalogLock.createFactory(hiveConf, clientClassName))
                 : Optional.empty();
     }
 
@@ -408,12 +411,16 @@ public class HiveCatalog extends AbstractCatalog {
         return Lock.fromCatalog(lock, tablePath);
     }
 
-    static IMetaStoreClient createClient(HiveConf hiveConf) {
+    static IMetaStoreClient createClient(HiveConf hiveConf, String clientClassName) {
         IMetaStoreClient client;
         try {
             client =
                     RetryingMetaStoreClient.getProxy(
-                            hiveConf, tbl -> null, HiveMetaStoreClient.class.getName());
+                            hiveConf,
+                            tbl -> null,
+                            new ConcurrentHashMap<>(),
+                            clientClassName,
+                            true);
         } catch (MetaException e) {
             throw new RuntimeException(e);
         }
