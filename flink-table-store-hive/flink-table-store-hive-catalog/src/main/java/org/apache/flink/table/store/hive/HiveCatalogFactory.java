@@ -28,6 +28,7 @@ import org.apache.flink.util.Preconditions;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
+import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 
 /** Factory to create {@link HiveCatalog}. */
 public class HiveCatalogFactory implements CatalogFactory {
@@ -38,7 +39,11 @@ public class HiveCatalogFactory implements CatalogFactory {
             ConfigOptions.key("metastore.client.class")
                     .stringType()
                     .defaultValue(HiveMetaStoreClient.class.getName())
-                    .withDescription("Class name of Hive metastore client.");
+                    .withDescription(
+                            "Class name of Hive metastore client.\n"
+                                    + "NOTE: This class must directly implements "
+                                    + IMetaStoreClient.class.getName()
+                                    + ".");
 
     @Override
     public String identifier() {
