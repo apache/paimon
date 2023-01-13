@@ -69,6 +69,10 @@ public final class RowType extends DataType {
         return fields.stream().map(DataField::name).collect(Collectors.toList());
     }
 
+    public List<DataType> getFieldTypes() {
+        return fields.stream().map(DataField::type).collect(Collectors.toList());
+    }
+
     public DataType getTypeAt(int i) {
         return fields.get(i).type();
     }
