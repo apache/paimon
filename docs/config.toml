@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-baseURL = '//nightlies.apache.org/flink/flink-table-store-docs-master'
+baseURL = '//nightlies.apache.org/flink/flink-table-store-docs-release-0.3'
 languageCode = 'en-us'
 title = 'Apache Flink Table Store'
 enableGitInfo = false
@@ -24,7 +24,7 @@ pygmentsUseClasses = true
 [params]
   # Flag whether this is a stable version or not.
   # Used for the quickstart page.
-  IsStable = false
+  IsStable = true
 
   # Flag to indicate whether an outdated warning should be shown.
   ShowOutDatedWarning = false
@@ -34,14 +34,14 @@ pygmentsUseClasses = true
   # we change the version for the complete docs when forking of a release branch
   # etc.
   # The full version string as referenced in Maven (e.g. 1.2.1)
-  Version = "0.3-SNAPSHOT"
+  Version = "0.3.0"
 
   # For stable releases, leave the bugfix version out (e.g. 1.2). For snapshot
   # release this should be the same as the regular version
-  VersionTitle = "0.3-SNAPSHOT"
+  VersionTitle = "0.3"
 
   # The branch for this version of Apache Flink Table Store
-  Branch = "master"
+  Branch = "release-0.3"
 
   # The github repository for Apache Flink Table Store
   Repo = "//github.com/apache/flink-table-store"
@@ -57,7 +57,7 @@ pygmentsUseClasses = true
   # of the menu
   MenuLinks = [
     ["Project Homepage", "//flink.apache.org"],
-    ["JavaDocs", "//nightlies.apache.org/flink/flink-table-store-docs-master/api/java/"],
+    ["JavaDocs", "//nightlies.apache.org/flink/flink-table-store-docs-release-0.3/api/java/"],
   ]
 
   PreviousDocs = [
