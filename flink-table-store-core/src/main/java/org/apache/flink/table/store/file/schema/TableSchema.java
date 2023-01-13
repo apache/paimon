@@ -19,23 +19,12 @@
 package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.DistinctType;
-import org.apache.flink.table.types.logical.LegacyTypeInformationType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.MapType;
-import org.apache.flink.table.types.logical.MultisetType;
-import org.apache.flink.table.types.logical.NullType;
+import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.StructuredType;
-import org.apache.flink.table.types.logical.SymbolType;
-import org.apache.flink.table.types.logical.UnresolvedUserDefinedType;
-import org.apache.flink.table.types.logical.UserDefinedType;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.StringUtils;
 
 import java.io.Serializable;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -47,6 +36,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
+import static org.apache.flink.table.store.types.LogicalTypeConversion.toDataType;
+import static org.apache.flink.table.store.types.LogicalTypeConversion.toRowType;
 
 /** Schema of a table. */
 public class TableSchema implements Serializable {
@@ -189,7 +180,7 @@ public class TableSchema implements Serializable {
     }
 
     public RowType logicalRowType() {
-        return (RowType) new RowDataType(false, fields).logicalType;
+        return toRowType(fields);
     }
 
     public RowType logicalPartitionType() {
@@ -228,8 +219,7 @@ public class TableSchema implements Serializable {
     }
 
     private RowType projectedLogicalRowType(List<String> projectedFieldNames) {
-        return (RowType)
-                new RowDataType(false, projectedDataFields(projectedFieldNames)).logicalType;
+        return toRowType(projectedDataFields(projectedFieldNames));
     }
 
     public TableSchema copy(Map<String, String> newOptions) {
@@ -268,77 +258,14 @@ public class TableSchema implements Serializable {
     }
 
     public static List<DataField> newFields(RowType rowType) {
-        return ((RowDataType) toDataType(rowType, new AtomicInteger(-1))).fields();
-    }
-
-    public static DataType toDataType(LogicalType type, AtomicInteger currentHighestFieldId) {
-        if (type instanceof ArrayType) {
-            DataType element =
-                    toDataType(((ArrayType) type).getElementType(), currentHighestFieldId);
-            return new ArrayDataType(type.isNullable(), element);
-        } else if (type instanceof MultisetType) {
-            DataType element =
-                    toDataType(((MultisetType) type).getElementType(), currentHighestFieldId);
-            return new MultisetDataType(type.isNullable(), element);
-        } else if (type instanceof MapType) {
-            DataType key = toDataType(((MapType) type).getKeyType(), currentHighestFieldId);
-            DataType value = toDataType(((MapType) type).getValueType(), currentHighestFieldId);
-            return new MapDataType(type.isNullable(), key, value);
-        } else if (type instanceof RowType) {
-            List<DataField> fields = new ArrayList<>();
-            for (RowType.RowField field : ((RowType) type).getFields()) {
-                int id = currentHighestFieldId.incrementAndGet();
-                DataType fieldType = toDataType(field.getType(), currentHighestFieldId);
-                fields.add(
-                        new DataField(
-                                id,
-                                field.getName(),
-                                fieldType,
-                                field.getDescription().orElse(null)));
-            }
-            return new RowDataType(type.isNullable(), fields);
-        } else {
-            return new AtomicDataType(type);
-        }
+        return ((org.apache.flink.table.store.types.RowType)
+                        toDataType(rowType, new AtomicInteger(-1)))
+                .getFields();
     }
 
     public static int currentHighestFieldId(List<DataField> fields) {
         Set<Integer> fieldIds = new HashSet<>();
-        collectFieldIds(new RowDataType(fields), fieldIds);
+        new org.apache.flink.table.store.types.RowType(fields).collectFieldIds(fieldIds);
         return fieldIds.stream().max(Integer::compareTo).orElse(-1);
     }
-
-    private static void collectFieldIds(DataType type, Set<Integer> fieldIds) {
-        if (type instanceof ArrayDataType) {
-            collectFieldIds(((ArrayDataType) type).elementType(), fieldIds);
-        } else if (type instanceof MultisetDataType) {
-            collectFieldIds(((MultisetDataType) type).elementType(), fieldIds);
-        } else if (type instanceof MapDataType) {
-            collectFieldIds(((MapDataType) type).keyType(), fieldIds);
-            collectFieldIds(((MapDataType) type).valueType(), fieldIds);
-        } else if (type instanceof RowDataType) {
-            for (DataField field : ((RowDataType) type).fields()) {
-                if (fieldIds.contains(field.id())) {
-                    throw new RuntimeException(
-                            String.format("Broken schema, field id %s is duplicated.", field.id()));
-                }
-                fieldIds.add(field.id());
-                collectFieldIds(field.type(), fieldIds);
-            }
-        }
-    }
-
-    public static final List<Class<? extends LogicalType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
-            Arrays.asList(
-                    MapType.class,
-                    ArrayType.class,
-                    RowType.class,
-                    UserDefinedType.class,
-                    DistinctType.class,
-                    StructuredType.class,
-                    MultisetType.class,
-                    NullType.class,
-                    LegacyTypeInformationType.class,
-                    SymbolType.class,
-                    UnresolvedUserDefinedType.class);
 }

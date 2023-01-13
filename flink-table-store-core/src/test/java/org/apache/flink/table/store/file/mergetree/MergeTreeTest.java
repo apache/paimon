@@ -40,8 +40,6 @@ import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunct
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
 import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
-import org.apache.flink.table.store.file.schema.AtomicDataType;
-import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -51,6 +49,7 @@ import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.table.SchemaEvolutionTableTestBase;
+import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.utils.BinaryRowDataUtil;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -148,14 +147,20 @@ public class MergeTreeTest {
                             public List<DataField> keyFields(TableSchema schema) {
                                 return Collections.singletonList(
                                         new DataField(
-                                                0, "k", new AtomicDataType(new IntType(false))));
+                                                0,
+                                                "k",
+                                                new org.apache.flink.table.store.types.IntType(
+                                                        false)));
                             }
 
                             @Override
                             public List<DataField> valueFields(TableSchema schema) {
                                 return Collections.singletonList(
                                         new DataField(
-                                                0, "v", new AtomicDataType(new IntType(false))));
+                                                0,
+                                                "v",
+                                                new org.apache.flink.table.store.types.IntType(
+                                                        false)));
                             }
                         });
         readerFactory = readerFactoryBuilder.build(BinaryRowDataUtil.EMPTY_ROW, 0);

@@ -22,10 +22,9 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.store.file.schema.DataField;
-import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
+import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.BooleanType;
@@ -213,7 +212,7 @@ public abstract class SparkReadTestBase {
     }
 
     protected boolean fieldIsNullable(DataField field) {
-        return field.type().logicalType().isNullable();
+        return field.type().isNullable();
     }
 
     protected DataField getField(TableSchema schema, int index) {
@@ -221,9 +220,10 @@ public abstract class SparkReadTestBase {
     }
 
     protected DataField getNestedField(DataField field, int index) {
-        if (field.type() instanceof RowDataType) {
-            RowDataType rowDataType = (RowDataType) field.type();
-            return rowDataType.fields().get(index);
+        if (field.type() instanceof org.apache.flink.table.store.types.RowType) {
+            org.apache.flink.table.store.types.RowType rowDataType =
+                    (org.apache.flink.table.store.types.RowType) field.type();
+            return rowDataType.getFields().get(index);
         }
         throw new IllegalArgumentException();
     }

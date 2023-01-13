@@ -18,19 +18,32 @@
 
 package org.apache.flink.table.store.hive;
 
+import org.apache.flink.configuration.ConfigOption;
+import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.table.store.CatalogOptions;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.hadoop.hive.conf.HiveConf;
-
-import static org.apache.flink.table.store.CatalogOptions.URI;
+import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
+import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 
 /** Factory to create {@link HiveCatalog}. */
 public class HiveCatalogFactory implements CatalogFactory {
 
     private static final String IDENTIFIER = "hive";
+
+    private static final ConfigOption<String> METASTORE_CLIENT_CLASS =
+            ConfigOptions.key("metastore.client.class")
+                    .stringType()
+                    .defaultValue(HiveMetaStoreClient.class.getName())
+                    .withDescription(
+                            "Class name of Hive metastore client.\n"
+                                    + "NOTE: This class must directly implements "
+                                    + IMetaStoreClient.class.getName()
+                                    + ".");
 
     @Override
     public String identifier() {
@@ -41,13 +54,18 @@ public class HiveCatalogFactory implements CatalogFactory {
     public Catalog create(String warehouse, Configuration options) {
         String uri =
                 Preconditions.checkNotNull(
-                        options.get(URI),
-                        URI.key() + " must be set for table store " + IDENTIFIER + " catalog");
+                        options.get(CatalogOptions.URI),
+                        CatalogOptions.URI.key()
+                                + " must be set for table store "
+                                + IDENTIFIER
+                                + " catalog");
+
         org.apache.hadoop.conf.Configuration hadoopConfig =
                 new org.apache.hadoop.conf.Configuration();
         options.toMap().forEach(hadoopConfig::set);
         hadoopConfig.set(HiveConf.ConfVars.METASTOREURIS.varname, uri);
         hadoopConfig.set(HiveConf.ConfVars.METASTOREWAREHOUSE.varname, warehouse);
-        return new HiveCatalog(hadoopConfig);
+
+        return new HiveCatalog(hadoopConfig, options.get(METASTORE_CLIENT_CLASS));
     }
 }

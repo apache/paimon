@@ -20,8 +20,8 @@ package org.apache.flink.table.store.table.sink;
 
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 

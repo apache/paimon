@@ -31,9 +31,7 @@ import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFun
 import org.apache.flink.table.store.file.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.schema.DataField;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
-import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
@@ -47,6 +45,8 @@ import org.apache.flink.table.store.table.source.MergeTreeSplitGenerator;
 import org.apache.flink.table.store.table.source.SplitGenerator;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.LogicalTypeConversion;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.List;
@@ -112,7 +112,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                             options,
                             tableSchema.logicalPartitionType(),
                             addKeyNamePrefix(tableSchema.logicalBucketKeyType()),
-                            RowDataType.toRowType(false, extractor.keyFields(tableSchema)),
+                            LogicalTypeConversion.toRowType(extractor.keyFields(tableSchema)),
                             rowType,
                             extractor,
                             mfFactory);

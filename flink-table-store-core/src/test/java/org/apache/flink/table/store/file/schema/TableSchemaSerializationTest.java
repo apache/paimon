@@ -19,7 +19,11 @@
 package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
-import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.MultisetType;
 
 import org.junit.jupiter.api.Test;
 
@@ -39,14 +43,14 @@ public class TableSchemaSerializationTest {
     public void testSchema() {
         List<DataField> fields =
                 Arrays.asList(
-                        new DataField(0, "f0", new AtomicDataType(new IntType())),
+                        new DataField(0, "f0", new IntType()),
                         new DataField(1, "f1", newRowType(false, 2)),
-                        new DataField(3, "f2", new ArrayDataType(false, newRowType(true, 4))),
-                        new DataField(5, "f3", new MultisetDataType(true, newRowType(false, 6))),
+                        new DataField(3, "f2", new ArrayType(false, newRowType(true, 4))),
+                        new DataField(5, "f3", new MultisetType(true, newRowType(false, 6))),
                         new DataField(
                                 7,
                                 "f4",
-                                new MapDataType(true, newRowType(true, 8), newRowType(false, 9))));
+                                new MapType(true, newRowType(true, 8), newRowType(false, 9))));
         List<String> partitionKeys = Collections.singletonList("f0");
         List<String> primaryKeys = Arrays.asList("f0", "f1");
         Map<String, String> options = new HashMap<>();

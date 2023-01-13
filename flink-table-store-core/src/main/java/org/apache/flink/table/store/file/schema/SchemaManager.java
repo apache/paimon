@@ -35,8 +35,21 @@ import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnType;
 import org.apache.flink.table.store.file.utils.AtomicFileWriter;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypeVisitor;
+import org.apache.flink.table.store.types.LogicalTypeConversion;
+import org.apache.flink.table.types.logical.ArrayType;
+import org.apache.flink.table.types.logical.DistinctType;
+import org.apache.flink.table.types.logical.LegacyTypeInformationType;
 import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.MapType;
+import org.apache.flink.table.types.logical.NullType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.logical.StructuredType;
+import org.apache.flink.table.types.logical.SymbolType;
+import org.apache.flink.table.types.logical.UnresolvedUserDefinedType;
+import org.apache.flink.table.types.logical.UserDefinedType;
 import org.apache.flink.table.types.logical.utils.LogicalTypeCasts;
 import org.apache.flink.util.Preconditions;
 
@@ -57,6 +70,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.utils.FileUtils.listVersionedFiles;
+import static org.apache.flink.table.store.types.LogicalTypeConversion.toLogicalType;
 import static org.apache.flink.util.Preconditions.checkState;
 
 /** Schema Manager to manage schema versions. */
@@ -175,7 +189,7 @@ public class SchemaManager implements Serializable {
             for (String primaryKeyName : primaryKeys) {
                 RowType.RowField rowField = rowFields.get(primaryKeyName);
                 LogicalType logicalType = rowField.getType();
-                if (TableSchema.PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES.stream()
+                if (PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES.stream()
                         .anyMatch(c -> c.isInstance(logicalType))) {
                     throw new UnsupportedOperationException(
                             String.format(
@@ -185,6 +199,20 @@ public class SchemaManager implements Serializable {
             }
         }
     }
+
+    public static final List<Class<? extends LogicalType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
+            Arrays.asList(
+                    MapType.class,
+                    ArrayType.class,
+                    RowType.class,
+                    UserDefinedType.class,
+                    DistinctType.class,
+                    StructuredType.class,
+                    org.apache.flink.table.types.logical.MultisetType.class,
+                    NullType.class,
+                    LegacyTypeInformationType.class,
+                    SymbolType.class,
+                    UnresolvedUserDefinedType.class);
 
     /** Create {@link SchemaChange}s. */
     public TableSchema commitChanges(List<SchemaChange> changes) throws Exception {
@@ -217,7 +245,8 @@ public class SchemaManager implements Serializable {
                             "ADD COLUMN cannot specify NOT NULL.");
                     int id = highestFieldId.incrementAndGet();
                     DataType dataType =
-                            TableSchema.toDataType(addColumn.logicalType(), highestFieldId);
+                            LogicalTypeConversion.toDataType(
+                                    addColumn.logicalType(), highestFieldId);
                     newFields.add(
                             new DataField(
                                     id, addColumn.fieldName(), dataType, addColumn.description()));
@@ -268,20 +297,20 @@ public class SchemaManager implements Serializable {
                             (field) -> {
                                 checkState(
                                         LogicalTypeCasts.supportsImplicitCast(
-                                                        field.type().logicalType,
+                                                        toLogicalType(field.type()),
                                                         update.newLogicalType())
                                                 && CastExecutors.resolve(
-                                                                field.type().logicalType,
+                                                                toLogicalType(field.type()),
                                                                 update.newLogicalType())
                                                         != null,
                                         String.format(
                                                 "Column type %s[%s] cannot be converted to %s without loosing information.",
                                                 field.name(),
-                                                field.type().logicalType,
+                                                toLogicalType(field.type()),
                                                 update.newLogicalType()));
                                 AtomicInteger dummyId = new AtomicInteger(0);
                                 DataType newType =
-                                        TableSchema.toDataType(
+                                        LogicalTypeConversion.toDataType(
                                                 update.newLogicalType(), new AtomicInteger(0));
                                 if (dummyId.get() != 0) {
                                     throw new RuntimeException(
@@ -356,6 +385,7 @@ public class SchemaManager implements Serializable {
         }
     }
 
+    /** This method is hacky, newFields may be immutable. We should use {@link DataTypeVisitor}. */
     private void updateNestedColumn(
             List<DataField> newFields,
             String[] updateFieldNames,
@@ -370,12 +400,19 @@ public class SchemaManager implements Serializable {
                     newFields.set(i, updateFunc.apply(field));
                     break;
                 } else {
-                    assert field.type() instanceof RowDataType;
-                    updateNestedColumn(
-                            ((RowDataType) field.type()).fields(),
-                            updateFieldNames,
-                            index + 1,
-                            updateFunc);
+                    List<DataField> nestedFields =
+                            new ArrayList<>(
+                                    ((org.apache.flink.table.store.types.RowType) field.type())
+                                            .getFields());
+                    updateNestedColumn(nestedFields, updateFieldNames, index + 1, updateFunc);
+                    newFields.set(
+                            i,
+                            new DataField(
+                                    field.id(),
+                                    field.name(),
+                                    new org.apache.flink.table.store.types.RowType(
+                                            field.type().isNullable(), nestedFields),
+                                    field.description()));
                 }
             }
         }

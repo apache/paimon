@@ -18,7 +18,10 @@
 
 package org.apache.flink.table.store.file.schema;
 
+import org.apache.flink.table.store.file.utils.JsonDeserializer;
 import org.apache.flink.table.store.file.utils.JsonSerializer;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataTypeJsonParser;
 import org.apache.flink.util.StringUtils;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
@@ -32,7 +35,8 @@ import java.util.List;
 import java.util.Map;
 
 /** A {@link JsonSerializer} for {@link TableSchema}. */
-public class SchemaSerializer implements JsonSerializer<TableSchema> {
+public class SchemaSerializer
+        implements JsonSerializer<TableSchema>, JsonDeserializer<TableSchema> {
 
     public static final SchemaSerializer INSTANCE = new SchemaSerializer();
 
@@ -44,7 +48,7 @@ public class SchemaSerializer implements JsonSerializer<TableSchema> {
 
         generator.writeArrayFieldStart("fields");
         for (DataField field : tableSchema.fields()) {
-            DataFieldSerializer.INSTANCE.serialize(field, generator);
+            field.serializeJson(generator);
         }
         generator.writeEndArray();
 
@@ -82,7 +86,7 @@ public class SchemaSerializer implements JsonSerializer<TableSchema> {
         Iterator<JsonNode> fieldJsons = node.get("fields").elements();
         List<DataField> fields = new ArrayList<>();
         while (fieldJsons.hasNext()) {
-            fields.add(DataFieldSerializer.INSTANCE.deserialize(fieldJsons.next()));
+            fields.add(DataTypeJsonParser.parseDataField(fieldJsons.next()));
         }
 
         int highestFieldId = node.get("highestFieldId").asInt();

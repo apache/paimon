@@ -27,11 +27,11 @@ import org.apache.flink.table.store.file.predicate.IsNull;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.file.schema.RowDataType;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
+import org.apache.flink.table.store.types.LogicalTypeConversion;
 import org.apache.flink.types.RowKind;
 
 import org.junit.jupiter.api.Test;
@@ -158,7 +158,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
         writeAndCheckFileResult(
                 schemas -> {
                     PredicateBuilder builder =
-                            new PredicateBuilder(RowDataType.toRowType(false, SCHEMA_0_FIELDS));
+                            new PredicateBuilder(LogicalTypeConversion.toRowType(SCHEMA_0_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits = table.newScan().plan().splits();
                     // filter with "b" = 15 in schema0
@@ -172,7 +172,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                 },
                 (files, schemas) -> {
                     PredicateBuilder builder =
-                            new PredicateBuilder(RowDataType.toRowType(false, SCHEMA_1_FIELDS));
+                            new PredicateBuilder(LogicalTypeConversion.toRowType(SCHEMA_1_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits = table.newScan().plan().splits();
 
@@ -201,7 +201,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                 schemas -> null,
                 (files, schemas) -> {
                     PredicateBuilder builder =
-                            new PredicateBuilder(RowDataType.toRowType(false, SCHEMA_1_FIELDS));
+                            new PredicateBuilder(LogicalTypeConversion.toRowType(SCHEMA_1_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits = table.newScan().plan().splits();
 
@@ -402,7 +402,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
         writeAndCheckFileResult(
                 schemas -> {
                     PredicateBuilder builder =
-                            new PredicateBuilder(RowDataType.toRowType(false, SCHEMA_0_FIELDS));
+                            new PredicateBuilder(LogicalTypeConversion.toRowType(SCHEMA_0_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
                     // filter with "b" = 15 in schema0
@@ -416,7 +416,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                 },
                 (files, schemas) -> {
                     PredicateBuilder builder =
-                            new PredicateBuilder(RowDataType.toRowType(false, SCHEMA_1_FIELDS));
+                            new PredicateBuilder(LogicalTypeConversion.toRowType(SCHEMA_1_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
 

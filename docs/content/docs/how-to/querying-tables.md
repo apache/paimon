@@ -93,6 +93,11 @@ System tables contain metadata and information about each table, such as the sna
 
 Currently, Flink, Spark and Trino supports querying system tables.
 
+In some cases, the table name needs to be enclosed with back quotes to avoid syntax parsing conflicts, for example triple access mode:
+```sql
+SELECT * FROM my_catalog.my_db.`MyTable$snapshots`;
+```
+
 ### Snapshots Table
 
 You can query the snapshot history information of the table through snapshots table.

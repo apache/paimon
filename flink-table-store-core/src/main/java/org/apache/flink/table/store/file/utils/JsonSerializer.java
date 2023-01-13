@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.IOException;
 
@@ -27,6 +26,4 @@ import java.io.IOException;
 public interface JsonSerializer<T> {
 
     void serialize(T t, JsonGenerator generator) throws IOException;
-
-    T deserialize(JsonNode node);
 }

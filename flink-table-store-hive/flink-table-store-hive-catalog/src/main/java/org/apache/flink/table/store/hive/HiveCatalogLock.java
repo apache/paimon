@@ -112,8 +112,8 @@ public class HiveCatalogLock implements CatalogLock {
     }
 
     /** Create a hive lock factory. */
-    public static CatalogLock.Factory createFactory(HiveConf hiveConf) {
-        return new HiveCatalogLockFactory(hiveConf);
+    public static CatalogLock.Factory createFactory(HiveConf hiveConf, String clientClassName) {
+        return new HiveCatalogLockFactory(hiveConf, clientClassName);
     }
 
     private static class HiveCatalogLockFactory implements CatalogLock.Factory {
@@ -121,16 +121,20 @@ public class HiveCatalogLock implements CatalogLock {
         private static final long serialVersionUID = 1L;
 
         private final SerializableHiveConf hiveConf;
+        private final String clientClassName;
 
-        public HiveCatalogLockFactory(HiveConf hiveConf) {
+        public HiveCatalogLockFactory(HiveConf hiveConf, String clientClassName) {
             this.hiveConf = new SerializableHiveConf(hiveConf);
+            this.clientClassName = clientClassName;
         }
 
         @Override
         public CatalogLock create() {
             HiveConf conf = hiveConf.conf();
             return new HiveCatalogLock(
-                    HiveCatalog.createClient(conf), checkMaxSleep(conf), acquireTimeout(conf));
+                    HiveCatalog.createClient(conf, clientClassName),
+                    checkMaxSleep(conf),
+                    acquireTimeout(conf));
         }
     }
 
