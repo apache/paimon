@@ -553,10 +553,6 @@ under the License.
                                     <shadedPattern>org.apache.flink.table.store.shaded.com.google.common</shadedPattern>
                                 </relocation>
                                 <relocation>
-                                    <pattern>org.apache.hadoop.hive</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.hive</shadedPattern>
-                                </relocation>
-                                <relocation>
                                     <pattern>org.apache.hadoop.fs.ProxyLocalFileSystem</pattern>
                                     <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.fs.ProxyLocalFileSystem</shadedPattern>
                                 </relocation>
@@ -575,10 +571,6 @@ under the License.
                                 <relocation>
                                     <pattern>org.apache.hadoop.security.token.delegation.HiveDelegationTokenSupport</pattern>
                                     <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.security.token.delegation.HiveDelegationTokenSupport</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.apache.hive</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hive</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.apache.thrift</pattern>
