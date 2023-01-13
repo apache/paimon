@@ -35,14 +35,14 @@ public class SparkCaseSensitiveConverter {
     private static final Set<String> CASE_SENSITIVE_KEYS = new HashSet<>();
 
     // OSS access verification
-    private static final String ACCESS_KEY_ID = "fs.oss.accessKeyId";
-    private static final String ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
-    private static final String SECURITY_TOKEN = "fs.oss.securityToken";
+    private static final String OSS_ACCESS_KEY_ID = "fs.oss.accessKeyId";
+    private static final String OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
+    private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
 
     static {
-        CASE_SENSITIVE_KEYS.add(ACCESS_KEY_ID);
-        CASE_SENSITIVE_KEYS.add(ACCESS_KEY_SECRET);
-        CASE_SENSITIVE_KEYS.add(SECURITY_TOKEN);
+        CASE_SENSITIVE_KEYS.add(OSS_ACCESS_KEY_ID);
+        CASE_SENSITIVE_KEYS.add(OSS_ACCESS_KEY_SECRET);
+        CASE_SENSITIVE_KEYS.add(OSS_SECURITY_TOKEN);
     }
 
     public static Map<String, String> convert(Map<String, String> caseInsensitiveOptions) {
