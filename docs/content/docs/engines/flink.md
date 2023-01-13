@@ -110,7 +110,7 @@ the Flink dashboard and see that the cluster is up and running.
 You can now start Flink SQL client to execute SQL scripts.
 
 ```bash
-<FLINK_HOME>/bin/sql-client.sh embedded
+<FLINK_HOME>/bin/sql-client.sh
 ```
 
 **Step 5: Create a Catalog and a Table**
