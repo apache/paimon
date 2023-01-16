@@ -65,8 +65,7 @@ public class SchemaEvolutionUtilTest {
     private final List<DataField> tableFields2 =
             Arrays.asList(
                     new DataField(1, "c", new DoubleType()),
-                    new DataField(
-                            3, "d", new DecimalType(10, 2)),
+                    new DataField(3, "d", new DecimalType(10, 2)),
                     new DataField(5, "f", new BigIntType()),
                     new DataField(7, "a", new FloatType()),
                     new DataField(8, "b", new IntType()),

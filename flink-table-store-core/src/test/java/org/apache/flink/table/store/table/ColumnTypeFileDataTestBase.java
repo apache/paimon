@@ -32,6 +32,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.table.store.types.LogicalTypeConversion.toLogicalType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base test class of file data for column type evolution. */
@@ -40,7 +41,7 @@ public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTes
         return Arrays.asList(
                 RowDataUtils.createFieldGetters(
                         table.schema().fields().stream()
-                                .map(f -> f.type().logicalType())
+                                .map(f -> toLogicalType(f.type()))
                                 .collect(Collectors.toList())));
     }
 

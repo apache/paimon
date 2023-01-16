@@ -40,6 +40,8 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.BinaryType;
 import org.apache.flink.table.store.types.CharType;
@@ -53,8 +55,6 @@ import org.apache.flink.table.store.types.SmallIntType;
 import org.apache.flink.table.store.types.TimestampType;
 import org.apache.flink.table.store.types.VarBinaryType;
 import org.apache.flink.table.store.types.VarCharType;
-import org.apache.flink.table.store.table.source.Split;
-import org.apache.flink.table.store.table.source.TableRead;
 
 import org.apache.commons.lang3.StringUtils;
 import org.junit.jupiter.api.AfterEach;

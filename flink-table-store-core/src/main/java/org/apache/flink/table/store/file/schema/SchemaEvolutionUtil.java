@@ -26,8 +26,13 @@ import org.apache.flink.table.store.file.casting.FieldGetterCastExecutor;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateReplaceVisitor;
+import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypeFamily;
+import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.MultisetType;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.ProjectedRow;
 import org.apache.flink.table.store.utils.RowDataUtils;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -289,14 +294,14 @@ public class SchemaEvolutionUtil {
                         return Optional.empty();
                     }
 
-                    LogicalType dataValueType = dataField.type().logicalType().copy(true);
+                    DataType dataValueType = dataField.type().copy(true);
                     LogicalType predicateType = predicate.type().copy(true);
                     CastExecutor<Object, Object> castExecutor =
                             dataValueType.equals(predicateType)
                                     ? null
                                     : (CastExecutor<Object, Object>)
                                             CastExecutors.resolve(
-                                                    dataField.type().logicalType(),
+                                                    toLogicalType(dataField.type()),
                                                     predicate.type());
                     return Optional.of(
                             new LeafPredicate(
@@ -417,24 +422,26 @@ public class SchemaEvolutionUtil {
                     converterMapping[i] =
                             new FieldGetterCastExecutor(
                                     RowDataUtils.createNullCheckingFieldGetter(
-                                            dataField.type().logicalType(), i),
+                                            toLogicalType(dataField.type()), i),
                                     CastExecutors.identityCastExecutor());
                 } else {
                     // TODO support column type evolution in nested type
                     checkState(
-                            tableField.type() instanceof AtomicDataType
-                                    && dataField.type() instanceof AtomicDataType,
+                            !(tableField.type() instanceof MapType
+                                    || dataField.type() instanceof ArrayType
+                                    || dataField.type() instanceof MultisetType
+                                    || dataField.type() instanceof RowType),
                             "Only support column type evolution in atomic data type.");
                     // Create getter with index i and projected row data will convert to underlying
                     // data
                     converterMapping[i] =
                             new FieldGetterCastExecutor(
                                     RowDataUtils.createNullCheckingFieldGetter(
-                                            dataField.type().logicalType(), i),
+                                            toLogicalType(dataField.type()), i),
                                     checkNotNull(
                                             CastExecutors.resolve(
-                                                    dataField.type().logicalType(),
-                                                    tableField.type().logicalType())));
+                                                    toLogicalType(dataField.type()),
+                                                    toLogicalType(tableField.type()))));
                     castExist = true;
                 }
             }
